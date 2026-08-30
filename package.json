@@ -1,10 +1,10 @@
 {
-  "name": "{{moduleName}}",
-  "version": "0.0.1",
-  "description": "{{description}}",
+  "name": "@opencode-ai/state-machine",
+  "version": "0.1.0",
+  "description": "State machine library for OpenCode plugins — gives schema-based workflow with strict validation between steps",
   "author": {
-    "name": "{{authorName}}",
-    "email": "{{authorEmail}}"
+    "name": "OpenCode AI",
+    "email": "dev@opencode.ai"
   },
   "type": "module",
   "exports": {
@@ -15,15 +15,23 @@
   },
   "repository": {
     "type": "git",
-    "url": "{{repositoryUrl}}"
+    "url": "https://github.com/opencode-ai/profile-config"
   },
   "publishConfig": {
     "access": "public"
   },
+  "scripts": {
+    "build": "bun build ./src/index.ts --outdir dist --target bun && bun run build:schema",
+    "build:schema": "bun -e \"import { ProfileMetadataJsonSchema } from './src/schema/profile-metadata.ts'; import { writeFileSync } from 'fs'; writeFileSync('dist/profile.schema.json', JSON.stringify(ProfileMetadataJsonSchema, null, 2));\" && bun -e \"import { ProfileSchemaJsonSchema } from './src/schema/profile-schema.ts'; import { writeFileSync } from 'fs'; writeFileSync('dist/profile-schema.schema.json', JSON.stringify(ProfileSchemaJsonSchema, null, 2));\""
+  },
   "files": [
-    "dist",
-    "src/version.ts"
+    "dist"
   ],
+  "dependencies": {
+    "yaml": "^2.9.0",
+    "zod": "^3",
+    "zod-to-json-schema": "^3"
+  },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
     "@types/node": "^20.11.5",

@@ -1,0 +1,70 @@
+schema: spec-driven
+
+context: |
+  Language: TypeScript (strict mode), ESNext target
+  Runtime: Bun 1.3.2 (macOS)
+  Module: ESM with bundler resolution
+  Build: bun build ./src/index.ts --outdir dist --target bun
+  Test: vitest (bun test runner), vitest v3.2.4
+  Lint: ESLint 9 (flat config) + typescript-eslint + prettier
+  Formatter: Prettier (singleQuote, printWidth 100, trailingComma es5)
+  Type check: tsc --noEmit
+  CI: GitHub Actions (mise-managed tooling, lint -> test -> build)
+  Hooks: hk (eslint, prettier, pkl pre-commit hooks)
+  Package manager: mise (bun 1.3.2, npm 11.6.3)
+  Strict TDD: true (vitest available, AGENTS.md declares vitest + describe/it)
+  Convention: NeverNesters (early-exit), explicit file extensions in imports
+  Coverage: vitest --coverage available (not configured in CI)
+
+rules:
+  proposal:
+    - Include rollback plan for risky changes
+    - List affected areas in a table
+  specs:
+    - Use Given/When/Then for scenarios
+    - Use RFC 2119 keywords (MUST, SHALL, SHOULD, MAY)
+  design:
+    - Document architecture decisions with rationale (D1, D2, etc.)
+    - Include risks and trade-offs table
+  tasks:
+    - Group by phase, use hierarchical numbering
+    - Keep tasks completable in one session
+
+operations:
+  apply:
+    guidance:
+      - Strict TDD - write the failing vitest test before the implementation
+      - Follow existing code patterns (NeverNesters, early-exit)
+      - Use explicit .ts extensions in imports
+      - Implement what spec.md requires; never copy code out of the prompt in place of the spec
+      - If you deviate from the spec, update the spec in the same session
+      - Verify with `bun test`, `mise run typecheck`, `mise run lint`, then `mise run build`
+      - Coverage threshold is 80% (`bun test --coverage`)
+  archive:
+    guidance:
+      - Warn before merging destructive deltas
+      - Confirm `bun test` and `mise run build` pass before archiving
+
+testing:
+  strict_tdd: true
+  runner:
+    command: bun test
+    framework: vitest
+    watch: bun test --watch
+    single: 'bun test {pattern}'
+  layers:
+    unit: vitest
+    integration: vitest
+    e2e: false
+  coverage:
+    available: true
+    command: bun test --coverage
+  quality:
+    linter:
+      command: mise run lint
+      fix: mise run lint:fix
+    type_checker:
+      command: mise run typecheck
+    formatter:
+      command: npx prettier --check .
+      fix: npx prettier --write .

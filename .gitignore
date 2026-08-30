@@ -10,3 +10,8 @@ coverage/
 .bun/
 .bun.lockb
 .memory/
+.opencode/config.json
+.opencode.json
+.opencode.jsonc
+.tui.json
+.tui.jsonc

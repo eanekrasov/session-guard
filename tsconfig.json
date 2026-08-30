@@ -5,7 +5,9 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "strict": true,
-    "noEmit": true,
+    "noEmit": false,
+    "outDir": "dist",
+    "declaration": true,
     "skipLibCheck": true,
     "allowImportingTsExtensions": true,
     "types": ["bun-types"]
