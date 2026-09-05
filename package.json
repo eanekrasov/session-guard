@@ -1,33 +1,69 @@
 {
-  "name": "@opencode-ai/state-machine",
+  "name": "opencode-state-machine",
   "version": "0.1.0",
   "description": "State machine library for OpenCode plugins — gives schema-based workflow with strict validation between steps",
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "state-machine",
+    "workflow",
+    "agent"
+  ],
+  "license": "MIT",
   "author": {
     "name": "OpenCode AI",
     "email": "dev@opencode.ai"
   },
   "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
+      "import": "./dist/index.js"
+    },
+    "./tui": {
+      "types": "./dist/tui.d.ts",
+      "import": "./dist/tui.js"
     }
   },
   "repository": {
     "type": "git",
     "url": "https://github.com/opencode-ai/profile-config"
   },
+  "bugs": {
+    "url": "https://github.com/opencode-ai/profile-config/issues"
+  },
+  "homepage": "https://github.com/opencode-ai/profile-config#readme",
+  "engines": {
+    "opencode": ">=0.15.0"
+  },
   "publishConfig": {
     "access": "public"
   },
   "scripts": {
-    "build": "bun build ./src/index.ts --outdir dist --target bun && bun run build:schema",
-    "build:schema": "bun -e \"import { ProfileMetadataJsonSchema } from './src/schema/profile-metadata.ts'; import { writeFileSync } from 'fs'; writeFileSync('dist/profile.schema.json', JSON.stringify(ProfileMetadataJsonSchema, null, 2));\" && bun -e \"import { ProfileSchemaJsonSchema } from './src/schema/profile-schema.ts'; import { writeFileSync } from 'fs'; writeFileSync('dist/profile-schema.schema.json', JSON.stringify(ProfileSchemaJsonSchema, null, 2));\""
+    "dashboard": "bun run src/dashboard/dashboard-server.ts",
+    "build": "bun build ./src/index.ts --outdir dist --target bun && bun run build:tui && bun run build:schema && bun run build:decl && bun run build:verify",
+    "build:verify": "bun -e \"const { existsSync, readFileSync } = require('fs'); const required = ['dist/index.js', 'dist/tui.js', 'dist/index.d.ts', 'dist/tui.d.ts', 'dist/profile.schema.json', 'dist/profile-schema.schema.json']; const missing = required.filter(f => !existsSync(f)); if (missing.length) { console.error('Missing build outputs:', missing.join(', ')); process.exit(1); } const idx = readFileSync('dist/index.js','utf-8'); const tui = readFileSync('dist/tui.js','utf-8'); if (idx === tui) { console.error('ERROR: dist/index.js and dist/tui.js are identical - one entrypoint overwrites the other'); process.exit(1); } console.error('Build verification: all outputs present, entrypoints distinct');\"",
+    "build:tui": "bun scripts/build-tui.ts",
+    "build:schema": "bun -e \"import { ProfileMetadataJsonSchema } from './src/schema/profile-metadata.ts'; import { writeFileSync } from 'fs'; writeFileSync('dist/profile.schema.json', JSON.stringify(ProfileMetadataJsonSchema, null, 2));\" && bun -e \"import { ProfileSchemaJsonSchema } from './src/schema/profile-schema.ts'; import { writeFileSync } from 'fs'; writeFileSync('dist/profile-schema.schema.json', JSON.stringify(ProfileSchemaJsonSchema, null, 2));\"",
+    "build:decl": "tsc -p tsconfig.decl.json",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "test:coverage": "bun test --coverage"
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md"
   ],
   "dependencies": {
+    "@opencode-ai/plugin": "^1.18.25",
+    "@opentui/core": "^0.5.9",
+    "@opentui/keymap": "^0.5.9",
+    "@opentui/solid": "^0.5.9",
+    "@tsconfig/bun": "^1.0.11",
+    "minimatch": "^10.2.6",
+    "solid-js": "^1.9.15",
     "yaml": "^2.9.0",
     "zod": "^3",
     "zod-to-json-schema": "^3"

@@ -1,0 +1,18 @@
+phases:
+  PLANNING:
+    dispatch:
+      strategy: serial
+transitions:
+  - from: PLANNING
+    to: EXECUTION
+    guard: "session.approved('plan')"
+gateMapping:
+  review: ['invariants', 'review']
+settings:
+  mutationTtlMs: 1800000
+  retryMaxAttempts: 3
+editingAgents: ['architect']
+verifiers: ['architect']
+requiredGates: ['invariants']
+actionGuards:
+  beginMutation: "session.approved('plan')"

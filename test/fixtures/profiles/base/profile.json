@@ -1,0 +1,8 @@
+{
+  "id": "base",
+  "description": "Base development profile",
+  "agents": ["code", "architect"],
+  "skills": ["code-review", "testing"],
+  "invariants": ["no-console", "strict-null"],
+  "schemas": ["state-machine.yaml"]
+}

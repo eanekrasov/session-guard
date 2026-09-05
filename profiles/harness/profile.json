@@ -1,0 +1,16 @@
+{
+  "id": "harness",
+  "description": "Harness self-edit profile (TypeScript)",
+
+  "extends": "base",
+
+  "schemas": ["harness.yaml"],
+
+  "agentsDir": "agents",
+  "skillsDir": "skills",
+
+  "agents": ["harness"],
+  "skills": ["harness-code-review", "opencode-init"],
+
+  "invariants": ["LF_ONLY", "BROKEN_IMPORT", "CONSOLE_LOG", "INVALID_JSON", "ANGLICISM"]
+}

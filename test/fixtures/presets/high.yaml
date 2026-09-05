@@ -1,0 +1,55 @@
+# test/fixtures/presets/high.yaml
+# State machine config for high (full feature workflow).
+
+phases:
+  PLANNING: {}
+
+  TASKS_READY: {}
+
+  EXECUTION: {}
+
+  COMMIT: {}
+
+  DONE: {}
+
+transitions:
+  - from: PLANNING
+    to: TASKS_READY
+    guard: "session.approved('plan') == true && (session.taskLists.implementation ?? []).length == 0"
+  - from: PLANNING
+    to: EXECUTION
+    guard: "session.approved('plan') == true && (session.taskLists.implementation ?? []).length > 0"
+  - from: PLANNING
+    to: COMMIT
+    guard: "session.deliveryPermit != null"
+  - from: TASKS_READY
+    to: EXECUTION
+    guard: "(session.taskLists.implementation ?? []).length > 0"
+  - from: EXECUTION
+    to: EXECUTION
+    kind: auto
+  - from: EXECUTION
+    to: COMMIT
+    kind: pass
+  - from: COMMIT
+    to: DONE
+    guard: "session.deliveryReceipt != null"
+
+settings:
+  stall:
+    thresholdMs: 300000
+    action: notify
+    maxRetries: 3
+  mutationTtlMs: 1800000
+  verifierTtlMs: 1800000
+  supportedExtensions: "\\.(kt|ts|json|md)$"
+  retryMaxAttempts: 3
+
+defaultManifest:
+  - dev
+  - test
+  - review
+  - qa
+
+actionGuards:
+  beginMutation: 'session.approved("plan")'

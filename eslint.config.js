@@ -1,43 +1,35 @@
-import js from '@eslint/js';
+import prettierConfig from 'eslint-config-prettier';
+import prettierPlugin from 'eslint-plugin-prettier';
 import tseslint from 'typescript-eslint';
-import prettier from 'eslint-config-prettier/flat';
-import eslintPluginPrettier from 'eslint-plugin-prettier';
 
-export default tseslint.config(
+export default [
   {
-    ignores: ['dist', 'node_modules', '*.config.js'],
+    ignores: ['.memory/**', 'dist/**', '.opencode/plugin/**', 'node_modules/**'],
   },
   {
-    files: ['**/*.ts'],
+    files: ['**/*.{ts,tsx}'],
     languageOptions: {
-      ecmaVersion: 'latest',
-      sourceType: 'module',
       parser: tseslint.parser,
       parserOptions: {
         ecmaVersion: 'latest',
         sourceType: 'module',
       },
-      globals: {
-        // Node.js globals
-        console: 'readonly',
-        process: 'readonly',
-        Buffer: 'readonly',
-        // Bun globals
-        Bun: 'readonly',
-      },
     },
     plugins: {
       '@typescript-eslint': tseslint.plugin,
-      prettier: eslintPluginPrettier,
+      prettier: prettierPlugin,
     },
     rules: {
-      ...js.configs.recommended.rules,
-      ...tseslint.configs.recommended.rules,
-      ...prettier.rules,
-      'prettier/prettier': 'error',
-      '@typescript-eslint/explicit-function-return-type': 'off',
       '@typescript-eslint/no-explicit-any': 'warn',
-      'no-console': 'error',
+      'no-console': ['error', { allow: ['error'] }],
+      'prettier/prettier': 'error',
     },
-  }
-);
+  },
+  {
+    files: ['scripts/**/*.ts', 'test/**/*.ts', 'watcher.ts'],
+    rules: {
+      'no-console': 'off',
+    },
+  },
+  prettierConfig,
+];

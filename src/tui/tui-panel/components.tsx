@@ -1,0 +1,190 @@
+/** @jsxImportSource @opentui/solid */
+import { Show, type JSX } from 'solid-js';
+import { padBeforeTitleSummary, sepAfterPrefix, UNIT_GAP, visualWidth } from './layout.ts';
+import type { PanelLayout } from './use-panel-layout.ts';
+import type { PanelPalette } from './palette.ts';
+
+export function TuiPanel(props: {
+  pal: PanelPalette;
+  border: boolean;
+  layout: PanelLayout;
+  children: JSX.Element;
+}) {
+  const bindRef = (el: { width?: number } | undefined) => {
+    props.layout.boxRef = el;
+  };
+  return (
+    <box
+      ref={bindRef}
+      onSizeChange={props.layout.syncWidth}
+      border={props.border}
+      {...(props.border ? { borderColor: props.pal.border } : {})}
+      paddingTop={0}
+      paddingBottom={0}
+      paddingLeft={props.border ? 2 : 0}
+      paddingRight={props.border ? 2 : 0}
+      flexDirection="column"
+      gap={0}
+      width="100%"
+    >
+      {props.children}
+    </box>
+  );
+}
+
+export function TuiPanelTitle(props: {
+  pal: PanelPalette;
+  layout: PanelLayout;
+  open: boolean;
+  onToggle: () => void;
+  title: string;
+  version?: string;
+  collapsed?: JSX.Element;
+}) {
+  return (
+    <text onMouseUp={props.onToggle}>
+      <span style={{ fg: props.pal.muted }}>{props.open ? '\u25bc ' : '\u25b6 '}</span>
+      <span style={{ fg: props.pal.primary }}>
+        <b>{props.title}</b>
+        <Show when={props.open && props.version}>
+          <span style={{ fg: props.pal.muted }}> (v{props.version})</span>
+        </Show>
+      </span>
+      <Show when={!props.open && props.collapsed}>{props.collapsed}</Show>
+    </text>
+  );
+}
+
+export function TuiTitleSummaryPad(props: {
+  layout: PanelLayout;
+  titleWidth: number;
+  summaryWidth: number;
+  children: JSX.Element;
+}) {
+  const spaces = () =>
+    padBeforeTitleSummary(
+      props.layout.panelWidth(),
+      props.layout.gutter(),
+      props.titleWidth,
+      props.summaryWidth
+    );
+  return (
+    <span>
+      {' '.repeat(spaces())}
+      {props.children}
+    </span>
+  );
+}
+
+export function TuiPanelSep(props: { pal: PanelPalette; layout: PanelLayout }) {
+  return <text fg={props.pal.muted}>{props.layout.sep()}</text>;
+}
+
+export function TuiPanelNoData(props: { pal: PanelPalette; layout: PanelLayout; message: string }) {
+  return (
+    <>
+      <TuiPanelSep pal={props.pal} layout={props.layout} />
+      <text>
+        <span style={{ fg: props.pal.muted }}>{'> '}</span>
+        <span style={{ fg: props.pal.muted }}>{props.message}</span>
+      </text>
+    </>
+  );
+}
+
+export function TuiSection(props: {
+  pal: PanelPalette;
+  layout: PanelLayout;
+  open: () => boolean;
+  title: string;
+  suffix?: string;
+  onToggle: () => void;
+  onHide?: () => void;
+  children: JSX.Element;
+}) {
+  const prefix = () => `${props.open() ? '\u25bc ' : '\u25b6 '}${props.title}${props.suffix ?? ''}`;
+  return (
+    <>
+      <box width="100%" flexDirection="row" flexShrink={0}>
+        <text flexGrow={1} minWidth={0} onMouseUp={props.onToggle}>
+          <span style={{ fg: props.pal.muted }}>{props.open() ? '\u25bc ' : '\u25b6 '}</span>
+          <span style={{ fg: props.pal.primary }}>
+            <b>{props.title}</b>
+          </span>
+          <Show when={props.suffix}>
+            <span style={{ fg: props.pal.muted }}>{props.suffix}</span>
+          </Show>
+          <span style={{ fg: props.pal.muted }}>
+            {sepAfterPrefix(prefix(), Math.max(1, props.layout.gauge() - 2))}
+          </span>
+        </text>
+        <Show when={props.onHide}>
+          <text width={2} flexShrink={0} onMouseUp={props.onHide} fg={props.pal.muted}>
+            ✕
+          </text>
+        </Show>
+      </box>
+      <Show when={props.open()}>{props.children}</Show>
+    </>
+  );
+}
+
+function metricRowGap(label: string, value: string, unit: string, gauge: number): number {
+  const used = visualWidth(label) + visualWidth(value) + (unit ? visualWidth(unit) + UNIT_GAP : 0);
+  return Math.max(1, gauge - used);
+}
+
+export function TuiMetricRow(props: {
+  pal: PanelPalette;
+  layout: PanelLayout;
+  label: string;
+  value: string;
+  unit?: string;
+  /** Whole line (label + value + unit). Ignored when `labelFg` / `valueFg` set. */
+  fg?: string;
+  /** Label-only color (e.g. sub-agent model); value stays `valueFg` or muted. */
+  labelFg?: string;
+  valueFg?: string;
+}) {
+  const unit = props.unit ?? '';
+  const unitSuffix = unit ? ' ' + unit : '';
+  const split = props.labelFg !== undefined || props.valueFg !== undefined;
+  if (split) {
+    const gap = metricRowGap(props.label, props.value, unit, props.layout.gauge());
+    const labelColor = props.labelFg ?? props.fg ?? props.pal.muted;
+    const valueColor = props.valueFg ?? props.fg ?? props.pal.muted;
+    return (
+      <text>
+        <span style={{ fg: labelColor }}>{props.label}</span>
+        {' '.repeat(gap)}
+        <span style={{ fg: valueColor }}>
+          {props.value}
+          {unitSuffix}
+        </span>
+      </text>
+    );
+  }
+  return (
+    <text fg={props.fg ?? props.pal.muted}>{props.layout.row(props.label, props.value, unit)}</text>
+  );
+}
+
+export function TuiHitRow(props: {
+  label: string;
+  bar: string;
+  pct: string;
+  barColor: string;
+  textColor: string;
+  trend?: { text: string; color: string };
+}) {
+  return (
+    <text>
+      <span style={{ fg: props.textColor }}>{props.label} </span>
+      <span style={{ fg: props.barColor }}>[{props.bar}] </span>
+      <span style={{ fg: props.textColor }}>{props.pct}</span>
+      <Show when={props.trend}>
+        <span style={{ fg: props.trend?.color }}> {props.trend?.text}</span>
+      </Show>
+    </text>
+  );
+}

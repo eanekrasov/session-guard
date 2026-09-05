@@ -1,0 +1,7 @@
+{
+  "id": "ios",
+  "extends": "base",
+  "description": "iOS development profile",
+  "schemas": ["state-machine.yaml"],
+  "guardsTs": "guards.ts"
+}

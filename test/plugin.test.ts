@@ -1,0 +1,111 @@
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { mkdirSync, readFileSync, existsSync, rmSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+
+const TEST_DIR = '/tmp/state-machine-plugin-test-' + Date.now();
+const ORIG_STORE_DIR = process.env.STATE_MACHINE_STORE_DIR;
+const ORIG_HARNESS_DIR = process.env.OPENCODE_HARNESS_DIR;
+const ORIG_PROFILES_DIR = process.env.STATE_MACHINE_PROFILES_DIR;
+
+const DEFAULT_STORE = join(homedir(), '.local/share/opencode/session-guard/runtime');
+
+function makeMockCtx(overrides?: Record<string, unknown>) {
+  return {
+    client: {} as Record<string, unknown>,
+    project: {
+      id: 'test',
+      name: 'test',
+      directory: TEST_DIR,
+      worktree: TEST_DIR,
+      time: { created: Date.now() },
+    },
+    directory: TEST_DIR,
+    worktree: TEST_DIR,
+    serverUrl: new URL('http://localhost:0'),
+    $: {} as Record<string, unknown>,
+    experimental_workspace: {} as Record<string, unknown>,
+    ...overrides,
+  };
+}
+
+describe('plugin.ts', () => {
+  beforeEach(() => {
+    mkdirSync(TEST_DIR, { recursive: true });
+    delete process.env.STATE_MACHINE_STORE_DIR;
+    delete process.env.STATE_MACHINE_PROFILES_DIR;
+    delete process.env.OPENCODE_HARNESS_DIR;
+  });
+
+  afterEach(() => {
+    if (existsSync(TEST_DIR)) {
+      rmSync(TEST_DIR, { recursive: true, force: true });
+    }
+    if (ORIG_STORE_DIR) process.env.STATE_MACHINE_STORE_DIR = ORIG_STORE_DIR;
+    if (ORIG_HARNESS_DIR) process.env.OPENCODE_HARNESS_DIR = ORIG_HARNESS_DIR;
+    if (ORIG_PROFILES_DIR) process.env.STATE_MACHINE_PROFILES_DIR = ORIG_PROFILES_DIR;
+    else delete process.env.STATE_MACHINE_PROFILES_DIR;
+  });
+
+  it('sets STATE_MACHINE_STORE_DIR by default', async () => {
+    const { StateMachinePlugin } = await import('../src/index.ts');
+
+    const ctx = makeMockCtx();
+    await StateMachinePlugin(ctx as never);
+
+    expect(process.env.STATE_MACHINE_STORE_DIR).toBe(DEFAULT_STORE);
+  });
+
+  it('does not override existing STATE_MACHINE_STORE_DIR', async () => {
+    process.env.STATE_MACHINE_STORE_DIR = '/custom/store/dir';
+
+    const { StateMachinePlugin } = await import('../src/index.ts');
+
+    const ctx = makeMockCtx();
+    await StateMachinePlugin(ctx as never);
+
+    expect(process.env.STATE_MACHINE_STORE_DIR).toBe('/custom/store/dir');
+  });
+
+  it('respects OPENCODE_HARNESS_DIR for profiles', async () => {
+    const { StateMachinePlugin } = await import('../src/index.ts');
+
+    process.env.OPENCODE_HARNESS_DIR = 'custom-harness';
+
+    const ctx = makeMockCtx();
+    await StateMachinePlugin(ctx as never);
+
+    expect(process.env.STATE_MACHINE_PROFILES_DIR).toBe(join(TEST_DIR, 'custom-harness/profiles'));
+  });
+
+  it('respects absolute OPENCODE_HARNESS_DIR', async () => {
+    const { StateMachinePlugin } = await import('../src/index.ts');
+
+    process.env.OPENCODE_HARNESS_DIR = '/absolute/path';
+
+    const ctx = makeMockCtx();
+    await StateMachinePlugin(ctx as never);
+
+    expect(process.env.STATE_MACHINE_PROFILES_DIR).toBe('/absolute/path/profiles');
+  });
+
+  it('state store remains global regardless of OPENCODE_HARNESS_DIR', async () => {
+    const { StateMachinePlugin } = await import('../src/index.ts');
+
+    process.env.OPENCODE_HARNESS_DIR = 'custom-harness';
+    const ctx = makeMockCtx();
+    await StateMachinePlugin(ctx as never);
+
+    expect(process.env.STATE_MACHINE_STORE_DIR).toBe(DEFAULT_STORE);
+  });
+
+  it('validates catch block exists in source', async () => {
+    const pluginSource = readFileSync(join(import.meta.dirname, '../src/index.ts'), 'utf-8');
+
+    expect(pluginSource).toContain('try {');
+    expect(pluginSource).toContain('catch (e)');
+    expect(pluginSource).toContain('sm-init-error.json');
+    expect(pluginSource).toContain('writeFileSync');
+    expect(pluginSource).toContain('return {}');
+  });
+});

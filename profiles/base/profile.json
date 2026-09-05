@@ -1,0 +1,13 @@
+{
+  "id": "base",
+  "description": "Базовый профиль state-machine. Все профили наследуют от него.",
+
+  "schemas": ["base.yaml"],
+
+  "agentsDir": "agents",
+  "skillsDir": "skills",
+
+  "agents": ["code", "review"],
+  "skills": [],
+  "invariants": ["LF_ONLY"]
+}

@@ -1,0 +1,50 @@
+phases:
+  PLANNING:
+    dispatch:
+      strategy: serial
+  EXECUTION:
+    dispatch:
+      strategy: serial_with_overlap
+      maxConcurrent: 2
+transitions:
+  - from: PLANNING
+    to: EXECUTION
+    guard: "session.approved('plan')"
+  - from: EXECUTION
+    to: COMMIT
+    kind: pass
+  - from: COMMIT
+    to: DONE
+    guard: "typeof session.deliveryReceipt == 'string' || typeof session.deliveryPermit == 'string'"
+gateMapping:
+  review: ['invariants', 'review']
+settings:
+  mutationTtlMs: 1800000
+  retryMaxAttempts: 3
+phaseAssignments:
+  - id: default
+    priority: 0
+    condition: 'true'
+    result: PLANNING
+  - id: hasPlanApproval
+    priority: 60
+    condition: "session.approved('plan')"
+    result: TASKS_READY
+  - id: uncommitted
+    priority: 70
+    condition: "session.approved('plan') && (session.taskLists.implementation ?? []).length > 0 && session.taskLists.implementation.some(t => t.status != 'completed')"
+    result: EXECUTION
+  - id: commitApproval
+    priority: 90
+    condition: "session.approved('commit')"
+    result: COMMIT
+  - id: deliveryReceipt
+    priority: 100
+    condition: "typeof session.deliveryReceipt == 'string' || typeof session.deliveryPermit == 'string'"
+    result: DONE
+actionGuards:
+  beginMutation: "session.approved('plan') || session.revision == 0"
+requiredGates:
+  - invariants
+  - review
+  - qa

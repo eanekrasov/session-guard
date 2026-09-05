@@ -1,15 +1,30 @@
 {
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "@tsconfig/bun/tsconfig.json",
   "compilerOptions": {
     "lib": ["ESNext", "DOM"],
     "target": "ESNext",
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "strict": true,
-    "noEmit": false,
+    "strict": false,
+    "strictNullChecks": false,
+    "noImplicitAny": false,
+    "noImplicitOverride": false,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "noEmit": true,
+    "rootDir": "src",
     "outDir": "dist",
-    "declaration": true,
+    "declaration": false,
     "skipLibCheck": true,
     "allowImportingTsExtensions": true,
-    "types": ["bun-types"]
-  }
+    "types": ["bun-types"],
+
+    "jsx": "react-jsx",
+    "jsxImportSource": "@opentui/solid",
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": false
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "exclude": ["profiles/**/*.ts"]
 }

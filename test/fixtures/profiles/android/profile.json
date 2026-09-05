@@ -1,0 +1,8 @@
+{
+  "id": "android",
+  "extends": "base",
+  "description": "Android development profile",
+  "agentsDir": "custom-agents",
+  "skillsDir": "custom-skills",
+  "schemas": ["state-machine.yaml"]
+}

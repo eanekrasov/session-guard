@@ -1,0 +1,19 @@
+extends: 'base/state-machine.yaml'
+phases:
+  PLANNING:
+    dispatch:
+      strategy: serial
+  EXECUTION:
+    dispatch:
+      strategy: serial_with_overlap
+      maxConcurrent: 2
+    stages:
+      - id: compile
+        allowedAgents: ['code']
+        entryGuards: ["session.approved('plan')"]
+        exitGuards: ['session.activeMutation?.outputReady == true']
+gateMapping:
+  review: ['invariants']
+  build: ['compile', 'test']
+settings:
+  mutationTtlMs: 600000

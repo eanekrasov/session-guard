@@ -1,0 +1,5 @@
+{
+  "id": "missing-extends",
+  "extends": "non-existent-profile",
+  "description": "Profile that extends a non-existent profile"
+}

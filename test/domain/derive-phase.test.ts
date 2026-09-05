@@ -1,0 +1,173 @@
+import { describe, it, expect } from 'vitest';
+import type { PhaseAssignmentRule } from '../../src/schema/types.ts';
+import type { SessionFacts } from '../../src/domain/session-facts.ts';
+import { derivePhaseFn as derivePhase } from '../../src/domain/engine.ts';
+
+function makeFacts(overrides: Partial<SessionFacts> = {}): SessionFacts {
+  return {
+    lastApproval: null,
+    approvals: [],
+    tasks: [],
+    activeOperations: [],
+    testStatus: {},
+    verifications: [],
+    verified(this: SessionFacts, stage: string, status: 'confirmed' | 'rejected') {
+      return this.verifications.some((v) => v.stage === stage && v.status === status);
+    },
+    gates: {},
+    profileId: 'android',
+    revision: 0,
+    deliveryReceipt: null,
+    refs: {},
+    retryBudgets: {},
+    isExhausted(this: SessionFacts, budgetKey: string) {
+      const budget = this.retryBudgets[budgetKey];
+      return budget ? budget.attempts >= budget.maximum : false;
+    },
+    ...overrides,
+  };
+}
+
+describe('derivePhase', () => {
+  it('returns the highest priority rule when condition is true', () => {
+    const rules: PhaseAssignmentRule[] = [
+      {
+        id: 'r1',
+        priority: 100,
+        condition: 'session.gates.invariants == "passed"',
+        result: 'EXECUTION',
+      },
+      { id: 'r2', priority: 50, condition: 'true', result: 'PLANNING' },
+    ];
+    const facts = makeFacts({ gates: { invariants: 'passed' } });
+
+    const result = derivePhase(facts, rules);
+
+    expect(result).toBe('EXECUTION');
+  });
+
+  it('falls back to lower priority when higher priority condition is false', () => {
+    const rules: PhaseAssignmentRule[] = [
+      {
+        id: 'r1',
+        priority: 100,
+        condition: 'session.gates.invariants == "passed"',
+        result: 'DONE',
+      },
+      { id: 'r2', priority: 0, condition: 'true', result: 'PLANNING' },
+    ];
+    const facts = makeFacts({ gates: { invariants: 'failed' } });
+
+    const result = derivePhase(facts, rules);
+
+    expect(result).toBe('PLANNING');
+  });
+
+  it('returns PLANNING when no rule matches and no fallback', () => {
+    const rules: PhaseAssignmentRule[] = [
+      {
+        id: 'r1',
+        priority: 100,
+        condition: "session.verified('bug', 'confirmed')",
+        result: 'VERIFY',
+      },
+    ];
+    const facts = makeFacts({ verifications: [] });
+
+    const result = derivePhase(facts, rules);
+
+    expect(result).toBe('PLANNING');
+  });
+
+  it('returns PLANNING for empty rules array', () => {
+    const rules: PhaseAssignmentRule[] = [];
+    const facts = makeFacts();
+
+    const result = derivePhase(facts, rules);
+
+    expect(result).toBe('PLANNING');
+  });
+
+  it('skips a rule with a broken expression (safe-fail) and matches next', () => {
+    const rules: PhaseAssignmentRule[] = [
+      { id: 'r1', priority: 100, condition: 'session.nonexistent.field == true', result: 'BROKEN' },
+      { id: 'r2', priority: 50, condition: 'true', result: 'PLANNING' },
+    ];
+    const facts = makeFacts();
+
+    const result = derivePhase(facts, rules);
+
+    expect(result).toBe('PLANNING');
+  });
+
+  it('evaluates expression with SessionFacts fields like gates', () => {
+    const rules: PhaseAssignmentRule[] = [
+      {
+        id: 'r1',
+        priority: 100,
+        condition: 'session.gates.invariants == "passed"',
+        result: 'EXECUTION',
+      },
+    ];
+    const facts = makeFacts({
+      gates: { invariants: 'passed' },
+    });
+
+    const result = derivePhase(facts, rules);
+
+    expect(result).toBe('EXECUTION');
+  });
+
+  it('correctly resolves three-way priority: skips r100, matches r50', () => {
+    const rules: PhaseAssignmentRule[] = [
+      {
+        id: 'r1',
+        priority: 100,
+        condition: "session.verified('bug', 'confirmed')",
+        result: 'VERIFY',
+      },
+      { id: 'r2', priority: 50, condition: 'session.tasks.length > 0', result: 'EXECUTION' },
+      { id: 'r3', priority: 0, condition: 'true', result: 'PLANNING' },
+    ];
+    const facts = makeFacts({ tasks: [{ id: 't1', status: 'running' }] });
+
+    const result = derivePhase(facts, rules);
+
+    expect(result).toBe('EXECUTION');
+  });
+
+  it('returns VERIFY when bug stage is confirmed', () => {
+    const rules: PhaseAssignmentRule[] = [
+      {
+        id: 'r1',
+        priority: 100,
+        condition: "session.verified('bug', 'confirmed')",
+        result: 'VERIFY',
+      },
+      { id: 'r2', priority: 0, condition: 'true', result: 'PLANNING' },
+    ];
+    const facts = makeFacts({ verifications: [{ stage: 'bug', status: 'confirmed' }] });
+
+    const result = derivePhase(facts, rules);
+
+    expect(result).toBe('VERIFY');
+  });
+
+  it('skips r100 false, skips r50 false, matches r0 true', () => {
+    const rules: PhaseAssignmentRule[] = [
+      {
+        id: 'r1',
+        priority: 100,
+        condition: "session.verified('bug', 'confirmed')",
+        result: 'VERIFY',
+      },
+      { id: 'r2', priority: 50, condition: 'session.tasks.length > 10', result: 'EXECUTION' },
+      { id: 'r3', priority: 0, condition: 'true', result: 'PLANNING' },
+    ];
+    const facts = makeFacts({ verifications: [] });
+
+    const result = derivePhase(facts, rules);
+
+    expect(result).toBe('PLANNING');
+  });
+});
