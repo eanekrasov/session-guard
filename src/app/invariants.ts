@@ -7,7 +7,7 @@
 
 import { readFileSync, existsSync } from 'node:fs';
 import { relative, resolve, join } from 'node:path';
-import { ProfileResolver } from '../profile-resolver.ts';
+import { ProfileResolver } from './profile-resolver.ts';
 
 export interface InvariantViolation {
   invariant: string;

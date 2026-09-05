@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 
-import { evaluateGuard } from '../src/guard-ast.ts';
+import { evaluateGuard } from '../../src/schema/guard-ast.ts';
 
 function makeBuiltins(
   session: Record<string, unknown>

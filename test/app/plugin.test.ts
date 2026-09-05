@@ -48,7 +48,7 @@ describe('plugin.ts', () => {
   });
 
   it('sets STATE_MACHINE_STORE_DIR by default', async () => {
-    const { StateMachinePlugin } = await import('../src/index.ts');
+    const { StateMachinePlugin } = await import('../../src/index.ts');
 
     const ctx = makeMockCtx();
     await StateMachinePlugin(ctx as never);
@@ -59,7 +59,7 @@ describe('plugin.ts', () => {
   it('does not override existing STATE_MACHINE_STORE_DIR', async () => {
     process.env.STATE_MACHINE_STORE_DIR = '/custom/store/dir';
 
-    const { StateMachinePlugin } = await import('../src/index.ts');
+    const { StateMachinePlugin } = await import('../../src/index.ts');
 
     const ctx = makeMockCtx();
     await StateMachinePlugin(ctx as never);
@@ -68,7 +68,7 @@ describe('plugin.ts', () => {
   });
 
   it('respects OPENCODE_HARNESS_DIR for profiles', async () => {
-    const { StateMachinePlugin } = await import('../src/index.ts');
+    const { StateMachinePlugin } = await import('../../src/index.ts');
 
     process.env.OPENCODE_HARNESS_DIR = 'custom-harness';
 
@@ -79,7 +79,7 @@ describe('plugin.ts', () => {
   });
 
   it('respects absolute OPENCODE_HARNESS_DIR', async () => {
-    const { StateMachinePlugin } = await import('../src/index.ts');
+    const { StateMachinePlugin } = await import('../../src/index.ts');
 
     process.env.OPENCODE_HARNESS_DIR = '/absolute/path';
 
@@ -90,7 +90,7 @@ describe('plugin.ts', () => {
   });
 
   it('state store remains global regardless of OPENCODE_HARNESS_DIR', async () => {
-    const { StateMachinePlugin } = await import('../src/index.ts');
+    const { StateMachinePlugin } = await import('../../src/index.ts');
 
     process.env.OPENCODE_HARNESS_DIR = 'custom-harness';
     const ctx = makeMockCtx();
@@ -100,7 +100,7 @@ describe('plugin.ts', () => {
   });
 
   it('validates catch block exists in source', async () => {
-    const pluginSource = readFileSync(join(import.meta.dirname, '../src/index.ts'), 'utf-8');
+    const pluginSource = readFileSync(join(import.meta.dirname, '../../src/index.ts'), 'utf-8');
 
     expect(pluginSource).toContain('try {');
     expect(pluginSource).toContain('catch (e)');

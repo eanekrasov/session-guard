@@ -2,10 +2,10 @@ import { describe, it, expect } from 'vitest';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-import { ProfileResolver } from '../src/profile-resolver.ts';
+import { ProfileResolver } from '../../src/app/profile-resolver.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const fixturesDir = path.resolve(__dirname, 'fixtures', 'profiles');
+const fixturesDir = path.resolve(__dirname, '..', 'fixtures', 'profiles');
 
 describe('ProfileResolver', () => {
   describe('resolve (missing extends)', () => {

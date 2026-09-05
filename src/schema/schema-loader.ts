@@ -1,16 +1,11 @@
-// @ts-nocheck — Zod parse возвращает loose тип, несовместимый со строгим ProfileSchema
 import fs from 'fs/promises';
 import path from 'path';
 import YAML from 'yaml';
 
 import { z } from 'zod';
 
-import { ProfileSchemaSchema } from './schema/profile-schema.ts';
-import {
-  ProfileConfigurationError,
-  type ProfileSchema,
-  type ResolvedSchema,
-} from './schema/types.ts';
+import { ProfileSchemaSchema } from './profile-schema.ts';
+import { ProfileConfigurationError, type ProfileSchema, type ResolvedSchema } from './types.ts';
 
 /**
  * Load a ProfileSchema from an arbitrary path. Returns null when the file

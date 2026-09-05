@@ -20,7 +20,7 @@ if (!process.env.STATE_MACHINE_PROFILES_DIR) {
 
 async function main() {
   console.log('\n🚀 Creating runtime...');
-  const { createRuntime } = await import('../src/app/runtime.ts');
+  const { createRuntime } = await import('../../src/app/runtime.ts');
 
   const runtime = createRuntime({
     client: {} as never,

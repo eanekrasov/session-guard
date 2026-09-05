@@ -1,13 +1,13 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { ProfileMetadataSchema } from './schema/profile-metadata.ts';
+import { ProfileMetadataSchema } from '../schema/profile-metadata.ts';
 import type {
   ProfileMetadata,
   LoadedProfile,
   ResolvedSchema,
   ResolvedProfile,
-} from './schema/types.ts';
-import { SchemaLoader } from './schema-loader.ts';
+} from '../schema/types.ts';
+import { SchemaLoader } from '../schema/schema-loader.ts';
 
 /**
  * ProfileResolver — resolves a profile's full configuration by:

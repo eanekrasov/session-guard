@@ -17,7 +17,7 @@ describe('plugin entry point (R10)', () => {
   });
 
   it('imports StateMachinePlugin as named and exposes the v1 module from src/index.ts', async () => {
-    const mod = await import('../src/index.ts');
+    const mod = await import('../../src/index.ts');
 
     expect(mod).toBeDefined();
     expect(mod.StateMachinePlugin).toBeDefined();
@@ -27,7 +27,7 @@ describe('plugin entry point (R10)', () => {
   });
 
   it('default export returns an object with Hooks shape', async () => {
-    const { default: plugin } = await import('../src/index.ts');
+    const { default: plugin } = await import('../../src/index.ts');
 
     const result = await plugin.server({
       client: {} as never,

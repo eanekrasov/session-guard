@@ -1,5 +1,5 @@
 import type { ProfileMetadata, ResolvedProfile } from './schema/types.ts';
-import { ProfileResolver } from './profile-resolver.ts';
+import { ProfileResolver } from './app/profile-resolver.ts';
 
 /**
  * Resolve a profile's full configuration.

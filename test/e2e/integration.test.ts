@@ -2,10 +2,10 @@ import { describe, it, expect } from 'vitest';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-import { resolveConfig, listProfiles } from '../src/public-api.ts';
+import { resolveConfig, listProfiles } from '../../src/public-api.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const fixturesDir = path.resolve(__dirname, 'fixtures', 'profiles');
+const fixturesDir = path.resolve(__dirname, '..', 'fixtures', 'profiles');
 
 describe('Public API', () => {
   describe('resolveConfig', () => {

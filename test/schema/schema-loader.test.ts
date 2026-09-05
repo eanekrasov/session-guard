@@ -4,12 +4,12 @@ import { tmpdir } from 'node:os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-import { SchemaLoader, loadSchemaFromPath } from '../src/schema-loader.ts';
-import { ProfileConfigurationError } from '../src/schema/types.ts';
+import { SchemaLoader, loadSchemaFromPath } from '../../src/schema/schema-loader.ts';
+import { ProfileConfigurationError } from '../../src/schema/types.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const fixturesDir = path.resolve(__dirname, 'fixtures', 'profiles');
-const schemaFixturesDir = path.resolve(__dirname, 'fixtures', 'schemas');
+const fixturesDir = path.resolve(__dirname, '..', 'fixtures', 'profiles');
+const schemaFixturesDir = path.resolve(__dirname, '..', 'fixtures', 'schemas');
 
 describe('SchemaLoader', () => {
   describe('loadSchemaFile', () => {

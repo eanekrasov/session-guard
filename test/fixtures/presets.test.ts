@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import YAML from 'yaml';
-import { loadSchemaFromPath } from '../../src/schema-loader.ts';
+import { loadSchemaFromPath } from '../../src/schema/schema-loader.ts';
 import { ProfileSchemaSchema } from '../../src/schema/profile-schema.ts';
 
 const FIXTURES_DIR = resolve(import.meta.dirname, 'presets');

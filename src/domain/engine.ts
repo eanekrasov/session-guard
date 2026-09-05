@@ -1,4 +1,4 @@
-import { type GuardEvaluationContext, GuardEvaluator } from '../guard-evaluator.ts';
+import { type GuardEvaluationContext, GuardEvaluator } from '../schema/guard-evaluator.ts';
 import type { TaskStatus, WorkflowSession } from '../session/session-schema.ts';
 import type { PhaseAssignmentRule, PhaseDef, TransitionDef } from '../schema/types.ts';
 import type { SessionFacts } from './session-facts.ts';

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 
-import { GuardEvaluator } from '../src/guard-evaluator.ts';
+import { GuardEvaluator } from '../../src/schema/guard-evaluator.ts';
 
 describe('GuardEvaluator', () => {
   describe('custom function from guards', () => {

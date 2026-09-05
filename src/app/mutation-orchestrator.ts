@@ -3,7 +3,7 @@ import type { WorkflowSession } from '../session/session-schema.ts';
 import { WorkflowStore } from '../session/session-store.ts';
 import { StateMachineEngine, type EvaluateGuardFn, type EngineConfig } from '../domain/engine.ts';
 import { resolveConfig } from '../public-api.ts';
-import { GuardEvaluator } from '../guard-evaluator.ts';
+import { GuardEvaluator } from '../schema/guard-evaluator.ts';
 import type { ResolvedSchema } from '../schema/types.ts';
 import { SessionQueue } from './session-queue.ts';
 import { computeChangeScope, type BaselineHashes } from './change-scope.ts';
