@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createSession, WorkflowStore } from '../../src/session/session-store.ts';
 import type { ConsentManifest } from '../../src/app/consent.ts';
-import type { OpenCodeSessionClient } from '../../src/app/runtime-types.ts';
+import type { SessionClient } from '../../src/app/runtime-types.ts';
 
 // ─── Helpers ──────────────────────────────────────────────────────
 
@@ -18,7 +18,7 @@ beforeEach(() => {
 
 function mockClient(
   messagesResult?: Array<{ id: string; parts: Array<{ type: string; status?: string }> }>
-): OpenCodeSessionClient {
+): SessionClient {
   return {
     messages: vi.fn().mockResolvedValue({
       data: messagesResult ?? [{ id: 'msg-1', parts: [{ type: 'text', status: 'completed' }] }],
@@ -28,7 +28,7 @@ function mockClient(
   };
 }
 
-async function makeOrchestrator(client?: OpenCodeSessionClient) {
+async function makeOrchestrator(client?: SessionClient) {
   const { ConsentOrchestrator } = await import('../../src/app/consent-orchestrator.ts');
   const { SessionQueue } = await import('../../src/app/session-queue.ts');
   const queue = new SessionQueue(store);
@@ -242,9 +242,9 @@ describe('ConsentOrchestrator.after', () => {
     expect(client.prompt).toHaveBeenCalledTimes(1);
     const promptCall = (client.prompt as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(promptCall.path.id).toBe('co-synthetic');
-    expect(promptCall.body.content).toContain('Plan approved');
-    expect(promptCall.body.parts[0].noReply).toBe(true);
-    expect(promptCall.body.parts[0].title).toBe('Consent Result');
+    expect(promptCall.body.noReply).toBe(true);
+    expect(promptCall.body.parts[0].type).toBe('text');
+    expect(promptCall.body.parts[0].text).toContain('Plan approved');
   });
 
   it('is a no-op when the callID does not match the pending approval', async () => {

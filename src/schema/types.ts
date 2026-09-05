@@ -1,3 +1,28 @@
+// Типы, выведенные из Zod-схемы — единственный источник истины.
+// Все изменения схемы в profile-schema.ts автоматически подхватываются.
+export type {
+  ProfileSchema,
+  PhaseDef,
+  PhaseAssignmentRule,
+  TransitionDef,
+  TransitionEffect,
+  StageDef,
+  DispatchDef,
+  ConsentOnTransition,
+  RetryBudget,
+  LoopSource,
+  GateItem,
+  ToolItem,
+} from './profile-schema.ts';
+
+import type {
+  PhaseDef,
+  PhaseAssignmentRule,
+  TransitionDef,
+  TransitionEffect,
+  StageDef,
+} from './profile-schema.ts';
+
 export interface ProfileMetadata {
   id: string;
   description?: string;
@@ -20,18 +45,8 @@ export interface ResolvedMetadata {
   skillsDir: string;
 }
 
-export interface ProfileSchema {
-  extends?: string;
-  phases?: Record<string, PhaseDef>;
-  transitions?: TransitionDef[];
-  settings?: Record<string, unknown>;
-  editingAgents?: string[];
-  verifiers?: string[];
-  requiredGates?: string[];
-  actionGuards?: Record<string, string>;
-  phaseAssignments?: PhaseAssignmentRule[];
-}
-
+// ResolvedSchema — resolved версия ProfileSchema без extends/gates/tools/gateMapping.
+// Индексная сигнатура для совместимости с z.infer (ProfileSchemaSchema.passthrough()).
 export interface ResolvedSchema {
   source: string;
   phases?: Record<string, PhaseDef>;
@@ -42,13 +57,7 @@ export interface ResolvedSchema {
   requiredGates?: string[];
   actionGuards?: Record<string, string>;
   phaseAssignments?: PhaseAssignmentRule[];
-}
-
-export interface PhaseAssignmentRule {
-  id: string;
-  priority: number;
-  condition: string;
-  result: string;
+  [key: string]: unknown;
 }
 
 export interface LoadedProfile {
@@ -66,51 +75,6 @@ export interface LoadedProfile {
 export interface ResolvedProfile {
   metadata: ResolvedMetadata;
   schemas: ResolvedSchema[];
-}
-
-export interface ConsentOnTransition {
-  /** Тип одобрения (plan, commit, ...) */
-  type: string;
-}
-
-export interface TransitionEffect {
-  bumpRetry?: string;
-  maxAttempts?: number;
-  /** Утвердить тип (type) при переходе */
-  approve?: string;
-}
-
-export interface TransitionDef {
-  from: string;
-  to: string;
-  guard?: string | null;
-  kind?: 'auto' | 'pass' | 'fail';
-  effects?: TransitionEffect[];
-  /** Для перехода нужно одобрение пользователя */
-  consent?: string | ConsentOnTransition;
-  onFailure?: 'retry' | 'terminal';
-}
-
-export interface PhaseDef {
-  loop?: string;
-  dispatch?:
-    | { strategy: 'serial'; overlapRoles?: string[] }
-    | {
-        strategy: 'parallel' | 'serial_with_overlap';
-        maxConcurrent: number;
-        overlapRoles?: string[];
-      };
-  retryBudget?: { maximum: number };
-  stages?: StageDef[];
-  exitGuards?: string[];
-  allowedAgents?: string[];
-}
-
-export interface StageDef {
-  id: string;
-  allowedAgents?: string[];
-  entryGuards?: string[];
-  exitGuards?: string[];
 }
 
 export interface ProfileConfigurationIssue {

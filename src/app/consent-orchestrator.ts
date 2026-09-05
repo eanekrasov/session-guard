@@ -11,7 +11,7 @@ import type { LogFn } from './logger.ts';
 import { approve } from '../domain/approvals.ts';
 import { REF_PLAN, type Approval } from '../session/session-schema.ts';
 import { readFile } from './sdd-artifacts.ts';
-import type { OpenCodeSessionClient } from './runtime-types.ts';
+import type { SessionClient } from './runtime-types.ts';
 
 // ─── ConsentOrchestrator ─────────────────────────────────────────────────────
 
@@ -28,7 +28,7 @@ export class ConsentOrchestrator {
     private readonly queue: SessionQueue,
     private readonly projectDir: string,
     private readonly profilesDir: string,
-    private readonly client: OpenCodeSessionClient,
+    private readonly client: SessionClient,
     log?: LogFn
   ) {
     this.log = log ?? (() => Promise.resolve());
@@ -54,8 +54,13 @@ export class ConsentOrchestrator {
     // (e.g., confirm the question was actually shown to the user).
     try {
       const messages = await this.client.messages({ path: { id: sessionID }, query: { limit: 5 } });
+      // SDK возвращает discriminated union: { data: T; error: undefined } | { data: undefined; error: E }
+      // Проверяем, что data не undefined.
+      if (!('data' in messages) || !messages.data) return;
+      // TODO: SDK Part union не имеет поля `status` на text-варианте.
+      // Проверяем status только если он есть (другие Part могут его иметь).
       const hasRelevantPart = messages.data.some((msg) =>
-        msg.parts.some((p) => p.type === 'text' && p.status !== 'failed')
+        msg.parts.some((p) => p.type === 'text' && (!('status' in p) || p.status !== 'failed'))
       );
       if (!hasRelevantPart) return;
     } catch (err) {
@@ -266,13 +271,11 @@ export class ConsentOrchestrator {
         await this.client.prompt({
           path: { id: sessionID },
           body: {
-            content: `Plan approved (evidence: ${evidence.slice(0, 16)}...)`,
+            noReply: true,
             parts: [
               {
                 type: 'text',
-                noReply: true,
-                title: 'Consent Result',
-                text: `Plan was approved with evidence ${evidence}.`,
+                text: `Plan approved with evidence ${evidence}.`,
               },
             ],
           },

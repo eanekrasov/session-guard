@@ -1,6 +1,5 @@
-// @ts-nocheck — optional поля approvals не проходят в required типы
 import type {
-  WorkflowSession,
+  WorkflowSessionRead,
   GateStatus,
   TaskStatus,
   Verification,
@@ -13,9 +12,9 @@ import type {
 export interface SessionFacts {
   currentPhase?: string;
   lastApproval: {
-    type: string;
-    callId: string;
-    status: 'pending' | 'granted' | 'denied';
+    type?: string;
+    callId?: string;
+    status?: 'pending' | 'granted' | 'denied';
     grantedAt?: string;
     evidence?: string;
     feedback?: string;
@@ -35,7 +34,7 @@ export interface SessionFacts {
   /** Used in guard: `session.deliveryReceipt exists`, `session.deliveryReceipt != null`.
    *  Always null until delivery model is implemented. */
   deliveryReceipt: string | null;
-  deliveryPermit?: WorkflowSession['deliveryPermit'];
+  deliveryPermit?: WorkflowSessionRead['deliveryPermit'];
   /** Document references (plan, spec, etc.) for guard expressions.
    *  Check with `session.refs.plan != null`. */
   refs: Record<string, string>;
@@ -49,7 +48,7 @@ export interface SessionFacts {
 
 // ─── Projection function ───────────────────────────────────────────────────────
 
-export function toSessionFacts(session: WorkflowSession): SessionFacts {
+export function toSessionFacts(session: WorkflowSessionRead): SessionFacts {
   const tasks = session.tasks ?? {};
   const activeOperations = session.activeOperations ?? {};
   const retryBudgets = session.retryBudgets ?? {};
@@ -57,7 +56,9 @@ export function toSessionFacts(session: WorkflowSession): SessionFacts {
   return {
     currentPhase: session.currentPhase,
     lastApproval:
-      session.approvals.length > 0 ? session.approvals[session.approvals.length - 1] : null,
+      session.approvals.length > 0
+        ? (session.approvals[session.approvals.length - 1] ?? null)
+        : null,
     approvals: session.approvals.map((a) => ({ type: a.type, status: a.status })),
     // Existing guards consume a flat task view while sessions retain list ownership.
     tasks: Object.values(tasks)

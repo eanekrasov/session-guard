@@ -131,10 +131,12 @@ async function beforeTask(
     description: `[workflow-task:${taskId}] Do the workflow task`,
   };
   const output: { args: unknown } = { args: nativeArgs };
-  await hooks['tool.execute.before']!(
-    { tool: 'task', sessionID: 's1', callID, args: nativeArgs },
-    output
-  );
+  const input: { tool: string; sessionID: string; callID: string } = {
+    tool: 'task',
+    sessionID: 's1',
+    callID,
+  };
+  await hooks['tool.execute.before']!(input, output);
   return output;
 }
 

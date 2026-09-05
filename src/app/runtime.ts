@@ -1,4 +1,3 @@
-// @ts-nocheck — Session (OpencodeClient) несовместим с OpenCodeSessionClient по возвращаемым типам
 import { spawnSync } from 'node:child_process';
 import type {
   Config,
@@ -49,7 +48,6 @@ import { TaskApi, type SetTasksInput } from './task-api.ts';
 import { resolveConfig } from '../public-api.ts';
 import { sessionsDir, profilesDir as getProfilesDir } from './paths.ts';
 import { OpenCodeRulesRuntime } from '../rules/runtime.ts';
-import { discoverRuleFiles } from '../rules/utils.ts';
 import { MatchedRulesStateStore } from '../rules/matched-rules-state.ts';
 import { syncProfileAgents } from './profile-agent-sync.ts';
 
@@ -121,19 +119,13 @@ class StateMachineRuntime {
       );
     });
 
-    // Initialize the rules sub-system
+    // Initialize the rules sub-system — rule files are discovered lazily
+    // inside OpenCodeRulesRuntime on first use.
     const matchedRulesStateStore = new MatchedRulesStateStore();
-    let ruleFiles: DiscoveredRule[] = [];
-    discoverRuleFiles(context.directory)
-      .then((files) => {
-        ruleFiles = files;
-      })
-      .catch(() => {});
     this.rulesRuntime = new OpenCodeRulesRuntime({
       client: context.client,
       directory: context.directory,
       projectDirectory: context.directory,
-      ruleFiles,
       matchedRulesStateStore,
     });
   }
@@ -563,11 +555,15 @@ class StateMachineRuntime {
    * P1-012: Handle tool.execute.before — runs guardrails, consent, or mutation.
    */
   async handleToolBefore(
-    input: { tool: string; sessionID: string; callID: string; args?: unknown },
+    input: { tool: string; sessionID: string; callID: string },
     output: { args: unknown }
   ): Promise<void> {
+    // SDK передаёт args вызова в output.args для tool.execute.before,
+    // НЕ в input.args (в input.args нет поля args по типам SDK).
+    const args = output.args;
+
     // 1. Guardrails — always check first
-    if (!this.guardrailBefore(input.args, output)) return;
+    if (!this.guardrailBefore(args, output)) return;
 
     // 1b. Rules — PreToolUse evaluation (may throw to block the tool)
     try {
@@ -578,11 +574,12 @@ class StateMachineRuntime {
     }
 
     // 2. Consent parsing (Question tool)
-    if (await this.consentBefore(input.tool, input.sessionID, input.callID, input.args)) return;
+    if (await this.consentBefore(input.tool, input.sessionID, input.callID, args)) return;
 
     // 3. Task admission — correlate the native call with declarative workflow work.
-    if (this.isMutationTask(input.tool, input.args)) {
-      await this.handleTaskBefore(input.sessionID, input.callID, input.args, output);
+    // Проверяем только task с маркером [workflow-task:] — обычные task (architect и т.д.) проходят без admission.
+    if (this.isWorkflowTask(input.tool, args)) {
+      await this.handleTaskBefore(input.sessionID, input.callID, args, output);
       if (
         output.args &&
         typeof output.args === 'object' &&
@@ -593,18 +590,20 @@ class StateMachineRuntime {
     }
 
     // 4. Commit Permit: block forbidden git commands, issue deliveryPermit for commit-task
-    await this.commitBefore(input.tool, input.sessionID, input.callID, input.args, output);
+    await this.commitBefore(input.tool, input.sessionID, input.callID, args, output);
 
     // 5. Mutation guard (Bash/Write tool)
     await this.mutationBefore(input.tool, input.sessionID, input.callID, output);
   }
 
-  private isMutationTask(tool: string, args: unknown): boolean {
+  private isWorkflowTask(tool: string, args: unknown): boolean {
     if (tool !== 'task') return false;
     if (!args || typeof args !== 'object') return false;
-    const a = args as Record<string, unknown>;
-    const agent = a.subagent_type ?? a.agent ?? a.type;
-    return typeof agent === 'string' && agent.length > 0;
+    const description = (args as Record<string, unknown>).description;
+    return (
+      typeof description === 'string' &&
+      /^\[workflow-task:(task-[0-9]+)\](?:\s|$)/.test(description)
+    );
   }
 
   private async handleTaskBefore(
@@ -621,17 +620,11 @@ class StateMachineRuntime {
         ? /^\[workflow-task:(task-[0-9]+)\](?:\s|$)/.exec(description)
         : null;
 
+    // match гарантированно не null — проверка уже в isWorkflowTask
+    const taskId = match![1];
+
     await this.queue.enqueue(sessionID, async (session) => {
       if (!session) return;
-      if (!match) {
-        this.blockTaskAdmission(
-          output,
-          'Native task description must begin with [workflow-task:task-N]'
-        );
-        return;
-      }
-
-      const taskId = match[1];
       if (session.activeOperations[callID]) {
         this.blockTaskAdmission(output, `Native call ${callID} is already correlated`);
         return;
@@ -767,7 +760,8 @@ class StateMachineRuntime {
         taskId,
         agent,
         stage: stageId,
-        displayDescription: description.slice(match[0].length).trimStart(),
+        displayDescription:
+          typeof description === 'string' ? description.slice(match[0].length).trimStart() : '',
       });
 
       // Save session to persist currentPhase for TUI
@@ -839,7 +833,7 @@ class StateMachineRuntime {
   }
 
   private resolveTaskAncestry(
-    tasks: Record<string, Array<{ id: string }>>,
+    tasks: Record<string, Array<{ id?: string }>>,
     listKey: string
   ): Array<{ listKey: string; taskId: string }> {
     const ancestry: Array<{ listKey: string; taskId: string }> = [];
@@ -988,17 +982,16 @@ class StateMachineRuntime {
    * Called before each model request — adds phase, gates, and approvals
    * so the model is aware of the current workflow state.
    */
-  async handleSystemTransform(input: {
-    sessionID?: string;
-    model: unknown;
-  }): Promise<{ system: string[] }> {
-    const output = { system: [] as string[] };
-    if (!input.sessionID) return output;
+  async handleSystemTransform(
+    input: { sessionID?: string; model: unknown },
+    output: { system: string[] }
+  ): Promise<void> {
+    if (!input.sessionID) return;
 
     const session = await this.store.load(input.sessionID);
-    if (!session) return output;
+    if (!session) return;
 
-    const lines: string[] = [];
+    const lines = [...output.system];
     lines.push(`[workflow session: ${session.sessionId}]`);
     lines.push(`[workflow profile: ${session.profileId}]`);
 
@@ -1039,19 +1032,19 @@ class StateMachineRuntime {
     lines.push(`[workflow tasks: ${tasks.length} total, revision ${session.revision}]`);
 
     output.system = lines;
-    return output;
   }
 
   /**
-   * Handle session compaction — delegate to rules sub-system.
+   * Handle session compaction — augment existing context with rules sub-system output.
    */
-  async handleSessionCompacting(input: { sessionID?: string }): Promise<{
-    context: string[];
-    prompt?: string;
-  }> {
-    const output = { context: [] as string[], prompt: undefined as string | undefined };
-    await this.rulesRuntime.handleSessionCompacting(input, output);
-    return output;
+  async handleSessionCompacting(
+    input: { sessionID?: string },
+    output: { context: string[]; prompt?: string }
+  ): Promise<void> {
+    const rulesOutput = { context: [...output.context], prompt: undefined as string | undefined };
+    await this.rulesRuntime.handleSessionCompacting(input, rulesOutput);
+    output.context = rulesOutput.context;
+    if (rulesOutput.prompt) output.prompt = rulesOutput.prompt;
   }
 
   /**
@@ -1382,7 +1375,7 @@ class StateMachineRuntime {
     sessionID: string,
     callID: string,
     args: unknown,
-    output: { title: string; output: string; metadata: unknown }
+    output: { args: unknown }
   ): Promise<boolean> {
     if (tool === 'Bash') {
       const command = typeof args === 'string' ? args : JSON.stringify(args ?? '');
@@ -1676,13 +1669,10 @@ class StateMachineRuntime {
         await this.handleEvent(input);
       },
       'experimental.chat.system.transform': async (input, output) => {
-        const result = await this.handleSystemTransform(input);
-        output.system = result.system;
+        await this.handleSystemTransform(input, output);
       },
       'experimental.session.compacting': async (input, output) => {
-        const result = await this.handleSessionCompacting(input);
-        output.context = result.context;
-        if (result.prompt) output.prompt = result.prompt;
+        await this.handleSessionCompacting(input, output);
       },
       'experimental.chat.messages.transform': async (input, output) => {
         await this.handleMessagesTransform(input, output);

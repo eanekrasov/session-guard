@@ -68,8 +68,8 @@ export interface EngineConfig {
   requiredGates?: string[];
 }
 
-function consentType(consent: string | { type: string }): string {
-  return typeof consent === 'string' ? consent : consent.type;
+function consentType(consent: string | { type?: string }): string {
+  return typeof consent === 'string' ? consent : (consent.type ?? '');
 }
 
 // ─── Transition validation result ──────────────────────────────────────────────

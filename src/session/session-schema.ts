@@ -225,6 +225,7 @@ export type DeliveryPermit = z.output<typeof DeliveryPermitSchema>;
 // ─── WorkflowSession type (derived from schema — single source of truth) ──────
 
 export type WorkflowSession = z.output<typeof WorkflowSessionSchema>;
+export type WorkflowSessionRead = z.input<typeof WorkflowSessionSchema>;
 
 // ─── Well-known reference keys ─────────────────────────────────────────────────
 

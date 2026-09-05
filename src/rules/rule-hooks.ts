@@ -6,7 +6,7 @@ export interface HookEvaluationContext {
   hookType: 'PreToolUse' | 'PostToolUse';
 }
 
-export function serializeToolArgs(args: Record<string, unknown>): string {
+export function serializeToolArgs(args: unknown): string {
   return JSON.stringify(args);
 }
 

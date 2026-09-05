@@ -4,6 +4,7 @@ import { zodToJsonSchema } from 'zod-to-json-schema';
 const ConsentOnTransitionSchema = z.object({
   type: z.string(),
 });
+export type ConsentOnTransition = z.infer<typeof ConsentOnTransitionSchema>;
 
 const DispatchSchema = z.discriminatedUnion('strategy', [
   z.object({
@@ -32,10 +33,12 @@ const LoopSourceSchema = z
   .refine((source) => source === '$currentTask.id' || !source.startsWith('$'), {
     message: 'Loop source must be a static list key or "$currentTask.id"',
   });
+export type LoopSource = z.infer<typeof LoopSourceSchema>;
 
 const RetryBudgetSchema = z.object({
   maximum: z.number().int().min(1),
 });
+export type RetryBudget = z.infer<typeof RetryBudgetSchema>;
 
 const StageDefSchema = z.object({
   id: z.string(),
@@ -43,6 +46,7 @@ const StageDefSchema = z.object({
   entryGuards: z.array(z.string()).optional(),
   exitGuards: z.array(z.string()).optional(),
 });
+export type StageDef = z.infer<typeof StageDefSchema>;
 
 const PhaseDefSchema = z.object({
   loop: LoopSourceSchema.optional(),
@@ -52,12 +56,14 @@ const PhaseDefSchema = z.object({
   exitGuards: z.array(z.string()).optional(),
   allowedAgents: z.array(z.string()).optional(),
 });
+export type PhaseDef = z.infer<typeof PhaseDefSchema>;
 
 const TransitionEffectSchema = z.object({
   bumpRetry: z.string().optional(),
   maxAttempts: z.number().int().positive().optional(),
   approve: z.string().optional(),
 });
+export type TransitionEffect = z.infer<typeof TransitionEffectSchema>;
 
 const TransitionDefSchema = z.object({
   from: z.string(),
@@ -68,6 +74,7 @@ const TransitionDefSchema = z.object({
   consent: z.union([z.string(), ConsentOnTransitionSchema]).optional(),
   onFailure: z.enum(['retry', 'terminal']).optional(),
 });
+export type TransitionDef = z.infer<typeof TransitionDefSchema>;
 
 const PhaseAssignmentRuleSchema = z.object({
   id: z.string(),
@@ -75,6 +82,25 @@ const PhaseAssignmentRuleSchema = z.object({
   condition: z.string(),
   result: z.string(),
 });
+export type PhaseAssignmentRule = z.infer<typeof PhaseAssignmentRuleSchema>;
+
+export const GateItemSchema = z.object({
+  id: z.string(),
+  status: z.string().default('pending'),
+  label: z.string().optional(),
+});
+export type GateItem = z.infer<typeof GateItemSchema>;
+
+export const ToolItemSchema = z.object({
+  name: z.string(),
+  description: z.string().optional(),
+  run: z.string(),
+  guard: z.string().optional(),
+  silent: z.boolean().optional(),
+});
+export type ToolItem = z.infer<typeof ToolItemSchema>;
+
+export type DispatchDef = z.infer<typeof DispatchSchema>;
 
 export const ProfileSchemaSchema = z
   .object({
@@ -82,26 +108,8 @@ export const ProfileSchemaSchema = z
     phases: z.record(PhaseDefSchema).optional(),
     phaseAssignments: z.array(PhaseAssignmentRuleSchema).optional(),
     transitions: z.array(TransitionDefSchema).optional(),
-    gates: z
-      .array(
-        z.object({
-          id: z.string(),
-          status: z.string().default('pending'),
-          label: z.string().optional(),
-        })
-      )
-      .optional(),
-    tools: z
-      .array(
-        z.object({
-          name: z.string(),
-          description: z.string().optional(),
-          run: z.string(),
-          guard: z.string().optional(),
-          silent: z.boolean().optional(),
-        })
-      )
-      .optional(),
+    gates: z.array(GateItemSchema).optional(),
+    tools: z.array(ToolItemSchema).optional(),
     gateMapping: z.record(z.array(z.string())).optional(),
     actionGuards: z.record(z.string()).optional(),
     editingAgents: z.array(z.string()).optional(),
@@ -126,6 +134,8 @@ export const ProfileSchemaSchema = z
       seen.set(phase.loop, phaseId);
     }
   });
+
+export type ProfileSchema = z.infer<typeof ProfileSchemaSchema>;
 
 export const ProfileSchemaJsonSchema = zodToJsonSchema(ProfileSchemaSchema, {
   name: 'ProfileSchema',

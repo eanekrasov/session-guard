@@ -434,16 +434,17 @@ describe('handleTaskBefore (via handleToolBefore)', () => {
     const sessionId = 'task-before-ok';
     await createTestSession(sessionId, 'test-profile', taskCycle());
 
-    const output = { args: {} };
-    await hooks['tool.execute.before']!(
-      {
-        tool: 'task',
-        sessionID: sessionId,
-        callID: 'call-task-1',
-        args: { subagent_type: 'code', description: '[workflow-task:task-1] implement' },
-      },
-      output
-    );
+    // SDK передаёт args в output.args, не в input.args
+    const output = {
+      args: { subagent_type: 'code', description: '[workflow-task:task-1] implement' },
+    };
+    const input: { tool: string; sessionID: string; callID: string } = {
+      tool: 'task',
+      sessionID: sessionId,
+      callID: 'call-task-1',
+    };
+
+    await hooks['tool.execute.before']!(input, output);
 
     const session = await loadSession(sessionId);
     expect(session).not.toBeNull();
@@ -456,50 +457,80 @@ describe('handleTaskBefore (via handleToolBefore)', () => {
 
   test('is a no-op when session does not exist', async () => {
     const hooks = await createRuntime();
-    const output = { args: {} };
-    await hooks['tool.execute.before']!(
-      {
-        tool: 'task',
-        sessionID: 'nonexistent',
-        callID: 'call-task-2',
-        args: { subagent_type: 'code' },
-      },
-      output
-    );
+    // SDK передаёт args в output.args
+    const output = {
+      args: { subagent_type: 'code', description: '[workflow-task:task-2] implement' },
+    };
+    const input: { tool: string; sessionID: string; callID: string } = {
+      tool: 'task',
+      sessionID: 'nonexistent',
+      callID: 'call-task-2',
+    };
+    await hooks['tool.execute.before']!(input, output);
     // If no session, handleTaskBefore returns early — no throw
   });
 
-  test('is a no-op when isMutationTask returns false (non-task tool)', async () => {
+  test('admission срабатывает когда args в output (SDK-формат)', async () => {
+    setExecutableProfilesDir();
+    const hooks = await createRuntime();
+    const sessionId = 'sdk-args-output';
+    await createTestSession(sessionId, 'test-profile', taskCycle());
+
+    const output = {
+      args: { subagent_type: 'code', description: '[workflow-task:task-1] implement' },
+    };
+    const input: { tool: string; sessionID: string; callID: string } = {
+      tool: 'task',
+      sessionID: sessionId,
+      callID: 'call-sdk-1',
+    };
+
+    await hooks['tool.execute.before']!(input, output);
+
+    const session = await loadSession(sessionId);
+    expect(session!.activeOperations['call-sdk-1']).toBeDefined();
+  });
+
+  test('is a no-op for non-task tools', async () => {
     const hooks = await createRuntime();
     const sessionId = 'task-before-noop';
     await createTestSession(sessionId);
 
     const output = { args: {} };
-    // Read is not a 'task' tool, so isMutationTask returns false
-    await hooks['tool.execute.before']!(
-      { tool: 'Read', sessionID: sessionId, callID: 'call-read', args: {} },
-      output
-    );
+    const input: { tool: string; sessionID: string; callID: string } = {
+      tool: 'Read',
+      sessionID: sessionId,
+      callID: 'call-read',
+    };
+    // Read is not a 'task' tool, so isWorkflowTask returns false
+    await hooks['tool.execute.before']!(input, output);
 
     const session = await loadSession(sessionId);
     expect(session).not.toBeNull();
     expect(session!.activeOperations).toEqual({});
   });
 
-  test('is a no-op when args have no agent/subagent_type/type field', async () => {
+  test('is a no-op for task without [workflow-task:] marker', async () => {
     const hooks = await createRuntime();
-    const sessionId = 'task-before-no-agent';
+    const sessionId = 'task-before-regular';
     await createTestSession(sessionId);
 
-    const output = { args: {} };
-    await hooks['tool.execute.before']!(
-      { tool: 'task', sessionID: sessionId, callID: 'call-no-agent', args: { unrelated: 'value' } },
-      output
-    );
+    const output = { args: { subagent_type: 'code', description: 'implement feature X' } };
+    const input: { tool: string; sessionID: string; callID: string } = {
+      tool: 'task',
+      sessionID: sessionId,
+      callID: 'call-regular',
+    };
+    await hooks['tool.execute.before']!(input, output);
 
     const session = await loadSession(sessionId);
     expect(session).not.toBeNull();
     expect(session!.activeOperations).toEqual({});
+    // output не blocked — обычный task проходит без admission
+    const result = output.args as Record<string, unknown> | undefined;
+    if (result && typeof result === 'object' && 'blocked' in result) {
+      expect(result.blocked).not.toBe(true);
+    }
   });
 
   test('skips when activeOperation already exists with a different callID', async () => {
@@ -510,16 +541,15 @@ describe('handleTaskBefore (via handleToolBefore)', () => {
       ...activeOperation('existing-call', 'existing'),
     });
 
-    const output = { args: {} };
-    await hooks['tool.execute.before']!(
-      {
-        tool: 'task',
-        sessionID: sessionId,
-        callID: 'new-call',
-        args: { subagent_type: 'code', description: '[workflow-task:task-1] implement' },
-      },
-      output
-    );
+    const output = {
+      args: { subagent_type: 'code', description: '[workflow-task:task-1] implement' },
+    };
+    const input: { tool: string; sessionID: string; callID: string } = {
+      tool: 'task',
+      sessionID: sessionId,
+      callID: 'new-call',
+    };
+    await hooks['tool.execute.before']!(input, output);
 
     const session = await loadSession(sessionId);
     expect(session).not.toBeNull();
@@ -533,16 +563,13 @@ describe('handleTaskBefore (via handleToolBefore)', () => {
     const sessionId = 'task-before-agent';
     await createTestSession(sessionId, 'test-profile', taskCycle());
 
-    const output = { args: {} };
-    await hooks['tool.execute.before']!(
-      {
-        tool: 'task',
-        sessionID: sessionId,
-        callID: 'call-agent',
-        args: { agent: 'my-agent', description: '[workflow-task:task-1] implement' },
-      },
-      output
-    );
+    const output = { args: { agent: 'my-agent', description: '[workflow-task:task-1] implement' } };
+    const input: { tool: string; sessionID: string; callID: string } = {
+      tool: 'task',
+      sessionID: sessionId,
+      callID: 'call-agent',
+    };
+    await hooks['tool.execute.before']!(input, output);
 
     const session = await loadSession(sessionId);
     expect(session).not.toBeNull();
@@ -555,16 +582,15 @@ describe('handleTaskBefore (via handleToolBefore)', () => {
     const sessionId = 'task-before-type';
     await createTestSession(sessionId, 'test-profile', taskCycle());
 
-    const output = { args: {} };
-    await hooks['tool.execute.before']!(
-      {
-        tool: 'task',
-        sessionID: sessionId,
-        callID: 'call-type',
-        args: { type: 'fallback-agent', description: '[workflow-task:task-1] implement' },
-      },
-      output
-    );
+    const output = {
+      args: { type: 'fallback-agent', description: '[workflow-task:task-1] implement' },
+    };
+    const input: { tool: string; sessionID: string; callID: string } = {
+      tool: 'task',
+      sessionID: sessionId,
+      callID: 'call-type',
+    };
+    await hooks['tool.execute.before']!(input, output);
 
     const session = await loadSession(sessionId);
     expect(session).not.toBeNull();

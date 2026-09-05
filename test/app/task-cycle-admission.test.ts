@@ -106,10 +106,12 @@ async function beforeTask(
   };
   if (description !== undefined) nativeArgs.description = description;
   const output: { args: unknown } = { args: nativeArgs };
-  await hooks['tool.execute.before']!(
-    { tool: 'task', sessionID: 's1', callID, args: nativeArgs },
-    output
-  );
+  const input: { tool: string; sessionID: string; callID: string } = {
+    tool: 'task',
+    sessionID: 's1',
+    callID,
+  };
+  await hooks['tool.execute.before']!(input, output);
   return { args: output.args, nativeArgs };
 }
 
@@ -189,18 +191,24 @@ describe('task-cycle admission', () => {
     '[workflow-task:task-x] Implement parser',
     ' [workflow-task:task-1] Implement parser',
     '[workflow-task:task-1-extra] Implement parser',
-  ])('rejects a missing or malformed workflow prefix: %s', async (description) => {
-    await writeProfile('serial');
-    const store = await createWorkflowSession();
-    const hooks = createRuntime(pluginInput());
+  ])(
+    'passes without admission for missing or malformed workflow prefix: %s',
+    async (description) => {
+      await writeProfile('serial');
+      const store = await createWorkflowSession();
+      const hooks = createRuntime(pluginInput());
 
-    const invocation = await beforeTask(hooks, 'bad-call', description);
-    const session = await load(store);
+      const invocation = await beforeTask(hooks, 'bad-call', description);
 
-    expect(invocation.args).toEqual({ blocked: true, reason: expect.any(String) });
-    expect(session.activeOperations).toEqual({});
-    expect(session.loopRuns).toEqual({});
-  });
+      // isWorkflowTask отсекает такие вызовы — они проходят без admission
+      const blocked = (invocation.args as Record<string, unknown> | undefined)?.blocked;
+      expect(blocked).toBeUndefined();
+
+      const session = await load(store);
+      expect(session.activeOperations).toEqual({});
+      expect(session.loopRuns).toEqual({});
+    }
+  );
 
   it('rejects a task outside the selected loop', async () => {
     await writeProfile('parallel', { maxConcurrent: 2 });

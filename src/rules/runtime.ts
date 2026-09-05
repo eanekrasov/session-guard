@@ -5,6 +5,7 @@ import {
   type MatchedRuleEntry,
 } from './rule-filter.js';
 import { loadRuleSnapshots, type DiscoveredRule, type RuleSnapshot } from './rule-discovery.js';
+import { discoverRuleFiles } from './rule-discovery.js';
 import {
   extractLatestUserPrompt,
   extractSessionID,
@@ -82,7 +83,9 @@ interface OpenCodeRulesRuntimeOptions {
   client: unknown;
   directory: string;
   projectDirectory: string;
-  ruleFiles: DiscoveredRule[];
+  /** Optional pre-discovered rule files. When omitted, the runtime
+   * discovers them lazily from the project directory on first use. */
+  ruleFiles?: DiscoveredRule[];
   matchedRulesStateStore: MatchedRulesStateStore;
   debugLog?: DebugLog;
   /** Optional external session store. When provided, the runtime uses it
@@ -104,7 +107,7 @@ export class OpenCodeRulesRuntime {
   private client: OpenCodeClient;
   private directory: string;
   private projectDirectory: string;
-  private ruleFiles: DiscoveredRule[];
+  private ruleFilesPromise: Promise<DiscoveredRule[]>;
   sessionStore: SessionStore;
   private matchedRulesStateStore: MatchedRulesStateStore;
   private debugLog: DebugLog;
@@ -117,7 +120,9 @@ export class OpenCodeRulesRuntime {
     this.client = opts.client as OpenCodeClient;
     this.directory = opts.directory;
     this.projectDirectory = opts.projectDirectory;
-    this.ruleFiles = opts.ruleFiles;
+    this.ruleFilesPromise = opts.ruleFiles
+      ? Promise.resolve(opts.ruleFiles)
+      : discoverRuleFiles(this.projectDirectory);
     this.sessionStore = opts.sessionStore ?? new SessionStore();
     this.matchedRulesStateStore = opts.matchedRulesStateStore;
     this.debugLog = opts.debugLog ?? createDebugLog();
@@ -197,7 +202,7 @@ export class OpenCodeRulesRuntime {
   /** Called from StateMachineRuntime on `tool.execute.before` hook. */
   async handleToolExecuteBefore(
     input: { tool?: string; sessionID?: string; callID?: string },
-    output: { args?: Record<string, unknown> }
+    output: { args?: unknown }
   ): Promise<void> {
     const sessionID = input?.sessionID;
     const toolName = input?.tool;
@@ -219,7 +224,7 @@ export class OpenCodeRulesRuntime {
       tool?: string;
       sessionID?: string;
       callID?: string;
-      args?: Record<string, unknown>;
+      args?: unknown;
     },
     output: { title?: string; output?: string; metadata?: unknown }
   ): Promise<void> {
@@ -342,7 +347,8 @@ export class OpenCodeRulesRuntime {
 
     let pending = this.snapshotPromises.get(sessionID);
     if (!pending) {
-      pending = loadRuleSnapshots(this.ruleFiles);
+      const files = await this.ruleFilesPromise;
+      pending = loadRuleSnapshots(files);
       this.snapshotPromises.set(sessionID, pending);
     }
 
@@ -543,7 +549,7 @@ export class OpenCodeRulesRuntime {
     hookType: 'PreToolUse' | 'PostToolUse',
     sessionID: string,
     toolName: string,
-    args: Record<string, unknown>
+    args: unknown
   ): Promise<void> {
     const serializedArgs = serializeToolArgs(args);
 

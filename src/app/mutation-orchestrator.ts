@@ -15,7 +15,7 @@ import {
   isExpiredMutation,
 } from '../domain/operation-lifecycle.ts';
 import type { LogFn, LogLevel } from './logger.ts';
-import type { OpenCodeSessionClient } from './runtime-types.ts';
+import type { SessionClient } from './runtime-types.ts';
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -178,7 +178,7 @@ export class MutationOrchestrator {
   private liveMutations = new Map<string, { rootSessionId: string; phaseBefore: string }>();
   private logNoop: LogFn;
   private readonly projectDir: string;
-  private readonly client?: OpenCodeSessionClient;
+  private readonly client?: SessionClient;
   private readonly agentId: string;
 
   constructor(
@@ -187,7 +187,7 @@ export class MutationOrchestrator {
     projectDir: string | undefined,
     private readonly profilesDir: string,
     log?: LogFn,
-    client?: OpenCodeSessionClient | string
+    client?: SessionClient | string
   ) {
     // Keep compatibility with the pre-merge constructor where the project
     // directory occupied the final argument.
@@ -460,8 +460,10 @@ export class MutationOrchestrator {
   async listSessions(): Promise<Array<{ id: string; title?: string }>> {
     if (!this.client) return [];
     try {
-      const result = await this.client.list({ query: { limit: 50 } });
-      return result.data ?? [];
+      const result = await this.client.list({});
+      // SDK возвращает discriminated union: { data: T; error: undefined } | { data: undefined; error: E }
+      if (!('data' in result) || !result.data) return [];
+      return result.data.map((s) => ({ id: s.id, title: s.title }));
     } catch (err) {
       void this.log('warn', 'listSessions: client.list failed', {
         error: err instanceof Error ? err.message : String(err),
