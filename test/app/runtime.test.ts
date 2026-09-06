@@ -198,7 +198,8 @@ describe('handleWorkflowResult (via handleToolAfter)', () => {
   test('a dispatched verifier’s result is recorded', async () => {
     const hooks = await createRuntime();
     const sessionId = 'wf-result-1b';
-    await createTestSession(sessionId);
+    setExecutableProfilesDir();
+    await createTestSession(sessionId, 'test-profile', activeOperation('call-wf-1b'));
 
     const output = {
       title: 'test',

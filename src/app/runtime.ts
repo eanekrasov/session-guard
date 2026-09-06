@@ -1405,14 +1405,6 @@ class StateMachineRuntime {
         return;
       }
 
-      if (parsed) {
-        session.verifications.push({
-          stage: parsed.stage,
-          status: parsed.status === 'pass' ? 'confirmed' : 'rejected',
-          recordedAt: new Date().toISOString(),
-        });
-      }
-
       if (operation) {
         if (run && task) {
           if (operation.status !== 'running') {
@@ -1462,6 +1454,17 @@ class StateMachineRuntime {
             run.gates[parsed.stage] = parsed.status === 'pass' ? 'passed' : 'failed';
           }
 
+          // Verification is recorded only after all admission checks pass —
+          // agent authority, declared gates, and round freshness. A result
+          // rejected above leaves nothing in session.verifications.
+          if (parsed) {
+            session.verifications.push({
+              stage: parsed.stage,
+              status: parsed.status === 'pass' ? 'confirmed' : 'rejected',
+              recordedAt: new Date().toISOString(),
+            });
+          }
+
           const stageFailed = declaredGates.some((gate) => run.gates[gate] === 'failed');
           const stagePassed =
             declaredGates.length > 0 && declaredGates.every((gate) => run.gates[gate] === 'passed');
@@ -1499,7 +1502,9 @@ class StateMachineRuntime {
               (type) =>
                 session.approvals.some(
                   (approval) => approval.type === type && approval.status === 'granted'
-                )
+                ),
+              engine.getRequiredGates(),
+              Object.fromEntries(session.gates.map((g) => [g.id, g.status]))
             );
 
             // An edge that is taken applies what it declares, at either level
