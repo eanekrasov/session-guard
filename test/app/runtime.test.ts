@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execSync } from 'node:child_process';
 import type { PluginInput } from '@opencode-ai/plugin';
@@ -134,35 +134,7 @@ function activeOperation(
 }
 
 function setExecutableProfilesDir(): void {
-  const profilesDir = mkdtempSync(join(tmpdir(), 'runtime-profiles-'));
-  cleanupDirs.push(profilesDir);
-  const profileDir = join(profilesDir, 'test-profile');
-  mkdirSync(profileDir, { recursive: true });
-  writeFileSync(
-    join(profileDir, 'profile.json'),
-    JSON.stringify({ id: 'test-profile', name: 'test-profile', schemas: ['state-machine.yaml'] }),
-    'utf-8'
-  );
-  writeFileSync(
-    join(profileDir, 'state-machine.yaml'),
-    [
-      'stages:',
-      '  EXECUTION:',
-      '    loop: implementation',
-      '    dispatch:',
-      '      strategy: serial',
-      '    stages:',
-      '      dev:',
-      "        allowedAgents: ['code', 'my-agent', 'fallback-agent']",
-      'stageAssignments:',
-      '  - id: execution',
-      '    priority: 1',
-      "    condition: 'true'",
-      '    result: EXECUTION',
-    ].join('\n'),
-    'utf-8'
-  );
-  process.env.STATE_MACHINE_PROFILES_DIR = profilesDir;
+  process.env.STATE_MACHINE_PROFILES_DIR = resolve(import.meta.dir, '../../test/fixtures/profiles');
 }
 
 // ─── handleWorkflowResult ────────────────────────────────────────────────────

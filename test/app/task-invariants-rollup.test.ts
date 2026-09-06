@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import type { Hooks, PluginInput } from '@opencode-ai/plugin';
 
 import { createRuntime } from '../../src/app/runtime.ts';
@@ -59,37 +59,8 @@ function makeGitDir(): string {
   return dir;
 }
 
-async function writeProfile(): Promise<void> {
-  const profileDirectory = join(profilesDirectory, 'rollup');
-  await mkdir(profileDirectory, { recursive: true });
-  await writeFile(
-    join(profileDirectory, 'profile.json'),
-    JSON.stringify({ id: 'rollup', schemas: ['cycle.yaml'] }),
-    'utf-8'
-  );
-  await writeFile(
-    join(profileDirectory, 'cycle.yaml'),
-    [
-      'stages:',
-      '  EXECUTION:',
-      '    loop: implementation',
-      '    dispatch:',
-      '      strategy: serial',
-      '    stages:',
-      '      code:',
-      "        allowedAgents: ['coder']",
-      '    transitions:',
-      '      - from: code',
-      '        to: done',
-      '        guard: "task.gates.invariants == \'passed\'"',
-      'stageAssignments:',
-      '  - id: execution',
-      '    priority: 1',
-      "    condition: 'true'",
-      '    result: EXECUTION',
-    ].join('\n'),
-    'utf-8'
-  );
+function setFixtureProfilesDir(): void {
+  process.env.STATE_MACHINE_PROFILES_DIR = resolve(import.meta.dir, '../../test/fixtures/profiles');
 }
 
 async function seed(): Promise<WorkflowStore> {
@@ -122,7 +93,7 @@ afterEach(async () => {
 
 describe('run.gates.invariants rolls up before the movement it gates', () => {
   it('a task with no out-of-scope changes reaches done through a guard on task.gates.invariants', async () => {
-    await writeProfile();
+    setFixtureProfilesDir();
     const store = await seed();
     const hooks: Hooks = createRuntime(pluginInput());
 
@@ -161,7 +132,7 @@ describe('run.gates.invariants rolls up before the movement it gates', () => {
 
 describe('a missing baseline frame leaves no gate (D5)', () => {
   it('never falls back to an empty baseline; the operation is still cleaned up', async () => {
-    await writeProfile();
+    setFixtureProfilesDir();
     const store = await seed();
     const hooks: Hooks = createRuntime(pluginInput());
 
@@ -210,48 +181,8 @@ describe('a missing baseline frame leaves no gate (D5)', () => {
  * make a violation disappear from the outer move's diff, because the outer
  * diff is computed independently against the outer's own, older frame.
  */
-async function writeParallelInvariantsProfile(): Promise<void> {
-  const profileDirectory = join(profilesDirectory, 'nested-rollup');
-  await mkdir(profileDirectory, { recursive: true });
-  await writeFile(
-    join(profileDirectory, 'profile.json'),
-    JSON.stringify({ id: 'nested-rollup', schemas: ['cycle.yaml'], invariants: ['LF_ONLY'] }),
-    'utf-8'
-  );
-  await writeFile(
-    join(profileDirectory, 'invariants.ts'),
-    [
-      'export const INVARIANTS = [',
-      '  {',
-      "    id: 'LF_ONLY',",
-      "    severity: 'error',",
-      "    check: (content) => (/\\r/u.test(content) ? 'CRLF detected — use LF line endings.' : null),",
-      '  },',
-      '];',
-      '',
-    ].join('\n'),
-    'utf-8'
-  );
-  await writeFile(
-    join(profileDirectory, 'cycle.yaml'),
-    [
-      'stages:',
-      '  EXECUTION:',
-      '    loop: implementation',
-      '    dispatch:',
-      '      strategy: parallel',
-      '      maxConcurrent: 5',
-      '    stages:',
-      '      code:',
-      "        allowedAgents: ['coder']",
-      'stageAssignments:',
-      '  - id: execution',
-      '    priority: 1',
-      "    condition: 'true'",
-      '    result: EXECUTION',
-    ].join('\n'),
-    'utf-8'
-  );
+function setNestedRollupFixtureProfilesDir(): void {
+  process.env.STATE_MACHINE_PROFILES_DIR = resolve(import.meta.dir, '../../test/fixtures/profiles');
 }
 
 async function seedTwoTasks(): Promise<WorkflowStore> {
@@ -273,7 +204,7 @@ function passResult(): string {
 
 describe('nested moves: an outer diff still reports a violation an inner pass skipped', () => {
   it('the inner move (a superset-excluding, later baseline) passes; the outer move (an older, superset baseline) fails on the same file', async () => {
-    await writeParallelInvariantsProfile();
+    setNestedRollupFixtureProfilesDir();
     const store = await seedTwoTasks();
     const hooks: Hooks = createRuntime(pluginInput());
 
@@ -338,7 +269,7 @@ describe('nested moves: an outer diff still reports a violation an inner pass sk
 
 describe('session.gates stays a whole-body aggregate, untouched by the per-task roll-up', () => {
   it('does not write to session.gates when run.gates.invariants is rolled up', async () => {
-    await writeProfile();
+    setFixtureProfilesDir();
     const store = await seed();
     const hooks: Hooks = createRuntime(pluginInput());
 

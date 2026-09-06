@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import type { Hooks, PluginInput, ToolContext } from '@opencode-ai/plugin';
 
 import { createRuntime } from '../../src/app/runtime.ts';
@@ -13,6 +13,7 @@ let storeDirectory: string;
 let profilesDirectory: string;
 let previousStoreDirectory: string | undefined;
 let previousProfilesDirectory: string | undefined;
+let taskControlProfileId = 'task-control';
 
 function pluginInput(): PluginInput {
   return {
@@ -45,39 +46,14 @@ function toolContext(agent: string | undefined): ToolContext {
   };
 }
 
-async function writeProfile(taskControlAgents?: string[]): Promise<void> {
-  const profileDirectory = join(profilesDirectory, 'task-control');
-  await mkdir(profileDirectory, { recursive: true });
-  await writeFile(
-    join(profileDirectory, 'profile.json'),
-    JSON.stringify({ id: 'task-control', schemas: ['cycle.yaml'] }),
-    'utf-8'
-  );
-  await writeFile(
-    join(profileDirectory, 'cycle.yaml'),
-    [
-      'stages:',
-      '  EXECUTION:',
-      '    loop: implementation',
-      '    stages:',
-      '      dev:',
-      "        allowedAgents: ['code']",
-      'stageAssignments:',
-      '  - id: execution',
-      '    priority: 1',
-      "    condition: 'true'",
-      '    result: EXECUTION',
-      ...(taskControlAgents === undefined
-        ? []
-        : [`taskControlAgents: [${taskControlAgents.map((a) => `'${a}'`).join(', ')}]`]),
-    ].join('\n'),
-    'utf-8'
-  );
+function setFixtureProfilesDir(profileId = 'task-control'): void {
+  process.env.STATE_MACHINE_PROFILES_DIR = resolve(import.meta.dir, '../../test/fixtures/profiles');
+  taskControlProfileId = profileId;
 }
 
 async function createWorkflowSession(): Promise<WorkflowStore> {
   const store = new WorkflowStore(storeDirectory);
-  const session = createSession('s1', 'task-control');
+  const session = createSession('s1', taskControlProfileId);
   session.tasks.implementation = [createTask(), createTask({ id: 'task-2', status: 'pending' })];
   await store.save(session);
   return store;
@@ -103,6 +79,7 @@ beforeEach(async () => {
   profilesDirectory = await mkdtemp(join(tmpdir(), 'task-control-profiles-'));
   process.env.STATE_MACHINE_STORE_DIR = storeDirectory;
   process.env.STATE_MACHINE_PROFILES_DIR = profilesDirectory;
+  taskControlProfileId = 'task-control';
 });
 
 afterEach(async () => {
@@ -116,7 +93,7 @@ afterEach(async () => {
 
 describe('workflow task state is orchestrator-owned', () => {
   it('lets the orchestrator set a task status', async () => {
-    await writeProfile();
+    setFixtureProfilesDir();
     const store = await createWorkflowSession();
     const hooks = createRuntime(pluginInput());
 
@@ -127,7 +104,7 @@ describe('workflow task state is orchestrator-owned', () => {
   });
 
   it('accepts the profile-qualified orchestrator name the host reports', async () => {
-    await writeProfile();
+    setFixtureProfilesDir();
     const store = await createWorkflowSession();
     const hooks = createRuntime(pluginInput());
 
@@ -138,7 +115,7 @@ describe('workflow task state is orchestrator-owned', () => {
   });
 
   it('refuses a worker agent closing its own task', async () => {
-    await writeProfile();
+    setFixtureProfilesDir();
     const store = await createWorkflowSession();
     const hooks = createRuntime(pluginInput());
 
@@ -150,7 +127,7 @@ describe('workflow task state is orchestrator-owned', () => {
   });
 
   it("refuses another profile's orchestrator", async () => {
-    await writeProfile();
+    setFixtureProfilesDir();
     const store = await createWorkflowSession();
     const hooks = createRuntime(pluginInput());
 
@@ -161,7 +138,7 @@ describe('workflow task state is orchestrator-owned', () => {
   });
 
   it('refuses a caller whose agent the host did not report', async () => {
-    await writeProfile();
+    setFixtureProfilesDir();
     const store = await createWorkflowSession();
     const hooks = createRuntime(pluginInput());
 
@@ -172,7 +149,7 @@ describe('workflow task state is orchestrator-owned', () => {
   });
 
   it('honours taskControlAgents declared by the schema', async () => {
-    await writeProfile(['lead']);
+    setFixtureProfilesDir('task-control-lead');
     const store = await createWorkflowSession();
     const hooks = createRuntime(pluginInput());
 
@@ -185,7 +162,7 @@ describe('workflow task state is orchestrator-owned', () => {
   });
 
   it('refuses a worker replacing the whole task list', async () => {
-    await writeProfile();
+    setFixtureProfilesDir();
     const store = await createWorkflowSession();
     const hooks = createRuntime(pluginInput());
 
@@ -199,7 +176,7 @@ describe('workflow task state is orchestrator-owned', () => {
   });
 
   it('refuses a worker resolving a retry decision', async () => {
-    await writeProfile();
+    setFixtureProfilesDir();
     await createWorkflowSession();
     const hooks = createRuntime(pluginInput());
 
@@ -212,7 +189,7 @@ describe('workflow task state is orchestrator-owned', () => {
   });
 
   it('leaves reads open to every agent', async () => {
-    await writeProfile();
+    setFixtureProfilesDir();
     await createWorkflowSession();
     const hooks = createRuntime(pluginInput());
 

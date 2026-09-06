@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import type { Hooks, PluginInput } from '@opencode-ai/plugin';
 
 import { createRuntime } from '../../src/app/runtime.ts';
@@ -41,31 +41,8 @@ function pluginInput(): PluginInput {
   };
 }
 
-async function writeProfile(): Promise<void> {
-  const profileDirectory = join(profilesDirectory, 'commit-cwd');
-  await mkdir(profileDirectory, { recursive: true });
-  await writeFile(
-    join(profileDirectory, 'profile.json'),
-    JSON.stringify({ id: 'commit-cwd', schemas: ['cycle.yaml'] }),
-    'utf-8'
-  );
-  await writeFile(
-    join(profileDirectory, 'cycle.yaml'),
-    [
-      'stages:',
-      '  EXECUTION:',
-      '    loop: implementation',
-      '    stages:',
-      '      dev:',
-      "        allowedAgents: ['code']",
-      'stageAssignments:',
-      '  - id: execution',
-      '    priority: 1',
-      "    condition: 'true'",
-      '    result: EXECUTION',
-    ].join('\n'),
-    'utf-8'
-  );
+function setFixtureProfilesDir(): void {
+  process.env.STATE_MACHINE_PROFILES_DIR = resolve(import.meta.dir, '../../test/fixtures/profiles');
 }
 
 async function sessionWithPermit(expectedFiles: string[]): Promise<WorkflowStore> {
@@ -127,7 +104,7 @@ beforeEach(async () => {
   await writeFile(join(repoDirectory, 'README.md'), 'seed\n', 'utf-8');
   git(repoDirectory, ['add', '-A']);
   git(repoDirectory, ['commit', '-q', '-m', 'seed']);
-  await writeProfile();
+  setFixtureProfilesDir();
 
   // Инициализируем другой репозиторий — никак не связанный с проектом
   git(otherRepo, ['init', '-q']);

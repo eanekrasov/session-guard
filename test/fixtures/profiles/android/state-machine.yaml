@@ -1,16 +1,12 @@
 extends: 'base/state-machine.yaml'
 stages:
-  PLANNING:
-    dispatch:
-      strategy: serial
-  EXECUTION:
+  execution:
     dispatch:
       strategy: serial_with_overlap
       maxConcurrent: 2
     stages:
       compile:
         allowedAgents: ['code']
-        entryGuards: ["session.approved('plan')"]
         exitGuards: ["session.activeOperations.some(o => o.result == 'output_ready')"]
 gateMapping:
   review: ['invariants']

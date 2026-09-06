@@ -1,0 +1,12 @@
+stages:
+  execution:
+    loop: implementation
+    stages:
+      dev:
+        allowedAgents: ['code']
+stageAssignments:
+  - id: execution
+    priority: 1
+    condition: 'true'
+    result: execution
+taskControlAgents: ['lead']

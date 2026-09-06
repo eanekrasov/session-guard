@@ -28,7 +28,7 @@ describe('SchemaLoader', () => {
 
       expect(result).not.toBeNull();
       expect(result!.stages).toBeDefined();
-      expect(result!.stages!.PLANNING).toBeDefined();
+      expect(result!.stages!.planning).toBeDefined();
     });
 
     it('loads schema from a direct path', async () => {

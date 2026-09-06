@@ -1,0 +1,18 @@
+stages:
+  execution:
+    loop: implementation
+    dispatch:
+      strategy: serial_with_overlap
+      maxConcurrent: 1
+    stages:
+      dev:
+        allowedAgents: ['code']
+      review:
+        allowedAgents: ['review']
+      qa:
+        allowedAgents: ['qa']
+stageAssignments:
+  - id: execution
+    priority: 1
+    condition: 'true'
+    result: execution

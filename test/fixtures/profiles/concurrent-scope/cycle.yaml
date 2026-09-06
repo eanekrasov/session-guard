@@ -1,0 +1,14 @@
+stages:
+  execution:
+    loop: implementation
+    dispatch:
+      strategy: parallel
+      maxConcurrent: 5
+    stages:
+      code:
+        allowedAgents: ['code']
+stageAssignments:
+  - id: execution
+    priority: 1
+    condition: 'true'
+    result: execution

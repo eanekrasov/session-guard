@@ -1,0 +1,17 @@
+stages:
+  execution:
+    loop: implementation
+    dispatch:
+      strategy: serial
+    stages:
+      dev:
+        allowedAgents: ['code']
+      review:
+        allowedAgents: ['review']
+      qa:
+        allowedAgents: ['qa']
+stageAssignments:
+  - id: execution
+    priority: 1
+    condition: 'true'
+    result: execution

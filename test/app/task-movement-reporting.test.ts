@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import type { Hooks, PluginInput } from '@opencode-ai/plugin';
 
 import { createRuntime } from '../../src/app/runtime.ts';
@@ -37,23 +37,16 @@ function pluginInput(): PluginInput {
   };
 }
 
-function writeProfile(yaml: string): void {
-  const profilesDir = mkdtempSync(join(tmpdir(), 'movement-profiles-'));
-  cleanupDirs.push(profilesDir);
-  const profileDir = join(profilesDir, 'movement');
-  mkdirSync(profileDir, { recursive: true });
-  writeFileSync(
-    join(profileDir, 'profile.json'),
-    JSON.stringify({ id: 'movement', name: 'movement', schemas: ['cycle.yaml'] }),
-    'utf-8'
-  );
-  writeFileSync(join(profileDir, 'cycle.yaml'), yaml, 'utf-8');
-  process.env.STATE_MACHINE_PROFILES_DIR = profilesDir;
+let movementProfileId = 'movement-blocked';
+
+function setMovementFixtureProfilesDir(profileId: string): void {
+  process.env.STATE_MACHINE_PROFILES_DIR = resolve(import.meta.dir, '../../test/fixtures/profiles');
+  movementProfileId = profileId;
 }
 
 async function seed(): Promise<WorkflowStore> {
   const store = new WorkflowStore(storeDirectory);
-  const session = createSession('s1', 'movement');
+  const session = createSession('s1', movementProfileId);
   session.tasks.implementation = [createTask()];
   await store.save(session);
   return store;
@@ -98,31 +91,7 @@ const report = (hooks: Hooks, callID: string, status: 'pass' | 'fail'): Promise<
 
 describe('a blocked movement surfaces its reason without spending budget', () => {
   it('records movement.reason and leaves the retry budget unchanged', async () => {
-    writeProfile(
-      [
-        'stages:',
-        '  EXECUTION:',
-        '    loop: implementation',
-        '    dispatch:',
-        '      strategy: serial',
-        '    retryBudget:',
-        '      maximum: 3',
-        '    stages:',
-        '      code:',
-        "        allowedAgents: ['code']",
-        '    transitions:',
-        '      - from: code',
-        '        to: done',
-        // A transition that exists but is shut by a guard that never holds —
-        // an exhibit of `blocked`, not `unreachable`.
-        '        guard: "session.gates.review == \'passed\'"',
-        'stageAssignments:',
-        '  - id: execution',
-        '    priority: 1',
-        "    condition: 'true'",
-        '    result: EXECUTION',
-      ].join('\n')
-    );
+    setMovementFixtureProfilesDir('movement-blocked');
     const store = await seed();
     const hooks: Hooks = createRuntime(pluginInput());
 
@@ -162,23 +131,7 @@ describe('an unreachable movement on a pass is reported', () => {
     // stages — the only way `unreachable` happens on a pass. That is an
     // exhibit, not a natural flow: force it directly on the run after normal
     // admission, the way a corrupted or renamed stage would.
-    writeProfile(
-      [
-        'stages:',
-        '  EXECUTION:',
-        '    loop: implementation',
-        '    dispatch:',
-        '      strategy: serial',
-        '    stages:',
-        '      code:',
-        "        allowedAgents: ['code']",
-        'stageAssignments:',
-        '  - id: execution',
-        '    priority: 1',
-        "    condition: 'true'",
-        '    result: EXECUTION',
-      ].join('\n')
-    );
+    setMovementFixtureProfilesDir('movement-unreachable');
     const store = await seed();
     const hooks: Hooks = createRuntime(pluginInput());
 
