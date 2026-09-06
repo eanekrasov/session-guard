@@ -13,6 +13,7 @@ import type { WorkflowSession } from '../../src/session/session-schema.ts';
 import { CORE_GATES } from '../../src/session/session-schema.ts';
 import type { EngineConfig } from '../../src/domain/engine.ts';
 import { StateMachineEngine } from '../../src/domain/engine.ts';
+import { createTask } from '../support/task-factory.ts';
 import { approve } from '../../src/domain/approvals.ts';
 import { setGateStatus } from '../../src/session/helpers.ts';
 
@@ -154,12 +155,7 @@ describe('Happy path: planning → tasks_ready → code → review → qa → co
     //   guard: hasPendingTasks() → хотя бы одна таска со статусом pending/running
     assertStaysAt(session, engine, 'tasks_ready');
 
-    session.tasks.implementation.push({
-      id: 'task-1',
-      path: 'src/',
-      status: 'pending',
-      title: 'Implement feature',
-    });
+    session.tasks.implementation.push(createTask({ title: 'Implement feature' }));
 
     advanceTo(session, engine, 'code');
 
@@ -222,7 +218,6 @@ describe('QA recovery path: qa → code → review → qa → commit → done', 
     advanceTo(session, engine, 'tasks_ready');
     session.tasks.implementation.push({
       id: 't1',
-      path: 'src/',
       status: 'pending',
       title: 'Fix bug',
     });
@@ -273,7 +268,7 @@ describe('QA exhausted path: qa → failed', () => {
     session.refs.plan = '/plan.md';
     approve(session, 'plan', 'ok', 'c1');
     advanceTo(session, engine, 'tasks_ready');
-    session.tasks.implementation.push({ id: 't1', path: 'src/', status: 'pending', title: 'Fix' });
+    session.tasks.implementation.push({ id: 't1', status: 'pending', title: 'Fix' });
     advanceTo(session, engine, 'code');
     setGateStatus(session, 'invariants', 'passed');
     advanceTo(session, engine, 'review');
@@ -347,7 +342,7 @@ describe('Guard contracts — каждый тип guard-выражения из 
 
     assertStaysAt(session, engine, 'planning');
 
-    session.tasks.implementation.push({ id: 't1', path: 'src/', status: 'pending', title: 'Do' });
+    session.tasks.implementation.push({ id: 't1', status: 'pending', title: 'Do' });
     advanceTo(session, engine, 'code');
   });
 

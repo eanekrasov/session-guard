@@ -29,7 +29,6 @@ export function createSession(sessionId: string, profileId: string): WorkflowSes
     pendingDecisions: [],
     updatedAt: new Date().toISOString(),
     verifications: [],
-    baselineHashes: [],
     changedFiles: [],
     currentStage: 'planning',
     invariantViolations: [],

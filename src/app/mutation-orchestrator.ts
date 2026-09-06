@@ -10,7 +10,7 @@ import { GuardEvaluator } from '../schema/guard-evaluator.ts';
 import type { ResolvedSchema } from '../schema/types.ts';
 import { SessionQueue } from './session-queue.ts';
 import { WorkflowBlockedError } from './blocked-error.ts';
-import { computeChangeScope, type BaselineHashes } from './change-scope.ts';
+import { captureBaseline, computeChangeScope, type BaselineHashes } from './change-scope.ts';
 import { getAllProfileInvariants, validateFiles, SUPPORTED_EXTENSIONS } from './invariants.ts';
 import {
   beginMutation,
@@ -98,6 +98,13 @@ export interface ScopeProcessInput {
   metadataFailed: boolean;
   log: (level: LogLevel, message: string, extra?: Record<string, unknown>) => Promise<void>;
   onDiagnostics?: (text: string) => void;
+  /**
+   * The move's own baseline frame (`captureBaseline`, taken in
+   * `beginMutation`), diffed via `computeChangeScope`. `undefined` means no
+   * frame was captured for this move (D5) — the scope is not computed, and
+   * no empty baseline is ever substituted for a real one.
+   */
+  frame?: BaselineHashes;
 }
 
 /**
@@ -110,19 +117,24 @@ export interface ScopeProcessInput {
 export async function processScopeAndInvariants(
   input: ScopeProcessInput
 ): Promise<{ finalPassed: boolean; scopeError: string | null }> {
-  const { session, scopeRoot, projectDir, profilesDir, metadataFailed, log, onDiagnostics } = input;
+  const { session, scopeRoot, projectDir, profilesDir, metadataFailed, log, onDiagnostics, frame } =
+    input;
 
   let changedFiles: string[] = [];
   let scopeError: string | null = null;
 
-  if (scopeRoot) {
+  if (scopeRoot && frame) {
     try {
-      changedFiles = await computeChangeScope(scopeRoot, {} as BaselineHashes);
+      changedFiles = await computeChangeScope(scopeRoot, frame);
     } catch (err) {
       scopeError = err instanceof Error ? err.message : String(err);
       changedFiles = [];
       onDiagnostics?.(`\n\n[workflow-scope-error]\nChange scope computation failed: ${scopeError}`);
     }
+  } else if (scopeRoot && !frame) {
+    await log('warn', 'processScopeAndInvariants: no baseline frame for this move', {
+      sessionId: session.sessionId,
+    });
   }
 
   const sorted = [...changedFiles].sort();
@@ -307,6 +319,28 @@ export class MutationOrchestrator {
       throw new WorkflowBlockedError('Failed to load session or resolve engine');
     }
 
+    // Captured before the queue, like a task's own baseline (D2): real I/O
+    // (git status + a hash per dirty path) that must not run inside the
+    // serialised session queue. A missing projectDir leaves this move
+    // without a frame — handled at finish time (D5), never a false `{}`.
+    // `captureBaseline` shells out to git and throws outside a git working
+    // tree. A missing frame is D5's "no frame" case, not a reason to fail
+    // the mutating call about to run.
+    let frame: BaselineHashes | undefined;
+    if (this.projectDir) {
+      try {
+        frame = await captureBaseline(this.projectDir);
+      } catch (err) {
+        await this.log(
+          'warn',
+          'beginMutation: captureBaseline failed — proceeding without a frame',
+          {
+            error: err instanceof Error ? err.message : String(err),
+          }
+        );
+      }
+    }
+
     // Enqueue the actual mutation work — serialised per root session.
     // beginMutation guards itself internally via canPerformAction,
     // so the early guard here is redundant for safety; the enqueue
@@ -338,6 +372,8 @@ export class MutationOrchestrator {
           `Mutation failed: ${err instanceof Error ? err.message : String(err)}`
         );
       }
+      const operation = session.activeOperations[input.callID];
+      if (operation) operation.baseline = frame;
 
       // Save stage BEFORE mutation for post-mutation transition validation
       const stageBefore = session.currentStage ?? 'planning';
@@ -376,10 +412,12 @@ export class MutationOrchestrator {
       // available; do not silently inspect the host repository.
       const scopeRoot = this.projectDir;
       const projectDir = this.projectDir;
+      const frame = session.activeOperations[input.callID]?.baseline;
 
       const { finalPassed } = await processScopeAndInvariants({
         session,
         scopeRoot,
+        frame,
         projectDir,
         profilesDir: this.profilesDir,
         metadataFailed,

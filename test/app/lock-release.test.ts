@@ -4,6 +4,7 @@ import { SessionQueue } from '../../src/app/session-queue.ts';
 import { StateMachineEngine, type EvaluateGuardFn } from '../../src/domain/engine.ts';
 import type { WorkflowSession } from '../../src/session/session-schema.ts';
 import type { EngineConfig } from '../../src/domain/engine.ts';
+import { createTask } from '../support/task-factory.ts';
 
 // ─── Minimal engine config (no actionGuards) ─────────────────────
 const NOOP_ENGINE_CONFIG: EngineConfig = {
@@ -53,7 +54,7 @@ async function makeOrchestrator(engine?: StateMachineEngine, log?: ReturnType<ty
 
 function sessionWithTaskCycle(sid: string): WorkflowSession {
   const s = createSession(sid, 'base');
-  s.tasks.implementation = [{ id: 'task-1', path: 'src/task-1.ts', status: 'running' }];
+  s.tasks.implementation = [createTask({ status: 'running' })];
   s.loopRuns['run-1'] = {
     id: 'run-1',
     taskId: 'task-1',

@@ -3,6 +3,7 @@ import type { WorkflowSession } from '../../src/session/session-schema.ts';
 import { CORE_GATES } from '../../src/session/session-schema.ts';
 import { clearActiveMutation } from '../../src/domain/operation-lifecycle.ts';
 import { markOutputReady, getExecutionProgress, canExitExecution } from '../../test/helpers.ts';
+import { createTask } from '../support/task-factory.ts';
 
 function makeSession(overrides: Partial<WorkflowSession> = {}): WorkflowSession {
   return {
@@ -112,8 +113,8 @@ describe('getExecutionProgress', () => {
   it('returns correct counts for mixed tasks', () => {
     const session = makeSession({
       tasks: taskList([
-        { id: 'task-1', path: 'src/a.ts', status: 'completed' },
-        { id: 'task-2', path: 'src/b.ts', status: 'running' },
+        createTask({ status: 'completed' }),
+        createTask({ id: 'task-2', status: 'running' }),
       ]),
       activeOperations: activeOperation('m-1'),
     });
@@ -125,7 +126,7 @@ describe('getExecutionProgress', () => {
 
   it('returns all done state', () => {
     const session = makeSession({
-      tasks: taskList([{ id: 'task-1', path: 'src/a.ts', status: 'completed' }]),
+      tasks: taskList([createTask({ status: 'completed' })]),
       activeOperations: {},
     });
 
@@ -152,7 +153,7 @@ describe('canExitExecution', () => {
   it('returns true when no active operation and all tasks completed', () => {
     const session = makeSession({
       activeOperations: {},
-      tasks: taskList([{ id: 'task-1', path: 'src/a.ts', status: 'completed' }]),
+      tasks: taskList([createTask({ status: 'completed' })]),
     });
 
     expect(canExitExecution(session)).toBe(true);
@@ -161,7 +162,7 @@ describe('canExitExecution', () => {
   it('returns false when active operation exists', () => {
     const session = makeSession({
       activeOperations: activeOperation('m-1'),
-      tasks: taskList([{ id: 'task-1', path: 'src/a.ts', status: 'completed' }]),
+      tasks: taskList([createTask({ status: 'completed' })]),
     });
 
     expect(canExitExecution(session)).toBe(false);
@@ -170,7 +171,7 @@ describe('canExitExecution', () => {
   it('returns false when tasks are not all completed', () => {
     const session = makeSession({
       activeOperations: {},
-      tasks: taskList([{ id: 'task-1', path: 'src/a.ts', status: 'running' }]),
+      tasks: taskList([createTask({ status: 'running' })]),
     });
 
     expect(canExitExecution(session)).toBe(false);

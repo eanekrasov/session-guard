@@ -45,10 +45,15 @@ import {
 } from '../session/helpers.ts';
 import {
   TASK_STATUS,
+  MutationTaskSchema,
   type LoopRun,
   type MutationTask,
   type WorkflowSession,
 } from '../session/session-schema.ts';
+import { matchesScope, scopesIntersect } from './scope-match.ts';
+import { extractToolCallPaths } from '../rules/message-paths.ts';
+import { parsePatch } from '../rules/file-observation.ts';
+import { captureBaseline, computeChangeScope } from './change-scope.ts';
 import { existsSync, readFileSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { join, resolve, isAbsolute, relative } from 'node:path';
@@ -707,10 +712,19 @@ class StateMachineRuntime {
       await this.handleTaskBefore(input.sessionID, input.callID, args, output);
     }
 
+    // 3b. Task scope — refuse a write/read outside the active task's declared
+    // scope, before the tool runs. `bash` carries no path argument, so it is
+    // not enforced here (task-scope spec) — an out-of-scope bash write is
+    // caught only after the fact, via the per-move baseline diff.
+    await this.scopeBefore(tool, input.sessionID, args);
+
     // 4. Commit Permit: block forbidden git commands, issue deliveryPermit for commit-task
     await this.commitBefore(tool, input.sessionID, input.callID, args, output);
 
-    // 5. Mutation guard (Bash/Write tool)
+    // 5. Mutation guard (Bash/Write tool) — beginMutation captures this
+    // move's own baseline frame (move-invariants D1/D2/D3) before the tool
+    // runs. `task`'s baseline is captured in handleTaskBefore instead, since
+    // `task` never joins mutatingTools (D2).
     await this.mutationBefore(tool, input.sessionID, input.callID, output);
   }
 
@@ -740,6 +754,11 @@ class StateMachineRuntime {
 
     // match гарантированно не null — проверка уже в isWorkflowTask
     const taskId = match![1];
+
+    // Captured before admission (D2): this is real I/O (git status + a hash
+    // per dirty path) that must not run inside the serialised session queue.
+    // A refused admission wastes one snapshot — the rare path.
+    const frame = await this.safeCaptureBaseline();
 
     await this.queue.enqueue(sessionID, async (session) => {
       if (!session) return;
@@ -816,6 +835,19 @@ class StateMachineRuntime {
         );
         return;
       }
+      // task.editingAgents restricts who may hold this task's mutating tool
+      // calls at all. Agent identity is only known at dispatch time — a
+      // native tool.execute.before hook carries no agent — so this is
+      // enforced here, refusing the dispatch itself rather than each write.
+      if (
+        task.editingAgents?.length &&
+        !agentIsAllowed(agent, task.editingAgents, session.profileId)
+      ) {
+        this.blockTaskAdmission(
+          `Agent ${agent} may not edit ${taskId}. editingAgents: [${task.editingAgents.join(', ')}]`
+        );
+        return;
+      }
       // A stage that declares gates is waiting for several verdicts, so it may
       // have one call per gate at a time — review and qa run together. Every
       // other stage is one call at a time, and the same agent may never hold
@@ -869,7 +901,8 @@ class StateMachineRuntime {
           tasks,
           taskId,
           activeRuns,
-          firstNestedStageId(loopStage)!
+          firstNestedStageId(loopStage)!,
+          session
         );
         if (rejection) {
           this.blockTaskAdmission(rejection);
@@ -901,6 +934,9 @@ class StateMachineRuntime {
         // The occupancy of the stage this call belongs to. A verdict that
         // arrives after the task has moved on belongs to a round that is over.
         round: session.loopRuns[runId]?.round ?? 0,
+        // The pre-move snapshot captured above, before admission. A missing
+        // frame (no projectDir) leaves this unset — see D5.
+        baseline: frame,
       };
 
       upsertActiveTaskContext(session, {
@@ -950,7 +986,8 @@ class StateMachineRuntime {
     tasks: MutationTask[],
     taskId: string,
     activeRuns: LoopRun[],
-    firstStageId: string
+    firstStageId: string,
+    session: WorkflowSession
   ): string | null {
     if (dispatch.strategy !== 'serial' && activeRuns.length >= dispatch.maxConcurrent) {
       return `Task cycle concurrency limit ${dispatch.maxConcurrent} is exhausted`;
@@ -966,6 +1003,42 @@ class StateMachineRuntime {
       }
       return null;
     }
+
+    // Non-overlap applies to EVERY non-serial strategy (`parallel` and
+    // `serial_with_overlap`), not just `parallel`: disjoint writeScope is
+    // what makes invariant attribution possible at all, by splitting the
+    // diff by path instead of by time. `serial` admits one run at a time
+    // and needs nothing here. An absent/empty writeScope overlaps nothing,
+    // so a read-only task is always admissible (task-scope spec).
+    const incoming = tasks[taskIndex];
+    const overlapping = activeRuns.find((run) => {
+      const running = findTask(session, run.taskId);
+      return running !== undefined && scopesIntersect(incoming?.writeScope, running.writeScope);
+    });
+    if (overlapping) {
+      let message = `Task ${taskId}'s writeScope overlaps running task ${overlapping.taskId}`;
+      if (dispatch.strategy === 'parallel') {
+        // Only `parallel` has an alternative: under `serial_with_overlap`
+        // the order is strict, so there is no other admissible task and the
+        // answer is always "wait".
+        const runningTaskIds = new Set(activeRuns.map((run) => run.taskId));
+        const admissibleNow = tasks.filter(
+          (task) =>
+            task.id !== taskId &&
+            !runningTaskIds.has(task.id) &&
+            (task.status === 'pending' || task.status === 'running') &&
+            !activeRuns.some((run) => {
+              const running = findTask(session, run.taskId);
+              return running !== undefined && scopesIntersect(task.writeScope, running.writeScope);
+            })
+        );
+        if (admissibleNow.length > 0) {
+          message += `; admissible now: ${admissibleNow.map((task) => task.id).join(', ')}`;
+        }
+      }
+      return message;
+    }
+
     if (dispatch.strategy === 'parallel') return null;
 
     if (taskIndex === 0) return activeRuns.length === 0 ? null : 'First task is already active';
@@ -1051,6 +1124,12 @@ class StateMachineRuntime {
 
     // 1. Guardrails — always sanitize output
     output.output = this.guardrailAfter(output.output, tool);
+
+    // 1a. Invariants for a `task` move — MUST run before handleWorkflowResult
+    // (1b): that step computes movement and deletes the operation (D3). A
+    // verdict produced after either is a verdict about a move that already
+    // left.
+    await this.invariantsAfter(tool, input.sessionID, input.callID);
 
     // 1b. Workflow result — parse and record <workflow-result> tags
     await this.handleWorkflowResult(tool, input.sessionID, input.callID, input.args, output);
@@ -1250,9 +1329,11 @@ class StateMachineRuntime {
    * Handle events — clear only errored callId from the mutation orchestrator's
    * in-flight mutation tracking.
    */
-  async handleEvent(event: EventEnvelope & {
-    event: { properties?: Record<string, unknown> & { part?: EventPart } };
-  }): Promise<void> {
+  async handleEvent(
+    event: EventEnvelope & {
+      event: { properties?: Record<string, unknown> & { part?: EventPart } };
+    }
+  ): Promise<void> {
     // Check if event indicates an error
     const isError = this.isErrorEvent(event);
 
@@ -1272,10 +1353,7 @@ class StateMachineRuntime {
     // from `event.properties.sessionID` (not from `part`), so gate on that same
     // field: no workflow session, no rules.
     const rulesSessionID = event.event.properties?.['sessionID'];
-    if (
-      typeof rulesSessionID === 'string' &&
-      (await this.hasWorkflowSession(rulesSessionID))
-    ) {
+    if (typeof rulesSessionID === 'string' && (await this.hasWorkflowSession(rulesSessionID))) {
       await this.rulesRuntime.handleEvent(event);
     }
   }
@@ -1359,6 +1437,84 @@ class StateMachineRuntime {
     return agentIsAllowed(agent, roster, profileId);
   }
 
+  /**
+   * Step 1a of `tool.execute.after` — diff a `task` move's own baseline
+   * frame, run the profile's invariants over the intersection with the
+   * task's `writeScope`, and write the verdict onto the operation. Must run
+   * before `handleWorkflowResult` (D3): that step computes movement and
+   * deletes the operation, so a verdict written after it is dead.
+   *
+   * A missing frame (D5) — admission refused, a non-workflow `task`, the
+   * plugin installed mid-call — writes no gate: one `warn` log, and the
+   * operation is still deleted by `handleWorkflowResult`/`nextTaskStage` as
+   * normal. Never fall back to an empty baseline; never fail the task on
+   * this alone.
+   */
+  private async invariantsAfter(tool: string, sessionID: string, callID: string): Promise<void> {
+    if (tool !== 'task') return;
+    if (!this.projectDir) return;
+
+    const session = await this.store.load(sessionID);
+    if (!session) return;
+    const operation = session.activeOperations[callID];
+    if (!operation || operation.status !== 'running') return;
+
+    const frame = operation.baseline;
+    if (!frame) {
+      void this.log('warn', 'invariantsAfter: no baseline frame for this move', {
+        callID,
+        taskId: operation.taskId,
+        runId: operation.runId,
+      });
+      return;
+    }
+
+    const task = findTask(session, operation.taskId);
+
+    let changed: string[];
+    try {
+      changed = await computeChangeScope(this.projectDir, frame);
+    } catch (error) {
+      void this.log('warn', 'invariantsAfter: change scope computation failed', {
+        callID,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      changed = [];
+    }
+
+    // Only the diff intersected with the task's own writeScope is checked —
+    // this is the move's own violation, not the whole dirty tree.
+    const inScope = task?.writeScope?.length
+      ? changed.filter((file) => matchesScope(file, task.writeScope))
+      : changed;
+
+    let passed = true;
+    const existingFiles = inScope.filter((file) => SUPPORTED_EXTENSIONS.test(file));
+    if (existingFiles.length > 0) {
+      try {
+        const absoluteFiles = existingFiles.map((file) => resolve(this.projectDir, file));
+        const result = await validateFilesForProfile(
+          absoluteFiles,
+          session.profileId,
+          this.profilesDir,
+          this.projectDir
+        );
+        passed = result.errors.length === 0;
+      } catch (error) {
+        passed = false;
+        void this.log('warn', 'invariantsAfter: invariant validation threw', {
+          callID,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    await this.queue.enqueue(sessionID, async (s) => {
+      const op = s?.activeOperations[callID];
+      if (op) op.invariants = passed ? 'passed' : 'failed';
+    });
+  }
+
   private async handleWorkflowResult(
     tool: string,
     sessionID: string,
@@ -1376,6 +1532,16 @@ class StateMachineRuntime {
       const operation = session.activeOperations[callID];
       const run = operation ? session.loopRuns[operation.runId] : undefined;
       const task = operation ? findTask(session, operation.taskId) : undefined;
+
+      // Roll the move's invariants verdict (written by invariantsAfter, step
+      // 1a) into the task's own run.gates.invariants — strictly before the
+      // `failed || passed` block below computes movement (D3): toGuardContext
+      // (nextTaskStage's guard evaluation) reads run.gates, so a loop edge
+      // guarded on `task.gates.invariants == 'passed'` must see this roll-up
+      // to actually gate the movement it precedes.
+      if (run && operation?.invariants) {
+        run.gates.invariants = operation.invariants;
+      }
 
       if (
         operation &&
@@ -1556,9 +1722,36 @@ class StateMachineRuntime {
               // 'blocked' the route exists but a guard or consent explicitly
               // shut it — retry must NOT override that policy decision.
               this.recordTaskRetryFailure(session, run, task, loopStage);
+            } else if (movement.kind === 'blocked') {
+              // A route exists but a guard or consent explicitly shut it —
+              // a policy decision, not a missing route. It must NOT be
+              // silently dropped, and it must NOT spend retry budget.
+              output.output +=
+                `\n\n[workflow-task-blocked]\n` +
+                `${task.id} stayed at ${run.stage}: ${movement.reason}`;
+              void this.log('warn', 'Workflow task movement blocked', {
+                sessionID,
+                taskId: task.id,
+                stage: run.stage,
+                reason: movement.reason,
+              });
+            } else if (passed && movement.kind === 'unreachable') {
+              // A passing stage with nowhere applicable to go — surfaced
+              // rather than silently dropped, matching the failure case above.
+              output.output +=
+                `\n\n[workflow-task-unreachable]\n` +
+                `${task.id} stayed at ${run.stage}: ${movement.reason}`;
+              void this.log('warn', 'Workflow task movement unreachable on pass', {
+                sessionID,
+                taskId: task.id,
+                stage: run.stage,
+                reason: movement.reason,
+              });
             }
           }
         }
+        // Cleanup always follows movement recording above, for every
+        // movement kind — move, complete, blocked, and unreachable.
         delete session.activeOperations[callID];
       } else if (parsed) {
         // A verdict about the whole body of work, not about one task: the
@@ -1956,6 +2149,131 @@ class StateMachineRuntime {
 
   // ── Inlined handler methods (former MutationHandler) ─────────────────
 
+  /**
+   * The task whose scope governs the tool call currently in flight.
+   *
+   * The native `tool.execute.before`/`tool.execute.after` hooks carry no
+   * agent identity for arbitrary tools (only `tool`, `sessionID`, `callID`),
+   * so a write/edit/read cannot be attributed to a specific concurrent task
+   * by agent. When exactly one task operation is running for the session,
+   * its task is unambiguously the one in flight; with zero or several
+   * running at once, scope cannot be safely attributed and is not enforced
+   * here — the per-move baseline diff (move-invariants) still catches an
+   * out-of-scope change after the fact.
+   */
+  /**
+   * `captureBaseline` shells out to git and throws when the project
+   * directory is not a git working tree. A missing frame is D5's "no frame"
+   * case, not a reason to fail the tool call that is about to run.
+   */
+  private async safeCaptureBaseline(): Promise<Record<string, string | null> | undefined> {
+    if (!this.projectDir) return undefined;
+    try {
+      return await captureBaseline(this.projectDir);
+    } catch (error) {
+      void this.log('warn', 'captureBaseline failed — proceeding without a frame', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return undefined;
+    }
+  }
+
+  /**
+   * Every currently-running task, resolved from `activeOperations`. Used by
+   * `scopeBefore` so scope enforcement covers 2+ concurrent tasks — the
+   * exact case "Non-overlapping writeScope enables parallel admission"
+   * exists to allow — instead of silently no-opping whenever more than one
+   * task is running.
+   */
+  private activeRunningTasks(session: WorkflowSession): MutationTask[] {
+    const running = Object.values(session.activeOperations).filter(
+      (operation) => operation.status === 'running'
+    );
+    const tasks: MutationTask[] = [];
+    for (const operation of running) {
+      const task = findTask(session, operation.taskId);
+      if (task) tasks.push(task);
+    }
+    return tasks;
+  }
+
+  /** Target paths a tool call names, made project-relative. Best-effort. */
+  private scopeTargetPaths(tool: string, args: unknown): string[] {
+    if (tool === 'apply_patch') {
+      const patchText =
+        args && typeof args === 'object' ? (args as Record<string, unknown>).patchText : undefined;
+      if (typeof patchText !== 'string') return [];
+      const parsed = parsePatch(patchText);
+      return parsed ? parsed.map((observation) => observation.path) : [];
+    }
+    return extractToolCallPaths(tool, args);
+  }
+
+  /** A tool-call path, relative to the project root. `null` when unresolvable. */
+  private toProjectRelativePath(path: string): string | null {
+    const absolute = isAbsolute(path) ? path : resolve(this.projectDir, path);
+    const rel = relative(this.projectDir, absolute);
+    if (rel.startsWith('..') || isAbsolute(rel)) return null;
+    return rel;
+  }
+
+  private readonly readTools = new Set(['read']);
+
+  private async scopeBefore(tool: string, sessionID: string, args: unknown): Promise<void> {
+    const isWrite = this.fileTools.has(tool);
+    const isRead = this.readTools.has(tool);
+    if (!isWrite && !isRead) return;
+
+    const session = await this.store.load(sessionID);
+    if (!session) return;
+
+    // Check against the UNION of every running task's scope, not a single
+    // arbitrarily-picked one (CRITICAL-1 remediation). Admission guarantees
+    // running tasks' writeScope never intersect (see taskAdmissionRejection),
+    // so a path can match at most one active task's writeScope — "matches
+    // some active task's writeScope" is therefore exactly equivalent to
+    // "matches the right task's", never an approximation.
+    const activeTasks = this.activeRunningTasks(session);
+    // Zero running tasks is intentionally left unenforced: a write/read that
+    // belongs to no workflow task is not this gate's business.
+    if (activeTasks.length === 0) return;
+
+    for (const rawPath of this.scopeTargetPaths(tool, args)) {
+      const relPath = this.toProjectRelativePath(rawPath);
+      if (relPath === null) continue;
+
+      if (isWrite) {
+        const owner = activeTasks.find((task) => matchesScope(relPath, task.writeScope));
+        if (!owner) {
+          const scopes = activeTasks
+            .map((task) =>
+              task.writeScope?.length
+                ? `${task.id}: [${task.writeScope.join(', ')}]`
+                : `${task.id}: read-only`
+            )
+            .join('; ');
+          throw new WorkflowBlockedError(
+            `${tool} refused: '${relPath}' is outside every active task's writeScope (${scopes})`
+          );
+        }
+      }
+      if (isRead) {
+        const restricted = activeTasks.filter((task) => task.readScope?.length);
+        if (restricted.length > 0) {
+          const owner = restricted.find((task) => matchesScope(relPath, task.readScope));
+          if (!owner) {
+            const scopes = restricted
+              .map((task) => `${task.id}: [${task.readScope!.join(', ')}]`)
+              .join('; ');
+            throw new WorkflowBlockedError(
+              `${tool} refused: '${relPath}' is outside every active task's readScope (${scopes})`
+            );
+          }
+        }
+      }
+    }
+  }
+
   private async mutationBefore(
     tool: string,
     sessionID: string,
@@ -2149,20 +2467,11 @@ class StateMachineRuntime {
             'Replace task list. listKey is auto-detected from active loop run or defaults to "implementation". ' +
             'Cannot replace a list while work is in progress. IDs are auto-assigned.',
           args: {
-            tasks: z.union([
-              z.array(
-                z.object({
-                  path: z.string().min(1),
-                  status: z.enum(TASK_STATUS),
-                  title: z.string().optional(),
-                  declaredScope: z.string().optional(),
-                  branch: z.string().optional(),
-                  manifest: z.array(z.string()).optional(),
-                  testResult: z.enum(['pass', 'fail', 'unknown']).optional(),
-                })
-              ),
-              z.string().min(1),
-            ]),
+            // Derived from MutationTaskSchema rather than hand-duplicated, so
+            // the agent-facing tool surface cannot silently diverge from the
+            // domain type (task-scope spec: "argument schema derives from
+            // MutationTask").
+            tasks: z.union([z.array(MutationTaskSchema.omit({ id: true })), z.string().min(1)]),
           },
           execute: async (
             args: { tasks: Omit<SetTasksInput['tasks'][number], 'id'>[] | string },

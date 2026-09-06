@@ -49,6 +49,15 @@ export const ActiveOperationSchema = z.object({
    * recognised as belonging to a round that is over.
    */
   round: z.number().int().min(0).default(0),
+  /**
+   * The pre-move snapshot of the dirty working tree (`captureBaseline`),
+   * stored only for `bash`, `apply_patch` and `task` — moves whose target
+   * files are not fully known from arguments alone (see design.md D1/D2).
+   * `write`/`edit` name their target in arguments and carry no frame.
+   */
+  baseline: z.record(z.string().nullable()).optional(),
+  /** This move's invariants verdict, rolled into `run.gates.invariants` when the operation ends. */
+  invariants: z.enum(GATE_STATUS).optional(),
 });
 
 export const RetryBudgetSchema = z.object({
@@ -70,13 +79,40 @@ export const PendingDecisionSchema = z.object({
 
 export const MutationTaskSchema = z.object({
   id: z.string().regex(/^task-[0-9]+$/, 'Workflow task id must match task-[0-9]+'),
-  path: z.string().min(1),
   status: z.enum(TASK_STATUS),
   title: z.string().optional(),
-  declaredScope: z.string().optional(),
   branch: z.string().optional(),
-  manifest: z.array(z.string()).optional(),
   testResult: z.enum(['pass', 'fail', 'unknown']).optional(),
+  /**
+   * Which files this task may read, as glob masks matched by
+   * `matchesScope` (`app/scope-match.ts`). `readScope` is focus — which
+   * files are relevant to the task — not a confidentiality boundary.
+   * Absent means "no read restriction" for gates that check it.
+   */
+  readScope: z
+    .array(
+      z
+        .string()
+        .min(1)
+        .regex(/^(?!!)/, 'Scope masks do not support negation (!...)')
+    )
+    .optional(),
+  /**
+   * Which files this task may write, as glob masks. Absent or empty means
+   * read-only: every write is refused, and the task overlaps nothing for
+   * parallel admission (`scopesIntersect`). Independent of `readScope` —
+   * neither is derived from the other.
+   */
+  writeScope: z
+    .array(
+      z
+        .string()
+        .min(1)
+        .regex(/^(?!!)/, 'Scope masks do not support negation (!...)')
+    )
+    .optional(),
+  /** Agents allowed to issue this task's mutating tool calls. */
+  editingAgents: z.array(z.string()).optional(),
 });
 
 export const LoopRunSchema = z.object({
@@ -212,7 +248,6 @@ export const WorkflowSessionSchema = z
     pendingDecisions: z.array(PendingDecisionSchema).default([]),
     updatedAt: z.string().default(() => new Date().toISOString()),
     verifications: z.array(VerificationSchema).default([]),
-    baselineHashes: z.array(z.string()).default([]),
     changedFiles: z.array(z.string()).default([]),
     currentStage: z.string().default('planning'),
     invariantViolations: z.array(InvariantViolationRecordSchema).default([]),

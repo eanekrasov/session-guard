@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { WorkflowStore, createSession } from '../../src/session/session-store.ts';
 import type { WorkflowSession } from '../../src/session/session-schema.ts';
 import { withSession } from '../../test/helpers.ts';
+import { createTask } from '../support/task-factory.ts';
 
 // ─── Helpers ──────────────────────────────────────────────────────
 
@@ -335,9 +336,7 @@ describe('SessionQueue — writes survive nesting and overlap', () => {
     await queue.enqueue('sq-nested-write', async (outer) => {
       outer!.currentStage = 'code';
       await queue.enqueue('sq-nested-write', async (inner) => {
-        inner!.tasks.implementation = [
-          { id: 'task-0', path: 'src/a.ts', status: 'pending' },
-        ] as never;
+        inner!.tasks.implementation = [createTask({ id: 'task-0', status: 'pending' })] as never;
       });
     });
 
@@ -346,7 +345,7 @@ describe('SessionQueue — writes survive nesting and overlap', () => {
     expect(persisted?.currentStage).toBe('code');
   });
 
-  it('a reentrant call sees the outer execution\'s session, not a reload', async () => {
+  it("a reentrant call sees the outer execution's session, not a reload", async () => {
     await seedSession('sq-nested-identity');
 
     const { SessionQueue } = await import('../../src/app/session-queue.ts');
@@ -379,9 +378,7 @@ describe('SessionQueue — writes survive nesting and overlap', () => {
       order.push('first:start');
       started.resolve();
       await release.promise;
-      session!.tasks.implementation = [
-        { id: 'task-0', path: 'src/a.ts', status: 'pending' },
-      ] as never;
+      session!.tasks.implementation = [createTask({ id: 'task-0', status: 'pending' })] as never;
       order.push('first:end');
     });
 

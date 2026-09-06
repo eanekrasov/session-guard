@@ -77,7 +77,7 @@ function readContent(output: string | undefined): string | null | undefined {
  * Delete File sections are path-only: their lines never become content.
  * Returns undefined when the patch does not parse.
  */
-function parsePatch(patchText: string): FileObservation[] | undefined {
+export function parsePatch(patchText: string): FileObservation[] | undefined {
   const isPatch = patchText.includes('*** Begin Patch') || patchText.includes('*** Update File:');
   if (!isPatch) return undefined;
 

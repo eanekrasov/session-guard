@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { beginMutation, finishMutation } from '../../src/domain/operation-lifecycle.ts';
 import type { WorkflowSession } from '../../src/session/session-schema.ts';
+import { createTask } from '../support/task-factory.ts';
 
 function createSession(): WorkflowSession {
   return {
@@ -16,7 +17,7 @@ function createSession(): WorkflowSession {
     approvals: [],
     refs: {},
     tasks: {
-      implementation: [{ id: 'task-1', path: 'src/foo.ts', status: 'pending' }],
+      implementation: [createTask()],
     },
     activeOperations: {},
     loopRuns: {},

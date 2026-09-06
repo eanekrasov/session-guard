@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { WorkflowSession } from '../../src/session/session-schema.ts';
 import { toSessionFacts } from '../../src/domain/session-facts.ts';
+import { createTask } from '../support/task-factory.ts';
 
 function makeSession(overrides: Partial<WorkflowSession> = {}): WorkflowSession {
   return {
@@ -50,7 +51,7 @@ describe('toSessionFacts', () => {
         },
       },
       tasks: {
-        implementation: [{ id: 'task-1', path: 'src/foo.ts', status: 'completed' }],
+        implementation: [createTask({ status: 'completed' })],
       },
       testStatus: { 'test-1': 'pending' },
       verifications: [{ stage: 'bug', status: 'confirmed' }],
@@ -65,7 +66,7 @@ describe('toSessionFacts', () => {
     });
     expect(facts.approvals).toEqual([{ type: 'plan', status: 'granted' }]);
     expect(facts.tasks).toHaveLength(1);
-    expect(facts.tasks[0]).toEqual({ id: 'task-1', status: 'completed' });
+    expect(facts.tasks[0]).toEqual(createTask({ status: 'completed' }));
     expect(facts.activeOperations).toEqual([
       {
         callId: 'call-1',

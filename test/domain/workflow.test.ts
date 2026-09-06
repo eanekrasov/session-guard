@@ -11,6 +11,7 @@ import { approve, decline } from '../../src/domain/approvals.ts';
 import { confirm, rejectVerification as reject } from '../../test/helpers.ts';
 import { canCommit } from '../../src/domain/session-queries.ts';
 import { parseWorkflowResult, MUTATION_TTL_MS } from '../../src/domain/evidence.ts';
+import { createTask } from '../support/task-factory.ts';
 
 function makeSession(overrides: Partial<WorkflowSession> = {}): WorkflowSession {
   return {
@@ -44,7 +45,7 @@ function taskList(
   status: 'pending' | 'running' | 'completed' = 'pending'
 ): WorkflowSession['tasks'] {
   return {
-    implementation: [{ id: 'task-1', path: 'src/foo.ts', status }],
+    implementation: [createTask({ status })],
   };
 }
 

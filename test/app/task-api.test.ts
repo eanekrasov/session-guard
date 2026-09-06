@@ -6,6 +6,7 @@ import path from 'node:path';
 import { SessionQueue } from '../../src/app/session-queue.ts';
 import { TaskApi } from '../../src/app/task-api.ts';
 import { createSession, WorkflowStore } from '../../src/session/session-store.ts';
+import { createTask } from '../support/task-factory.ts';
 
 const temporaryDirectories: string[] = [];
 
@@ -58,12 +59,10 @@ describe('TaskApi', () => {
 
     await api.setTasks(sessionId, {
       listKey: 'implementation',
-      tasks: [{ id: 'task-1', path: 'src/a.ts', status: 'pending' }],
+      tasks: [createTask()],
     });
 
-    expect(await api.getTasks(sessionId, 'implementation')).toEqual([
-      { id: 'task-1', path: 'src/a.ts', status: 'pending' },
-    ]);
+    expect(await api.getTasks(sessionId, 'implementation')).toEqual([createTask()]);
 
     await api.setTaskStatus(sessionId, 'task-1', 'completed');
 
@@ -84,13 +83,13 @@ describe('TaskApi', () => {
     const { api, sessionId } = await createApi();
     await api.setTasks(sessionId, {
       listKey: 'implementation',
-      tasks: [{ id: 'task-1', path: 'src/a.ts', status: 'pending' }],
+      tasks: [createTask()],
     });
 
     await expect(
       api.setTasks(sessionId, {
         listKey: 'review',
-        tasks: [{ id: 'task-1', path: 'src/b.ts', status: 'pending' }],
+        tasks: [createTask()],
       })
     ).rejects.toThrow('already belongs to another task list');
   });
@@ -107,7 +106,7 @@ describe('TaskApi', () => {
     const { api, sessionId } = await createApi();
     await api.setTasks(sessionId, {
       listKey: 'implementation',
-      tasks: [{ id: 'task-1', path: 'src/a.ts', status: 'pending' }],
+      tasks: [createTask()],
     });
     await api.setTasks(sessionId, { listKey: 'task-1', tasks: [] });
 
@@ -148,16 +147,13 @@ describe('TaskApi', () => {
 
       await api.setTasks(sessionId, {
         listKey: 'implementation',
-        tasks: [{ id: 'task-1', path: 'src/a.ts', status: 'pending' }],
+        tasks: [createTask()],
       });
 
       // Two parallel setTaskStatus calls on different tasks — should not conflict
       await api.setTasks(sessionId, {
         listKey: 'implementation',
-        tasks: [
-          { id: 'task-1', path: 'src/a.ts', status: 'pending' },
-          { id: 'task-2', path: 'src/b.ts', status: 'pending' },
-        ],
+        tasks: [createTask(), createTask({ id: 'task-2', status: 'pending' })],
       });
 
       const tasks = await api.getTasks(sessionId, 'implementation');
@@ -170,17 +166,14 @@ describe('TaskApi', () => {
 
       await api.setTasks(sessionId, {
         listKey: 'implementation',
-        tasks: [{ id: 'task-1', path: 'src/a.ts', status: 'pending' }],
+        tasks: [createTask()],
       });
 
       // Both operations are enqueued via the same queue, so they serialize
       const [setResult, statusResult] = await Promise.all([
         api.setTasks(sessionId, {
           listKey: 'implementation',
-          tasks: [
-            { id: 'task-1', path: 'src/a.ts', status: 'pending' },
-            { id: 'task-2', path: 'src/b.ts', status: 'pending' },
-          ],
+          tasks: [createTask(), createTask({ id: 'task-2', status: 'pending' })],
         }),
         api.setTaskStatus(sessionId, 'task-1', 'running'),
       ]);
@@ -202,14 +195,14 @@ describe('TaskApi', () => {
       // Successful first set
       await api.setTasks(sessionId, {
         listKey: 'implementation',
-        tasks: [{ id: 'task-1', path: 'src/a.ts', status: 'pending' }],
+        tasks: [createTask()],
       });
 
       // This should fail — task-1 already in another list
       await expect(
         api.setTasks(sessionId, {
           listKey: 'review',
-          tasks: [{ id: 'task-1', path: 'src/b.ts', status: 'pending' }],
+          tasks: [createTask()],
         })
       ).rejects.toThrow('already belongs to');
 

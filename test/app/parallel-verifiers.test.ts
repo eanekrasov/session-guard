@@ -7,6 +7,7 @@ import type { Hooks, PluginInput } from '@opencode-ai/plugin';
 import { createRuntime } from '../../src/app/runtime.ts';
 import { createSession, WorkflowStore } from '../../src/session/session-store.ts';
 import type { WorkflowSession } from '../../src/session/session-schema.ts';
+import { createTask } from '../support/task-factory.ts';
 
 /**
  * A stage may run several agents at once — review and qa in parallel — so a
@@ -69,12 +70,7 @@ async function writeProfile(
       "        allowedAgents: ['review', 'qa']",
       '        gates: [review, qa]',
       ...(consentToFinish
-        ? [
-            '    transitions:',
-            '      - from: code',
-            '        to: done',
-            '        consent: release',
-          ]
+        ? ['    transitions:', '      - from: code', '        to: done', '        consent: release']
         : []),
       ...(approveOnMove
         ? [
@@ -95,12 +91,12 @@ async function writeProfile(
             '        to: verify',
             '      - from: verify',
             '        to: verify',
-            '        guard: "task.gates.review == \'failed\' || task.gates.qa == \'failed\'"',
+            "        guard: \"task.gates.review == 'failed' || task.gates.qa == 'failed'\"",
             '        effects:',
             '          - bumpRetry: task.id',
             '      - from: verify',
             '        to: done',
-            '        guard: "task.gates.review == \'passed\' && task.gates.qa == \'passed\'"',
+            "        guard: \"task.gates.review == 'passed' && task.gates.qa == 'passed'\"",
           ]
         : []),
       ...(guardInvariants
@@ -108,7 +104,7 @@ async function writeProfile(
             '    transitions:',
             '      - from: code',
             '        to: verify',
-            "        guard: \"session.gates.invariants == 'passed'\"",
+            '        guard: "session.gates.invariants == \'passed\'"',
             '      - from: verify',
             '        to: done',
             "        guard: \"task.gates.review == 'passed' && task.gates.qa == 'passed'\"",
@@ -145,7 +141,7 @@ async function writeProfile(
 async function seed(): Promise<WorkflowStore> {
   const store = new WorkflowStore(storeDirectory);
   const session = createSession('s1', 'verify');
-  session.tasks.implementation = [{ id: 'task-1', path: 'src/a.ts', status: 'pending' }];
+  session.tasks.implementation = [createTask()];
   await store.save(session);
   return store;
 }
@@ -406,7 +402,9 @@ describe('two verifiers work the same task at once', () => {
     await reachVerify(hooks, store);
 
     await tryDispatch(hooks, 'call-review', 'review');
-    expect(await tryDispatch(hooks, 'call-review-2', 'review')).toContain('already has an active call');
+    expect(await tryDispatch(hooks, 'call-review-2', 'review')).toContain(
+      'already has an active call'
+    );
   });
 
   it('keeps a stage without gates to one call at a time', async () => {
@@ -487,7 +485,9 @@ describe('a guard inside a loop reads the session the same way one outside it do
     await dispatch(hooks, 'call-code', 'code');
     await report(hooks, 'call-code', 'code', 'pass');
 
-    expect(run(await load(store)).stage, 'the guard could not read the session gate').toBe('verify');
+    expect(run(await load(store)).stage, 'the guard could not read the session gate').toBe(
+      'verify'
+    );
   });
 
   it('holds the task while that gate has not passed', async () => {

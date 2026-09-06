@@ -8,6 +8,7 @@ import { createRuntime } from '../../src/app/runtime.ts';
 import { createSession, WorkflowStore } from '../../src/session/session-store.ts';
 import { compileWorkflow } from '../../src/schema/compile-workflow.ts';
 import type { ResolvedSchema } from '../../src/schema/types.ts';
+import { createTask } from '../support/task-factory.ts';
 
 /**
  * What the compiler refuses at load.
@@ -18,7 +19,10 @@ import type { ResolvedSchema } from '../../src/schema/types.ts';
  * workflow when the file is read.
  */
 
-function schema(stages: ResolvedSchema['stages'], transitions: ResolvedSchema['transitions'] = []): ResolvedSchema {
+function schema(
+  stages: ResolvedSchema['stages'],
+  transitions: ResolvedSchema['transitions'] = []
+): ResolvedSchema {
   return { source: 'test.yaml', stages, transitions };
 }
 
@@ -89,9 +93,7 @@ describe('a workflow that cannot run is refused when it is read', () => {
       execution: {
         loop: 'implementation',
         stages: { code: {}, verify: {} },
-        transitions: [
-          { from: 'verify', to: 'code', effects: [{ bumpRetry: 'cycles' }] },
-        ],
+        transitions: [{ from: 'verify', to: 'code', effects: [{ bumpRetry: 'cycles' }] }],
       },
     });
     expect(messages(input)).toContain(
@@ -198,7 +200,7 @@ beforeEach(async () => {
 
   const store = new WorkflowStore(storeDirectory);
   const session = createSession('s1', 'broken');
-  session.tasks.implementation = [{ id: 'task-1', path: 'src/a.ts', status: 'pending' }];
+  session.tasks.implementation = [createTask()];
   await store.save(session);
 });
 

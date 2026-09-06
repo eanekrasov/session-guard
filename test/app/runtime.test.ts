@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { execSync } from 'node:child_process';
 import type { PluginInput } from '@opencode-ai/plugin';
 import { createSession, WorkflowStore } from '../../src/session/session-store.ts';
+import { createTask } from '../support/task-factory.ts';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -90,7 +91,7 @@ function taskCycle(): Pick<
 > {
   return {
     tasks: {
-      implementation: [{ id: 'task-1', path: 'src/task-1.ts', status: 'pending' }],
+      implementation: [createTask()],
     },
     loopRuns: {},
     currentStage: 'EXECUTION',
@@ -106,7 +107,7 @@ function activeOperation(
 > {
   return {
     tasks: {
-      implementation: [{ id: 'task-1', path: 'src/task-1.ts', status: 'running' }],
+      implementation: [createTask({ status: 'running' })],
     },
     loopRuns: {
       'run-1': {
@@ -209,7 +210,12 @@ describe('handleWorkflowResult (via handleToolAfter)', () => {
     };
 
     await hooks['tool.execute.after']!(
-      { tool: 'task', sessionID: sessionId, callID: 'call-wf-1b', args: { subagent_type: 'review' } },
+      {
+        tool: 'task',
+        sessionID: sessionId,
+        callID: 'call-wf-1b',
+        args: { subagent_type: 'review' },
+      },
       output
     );
 

@@ -6,6 +6,8 @@ import {
   ApprovalSchema,
   GateSchema,
   CORE_GATES,
+  MutationTaskSchema,
+  ActiveOperationSchema,
 } from '../../src/session/session-schema.ts';
 
 describe('WorkflowSessionSchema', () => {
@@ -41,7 +43,7 @@ describe('WorkflowSessionSchema', () => {
     expect(result.deliveryPermit).toBeNull();
     expect(result.verifications).toEqual([]);
     expect(result.refs).toEqual({});
-    expect(result.baselineHashes).toEqual([]);
+    expect((result as Record<string, unknown>).baselineHashes).toBeUndefined();
     expect(result.changedFiles).toEqual([]);
     expect(result.updatedAt).toBeDefined();
     expect(result.invariantViolations).toEqual([]);
@@ -237,6 +239,76 @@ describe('GateSchema', () => {
     const input = { id: 'invariants', status: 'fail' };
 
     expect(() => GateSchema.parse(input)).toThrow();
+  });
+});
+
+describe('MutationTaskSchema', () => {
+  it('accepts a task with readScope/writeScope and no path field', () => {
+    const input = {
+      id: 'task-1',
+      status: 'pending',
+      readScope: ['src/**'],
+      writeScope: ['src/auth/**'],
+    };
+
+    const result = MutationTaskSchema.parse(input);
+
+    expect(result.readScope).toEqual(['src/**']);
+    expect(result.writeScope).toEqual(['src/auth/**']);
+    expect((result as Record<string, unknown>).path).toBeUndefined();
+  });
+
+  it('accepts a task with neither readScope nor writeScope', () => {
+    const result = MutationTaskSchema.parse({ id: 'task-1', status: 'pending' });
+
+    expect(result.readScope).toBeUndefined();
+    expect(result.writeScope).toBeUndefined();
+  });
+
+  it('strips manifest and declaredScope — no field replaces them', () => {
+    const result = MutationTaskSchema.parse({
+      id: 'task-1',
+      status: 'pending',
+      manifest: ['a.ts'],
+      declaredScope: 'src',
+    } as unknown as Record<string, unknown>);
+
+    expect((result as Record<string, unknown>).manifest).toBeUndefined();
+    expect((result as Record<string, unknown>).declaredScope).toBeUndefined();
+  });
+});
+
+describe('ActiveOperationSchema', () => {
+  it('accepts an operation with a captured baseline frame and invariants verdict', () => {
+    const input = {
+      callId: 'c1',
+      runId: 'run-1',
+      taskId: 'task-1',
+      agent: 'coder',
+      status: 'running',
+      startedAt: '2024-01-01T00:00:00.000Z',
+      baseline: { 'src/a.ts': 'abc123', 'src/b.ts': null },
+      invariants: 'passed',
+    };
+
+    const result = ActiveOperationSchema.parse(input);
+
+    expect(result.baseline).toEqual({ 'src/a.ts': 'abc123', 'src/b.ts': null });
+    expect(result.invariants).toBe('passed');
+  });
+
+  it('accepts an operation with no baseline frame (write/edit)', () => {
+    const result = ActiveOperationSchema.parse({
+      callId: 'c1',
+      runId: 'run-1',
+      taskId: 'task-1',
+      agent: 'coder',
+      status: 'running',
+      startedAt: '2024-01-01T00:00:00.000Z',
+    });
+
+    expect(result.baseline).toBeUndefined();
+    expect(result.invariants).toBeUndefined();
   });
 });
 

@@ -6,6 +6,7 @@ import { rmSync } from 'node:fs';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { WorkflowStore, createSession } from '../../src/session/session-store.ts';
 import { approve } from '../../src/domain/approvals.ts';
+import { createTask } from '../support/task-factory.ts';
 
 // ─── Helpers ──────────────────────────────────────────────────────
 
@@ -67,7 +68,7 @@ function setFixtureProfilesDir(): void {
 }
 
 function addExecutableTaskCycle(session: ReturnType<typeof createSession>): void {
-  session.tasks.implementation = [{ id: 'task-1', path: 'src/task-1.ts', status: 'pending' }];
+  session.tasks.implementation = [createTask()];
 }
 
 // ─── Tests ─────────────────────────────────────────────────────────

@@ -9,6 +9,7 @@ import { StateMachineEngine } from '../../src/domain/engine.ts';
 import { mergeSchemasToEngineConfig } from '../../src/app/mutation-orchestrator.ts';
 import type { ResolvedSchema, ProfileSchema } from '../../src/schema/types.ts';
 import type { WorkflowSession } from '../../src/session/session-schema.ts';
+import { createTask } from '../support/task-factory.ts';
 
 // ─── Load YAML profile synchronously once ────────────────────────────────
 
@@ -85,7 +86,7 @@ function approvePlan(session: WorkflowSession) {
 }
 
 function addTask(session: WorkflowSession, status: 'running' | 'completed' = 'running') {
-  session.tasks.implementation = [{ id: 'task-1', path: 'a.ts', status }];
+  session.tasks.implementation = [createTask({ status })];
 }
 
 function completeTasks(session: WorkflowSession) {
@@ -208,8 +209,8 @@ describe('YAML-driven workflow (profiles/base/base.yaml)', () => {
     approvePlan(session);
     expectApplied(ENGINE.tryApplyTransitions(session), session, 'tasks_ready');
     session.tasks.implementation = [
-      { id: 'task-1', path: 'a.ts', status: 'running' },
-      { id: 'task-2', path: 'b.ts', status: 'pending' },
+      createTask({ status: 'running' }),
+      createTask({ id: 'task-2', status: 'pending' }),
     ];
     expectApplied(ENGINE.tryApplyTransitions(session), session, 'execution');
 

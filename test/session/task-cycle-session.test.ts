@@ -5,6 +5,7 @@ import path from 'node:path';
 
 import { WorkflowSessionSchema } from '../../src/session/session-schema.ts';
 import { WorkflowStore, createSession } from '../../src/session/session-store.ts';
+import { createTask } from '../support/task-factory.ts';
 
 const temporaryDirectories: string[] = [];
 
@@ -28,8 +29,8 @@ describe('task-cycle session persistence', () => {
     const session = createSession('multiple-operations', 'android');
     session.tasks = {
       implementation: [
-        { id: 'task-1', path: 'src/a.ts', status: 'running' },
-        { id: 'task-2', path: 'src/b.ts', status: 'pending' },
+        createTask({ status: 'running' }),
+        createTask({ id: 'task-2', status: 'pending' }),
       ],
     };
     session.loopRuns = {
@@ -123,7 +124,7 @@ describe('task-cycle session persistence', () => {
         sessionId: 'invalid-id',
         profileId: 'android',
         tasks: {
-          implementation: [{ id: 'invalid', path: 'src/a.ts', status: 'pending' }],
+          implementation: [{ id: 'invalid', status: 'pending' }],
         },
       })
     ).toThrow();
@@ -133,8 +134,8 @@ describe('task-cycle session persistence', () => {
         sessionId: 'duplicate-id',
         profileId: 'android',
         tasks: {
-          implementation: [{ id: 'task-1', path: 'src/a.ts', status: 'pending' }],
-          review: [{ id: 'task-1', path: 'src/b.ts', status: 'pending' }],
+          implementation: [createTask()],
+          review: [createTask()],
         },
       })
     ).toThrow();

@@ -23,6 +23,7 @@ import {
 import { parseWorkflowResult } from '../../src/domain/evidence.ts';
 import type { EngineConfig } from '../../src/domain/engine.ts';
 import type { WorkflowSession } from '../../src/session/session-schema.ts';
+import { createTask } from '../support/task-factory.ts';
 
 // ─── Config — mirrors profiles/base/state-machine.yaml behaviour ──────────
 
@@ -109,11 +110,11 @@ function addImplementationTask(
   session: WorkflowSession,
   status: 'pending' | 'running' | 'completed' = 'running'
 ): void {
-  implementationTasks(session).push({ id: 'task-1', path: 'a.ts', status });
+  implementationTasks(session).push(createTask({ status }));
 }
 
 function setActiveOperation(session: WorkflowSession, callId: string, startedAt: string): void {
-  setImplementationTasks(session, [{ id: 'task-1', path: 'a.ts', status: 'running' }]);
+  setImplementationTasks(session, [createTask({ status: 'running' })]);
   session.loopRuns['run-1'] = {
     id: 'run-1',
     taskId: 'task-1',
@@ -614,8 +615,8 @@ describe('E2E: Full state machine flow', () => {
     const session = baseSession();
     setGateStatus(session, 'invariants', 'passed');
     session.tasks.implementation = [
-      { id: 'task-1', path: 'a.ts', status: 'completed' },
-      { id: 'task-2', path: 'b.ts', status: 'pending' },
+      createTask({ status: 'completed' }),
+      createTask({ id: 'task-2', status: 'pending' }),
     ];
 
     // First step completed independently
@@ -750,9 +751,9 @@ describe('E2E: Full state machine flow', () => {
     const session = baseSession();
 
     setImplementationTasks(session, [
-      { id: 'task-1', path: 'a.ts', status: 'completed' },
-      { id: 'task-2', path: 'b.ts', status: 'running' },
-      { id: 'task-3', path: 'c.ts', status: 'running' },
+      createTask({ status: 'completed' }),
+      createTask({ id: 'task-2', status: 'running' }),
+      createTask({ id: 'task-3', status: 'running' }),
     ]);
     session.loopRuns['run-1'] = {
       id: 'run-1',
@@ -787,7 +788,7 @@ describe('E2E: Full state machine flow', () => {
     expect(session.verifications).not.toEqual([]);
 
     approve(session, 'plan', 'ev', 'c1');
-    setImplementationTasks(session, [{ id: 'task-1', path: 'a.ts', status: 'pending' }]);
+    setImplementationTasks(session, [createTask()]);
     beginMutation(session, 'm-1');
     expect(session.verifications).toEqual([]);
   });
@@ -802,7 +803,7 @@ describe('E2E: Full state machine flow', () => {
     expect(session.gates.find((g) => g.id === 'invariants')?.status).toBe('passed');
 
     approve(session, 'plan', 'ev', 'c1');
-    setImplementationTasks(session, [{ id: 'task-1', path: 'a.ts', status: 'pending' }]);
+    setImplementationTasks(session, [createTask()]);
     beginMutation(session, 'm-1');
     expect(session.gates.find((g) => g.id === 'invariants')?.status).toBe('pending');
   });
@@ -814,7 +815,7 @@ describe('E2E: Full state machine flow', () => {
     const session = baseSession();
 
     approve(session, 'plan', 'ev', 'c1');
-    setImplementationTasks(session, [{ id: 'task-1', path: 'a.ts', status: 'pending' }]);
+    setImplementationTasks(session, [createTask()]);
     beginMutation(session, 'm-1');
     session.changedFiles = [];
     finishMutation(session, false, 'm-1');
@@ -1066,13 +1067,13 @@ describe('E2E: Full state machine flow', () => {
     expect(validation.allowed).toBe(false);
   });
 
-  // ─── TC54: Session with baselineHashes + changedFiles empty after create ──
+  // ─── TC54: Session with changedFiles empty after create; baselineHashes removed ──
 
-  test('TC54: baselineHashes and changedFiles start empty', () => {
+  test('TC54: changedFiles starts empty; baselineHashes is gone', () => {
     store = makeStore();
     const session = baseSession();
 
-    expect(session.baselineHashes).toEqual([]);
+    expect((session as Record<string, unknown>).baselineHashes).toBeUndefined();
     expect(session.changedFiles).toEqual([]);
   });
 

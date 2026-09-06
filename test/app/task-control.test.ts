@@ -7,6 +7,7 @@ import type { Hooks, PluginInput, ToolContext } from '@opencode-ai/plugin';
 import { createRuntime } from '../../src/app/runtime.ts';
 import { createSession, WorkflowStore } from '../../src/session/session-store.ts';
 import type { WorkflowSession } from '../../src/session/session-schema.ts';
+import { createTask } from '../support/task-factory.ts';
 
 let storeDirectory: string;
 let profilesDirectory: string;
@@ -77,10 +78,7 @@ async function writeProfile(taskControlAgents?: string[]): Promise<void> {
 async function createWorkflowSession(): Promise<WorkflowStore> {
   const store = new WorkflowStore(storeDirectory);
   const session = createSession('s1', 'task-control');
-  session.tasks.implementation = [
-    { id: 'task-1', path: 'src/task-1.ts', status: 'pending' },
-    { id: 'task-2', path: 'src/task-2.ts', status: 'pending' },
-  ];
+  session.tasks.implementation = [createTask(), createTask({ id: 'task-2', status: 'pending' })];
   await store.save(session);
   return store;
 }
@@ -192,7 +190,7 @@ describe('workflow task state is orchestrator-owned', () => {
     const hooks = createRuntime(pluginInput());
 
     const result = await hooks.tool!['workflow.tasks-set'].execute(
-      { tasks: [{ path: 'src/x.ts', status: 'completed' }] },
+      { tasks: [{ status: 'completed' }] },
       toolContext('code')
     );
 

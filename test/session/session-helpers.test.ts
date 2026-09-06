@@ -28,7 +28,7 @@ describe('createSession', () => {
     expect(session.approvals).toEqual([]);
     expect(session.activeOperations).toEqual({});
     expect(session.loopRuns).toEqual({});
-    expect(session.baselineHashes).toEqual([]);
+    expect((session as Record<string, unknown>).baselineHashes).toBeUndefined();
     expect(session.changedFiles).toEqual([]);
     expect(session.updatedAt).toBeDefined();
     expect(session.preset).toBeUndefined();

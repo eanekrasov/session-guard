@@ -7,6 +7,7 @@ import { setGateStatus } from '../../src/session/helpers.ts';
 import { StateMachineEngine } from '../../src/domain/engine.ts';
 import type { EngineConfig } from '../../src/domain/engine.ts';
 import type { WorkflowSession } from '../../src/session/session-schema.ts';
+import { createTask } from '../support/task-factory.ts';
 
 let directory = '';
 let store: WorkflowStore;
@@ -52,7 +53,7 @@ async function createWorkflowSession(
 ): Promise<WorkflowSession> {
   const session = createSession(sessionId, preset);
   // Set tasks to avoid empty-state stage issues
-  session.tasks.implementation = [{ id: 'task-1', path: 'a.ts', status: 'running' }];
+  session.tasks.implementation = [createTask({ status: 'running' })];
   Object.assign(session, overrides);
   await store.save(session);
   return session;
@@ -201,7 +202,7 @@ describe('E2E: checkTransition kind=pass/fail', () => {
       directory = await mkdtemp(join(tmpdir(), 'sm-e2e-auto-apply'));
       store = new WorkflowStore(join(directory, '.opencode/state-machine/sessions'));
       const session = await createWorkflowSession('root', 'test');
-      session.tasks.implementation = [{ id: 'task-1', path: 'a.ts', status: 'running' }];
+      session.tasks.implementation = [createTask({ status: 'running' })];
       await store.save(session);
 
       // Engine with a no-guard auto transition from PLANNING
