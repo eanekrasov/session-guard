@@ -519,7 +519,9 @@ describe('consent covers every document it named, and only the plan in hand', ()
       )
     ).toBe(true);
 
-    const second = await ask('co-supersede', 'call-second', 'plan-two', { 'plan.md': '# Second\n' });
+    const second = await ask('co-supersede', 'call-second', 'plan-two', {
+      'plan.md': '# Second\n',
+    });
     await second.orchestrator.after(
       'co-supersede',
       'call-second',

@@ -37,6 +37,7 @@ import {
   extractBashCommand,
   hasForbiddenGitSubcommand,
   isCommitTaskCommand,
+  isReadOnlyBashCommand,
 } from '../domain/session-queries.ts';
 import {
   isOpenLoopRun,
@@ -2389,6 +2390,23 @@ class StateMachineRuntime {
     return tool === 'bash' && isCommitTaskCommand(extractBashCommand(args));
   }
 
+  /**
+   * A bash call that only reads is not a move, and must not be one.
+   *
+   * `bash` is in `mutatingTools` because it usually mutates, so `git status`
+   * entered the mutation lifecycle: refused before the plan was approved, and
+   * refused afterwards with "Cannot resolve a single workflow task run for
+   * mutation" whenever the session had no runnable task. A read had to satisfy
+   * a lifecycle built for writes.
+   *
+   * The classifier is a short allowlist and fails closed, because a command
+   * wrongly let through here runs with no baseline and no frame diff behind
+   * it.
+   */
+  private isReadOnlyBash(tool: string, args: unknown): boolean {
+    return tool === 'bash' && isReadOnlyBashCommand(extractBashCommand(args));
+  }
+
   private async mutationBefore(
     tool: string,
     sessionID: string,
@@ -2398,6 +2416,7 @@ class StateMachineRuntime {
   ): Promise<void> {
     if (!this.mutatingTools.has(tool)) return;
     if (this.isCommitDelivery(tool, args)) return;
+    if (this.isReadOnlyBash(tool, args)) return;
     await this.mutationOrchestrator.beginMutation({ sessionID, callID }, output);
   }
 
@@ -2410,6 +2429,7 @@ class StateMachineRuntime {
   ): Promise<void> {
     if (!this.mutatingTools.has(tool)) return;
     if (this.isCommitDelivery(tool, args)) return;
+    if (this.isReadOnlyBash(tool, args)) return;
     await this.mutationOrchestrator.finishMutation(
       { sessionID, callID, metadata: output.metadata },
       (text) => {

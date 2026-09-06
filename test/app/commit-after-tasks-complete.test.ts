@@ -93,3 +93,43 @@ describe('the commit step on a session whose work is finished', () => {
     expect(Object.values(reloaded?.loopRuns ?? {})).toHaveLength(0);
   });
 });
+
+describe('a bash call that only reads', () => {
+  it('is not refused for want of an approved plan or a runnable task', async () => {
+    // `bash` is in mutatingTools because it usually mutates, so a read had to
+    // satisfy a lifecycle built for writes: `git status --short` was refused
+    // before the plan was approved, and refused afterwards with "Cannot
+    // resolve a single workflow task run for mutation" whenever the session
+    // had no runnable task.
+    const store = new WorkflowStore(storeDirectory);
+    // Fresh session: no plan approval, no tasks — both refusal paths armed.
+    await store.save(createSession('read-only', 'base', 'state-machine'));
+    const hooks = await createRuntime(pluginInput());
+
+    for (const command of ['git status --short', 'ls -la', 'rg -n TODO src']) {
+      await expect(
+        hooks['tool.execute.before']!(
+          { tool: 'bash', sessionID: 'read-only', callID: `call-${command}` },
+          { args: { command } }
+        )
+      ).resolves.toBeUndefined();
+    }
+
+    const reloaded = await store.load('read-only');
+    expect(reloaded?.activeOperations).toEqual({});
+    expect(Object.values(reloaded?.loopRuns ?? {})).toHaveLength(0);
+  });
+
+  it('still refuses a write on the same session', async () => {
+    const store = new WorkflowStore(storeDirectory);
+    await store.save(createSession('read-only-guard', 'base', 'state-machine'));
+    const hooks = await createRuntime(pluginInput());
+
+    await expect(
+      hooks['tool.execute.before']!(
+        { tool: 'bash', sessionID: 'read-only-guard', callID: 'call-write' },
+        { args: { command: 'npm run build' } }
+      )
+    ).rejects.toThrow();
+  });
+});

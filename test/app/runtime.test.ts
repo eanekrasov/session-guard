@@ -896,7 +896,9 @@ describe('tool ID normalization', () => {
     const sessionId = 'norm-bash-lower';
     await createTestSession(sessionId);
 
-    const output = { args: { command: 'echo hi' } };
+    // A command that writes: a read-only one skips the mutation lifecycle by
+    // design, and would prove nothing about normalisation.
+    const output = { args: { command: 'npm run build' } };
     // SDK sends lowercase "bash"; normalization makes mutationBefore match, so the
     // engine guard is reached and refuses (this session has no approved plan).
     await expect(
@@ -1189,7 +1191,7 @@ describe('mutation abort mechanism (rulesRuntime throws block)', () => {
 
     // A refused call must not poison the next one: each refusal rejects on its
     // own and leaves no residue behind.
-    const output = { args: { command: 'echo hello' } };
+    const output = { args: { command: 'npm run build' } };
     await expect(
       hooks['tool.execute.before']!(
         { tool: 'bash', sessionID: sessionId, callID: 'call-rerun' },
@@ -1197,7 +1199,7 @@ describe('mutation abort mechanism (rulesRuntime throws block)', () => {
       )
     ).rejects.toThrow();
 
-    const output2 = { args: { command: 'echo hello again' } };
+    const output2 = { args: { command: 'npm run test' } };
     await expect(
       hooks['tool.execute.before']!(
         { tool: 'bash', sessionID: sessionId, callID: 'call-rerun-2' },

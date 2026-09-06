@@ -19,6 +19,68 @@ export function extractBashCommand(args: unknown): string {
 }
 
 /**
+ * Commands that cannot change the working tree, by name.
+ *
+ * An allowlist, not a denylist, and deliberately short. `bash` carries no path
+ * argument, so a mutating command is governed only by the mutation lifecycle
+ * and the frame diff that follows it — which means anything let through here
+ * without that lifecycle is ungoverned. A name that is not on this list is
+ * treated as a mutation, whatever it actually does.
+ */
+const READ_ONLY_COMMANDS = new Set([
+  'cat',
+  'bat',
+  'head',
+  'tail',
+  'wc',
+  'ls',
+  'eza',
+  'tree',
+  'pwd',
+  'echo',
+  'which',
+  'file',
+  'stat',
+  'du',
+  'df',
+  'date',
+  'env',
+  'rg',
+  'grep',
+  'fd',
+  'find',
+  'jq',
+  'diff',
+  'sort',
+  'uniq',
+  'basename',
+  'dirname',
+  'realpath',
+  'true',
+  'false',
+]);
+
+/** Read-only git subcommands. `git` alone proves nothing about the call. */
+const READ_ONLY_GIT_SUBCOMMANDS = new Set([
+  'status',
+  'diff',
+  'log',
+  'show',
+  'branch',
+  'remote',
+  'rev-parse',
+  'ls-files',
+  'blame',
+  'describe',
+  'shortlog',
+  'cat-file',
+  'symbolic-ref',
+  // `config` is deliberately absent: `git config user.name x` writes as
+  // readily as `git config user.name` reads, and telling them apart lexically
+  // is exactly the guess this classifier must not make.
+]);
+
+/**
  * Check if the session can commit: all required gates must pass, all tasks completed.
  */
 export function canCommit(session: WorkflowSession, requiredGates: string[]): boolean {
@@ -193,4 +255,53 @@ export function hasForbiddenGitSubcommand(command: string): boolean {
  */
 export function isCommitTaskCommand(command: string): boolean {
   return /commit-task\.ts\b/.test(command.trim());
+}
+
+/** Shell syntax that writes, or that hides what actually runs. */
+const WRITES_OR_HIDES = /[>]|\$\(|`|<\(/u;
+
+/**
+ * True when every command in the line is known not to change the working tree.
+ *
+ * `bash` is in the runtime's `mutatingTools` because it usually is one, so a
+ * read had to satisfy a lifecycle built for writes: `git status --short` was
+ * refused before the plan was approved, and refused afterwards with "Cannot
+ * resolve a single workflow task run for mutation" whenever the session had no
+ * runnable task.
+ *
+ * Structural, like `hasForbiddenGitSubcommand`, and over the same tokeniser —
+ * `"git" status`, `/usr/bin/git status` and `git -C sub status` are one
+ * command in different clothes. It fails closed at every turn: an unknown
+ * name, an unknown git subcommand, any redirection or substitution, any
+ * wrapper that could run something else, and the answer is `false`. A command
+ * wrongly admitted here runs with no baseline and no frame diff behind it,
+ * which is a far worse outcome than a read being asked to wait.
+ */
+export function isReadOnlyBashCommand(command: string): boolean {
+  if (command.trim() === '') return false;
+  if (WRITES_OR_HIDES.test(command)) return false;
+
+  const segments = shellSegments(command);
+  if (segments.length === 0) return false;
+
+  return segments.every((words) => {
+    // A leading `FOO=bar` or a wrapper like `sudo` hides the real program.
+    // `gitSubcommandOf` looks through them deliberately; here they are a
+    // reason to refuse, because looking through them is exactly the guess
+    // this classifier must not make.
+    const first = words[0];
+    if (first === undefined) return false;
+    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(first)) return false;
+
+    const name = executableName(first);
+    if (COMMAND_PREFIXES.has(name)) return false;
+
+    if (name === 'git') {
+      const subcommand = gitSubcommandOf(words);
+      if (subcommand === undefined || !READ_ONLY_GIT_SUBCOMMANDS.has(subcommand)) return false;
+      return true;
+    }
+
+    return READ_ONLY_COMMANDS.has(name);
+  });
 }

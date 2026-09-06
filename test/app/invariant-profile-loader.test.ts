@@ -64,9 +64,8 @@ describe('getAllProfileInvariants', () => {
     // against checks that never ran. Both of the tests that stood here
     // asserted that silence, and one was named for the other case while
     // exercising this one.
-    const { getAllProfileInvariants, InvariantsUnavailableError } = await import(
-      '../../src/app/invariants.ts'
-    );
+    const { getAllProfileInvariants, InvariantsUnavailableError } =
+      await import('../../src/app/invariants.ts');
 
     await expect(getAllProfileInvariants('nonexistent', PROFILES_DIR)).rejects.toBeInstanceOf(
       InvariantsUnavailableError

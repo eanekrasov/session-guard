@@ -27,6 +27,7 @@ import type { WorkflowSession } from '../session/session-schema.ts';
 import { StateMachineEngine } from '../domain/engine.ts';
 import type { EngineConfig } from '../domain/engine.ts';
 import { getIssue, postComment } from './beads-bridge.ts';
+import { sessionsDir, opencodeStateDir } from '../app/paths.ts';
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
@@ -40,7 +41,16 @@ import { getIssue, postComment } from './beads-bridge.ts';
  */
 const BASE_WORKFLOW_GATES = ['invariants', 'review', 'qa'] as const;
 
-const SESSIONS_DIR = join(import.meta.dir, '..', '..', '.opencode', 'state-machine', 'sessions');
+/**
+ * The store the plugin actually writes to.
+ *
+ * This was hardcoded to `<repo>/.opencode/state-machine/sessions`, a path
+ * nothing has written since the store moved out of the project — so the
+ * dashboard read an empty directory and showed no sessions while the plugin
+ * was running. `sessionsDir` is the same rule the plugin and the TUI use:
+ * STATE_MACHINE_STORE_DIR when set, otherwise OpenCode's own state directory.
+ */
+const SESSIONS_DIR = sessionsDir(opencodeStateDir());
 const OPENCODE_ROOT = resolve(join(import.meta.dir, '..', '..', '.opencode'));
 const AGENT_DIR = resolve(join(import.meta.dir, '..', '..', 'agent'));
 
@@ -660,6 +670,9 @@ console.log(`Dashboard: http://${BIND_HOST}:3456`);
 let lastSnapshot = JSON.stringify(loadAllSessions());
 
 try {
+  // `watch` throws on a directory that does not exist yet — no session has
+  // ever been written on this machine — and that is not a reason to take the
+  // dashboard down with it. The catch below already reports it.
   watch(SESSIONS_DIR, (_event, filename) => {
     if (filename && filename.endsWith('.json')) {
       const current = JSON.stringify(loadAllSessions());
