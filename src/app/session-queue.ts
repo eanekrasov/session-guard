@@ -99,14 +99,20 @@ export class SessionQueue {
       return result;
     });
 
-    this.queues.set(
-      rootSessionId,
-      current.catch((err) => {
+    // The stored tail drops itself once it is the last one for this root, so
+    // the map holds only roots with work in flight. It used to grow one entry
+    // per session for the life of the process and was only ever emptied
+    // wholesale by `clear()`.
+    const tail: Promise<void> = current
+      .catch((err) => {
         this.log('error', `SessionQueue action failed for root ${rootSessionId}`, {
           error: err instanceof Error ? err.message : String(err),
         });
-      }) as Promise<void>
-    );
+      })
+      .then(() => {
+        if (this.queues.get(rootSessionId) === tail) this.queues.delete(rootSessionId);
+      });
+    this.queues.set(rootSessionId, tail);
 
     return current;
   }

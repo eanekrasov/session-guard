@@ -45,6 +45,11 @@ export function createSession(
   };
 }
 
+/** A save built on a revision the file no longer holds. */
+export class WorkflowSessionConflictError extends Error {
+  readonly name = 'WorkflowSessionConflictError';
+}
+
 // ─── WorkflowStore ────────────────────────────────────────────────────────────
 
 export class WorkflowStore {
@@ -95,13 +100,20 @@ export class WorkflowStore {
     const key = session.sessionId;
     const prev = this.locks.get(key) ?? Promise.resolve();
     const chain = prev
+      .then(() => this.assertNotStale(session.sessionId, revisionBefore))
       .then(() => mkdir(this.directory, { recursive: true }))
       .then(() => writeFile(tmpPath, json, { mode: 0o600 }))
       .then(() => rename(tmpPath, targetPath))
       .catch((err) => {
-        void this.log('error', `Session save I/O failed for ${session.sessionId}`, {
-          error: err instanceof Error ? err.message : String(err),
-        });
+        // Undo the in-memory bump so the caller can reload and retry on a
+        // clean object, exactly as the validation failure above does.
+        session.revision = revisionBefore;
+        session.updatedAt = updatedAtBefore;
+        if (!(err instanceof WorkflowSessionConflictError)) {
+          void this.log('error', `Session save I/O failed for ${session.sessionId}`, {
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
         throw err;
       })
       .finally(() => {
@@ -124,6 +136,42 @@ export class WorkflowStore {
         .flat()
         .filter((task) => task.status === 'completed').length,
     });
+  }
+
+  /**
+   * Refuse a write built on a revision somebody else has already replaced.
+   *
+   * `revision` was incremented on every save and compared against nothing, so
+   * the field recorded how many times this process had written and said
+   * nothing about whether the write was still valid. Two writers — a second
+   * plugin instance, a second host — each loaded revision N and each wrote
+   * N+1, and the later one silently erased the earlier one's work.
+   *
+   * Runs inside the per-session lock chain, so it is atomic against this
+   * process's own writes as well.
+   */
+  private async assertNotStale(sessionId: string, revisionBefore: number): Promise<void> {
+    const filePath = this.sessionPath(sessionId);
+    if (!existsSync(filePath)) return;
+
+    let onDisk: number | undefined;
+    try {
+      const parsed: unknown = JSON.parse(await readFile(filePath, 'utf-8'));
+      const value = (parsed as { revision?: unknown }).revision;
+      if (typeof value === 'number') onDisk = value;
+    } catch {
+      // An unreadable or corrupt file carries no revision to conflict with.
+      // Overwriting it is the repair, not the race.
+      return;
+    }
+
+    if (onDisk === undefined || onDisk === revisionBefore) return;
+
+    const message =
+      `[ERROR] Session ${sessionId} changed underneath this write: ` +
+      `loaded revision ${revisionBefore}, on disk ${onDisk}. Reload and retry.`;
+    void this.log('error', message, { sessionId });
+    throw new WorkflowSessionConflictError(message);
   }
 
   async load(sessionId: string): Promise<WorkflowSession | null> {
