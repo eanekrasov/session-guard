@@ -87,3 +87,45 @@ describe("the shipped profile's validation-failure edge", () => {
     expect((await store.load('cycles'))?.retryBudgets['cycles']?.attempts).toBe(1);
   });
 });
+
+describe('two stores over one directory', () => {
+  it('lets exactly one concurrent save win, and says so to the other', async () => {
+    // The in-process lock chain serialises one WorkflowStore. It says nothing
+    // about a second store, a second plugin instance or a second host: two of
+    // them each read the same revision, each passed the staleness check and
+    // each wrote. Both reported success and one update vanished.
+    const first = new WorkflowStore(storeDir);
+    const second = new WorkflowStore(storeDir);
+    await first.save(createSession('race', 'base', 'state-machine'));
+
+    const a = (await first.load('race'))!;
+    const b = (await second.load('race'))!;
+    a.title = 'written by the first store';
+    b.title = 'written by the second store';
+
+    const outcomes = await Promise.allSettled([first.save(a), second.save(b)]);
+    const fulfilled = outcomes.filter((o) => o.status === 'fulfilled');
+    const rejected = outcomes.filter((o) => o.status === 'rejected');
+
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+
+    // Whichever won, the file holds that writer's work whole — not a mixture,
+    // and not the loser's silent overwrite.
+    const onDisk = await first.load('race');
+    expect(['written by the first store', 'written by the second store']).toContain(onDisk?.title);
+    expect(onDisk?.revision).toBe(2);
+  });
+
+  it('leaves no lock file behind, so the next save is not blocked', async () => {
+    const { readdirSync } = await import('node:fs');
+    const store = new WorkflowStore(storeDir);
+    await store.save(createSession('lockless', 'base', 'state-machine'));
+    const again = (await store.load('lockless'))!;
+    again.title = 'second write';
+    await store.save(again);
+
+    expect(readdirSync(storeDir).filter((name) => name.endsWith('.lock'))).toEqual([]);
+    expect((await store.load('lockless'))?.title).toBe('second write');
+  });
+});

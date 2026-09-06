@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, writeFile, readdir, unlink } from 'node:fs/promises';
+import { mkdir, readFile, rename, writeFile, readdir, unlink, open, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -44,6 +44,12 @@ export function createSession(
     consentedCallIDs: [],
   };
 }
+
+/** How long a write waits for another process's lock before giving up. */
+const LOCK_TIMEOUT_MS = 5_000;
+
+/** A lock older than this belonged to a process that died holding it. */
+const LOCK_STALE_MS = 30_000;
 
 /** A save built on a revision the file no longer holds. */
 export class WorkflowSessionConflictError extends Error {
@@ -100,10 +106,19 @@ export class WorkflowStore {
     const key = session.sessionId;
     const prev = this.locks.get(key) ?? Promise.resolve();
     const chain = prev
-      .then(() => this.assertNotStale(session.sessionId, revisionBefore))
       .then(() => mkdir(this.directory, { recursive: true }))
-      .then(() => writeFile(tmpPath, json, { mode: 0o600 }))
-      .then(() => rename(tmpPath, targetPath))
+      // The revision check and the write are one step or they are nothing.
+      // The in-process chain above serialises this instance; it says nothing
+      // about a second WorkflowStore, a second plugin instance, or a second
+      // host. Two of them each read the same revision, each passed the check
+      // and each wrote — both reported success and one update vanished.
+      .then(() =>
+        this.withFileLock(session.sessionId, async () => {
+          await this.assertNotStale(session.sessionId, revisionBefore);
+          await writeFile(tmpPath, json, { mode: 0o600 });
+          await rename(tmpPath, targetPath);
+        })
+      )
       .catch((err) => {
         // Undo the in-memory bump so the caller can reload and retry on a
         // clean object, exactly as the validation failure above does.
@@ -136,6 +151,51 @@ export class WorkflowStore {
         .flat()
         .filter((task) => task.status === 'completed').length,
     });
+  }
+
+  /**
+   * Hold the session's cross-process lock for the length of one write.
+   *
+   * `open(path, 'wx')` fails when the file exists, which is the only
+   * compare-and-swap the filesystem offers. A lock older than
+   * `LOCK_STALE_MS` belonged to a process that died holding it and is broken
+   * rather than waited on — a write that cannot finish must not stop every
+   * later one for ever.
+   */
+  private async withFileLock<T>(sessionId: string, write: () => Promise<T>): Promise<T> {
+    const lockPath = `${this.sessionPath(sessionId)}.lock`;
+    const deadline = Date.now() + LOCK_TIMEOUT_MS;
+
+    for (;;) {
+      try {
+        await (await open(lockPath, 'wx')).close();
+        break;
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+
+        const age = await stat(lockPath).then(
+          (info) => Date.now() - info.mtimeMs,
+          () => null // it went away underneath us; try to take it
+        );
+        if (age !== null && age > LOCK_STALE_MS) {
+          void this.log('warn', `Breaking a stale session lock`, { sessionId, ageMs: age });
+          await unlink(lockPath).catch(() => {});
+          continue;
+        }
+        if (Date.now() > deadline) {
+          throw new Error(
+            `[ERROR] Timed out waiting for the session lock on ${sessionId} after ${LOCK_TIMEOUT_MS}ms`
+          );
+        }
+        await new Promise((resolve) => setTimeout(resolve, 2 + Math.random() * 8));
+      }
+    }
+
+    try {
+      return await write();
+    } finally {
+      await unlink(lockPath).catch(() => {});
+    }
   }
 
   /**
