@@ -1,0 +1,6 @@
+# A workflow that admits nothing until the operator has approved a plan. It
+# declares one stage, because the guard is the whole subject.
+stages:
+  planning: {}
+actionGuards:
+  beginMutation: "session.approved('plan')"

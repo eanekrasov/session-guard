@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import type { Hooks, PluginInput } from '@opencode-ai/plugin';
 
 import { createRuntime } from '../../src/app/runtime.ts';
@@ -46,27 +46,11 @@ beforeEach(async () => {
   process.env.STATE_MACHINE_STORE_DIR = storeDirectory;
   process.env.STATE_MACHINE_PROFILES_DIR = profilesDirectory;
 
-  const profileDirectory = join(profilesDirectory, 'guarded');
-  await mkdir(profileDirectory, { recursive: true });
-  await writeFile(
-    join(profileDirectory, 'profile.json'),
-    JSON.stringify({ id: 'guarded', schemas: ['flow.yaml'] }),
-    'utf-8'
-  );
-  await writeFile(
-    join(profileDirectory, 'flow.yaml'),
-    [
-      'stages:',
-      '  planning: {}',
-      'actionGuards:',
-      // Nothing may be edited before the operator has approved a plan.
-      '  beginMutation: "session.approved(\'plan\')"',
-    ].join('\n'),
-    'utf-8'
-  );
+  // `mutation-guarded` admits nothing until a plan is approved.
+  process.env.STATE_MACHINE_PROFILES_DIR = resolve(import.meta.dir, '../../test/fixtures/profiles');
 
   const store = new WorkflowStore(storeDirectory);
-  const session = createSession('s1', 'guarded');
+  const session = createSession('s1', 'mutation-guarded');
   session.currentStage = 'planning';
   await store.save(session);
 });

@@ -1,0 +1,13 @@
+# The parent half of the extends-order pair. Every value here is a marker: the
+# test asserts which of the two profiles a merged field came from, so the
+# guards are sentinels rather than real expressions.
+stages:
+  a: {}
+  b: {}
+transitions:
+  - from: a
+    to: b
+    guard: 'FROM_PARENT'
+actionGuards:
+  beginMutation: 'PARENT_GUARD'
+requiredGates: [parentGate]

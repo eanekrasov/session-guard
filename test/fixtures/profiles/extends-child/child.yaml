@@ -1,0 +1,14 @@
+# The extending half. It declares stage `c` on top of the parent's `a` and `b`,
+# and overrides every field the parent set, so a merge that resolves in the
+# wrong order shows up as a parent marker surviving.
+stages:
+  a: {}
+  b: {}
+  c: {}
+transitions:
+  - from: a
+    to: b
+    guard: 'FROM_CHILD'
+actionGuards:
+  beginMutation: 'CHILD_GUARD'
+requiredGates: [childGate]

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import type { Hooks, PluginInput, ToolContext } from '@opencode-ai/plugin';
 
 import { createRuntime } from '../../src/app/runtime.ts';
@@ -52,51 +52,24 @@ function toolContext(agent = 'orchestrator'): ToolContext {
   };
 }
 
-async function writeProfile(
+let taskRetryProfileId = 'task-retry-serial';
+
+/**
+ * Point the runtime at the fixture profile this scenario needs.
+ *
+ * The signature is the one the tests already call; what changed is that the
+ * profile is a file under `test/fixtures/profiles` rather than YAML assembled
+ * here. A test that needs a new combination gets a fixture, not another flag.
+ */
+function writeProfile(
   strategy: DispatchStrategy,
   options: { maxConcurrent?: number; retryMaximum?: number; loop?: string } = {}
-): Promise<void> {
-  const profileDirectory = join(profilesDirectory, 'task-retry');
-  await mkdir(profileDirectory, { recursive: true });
-  await writeFile(
-    join(profileDirectory, 'profile.json'),
-    JSON.stringify({ id: 'task-retry', schemas: ['cycle.yaml'] }),
-    'utf-8'
-  );
-  const dispatch = [
-    `      strategy: ${strategy}`,
-    ...(options.maxConcurrent === undefined
-      ? []
-      : [`      maxConcurrent: ${options.maxConcurrent}`]),
-  ];
-  const retryBudget =
-    options.retryMaximum === undefined
-      ? []
-      : ['    retryBudget:', `      maximum: ${options.retryMaximum}`];
-  await writeFile(
-    join(profileDirectory, 'cycle.yaml'),
-    [
-      'stages:',
-      '  EXECUTION:',
-      `    loop: ${options.loop ?? 'implementation'}`,
-      '    dispatch:',
-      ...dispatch,
-      ...retryBudget,
-      '    stages:',
-      '      dev:',
-      "        allowedAgents: ['code']",
-      '      review:',
-      "        allowedAgents: ['review']",
-      '      qa:',
-      "        allowedAgents: ['qa']",
-      'stageAssignments:',
-      '  - id: execution',
-      '    priority: 1',
-      "    condition: 'true'",
-      '    result: EXECUTION',
-    ].join('\n'),
-    'utf-8'
-  );
+): void {
+  process.env.STATE_MACHINE_PROFILES_DIR = resolve(import.meta.dir, '../../test/fixtures/profiles');
+  if (options.loop === '$currentTask.id') taskRetryProfileId = 'task-retry-current-task';
+  else if (strategy === 'parallel') taskRetryProfileId = 'task-retry-parallel-1';
+  else if (options.retryMaximum !== undefined) taskRetryProfileId = 'task-retry-serial-budget';
+  else taskRetryProfileId = 'task-retry-serial';
 }
 
 async function createWorkflowSession(
@@ -104,16 +77,14 @@ async function createWorkflowSession(
   childTasks: Record<string, TaskFixture[]> = {}
 ): Promise<WorkflowStore> {
   const store = new WorkflowStore(storeDirectory);
-  const session = createSession('s1', 'task-retry');
+  const session = createSession('s1', taskRetryProfileId);
   session.tasks.implementation = tasks.map((task) => ({
     id: task.id,
-    path: `src/${task.id}.ts`,
     status: task.status ?? 'pending',
   }));
   for (const [listKey, children] of Object.entries(childTasks)) {
     session.tasks[listKey] = children.map((task) => ({
       id: task.id,
-      path: `src/${task.id}.ts`,
       status: task.status ?? 'pending',
     }));
   }
@@ -195,7 +166,7 @@ afterEach(async () => {
 
 describe('task-cycle retry and recovery', () => {
   it('retries a failed stage by returning the same task to dev and incrementing its budget', async () => {
-    await writeProfile('serial');
+    writeProfile('serial');
     const store = await createWorkflowSession();
     const hooks = createRuntime(pluginInput());
 
@@ -215,7 +186,7 @@ describe('task-cycle retry and recovery', () => {
   });
 
   it('creates a pending decision on retry exhaustion without failing the task', async () => {
-    await writeProfile('parallel', { maxConcurrent: 1, retryMaximum: 1 });
+    writeProfile('parallel', { maxConcurrent: 1, retryMaximum: 1 });
     const store = await createWorkflowSession();
     const hooks = createRuntime(pluginInput());
 
@@ -244,7 +215,7 @@ describe('task-cycle retry and recovery', () => {
   });
 
   it('resolves an exhausted retry decision by increasing the absolute maximum', async () => {
-    await writeProfile('serial', { retryMaximum: 1 });
+    writeProfile('serial', { retryMaximum: 1 });
     const store = await createWorkflowSession();
     const hooks = createRuntime(pluginInput());
 
@@ -268,7 +239,7 @@ describe('task-cycle retry and recovery', () => {
     ['failed', 'Failed task-1 after retry decision'],
     ['cancelled', 'Cancelled task-1 after retry decision'],
   ] as const)('resolves an exhausted retry decision as %s', async (decision, output) => {
-    await writeProfile('serial', { retryMaximum: 1 });
+    writeProfile('serial', { retryMaximum: 1 });
     const store = await createWorkflowSession();
     const hooks = createRuntime(pluginInput());
 
@@ -287,7 +258,7 @@ describe('task-cycle retry and recovery', () => {
   });
 
   it('records native interruption without failing the task or consuming retry budget', async () => {
-    await writeProfile('serial');
+    writeProfile('serial');
     const store = await createWorkflowSession();
     const hooks = createRuntime(pluginInput());
 
@@ -307,7 +278,7 @@ describe('task-cycle retry and recovery', () => {
   });
 
   it('leaves a parent task running when its child task is terminally failed', async () => {
-    await writeProfile('serial', { retryMaximum: 1, loop: '$currentTask.id' });
+    writeProfile('serial', { retryMaximum: 1, loop: '$currentTask.id' });
     const store = await createWorkflowSession([{ id: 'task-1', status: 'running' }], {
       'task-1': [{ id: 'task-2' }],
     });
@@ -333,7 +304,7 @@ describe('task-cycle retry and recovery', () => {
   // ── Parallel retry decisions ──
 
   it('REGRESSION: two pending contexts without decisionId selector are rejected with candidates', async () => {
-    await writeProfile('serial', { retryMaximum: 1 });
+    writeProfile('serial', { retryMaximum: 1 });
     const store = await createWorkflowSession([{ id: 'task-1' }, { id: 'task-2' }]);
     const hooks = createRuntime(pluginInput());
 
@@ -385,7 +356,7 @@ describe('task-cycle retry and recovery', () => {
   });
 
   it('REGRESSION: explicit decisionId resolves only the selected decision', async () => {
-    await writeProfile('serial', { retryMaximum: 1 });
+    writeProfile('serial', { retryMaximum: 1 });
     const store = await createWorkflowSession([{ id: 'task-1' }, { id: 'task-2' }]);
     const hooks = createRuntime(pluginInput());
 
@@ -446,7 +417,7 @@ describe('task-cycle retry and recovery', () => {
   });
 
   it('REGRESSION: unknown decisionId is rejected without mutation', async () => {
-    await writeProfile('serial', { retryMaximum: 1 });
+    writeProfile('serial', { retryMaximum: 1 });
     const store = await createWorkflowSession([{ id: 'task-1' }]);
     const hooks = createRuntime(pluginInput());
 
@@ -466,7 +437,7 @@ describe('task-cycle retry and recovery', () => {
   });
 
   it('REGRESSION: missing retry budget prevents mutation', async () => {
-    await writeProfile('serial', { retryMaximum: 1 });
+    writeProfile('serial', { retryMaximum: 1 });
     const store = await createWorkflowSession([{ id: 'task-1' }]);
     const hooks = createRuntime(pluginInput());
 
@@ -486,7 +457,7 @@ describe('task-cycle retry and recovery', () => {
   });
 
   it('REGRESSION: save and reload with two pending decisions — both survive', async () => {
-    await writeProfile('serial', { retryMaximum: 1 });
+    writeProfile('serial', { retryMaximum: 1 });
     const store = await createWorkflowSession([{ id: 'task-1' }, { id: 'task-2' }]);
     const hooks = createRuntime(pluginInput());
 
