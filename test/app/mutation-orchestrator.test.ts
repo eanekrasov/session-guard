@@ -101,6 +101,26 @@ describe('MutationOrchestrator.resolveEngine', () => {
     return dir;
   }
 
+  it('does not serve one directory\'s engine for another', async () => {
+    // A fixture corpus points the same profile id at different directories.
+    // The cache is keyed on the id, but the directory is read from the
+    // environment on each call, so keying on the id alone hands back the first
+    // directory's engine and the second fixture is never really loaded.
+    const good = mkdtempSync(join(tmpdir(), 'mo-good-'));
+    mkdirSync(join(good, 'bad'), { recursive: true });
+    writeFileSync(join(good, 'bad', 'profile.json'), '{"id":"bad","schemas":["bad.yaml"]}', 'utf-8');
+    writeFileSync(join(good, 'bad', 'bad.yaml'), 'stages:\n  planning: {}\n', 'utf-8');
+    gitDirs.push(good);
+
+    const { orchestrator } = await makeOrchestrator();
+
+    process.env.STATE_MACHINE_PROFILES_DIR = good;
+    await orchestrator.resolveEngine('bad');
+
+    process.env.STATE_MACHINE_PROFILES_DIR = writeUndeclaredGateProfile();
+    await expect(orchestrator.resolveEngine('bad')).rejects.toThrow(/Gate "security"/);
+  });
+
   it('refuses a profile whose stage waits on a gate it does not declare', async () => {
     // The compiler checks a stage's `gates:` against the profile's own
     // declaration, and `resolveEngine` is where that check reaches production.

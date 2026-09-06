@@ -238,12 +238,19 @@ export class MutationOrchestrator {
    * Resolve (lazy-init) an engine for the given profileId.
    */
   async resolveEngine(profileId: string): Promise<StateMachineEngine> {
-    const cached = this.engineCache.get(profileId);
+    // The engine depends on the directory as much as on the id, and the
+    // directory is read from the environment on every call. Keying on the id
+    // alone returns the first directory's engine for every later one — which
+    // production never notices, because its directory does not move, and a
+    // test suite that points the same profile id at two fixture directories
+    // does not notice either: it just silently gets the first.
+    const profilesDir = process.env.STATE_MACHINE_PROFILES_DIR ?? this.profilesDir;
+    const cacheKey = `${profilesDir}\u0000${profileId}`;
+    const cached = this.engineCache.get(cacheKey);
     if (cached) {
       return cached;
     }
 
-    const profilesDir = process.env.STATE_MACHINE_PROFILES_DIR ?? this.profilesDir;
     await this.log('info', 'resolveEngine: resolving profile', {
       profileId,
       profilesDir,
@@ -303,7 +310,7 @@ export class MutationOrchestrator {
     };
     const engine = new StateMachineEngine(engineConfig, evaluateGuardFn);
 
-    this.engineCache.set(profileId, engine);
+    this.engineCache.set(cacheKey, engine);
     return engine;
   }
 

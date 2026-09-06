@@ -574,3 +574,52 @@ Two related gaps in what the compiler catches at all:
    runtime — so this is collecting the expressions (transition guards, entry
    and exit guards, `actionGuards`, stage-assignment conditions) and parsing
    them at compile time. Bounded work, not hard.
+
+## A fixture corpus, and the pattern that earns it
+
+Agreed 2026-09-06, not started. `test/fixtures/presets/` is the ancestor of
+`base.yaml`: `high`/`medium`/`low.yaml` are ProfileSchema files of the same
+format, from before the stage model — stages in uppercase, not a `loop:` among
+them — and `default.yaml` is one generation older still, a flat `stages:` list
+plus a `deriveStageRules` block in a condition language this project does not
+have. The decision is to keep the fixtures but replace their content wholesale
+with current profiles, schemas and agent prompts, so tests can lean on a real
+configuration instead of writing one inline.
+
+The case, measured: **17 test files** write profile YAML on the fly, **226
+lines** of inline YAML across the ten that do it at length, and
+`loop: implementation` is declared again in **13 different files**. The worst is
+`test/app/parallel-verifiers.test.ts` — 74 lines assembled by
+`writeProfile(transitions, guardInvariants, consentToFinish, selfLoop,
+approveOnMove)`, five booleans concatenating YAML, where a sixth scenario means
+a sixth flag.
+
+`scripts/host-smoke/profile/` is the model: `smoke`, `comprehensive` and `cicd`
+are complete current-format profiles with `profile.json`, a schema and
+`agents/*.md`, and they are exercised against a live opencode, so they cannot
+rot unnoticed.
+
+**The pattern to use is `resolveEngine` against a directory**, not
+`compileWorkflow` against a literal. That is the call production makes, and it
+is the difference between catching a lost field and not: the gate check was
+dead in production for a day precisely because both tests over it passed their
+own `gates` to the pure function. A test that points
+`STATE_MACHINE_PROFILES_DIR` at a fixture and resolves gets the whole chain —
+resolution, the field projections, merging, compilation.
+
+Two constraints on the corpus:
+
+- **Deliberately-invalid fixtures must be broken semantically**, never by
+  shape: a wrong type throws at `ProfileSchemaSchema.parse` before the compiler
+  ever sees it (see the breakage table above). An undeclared gate or a
+  transition to a stage that does not exist loads fine and is refused with a
+  reason — which is what a refusal test wants.
+- **The engine cache had to be keyed on the directory** before this was safe.
+  It was keyed on `profileId` alone while `profilesDir` is read from the
+  environment on each call, so a shared helper pointing one profile id at two
+  fixture directories would have been served the first one in silence. Fixed
+  and covered.
+
+Keep the inline YAML in `test/schema/compile-validation.test.ts` where it is:
+those schemas are deliberately wrong, and they are the test's input rather than
+duplication.
