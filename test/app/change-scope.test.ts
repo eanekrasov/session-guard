@@ -58,3 +58,58 @@ describe('change scope', () => {
     expect(await computeChangeScope(directory, baseline)).toEqual(['New.kt']);
   });
 });
+
+describe('change scope — what the walk used to miss', () => {
+  test('reports a file the operation reverted to HEAD', async () => {
+    // The walk went over what is dirty *now*. A file the operator had edited,
+    // which the operation put back to HEAD, is no longer dirty — so it was
+    // never compared, and undoing somebody else's work registered as no
+    // change at all.
+    directory = await repo();
+    await mkdir(join(directory, 'src'));
+    await writeFile(join(directory, 'src/Reverted.kt'), 'val committed = 1\n');
+    git(directory, ['add', '.']);
+    git(directory, ['commit', '-m', 'baseline']);
+
+    // The operator's own edit, present before the operation started.
+    await writeFile(join(directory, 'src/Reverted.kt'), 'val theirEdit = 2\n');
+    const baseline = await captureBaseline(directory);
+
+    // The operation throws it away.
+    await writeFile(join(directory, 'src/Reverted.kt'), 'val committed = 1\n');
+
+    expect(await computeChangeScope(directory, baseline)).toEqual(['src/Reverted.kt']);
+  });
+
+  test('reads a non-ASCII path under core.quotepath', async () => {
+    // git's default quotepath returns `тест.ts` C-quoted. Taken literally the
+    // file does not exist, its hash is null, and the change falls outside
+    // every scope in silence.
+    directory = await repo();
+    git(directory, ['config', 'core.quotepath', 'true']);
+    await writeFile(join(directory, 'README.md'), 'seed\n');
+    git(directory, ['add', '.']);
+    git(directory, ['commit', '-m', 'baseline']);
+
+    const baseline = await captureBaseline(directory);
+    await writeFile(join(directory, 'тест.ts'), 'export const x = 1;\n');
+
+    expect(await computeChangeScope(directory, baseline)).toEqual(['тест.ts']);
+  });
+
+  test('a baseline path outside the module root stays outside', async () => {
+    directory = await repo();
+    await mkdir(join(directory, 'src'));
+    await mkdir(join(directory, 'other'));
+    await writeFile(join(directory, 'src/In.kt'), 'val a = 1\n');
+    await writeFile(join(directory, 'other/Out.kt'), 'val b = 1\n');
+    git(directory, ['add', '.']);
+    git(directory, ['commit', '-m', 'baseline']);
+
+    await writeFile(join(directory, 'other/Out.kt'), 'val b = 2\n');
+    const baseline = await captureBaseline(directory);
+    await writeFile(join(directory, 'other/Out.kt'), 'val b = 1\n');
+
+    expect(await computeChangeScope(directory, baseline, 'src/')).toEqual([]);
+  });
+});

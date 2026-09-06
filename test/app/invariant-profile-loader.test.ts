@@ -57,17 +57,41 @@ describe('getAllProfileInvariants', () => {
     expect(checks[0]!.id).toBe('LF_ONLY');
   });
 
-  it('returns empty for unknown profiles', async () => {
-    const { getAllProfileInvariants } = await import('../../src/app/invariants.ts');
-    const checks = await getAllProfileInvariants('nonexistent', PROFILES_DIR);
-    expect(checks).toEqual([]);
+  it('refuses to answer for a profile it cannot load', async () => {
+    // "Could not load" is not "has none". Both used to return [], and a caller
+    // reading "nothing to check" as "everything passed" turned a broken
+    // profile into a green invariants gate — a changed file reported clean
+    // against checks that never ran. Both of the tests that stood here
+    // asserted that silence, and one was named for the other case while
+    // exercising this one.
+    const { getAllProfileInvariants, InvariantsUnavailableError } = await import(
+      '../../src/app/invariants.ts'
+    );
+
+    await expect(getAllProfileInvariants('nonexistent', PROFILES_DIR)).rejects.toBeInstanceOf(
+      InvariantsUnavailableError
+    );
   });
 
-  it('returns empty for profiles without invariants', async () => {
+  it('returns none for a profile that declares none', async () => {
     const { getAllProfileInvariants } = await import('../../src/app/invariants.ts');
-    // Profile without invariants file or field
-    const checks = await getAllProfileInvariants('nonexistent', PROFILES_DIR);
-    expect(checks).toEqual([]);
+    const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+
+    const root = mkdtempSync(join(tmpdir(), 'inv-none-'));
+    try {
+      mkdirSync(join(root, 'quiet'), { recursive: true });
+      writeFileSync(
+        join(root, 'quiet', 'profile.json'),
+        JSON.stringify({ id: 'quiet', description: 'declares no invariants', schemas: [] }),
+        'utf-8'
+      );
+
+      await expect(getAllProfileInvariants('quiet', root)).resolves.toEqual([]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 

@@ -2158,8 +2158,12 @@ class StateMachineRuntime {
           .join('\n')}`;
       }
     } catch (err) {
-      void this.log('warn', 'handleFileToolAfter: validateFiles failed', {
-        error: err instanceof Error ? err.message : String(err),
+      // The checks did not run, so the file is not known to be clean. Say so
+      // where the agent reads it rather than leaving an unexplained silence.
+      const message = errorMessage(err);
+      output.output += `\n\n[workflow-validation-unavailable]\n${message}`;
+      this.report(`handleFileToolAfter: invariants did not run — ${message}`, {
+        sessionID: input.sessionID,
       });
     }
   }

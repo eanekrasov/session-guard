@@ -46,6 +46,15 @@ export interface ProfileInvariants {
  * @param profileId   — profile ID (e.g. "android", "harness")
  * @param profilesDir — path to the profiles directory
  */
+/**
+ * The invariants could not be loaded, which is not the same as there being
+ * none. Both used to return `[]`, and a caller reading "nothing to check" as
+ * "everything passed" turned a broken profile into a green gate.
+ */
+export class InvariantsUnavailableError extends Error {
+  readonly name = 'InvariantsUnavailableError';
+}
+
 export async function getAllProfileInvariants(
   profileId: string,
   profilesDir: string
@@ -56,12 +65,13 @@ export async function getAllProfileInvariants(
     const resolved = await resolver.resolve(profileId);
     enabledIds = new Set(resolved.metadata.invariants ?? []);
   } catch (err) {
-    console.error('[ERROR] getAllProfileInvariants: profile resolution failed', {
-      profileId,
-      profilesDir,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return [];
+    // Fail closed. A profile that cannot be resolved has not told us it has no
+    // invariants — it has told us nothing, and an unrun check is not a passed
+    // one. Returning [] here made a missing profile look like a clean file.
+    throw new InvariantsUnavailableError(
+      `Cannot load invariants for profile "${profileId}" from ${profilesDir}: ` +
+        `${err instanceof Error ? err.message : String(err)}`
+    );
   }
 
   if (enabledIds.size === 0) return [];
@@ -80,12 +90,12 @@ export async function getAllProfileInvariants(
       const mod = await import(`file://${filePath}`);
       allChecks = (mod.INVARIANTS as InvariantCheck[]) ?? [];
     } catch {
-      console.error('[ERROR] getAllProfileInvariants: cannot load invariants.ts for profile', {
-        profileId,
-        invariantsPath,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      return [];
+      // The profile declares invariants it cannot load. Same rule: silence
+      // here would report the file as clean against checks that never ran.
+      throw new InvariantsUnavailableError(
+        `Profile "${profileId}" declares ${enabledIds.size} invariant(s) but ${invariantsPath} ` +
+          `cannot be loaded: ${err instanceof Error ? err.message : String(err)}`
+      );
     }
   }
 

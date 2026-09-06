@@ -15,7 +15,16 @@ function git(cwd: string, args: string[], trim = true): string {
 }
 
 function dirtyPaths(cwd: string, moduleRoot?: string): string[] {
-  const output = git(cwd, ['status', '--porcelain', '--untracked-files=all'], false);
+  // `core.quotepath` is on by default, so git returns a non-ASCII path
+  // C-quoted — `"\321\202\320\265\321\201\321\202.ts"` for `тест.ts`.
+  // Taken literally the file does not exist, its hash is null, and the change
+  // is silently outside every scope. Asking git not to quote is the fix; the
+  // alternative is re-implementing its escaping.
+  const output = git(
+    cwd,
+    ['-c', 'core.quotepath=false', 'status', '--porcelain', '--untracked-files=all'],
+    false
+  );
   if (!output) return [];
   const renameArrow = / -> /u;
   const paths: string[] = [];
@@ -56,7 +65,19 @@ export async function computeChangeScope(
 ): Promise<string[]> {
   const root = resolve(cwd);
   const result: string[] = [];
-  for (const path of dirtyPaths(cwd, moduleRoot)) {
+
+  // The union of what is dirty now and what was dirty at the baseline. Walking
+  // only the current dirty set missed the reverse direction: a file the
+  // operator had edited, which the operation put back to HEAD, is no longer
+  // dirty — so it was never compared, and undoing somebody's work registered
+  // as no change at all.
+  const candidates = new Set<string>(dirtyPaths(cwd, moduleRoot));
+  for (const path of Object.keys(baseline)) {
+    if (moduleRoot && !path.startsWith(moduleRoot)) continue;
+    candidates.add(path);
+  }
+
+  for (const path of candidates) {
     const normalized = relative(root, resolve(root, path));
     if (isAbsolute(normalized) || normalized.startsWith('..')) continue;
     if (!(path in baseline) || baseline[path] !== (await hash(cwd, path))) result.push(path);
