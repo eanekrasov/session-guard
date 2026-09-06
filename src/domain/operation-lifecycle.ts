@@ -87,7 +87,12 @@ export function beginMutation(
     }
   }
 
-  const existing = getActiveOperations(session)[0];
+  // Only another *mutation* occupies the slot. A dispatched `task` is an
+  // operation too, but the writes it performs are exactly what it was
+  // dispatched to do — refusing them because the dispatch is open would refuse
+  // all delegated work. This was only ever passable because lock release
+  // deleted the task's operation to make room, which lost the task.
+  const existing = getActiveOperations(session).find((op) => op.kind !== 'task');
   if (existing) {
     throw new Error(`Active operation already exists: ${existing.callId}`);
   }
@@ -102,6 +107,7 @@ export function beginMutation(
     runId: run.id,
     taskId: run.taskId,
     agent,
+    kind: 'mutation',
     startedAt: new Date().toISOString(),
     status: 'running',
   };

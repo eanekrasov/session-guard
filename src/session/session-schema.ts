@@ -58,6 +58,17 @@ export const ActiveOperationSchema = z.object({
   baseline: z.record(z.string().nullable()).optional(),
   /** This move's invariants verdict, rolled into `run.gates.invariants` when the operation ends. */
   invariants: z.enum(GATE_STATUS).optional(),
+  /**
+   * What kind of call this operation belongs to.
+   *
+   * A dispatched `task` and a mutating `bash`/`write` are both operations, but
+   * only the mutation is tracked in the orchestrator's in-flight map. Lock
+   * release read "absent from that map" as "interrupted", which is true of a
+   * dead mutation and always true of a live task call — so an ordinary write
+   * inside a running task's writeScope deleted the task's own operation and
+   * took its place.
+   */
+  kind: z.enum(['mutation', 'task']).default('mutation'),
 });
 
 export const RetryBudgetSchema = z.object({

@@ -167,3 +167,28 @@ describe('scopeBefore under two concurrently running tasks', () => {
     ).resolves.toBeUndefined();
   });
 });
+
+describe('a write inside a running task does not evict the task', () => {
+  it('leaves the task operation in place and adds the mutation beside it', async () => {
+    // Lock release read "absent from the orchestrator's in-flight mutation
+    // map" as "interrupted". That is true of a dead mutation and always true
+    // of a live `task` call, which is never registered there — so a write
+    // inside a running task's writeScope deleted the task's own operation and
+    // took its place. The task's later result then had nothing to attribute
+    // itself to and its run stayed in `code`.
+    setFixtureProfilesDir();
+    const store = await seedTwoRunningTasks();
+    const hooks: Hooks = createRuntime(pluginInput());
+    await dispatch(hooks, 'call-1', 'task-1');
+
+    await hooks['tool.execute.before']!(
+      { tool: 'write', sessionID: 's1', callID: 'call-write' },
+      { args: { filePath: 'src/auth/login.ts' } }
+    );
+
+    const session = await store.load('s1');
+    expect(session?.activeOperations['call-1']?.kind).toBe('task');
+    expect(session?.activeOperations['call-1']?.taskId).toBe('task-1');
+    expect(session?.activeOperations['call-write']?.kind).toBe('mutation');
+  });
+});

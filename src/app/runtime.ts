@@ -980,6 +980,7 @@ class StateMachineRuntime {
         runId,
         taskId,
         agent,
+        kind: 'task',
         status: 'running',
         startedAt: new Date().toISOString(),
         // The occupancy of the stage this call belongs to. A verdict that

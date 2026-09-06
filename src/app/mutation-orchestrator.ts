@@ -600,6 +600,13 @@ export class MutationOrchestrator {
       // Don't release if we're still tracking it in liveMutations
       if (this.liveMutations.has(operation.callId)) continue;
 
+      // A dispatched `task` is never registered in liveMutations, so absence
+      // from that map proves nothing about it. Releasing one deleted a running
+      // task's operation and replaced it with the write — the task's own
+      // result then had nothing to attribute itself to and its run stayed put.
+      // Only the expiry below may end a task call.
+      if (operation.kind === 'task' && !isExpiredMutation(session, operation.callId)) continue;
+
       // Release if the mutation is expired
       if (isExpiredMutation(session, operation.callId)) {
         clearActiveMutation(session, operation.callId);
