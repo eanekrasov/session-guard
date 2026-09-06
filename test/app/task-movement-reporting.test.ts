@@ -163,3 +163,38 @@ describe('an unreachable movement on a pass is reported', () => {
     expect(after?.tasks.implementation?.[0]?.status).not.toBe('completed');
   });
 });
+
+describe('a replayed result is not a verdict about the whole body of work', () => {
+  it('refuses a second delivery of the same call id', async () => {
+    // The handler deletes the operation once it has recorded a verdict, so a
+    // second delivery of the same call found no operation and fell into the
+    // session-level branch. Replaying a task's review and qa results that way
+    // closed the session's own gates and carried the workflow past validation
+    // without anyone having validated anything.
+    setMovementFixtureProfilesDir('cycle-minimal');
+    const store = await seed();
+    const hooks: Hooks = createRuntime(pluginInput());
+
+    await dispatch(hooks, 'call-1');
+    await report(hooks, 'call-1', 'pass');
+
+    const afterFirst = await store.load('s1');
+    const gatesAfterFirst = JSON.stringify(afterFirst?.gates);
+
+    const tag = `<workflow-result>${JSON.stringify({
+      stage: 'code',
+      status: 'pass',
+      summary: 'ok',
+      evidence: ['ok'],
+    })}</workflow-result>`;
+    const output = { title: 'task', output: tag, metadata: {} };
+    await hooks['tool.execute.after']!(
+      { tool: 'task', sessionID: 's1', callID: 'call-1', args: { subagent_type: 'code' } },
+      output
+    );
+
+    expect(output.output).toContain('[workflow-result-replayed]');
+    const afterReplay = await store.load('s1');
+    expect(JSON.stringify(afterReplay?.gates)).toBe(gatesAfterFirst);
+  });
+});

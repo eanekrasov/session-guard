@@ -1580,6 +1580,27 @@ class StateMachineRuntime {
     await this.queue.enqueue(sessionID, async (session) => {
       if (!session) return;
 
+      // One call, one verdict. The branches below delete the operation once
+      // they have recorded a result, so a replay of the same call arrived with
+      // no operation to attribute it to and was read as a verdict about the
+      // whole body of work — replaying two task results closed the session's
+      // own gates and moved it past validation unvalidated.
+      session.processedResultCallIDs ??= [];
+      if (session.processedResultCallIDs.includes(callID)) {
+        output.output +=
+          `\n\n[workflow-result-replayed]\n` +
+          `The result for ${callID} has already been recorded. Nothing was recorded again.`;
+        void this.log('warn', 'Workflow result replayed', { sessionID, callID });
+        return;
+      }
+      if (parsed || session.activeOperations[callID]) {
+        session.processedResultCallIDs.push(callID);
+        // Bounded: a session's call ids only ever accumulate.
+        if (session.processedResultCallIDs.length > 500) {
+          session.processedResultCallIDs.splice(0, session.processedResultCallIDs.length - 500);
+        }
+      }
+
       const operation = session.activeOperations[callID];
       const run = operation ? session.loopRuns[operation.runId] : undefined;
       const task = operation ? findTask(session, operation.taskId) : undefined;

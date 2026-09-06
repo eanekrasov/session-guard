@@ -268,6 +268,16 @@ export const WorkflowSessionSchema = z
     currentStage: z.string().default('planning'),
     invariantViolations: z.array(InvariantViolationRecordSchema).default([]),
     consentedCallIDs: z.array(z.string()).default([]),
+    /**
+     * Call ids whose `<workflow-result>` has already been acted on.
+     *
+     * The result handler deletes the operation once it has recorded the
+     * verdict, so a second delivery of the same call found no operation and
+     * fell into the session-level branch: two task verdicts, replayed, closed
+     * the session's own review and qa gates and carried the workflow past
+     * validation without anyone having validated anything.
+     */
+    processedResultCallIDs: z.array(z.string()).default([]),
   })
   .strip();
 
