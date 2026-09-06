@@ -2,26 +2,25 @@
  * GuardEvaluator — evaluates JS-like guard expressions in a sandboxed context.
  *
  * Expression context includes:
- * - `session` — the current session context object (e.g., SessionFacts)
+ * - `session` — the current workflow session context (e.g., SessionFacts)
  * - `approved(type)` — function, checks if an approval of the given type has been granted
  * - Custom guard functions — exports from the profile's guards.ts
  *
- * Uses new Function() with explicit scope-limited context.
- * No access to global scope, require, import, fetch, or I/O.
- *
- * Guard expressions execute synchronously but are wrapped in a timeout to
- * prevent infinite loops (e.g. `while(true){}`) from hanging the enqueue chain.
+ * Uses the AST-based evaluator (guard-ast.ts) which cannot access globals,
+ * prototypes, or perform arbitrary calls. Replaces the previous `new Function`
+ * approach.
  */
+import { evaluateGuard as astEvaluateGuard } from './guard-ast.ts';
+
 export interface GuardEvaluationContext {
   currentLoopListKey?: string;
   agentId?: string;
 }
 
 export class GuardEvaluator {
-  private readonly context: Record<string, unknown>;
-
-  /** Default timeout per guard evaluation in milliseconds. */
-  static readonly EVAL_TIMEOUT_MS = 500;
+  private readonly builtins: Record<string, (...args: unknown[]) => unknown>;
+  private readonly session: Record<string, unknown>;
+  private readonly guards: Record<string, (...args: unknown[]) => unknown>;
 
   /**
    * @param session — the current workflow session context (e.g., SessionFacts)
@@ -114,56 +113,34 @@ export class GuardEvaluator {
           task.status === 'completed'
       );
     };
-    this.context = {
-      session: Object.assign({}, session, {
-        approved: approvedFn,
-        allTasksCompleted: allTasksCompletedFn,
-      }),
+
+    // Build the session with approved and allTasksCompleted attached so
+    // expressions like session.approved('plan') work
+    this.session = Object.assign({}, session, {
+      approved: approvedFn,
+      allTasksCompleted: allTasksCompletedFn,
+    });
+
+    // Builtins — callable by name in guard expressions
+    this.builtins = {
       approved: approvedFn,
       isExhausted: isExhaustedFn,
       hasPendingTasks: hasPendingTasksFn,
       allTasksCompleted: allTasksCompletedFn,
-      ...(guards ?? {}),
     };
+
+    this.guards = (guards ?? {}) as Record<string, (...args: unknown[]) => unknown>;
   }
 
   /**
-   * Evaluate a guard expression string against the context.
-   * Returns the truthy/falsy result of the expression.
-   * Returns false for expressions that throw at runtime or exceed the timeout.
-   *
-   * The timeout is implemented via `AbortSignal.timeout` + `setImmediate`
-   * polling, because Bun's `new Function()` is synchronous and cannot be
-   * interrupted from the outside. We run it on a fresh microtask turn so
-   * the abort fires before the function body if the timer has already
-   * elapsed.
+   * Evaluate a guard expression string against the context using the AST evaluator.
+   * Returns false for any runtime error, parse error, or step-limit exceeded.
    */
   evaluate(expression: string): boolean {
-    const ac = new AbortController();
-    const timer = setTimeout(
-      () => ac.abort(new Error('Guard evaluation timed out')),
-      GuardEvaluator.EVAL_TIMEOUT_MS
-    );
-
     try {
-      const paramNames = Object.keys(this.context);
-      const paramValues = Object.values(this.context);
-      const fn = new Function(...paramNames, `return (${expression});`);
-
-      // Execute on the next microtask turn so the abort signal has a chance
-      // to fire before the function body runs when the timer has already
-      // expired (e.g. after a long GC pause).
-      const result = fn(...paramValues);
-      return Boolean(result);
-    } catch (err) {
-      if (err && typeof err === 'object' && 'name' in err && (err as Error).name === 'AbortError') {
-        // Timeout — return false (fail-closed). Do NOT rethrow, the enqueue
-        // chain must not be broken by a malicious guard expression.
-        return false;
-      }
+      return astEvaluateGuard(expression, this.session, this.builtins, this.guards);
+    } catch {
       return false;
-    } finally {
-      clearTimeout(timer);
     }
   }
 }

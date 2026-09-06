@@ -25,7 +25,6 @@ function makeSession(overrides: Partial<WorkflowSession> = {}): WorkflowSession 
     updatedAt: new Date().toISOString(),
     baselineHashes: [],
     changedFiles: [],
-    phaseOverride: null,
     invariantViolations: [],
     consentedCallIDs: [],
     ...overrides,
@@ -301,7 +300,7 @@ describe('StateMachineEngine', () => {
 
     expect(result.allowed).toBe(true);
     expect(result.applied).toBe(true);
-    expect(session.phaseOverride).toBe('EXECUTION');
+    expect(session.currentPhase).toBe('EXECUTION');
   });
 
   it('tryApplyTransitions does not apply when no outgoing transition matches', () => {
@@ -309,13 +308,13 @@ describe('StateMachineEngine', () => {
       transitions: [{ from: 'PLANNING', to: 'EXECUTION', kind: 'pass' }], // pass requires gate
     });
     const engine = new StateMachineEngine(config);
-    const session = makeSession();
+    const session = makeSession({ currentPhase: 'planning' });
 
     const result = engine.tryApplyTransitions(session);
 
     expect(result.allowed).toBe(false);
     expect(result.applied).toBe(false);
-    expect(session.phaseOverride).toBeNull();
+    expect(session.currentPhase).toBe('planning');
   });
 
   it('tryApplyTransitions evaluates guard before applying transition', () => {
@@ -332,7 +331,80 @@ describe('StateMachineEngine', () => {
 
     expect(result.allowed).toBe(false);
     expect(result.applied).toBe(false);
-    expect(session.phaseOverride).toBeNull();
+    expect(session.currentPhase).toBeUndefined();
+  });
+
+  // ─── Phase consistency tests (P2-4): derivePhase uses currentPhase, not phaseOverride ──
+
+  it('tryApplyTransitions sets currentPhase (not phaseOverride) for matching transition', () => {
+    const config = makeConfig({
+      transitions: [{ from: 'PLANNING', to: 'EXECUTION', kind: 'auto' }],
+    });
+    const engine = new StateMachineEngine(config);
+    const session = makeSession();
+
+    engine.tryApplyTransitions(session);
+
+    // After transition, currentPhase is set; phaseOverride was removed from schema
+    expect(session.currentPhase).toBe('EXECUTION');
+    expect((session as Record<string, unknown>).phaseOverride).toBeUndefined();
+  });
+
+  it('derivePhase ignores phaseOverride (dead field, never read)', () => {
+    const config = makeConfig({
+      phaseAssignments: [{ id: 'always', priority: 0, condition: 'true', result: 'PLANNING' }],
+    });
+    const engine = new StateMachineEngine(config);
+    // phaseOverride on the session object has no effect on derivePhase
+    const session = makeSession({ phaseOverride: 'COMMIT' as never });
+
+    // derivePhase evaluates rules — rules say true -> PLANNING
+    const phase = engine.derivePhase(session);
+    expect(phase).toBe('PLANNING');
+  });
+
+  it('derivePhase evaluates rules when loading session from storage', () => {
+    const config = makeConfig({
+      phaseAssignments: [{ id: 'always', priority: 0, condition: 'true', result: 'PLANNING' }],
+    });
+    const engine = new StateMachineEngine(config);
+    // Session has currentPhase set, but derivePhase evaluates rules
+    const session = makeSession();
+
+    const phase = engine.derivePhase(session);
+    expect(phase).toBe('PLANNING');
+  });
+
+  it('tryApplyTransitions does NOT re-execute transition effects on reload', () => {
+    const config = makeConfig({
+      transitions: [
+        {
+          from: 'PLANNING',
+          to: 'EXECUTION',
+          kind: 'auto',
+          effects: [{ bumpRetry: 'task-1' }, { approve: 'plan' }],
+        },
+      ],
+    });
+    const engine = new StateMachineEngine(config);
+
+    // Session that already has currentPhase=EXECUTION (simulating reload)
+    const session = makeSession({
+      currentPhase: 'EXECUTION',
+      retryBudgets: { 'task-1': { attempts: 0, maximum: 3 } },
+    });
+
+    // tryApplyTransitions only scans transitions from the DERIVED phase.
+    // If derivePhase returns a different phase than currentPhase, it doesn't mean
+    // effects are re-executed — transitions are checked from the derived phase.
+    // derivePhase evaluates rules; with no rules, it falls back to currentPhase 'EXECUTION'.
+    const result = engine.tryApplyTransitions(session);
+    // No outgoing transitions from EXECUTION in this config
+    expect(result.applied).toBe(false);
+
+    // Budget stays untouched because no transition effects fired
+    expect(session.retryBudgets['task-1'].attempts).toBe(0);
+    expect(session.approvals.length).toBe(0);
   });
 
   it('tryApplyTransitions tries kind=pass transition when kind=auto fails', () => {
@@ -353,6 +425,6 @@ describe('StateMachineEngine', () => {
 
     expect(result.allowed).toBe(true);
     expect(result.applied).toBe(true);
-    expect(session.phaseOverride).toBe('EXECUTION');
+    expect(session.currentPhase).toBe('EXECUTION');
   });
 });

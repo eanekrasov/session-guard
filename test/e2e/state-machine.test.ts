@@ -433,9 +433,9 @@ describe('E2E: Full state machine flow', () => {
     expect(bugV2!.status).toBe('rejected');
   });
 
-  // ─── TC13: Engine tryApplyTransitions applies phaseOverride ───────────────
+  // ─── TC13: Engine tryApplyTransitions sets currentPhase ─────────────────
 
-  test('TC13: tryApplyTransitions applies phaseOverride on session', () => {
+  test('TC13: tryApplyTransitions sets currentPhase on session', () => {
     store = makeStore();
     const session = baseSession();
     approve(session, 'plan', 'ev', 'c1');
@@ -450,7 +450,8 @@ describe('E2E: Full state machine flow', () => {
 
     const result = engine.tryApplyTransitions(session);
     expect(result.applied).toBe(true);
-    expect(session.phaseOverride).toBe('EXECUTION');
+    expect(session.currentPhase).toBe('EXECUTION');
+    expect(session.phaseOverride).toBeUndefined();
   });
 
   // ─── TC14: Illegal transition ────────────────────────────────────────────

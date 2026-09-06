@@ -195,7 +195,6 @@ export const WorkflowSessionSchema = z
     baselineHashes: z.array(z.string()).default([]),
     changedFiles: z.array(z.string()).default([]),
     currentPhase: z.string().default('planning'),
-    phaseOverride: z.string().optional(),
     invariantViolations: z.array(InvariantViolationRecordSchema).default([]),
     consentedCallIDs: z.array(z.string()).default([]),
   })

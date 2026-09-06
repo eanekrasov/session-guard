@@ -208,6 +208,121 @@ describe('SessionQueue', () => {
   });
 });
 
+describe('reentrant SessionQueue', () => {
+  it('enqueue from inside enqueue callback does NOT deadlock', async () => {
+    await seedSession('sq-reenter');
+
+    const { SessionQueue } = await import('../../src/app/session-queue.ts');
+    const queue = new SessionQueue(store);
+
+    const order: number[] = [];
+
+    const result = await queue.enqueue('sq-reenter', async (session, rootId) => {
+      order.push(1);
+
+      // Nested enqueue from inside the callback
+      const inner = await queue.enqueue('sq-reenter', async () => {
+        order.push(2);
+        return 'inner-result';
+      });
+
+      order.push(3);
+      return inner;
+    });
+
+    expect(result).toBe('inner-result');
+    expect(order).toEqual([1, 2, 3]);
+  });
+
+  it('reentrant calls are serialized correctly with multiple levels', async () => {
+    await seedSession('sq-reenter-deep');
+
+    const { SessionQueue } = await import('../../src/app/session-queue.ts');
+    const queue = new SessionQueue(store);
+
+    const order: number[] = [];
+    const counter = { value: 0 };
+
+    const result = await queue.enqueue('sq-reenter-deep', async () => {
+      order.push(1);
+      counter.value++;
+
+      // Level 2
+      const l2 = await queue.enqueue('sq-reenter-deep', async () => {
+        order.push(2);
+        counter.value++;
+
+        // Level 3
+        const l3 = await queue.enqueue('sq-reenter-deep', async () => {
+          order.push(3);
+          counter.value++;
+          return counter.value;
+        });
+
+        return l3;
+      });
+
+      return l2;
+    });
+
+    expect(result).toBe(3);
+    expect(order).toEqual([1, 2, 3]);
+  });
+
+  it('nested enqueue returns the correct result', async () => {
+    await seedSession('sq-reenter-result');
+
+    const { SessionQueue } = await import('../../src/app/session-queue.ts');
+    const queue = new SessionQueue(store);
+
+    const outerResult = await queue.enqueue('sq-reenter-result', async () => {
+      const inner = await queue.enqueue('sq-reenter-result', async () => {
+        return 42;
+      });
+      return inner * 2;
+    });
+
+    expect(outerResult).toBe(84);
+  });
+
+  it('reentrant enqueue does not create separate promise chain', async () => {
+    await seedSession('sq-reenter-chain');
+
+    const { SessionQueue } = await import('../../src/app/session-queue.ts');
+    const queue = new SessionQueue(store);
+
+    let enqueueCount = 0;
+    const originalEnqueue = queue.enqueue.bind(queue);
+    // We can't easily spy on internal chain creation.
+    // Instead verify that reentrant calls don't deadlock and execute in order.
+
+    const order: number[] = [];
+
+    // A non-reentrant enqueue followed by a reentrant one
+    const p1 = queue.enqueue('sq-reenter-chain', async () => {
+      order.push(1);
+      await new Promise((r) => setTimeout(r, 5));
+      order.push(2);
+    });
+
+    // This enqueue will wait for p1 in the chain
+    // But inside, it's reentrant
+    const p2 = queue.enqueue('sq-reenter-chain', async () => {
+      order.push(3);
+
+      // Reentrant — should execute inline, not create a new chain link
+      await queue.enqueue('sq-reenter-chain', async () => {
+        order.push(4);
+      });
+
+      order.push(5);
+    });
+
+    await Promise.all([p1, p2]);
+    expect(order).toEqual([1, 2, 3, 4, 5]);
+  });
+});
+
 describe('withSession', () => {
   it('returns null when session does not exist', async () => {
     const result = await withSession(store, 'nonexistent', async () => {

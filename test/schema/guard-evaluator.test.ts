@@ -222,6 +222,62 @@ describe('GuardEvaluator', () => {
       expect(new GuardEvaluator(session).evaluate("allTasksCompleted('missing')")).toBe(false);
     });
 
+    describe('AST evaluator usage', () => {
+      it('cannot access globalThis', () => {
+        const evaluator = new GuardEvaluator({});
+        expect(evaluator.evaluate('globalThis')).toBe(false);
+      });
+
+      it('cannot access process', () => {
+        const evaluator = new GuardEvaluator({});
+        expect(evaluator.evaluate('process')).toBe(false);
+      });
+
+      it('cannot access require', () => {
+        const evaluator = new GuardEvaluator({});
+        expect(evaluator.evaluate('require')).toBe(false);
+      });
+
+      it('cannot access setTimeout', () => {
+        const evaluator = new GuardEvaluator({});
+        expect(evaluator.evaluate('setTimeout')).toBe(false);
+      });
+
+      it('cannot access eval', () => {
+        const evaluator = new GuardEvaluator({});
+        expect(evaluator.evaluate('eval')).toBe(false);
+      });
+
+      it('evaluates typeof operator correctly', () => {
+        const session = { deliveryReceipt: 'abc123', deliveryPermit: null };
+        const evaluator = new GuardEvaluator(session);
+        expect(
+          evaluator.evaluate(
+            "typeof session.deliveryReceipt == 'string' || typeof session.deliveryPermit == 'string'"
+          )
+        ).toBe(true);
+
+        const session2 = { deliveryReceipt: null, deliveryPermit: null };
+        const evaluator2 = new GuardEvaluator(session2);
+        expect(
+          evaluator2.evaluate(
+            "typeof session.deliveryReceipt == 'string' || typeof session.deliveryPermit == 'string'"
+          )
+        ).toBe(false);
+      });
+
+      it('short-circuits logical OR and AND', () => {
+        const session = {
+          approvals: [{ type: 'plan', status: 'granted' }],
+        };
+        const evaluator = new GuardEvaluator(session);
+        // true || <anything> should short-circuit and return true
+        expect(evaluator.evaluate("true || session.approved('plan')")).toBe(true);
+        // false && <anything> should short-circuit and return false
+        expect(evaluator.evaluate("false && session.approved('plan')")).toBe(false);
+      });
+    });
+
     it('uses explicit evaluation context instead of unrelated terminal run history', () => {
       const historicalSession = {
         tasks: session.tasks,

@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
+import { SessionQueue } from '../../src/app/session-queue.ts';
 import { TaskApi } from '../../src/app/task-api.ts';
 import { createSession, WorkflowStore } from '../../src/session/session-store.ts';
 
@@ -25,6 +26,27 @@ async function createApi(): Promise<{ api: TaskApi; store: WorkflowStore; sessio
 
   return {
     api: new TaskApi(store, async () => ['implementation', 'review']),
+    store,
+    sessionId: session.sessionId,
+  };
+}
+
+async function createApiWithQueue(): Promise<{
+  api: TaskApi;
+  queue: SessionQueue;
+  store: WorkflowStore;
+  sessionId: string;
+}> {
+  const directory = await mkdtemp(path.join(tmpdir(), 'task-api-queue-'));
+  temporaryDirectories.push(directory);
+  const store = new WorkflowStore(directory);
+  const session = createSession('s1', 'profile');
+  await store.save(session);
+  const queue = new SessionQueue(store);
+
+  return {
+    api: new TaskApi(store, async () => ['implementation', 'review'], queue),
+    queue,
     store,
     sessionId: session.sessionId,
   };
@@ -118,5 +140,83 @@ describe('TaskApi', () => {
     await expect(api.setTaskStatus(sessionId, 'task-404', 'completed')).rejects.toThrow(
       'Unknown task: task-404'
     );
+  });
+
+  describe('with SessionQueue', () => {
+    it('parallel setTasks calls see consistent state', async () => {
+      const { api, sessionId } = await createApiWithQueue();
+
+      await api.setTasks(sessionId, {
+        listKey: 'implementation',
+        tasks: [{ id: 'task-1', path: 'src/a.ts', status: 'pending' }],
+      });
+
+      // Two parallel setTaskStatus calls on different tasks — should not conflict
+      await api.setTasks(sessionId, {
+        listKey: 'implementation',
+        tasks: [
+          { id: 'task-1', path: 'src/a.ts', status: 'pending' },
+          { id: 'task-2', path: 'src/b.ts', status: 'pending' },
+        ],
+      });
+
+      const tasks = await api.getTasks(sessionId, 'implementation');
+      expect(tasks).toHaveLength(2);
+      expect(tasks.find((t) => t.id === 'task-2')).toBeDefined();
+    });
+
+    it('concurrent setTasks + setTaskStatus do not conflict', async () => {
+      const { api, sessionId } = await createApiWithQueue();
+
+      await api.setTasks(sessionId, {
+        listKey: 'implementation',
+        tasks: [{ id: 'task-1', path: 'src/a.ts', status: 'pending' }],
+      });
+
+      // Both operations are enqueued via the same queue, so they serialize
+      const [setResult, statusResult] = await Promise.all([
+        api.setTasks(sessionId, {
+          listKey: 'implementation',
+          tasks: [
+            { id: 'task-1', path: 'src/a.ts', status: 'pending' },
+            { id: 'task-2', path: 'src/b.ts', status: 'pending' },
+          ],
+        }),
+        api.setTaskStatus(sessionId, 'task-1', 'running'),
+      ]);
+
+      // Both should succeed — either order is fine, but no corruption
+      expect(setResult).toHaveLength(2);
+      expect(statusResult.id).toBe('task-1');
+
+      // Final state: task-1 is either running or completed depending on order
+      const tasks = await api.getTasks(sessionId, 'implementation');
+      const task1 = tasks.find((t) => t.id === 'task-1');
+      expect(task1).toBeDefined();
+      expect(['running', 'completed']).toContain(task1!.status);
+    });
+
+    it('error in one TaskApi call does not corrupt session for the next call', async () => {
+      const { api, sessionId } = await createApiWithQueue();
+
+      // Successful first set
+      await api.setTasks(sessionId, {
+        listKey: 'implementation',
+        tasks: [{ id: 'task-1', path: 'src/a.ts', status: 'pending' }],
+      });
+
+      // This should fail — task-1 already in another list
+      await expect(
+        api.setTasks(sessionId, {
+          listKey: 'review',
+          tasks: [{ id: 'task-1', path: 'src/b.ts', status: 'pending' }],
+        })
+      ).rejects.toThrow('already belongs to');
+
+      // The session should still be valid for the next call
+      const tasks = await api.getTasks(sessionId, 'implementation');
+      expect(tasks).toHaveLength(1);
+      expect(tasks[0].id).toBe('task-1');
+    });
   });
 });

@@ -25,7 +25,6 @@ function makeSession(overrides: Partial<WorkflowSession> = {}): WorkflowSession 
     updatedAt: new Date().toISOString(),
     baselineHashes: [],
     changedFiles: [],
-    phaseOverride: null,
     invariantViolations: [],
     consentedCallIDs: [],
     pendingDecisions: [],

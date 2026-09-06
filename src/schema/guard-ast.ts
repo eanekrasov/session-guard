@@ -62,7 +62,7 @@ interface CallNode {
 
 interface UnaryNode {
   type: 'unary';
-  operator: '-' | '!' | '+';
+  operator: '-' | '!' | '+' | 'typeof';
   argument: AstNode;
 }
 
@@ -121,8 +121,7 @@ function tokenise(input: string): Token[] {
       continue;
     }
 
-    // Multi-char operators
-    const multi = ['===', '!==', '==', '!=', '&&', '||', '<=', '>=', '=>', '?.', '??'];
+    // Multi-char operators (check 3-char before 2-char)
     const two = input.slice(i, i + 2);
     const three = input.slice(i, i + 3);
     if (three === '...') {
@@ -130,6 +129,12 @@ function tokenise(input: string): Token[] {
       i += 3;
       continue;
     }
+    if (three === '===' || three === '!==') {
+      tokens.push({ kind: three, value: three, pos: i });
+      i += 3;
+      continue;
+    }
+    const multi = ['==', '!=', '&&', '||', '<=', '>=', '=>', '?.', '??'];
     if (multi.includes(two)) {
       tokens.push({ kind: two, value: two, pos: i });
       i += 2;
@@ -340,10 +345,17 @@ function parseMultiplicative(tokens: Token[], depth: number): AstNode {
 }
 
 function parseUnary(tokens: Token[], depth: number): AstNode {
-  if (peek(tokens, depth) === '!' || peek(tokens, depth) === '-') {
-    const op = consume(tokens, peek(tokens, depth)).value as '-' | '!';
+  const tokenKind = peek(tokens, depth);
+  if (tokenKind === '!' || tokenKind === '-') {
+    const op = consume(tokens, tokenKind).value as '-' | '!';
     const argument = parseUnary(tokens, depth + 1);
     return { type: 'unary', operator: op, argument };
+  }
+  // typeof keyword — it's emitted as an 'id' token by the tokeniser
+  if (tokenKind === 'id' && tokens[0]?.value === 'typeof') {
+    consume(tokens, 'id');
+    const argument = parseUnary(tokens, depth + 1);
+    return { type: 'unary', operator: 'typeof', argument };
   }
   return parsePrimary(tokens, depth);
 }
@@ -537,6 +549,25 @@ export function parse(input: string): AstNode {
   return node;
 }
 
+// ─── Evaluation Budget ────────────────────────────────────────────────────────
+
+interface EvalBudget {
+  steps: number;
+  callbacks: number;
+}
+
+function makeBudget(): EvalBudget {
+  return { steps: 0, callbacks: 0 };
+}
+
+function consumeStep(budget: EvalBudget): void {
+  if (budget.steps++ > MAX_EVAL_STEPS) throw new EvalError('Evaluation step limit exceeded');
+}
+
+function consumeCallback(budget: EvalBudget): void {
+  if (budget.callbacks++ > MAX_CALLBACK_CALLS) throw new EvalError('Callback call limit exceeded');
+}
+
 // ─── Evaluator ───────────────────────────────────────────────────────────────
 
 export interface EvalContext {
@@ -546,18 +577,12 @@ export interface EvalContext {
   session: Record<string, unknown>;
   /** Custom user-defined guard functions. */
   guards: Record<string, (...args: unknown[]) => unknown>;
-}
-
-let evalStepCount = 0;
-let callbackCallCount = 0;
-
-function resetCounters(): void {
-  evalStepCount = 0;
-  callbackCallCount = 0;
+  /** Per-evaluation budget. */
+  budget: EvalBudget;
 }
 
 function evaluateNode(node: AstNode, ctx: EvalContext): unknown {
-  if (evalStepCount++ > MAX_EVAL_STEPS) throw new EvalError('Evaluation step limit exceeded');
+  consumeStep(ctx.budget);
 
   switch (node.type) {
     case 'literal':
@@ -584,6 +609,11 @@ function evaluateNode(node: AstNode, ctx: EvalContext): unknown {
     }
 
     case 'call': {
+      // Evaluate the object first (for method calls with this binding)
+      let thisArg: unknown = undefined;
+      if (node.callee.type === 'member') {
+        thisArg = evaluateNode(node.callee.object, ctx);
+      }
       const callee = evaluateNode(node.callee, ctx);
       if (typeof callee !== 'function') {
         if (node.optional) return undefined;
@@ -597,10 +627,12 @@ function evaluateNode(node: AstNode, ctx: EvalContext): unknown {
         return ctx.builtins[calleeName](...args);
       }
 
-      callbackCallCount++;
-      if (callbackCallCount > MAX_CALLBACK_CALLS)
-        throw new EvalError('Callback call limit exceeded');
+      consumeCallback(ctx.budget);
 
+      // Preserve this-binding for method calls (e.g. arr.find(cb))
+      if (thisArg !== undefined) {
+        return (callee as Function).apply(thisArg, args);
+      }
       return callee(...args);
     }
 
@@ -613,6 +645,8 @@ function evaluateNode(node: AstNode, ctx: EvalContext): unknown {
           return -Number(arg);
         case '+':
           return Number(arg);
+        case 'typeof':
+          return typeof arg;
         default:
           return undefined;
       }
@@ -620,6 +654,17 @@ function evaluateNode(node: AstNode, ctx: EvalContext): unknown {
 
     case 'binary': {
       const left = evaluateNode(node.left, ctx);
+      // Short-circuit: only evaluate right when needed
+      switch (node.operator) {
+        case '&&':
+          return left ? evaluateNode(node.right, ctx) : left;
+        case '||':
+          return left ? left : evaluateNode(node.right, ctx);
+        case '??':
+          return left != null ? left : evaluateNode(node.right, ctx);
+        default:
+          break;
+      }
       const right = evaluateNode(node.right, ctx);
       return evalBinary(node.operator, left, right);
     }
@@ -640,19 +685,13 @@ function evaluateNode(node: AstNode, ctx: EvalContext): unknown {
         const localCtx: EvalContext = {
           ...capturedCtx,
           session: { ...capturedCtx.session },
+          budget: makeBudget(),
         };
         node.params.forEach((p, i) => {
           (localCtx.session as Record<string, unknown>)[p] = args[i];
         });
-        // We need a fresh counter per arrow call
-        const prevStep = evalStepCount;
-        const prevCallback = callbackCallCount;
-        try {
-          return evaluateNode(node.body, localCtx);
-        } finally {
-          evalStepCount = prevStep;
-          callbackCallCount = prevCallback;
-        }
+        // Each arrow call gets its own fresh budget
+        return evaluateNode(node.body, localCtx);
       };
     }
 
@@ -717,10 +756,10 @@ export function evaluateGuard(
   builtins: Record<string, (...args: unknown[]) => unknown> = {},
   guards: Record<string, (...args: unknown[]) => unknown> = {}
 ): boolean {
-  resetCounters();
   try {
     const node = parse(expression);
-    const ctx: EvalContext = { builtins, session: { ...session }, guards };
+    const budget = makeBudget();
+    const ctx: EvalContext = { builtins, session: { ...session }, guards, budget };
     const result = evaluateNode(node, ctx);
     return Boolean(result);
   } catch {

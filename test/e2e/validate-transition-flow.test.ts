@@ -197,7 +197,7 @@ describe('E2E: checkTransition kind=pass/fail', () => {
       expect(result.kind).toBe('auto');
     });
 
-    test('tryApplyTransitions sets phaseOverride on session', async () => {
+    test('tryApplyTransitions sets currentPhase on session', async () => {
       directory = await mkdtemp(join(tmpdir(), 'sm-e2e-auto-apply'));
       store = new WorkflowStore(join(directory, '.opencode/state-machine/sessions'));
       const session = await createWorkflowSession('root', 'test');
@@ -214,7 +214,7 @@ describe('E2E: checkTransition kind=pass/fail', () => {
 
       const result = engine.tryApplyTransitions(session);
       expect(result.applied).toBe(true);
-      expect(session.phaseOverride).toBe('execution');
+      expect(session.currentPhase).toBe('execution');
     });
   });
 

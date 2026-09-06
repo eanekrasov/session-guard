@@ -104,7 +104,7 @@ export function derivePhaseFn(
   evaluateGuard?: (expr: string) => boolean
 ): string {
   if (rules.length === 0) {
-    const currentPhase = (facts as SessionFacts & { currentPhase?: string }).currentPhase;
+    const currentPhase = facts.currentPhase;
     return currentPhase ?? 'PLANNING';
   }
   const sorted = [...rules].sort((a, b) => b.priority - a.priority);
@@ -324,7 +324,7 @@ export class StateMachineEngine {
    *
    * Scans ALL transitions from the current derived phase (any kind: auto, pass, fail),
    * validates each one's guard and gate requirements, and applies the first
-   * that passes by setting `session.phaseOverride`.
+   * that passes by setting `session.currentPhase`.
    *
    * Returns the result of the transition that was applied (if any).
    * Returns `{ allowed: false, applied: false }` when no outgoing transition matches.
@@ -369,7 +369,6 @@ export class StateMachineEngine {
             approve(session, effect.approve, '', `transition:${currentPhase}->${transition.to}`);
           }
         }
-        session.phaseOverride = transition.to;
         session.currentPhase = transition.to;
         return { ...result, applied: true };
       }

@@ -1,5 +1,6 @@
 import type { MutationTask, TaskStatus, WorkflowSession } from '../session/session-schema.ts';
 import { WorkflowStore } from '../session/session-store.ts';
+import type { SessionQueue } from './session-queue.ts';
 
 export interface SetTasksInput {
   listKey: string;
@@ -11,29 +12,36 @@ export type StaticTaskListResolver = (profileId: string) => Promise<readonly str
 /**
  * Durable task-list boundary. It owns task-list validation and makes each
  * successful mutation visible only after WorkflowStore persists the session.
+ *
+ * When a `SessionQueue` is provided, all public methods are wrapped in the
+ * queue to serialise operations per root session.
  */
 export class TaskApi {
   constructor(
     private readonly store: WorkflowStore,
-    private readonly resolveStaticListKeys: StaticTaskListResolver
+    private readonly resolveStaticListKeys: StaticTaskListResolver,
+    private readonly queue?: SessionQueue
   ) {}
 
   async setTasks(sessionId: string, input: SetTasksInput): Promise<MutationTask[]> {
-    const session = await this.requireSession(sessionId);
-    await this.assertKnownList(session, input.listKey);
-    this.assertListIsNotInUse(session, input.listKey);
-    this.assertUniqueTaskIds(session, input);
-    this.assertReplacementKeepsChildren(session, input);
+    return this.runInQueue(sessionId, async (session) => {
+      if (!session) throw new Error(`Unknown workflow session: ${sessionId}`);
+      await this.assertKnownList(session, input.listKey);
+      this.assertListIsNotInUse(session, input.listKey);
+      this.assertUniqueTaskIds(session, input);
+      this.assertReplacementKeepsChildren(session, input);
 
-    session.tasks[input.listKey] = input.tasks.map((task) => ({ ...task }));
-    await this.store.save(session);
-    return this.copyTasks(session.tasks[input.listKey]);
+      session.tasks[input.listKey] = input.tasks.map((task) => ({ ...task }));
+      return this.copyTasks(session.tasks[input.listKey]);
+    });
   }
 
   async getTasks(sessionId: string, listKey: string): Promise<MutationTask[]> {
-    const session = await this.requireSession(sessionId);
-    await this.assertKnownList(session, listKey);
-    return this.copyTasks(session.tasks[listKey] ?? []);
+    return this.runInQueue(sessionId, async (session) => {
+      if (!session) throw new Error(`Unknown workflow session: ${sessionId}`);
+      await this.assertKnownList(session, listKey);
+      return this.copyTasks(session.tasks[listKey] ?? []);
+    });
   }
 
   async setTaskStatus(
@@ -41,17 +49,38 @@ export class TaskApi {
     taskId: string,
     status: TaskStatus
   ): Promise<MutationTask> {
-    const session = await this.requireSession(sessionId);
-    const task = Object.values(session.tasks)
-      .flat()
-      .find((candidate) => candidate.id === taskId);
-    if (!task) {
-      throw new Error(`Unknown task: ${taskId}`);
-    }
+    return this.runInQueue(sessionId, async (session) => {
+      if (!session) throw new Error(`Unknown workflow session: ${sessionId}`);
+      const task = Object.values(session.tasks)
+        .flat()
+        .find((candidate) => candidate.id === taskId);
+      if (!task) {
+        throw new Error(`Unknown task: ${taskId}`);
+      }
 
-    task.status = status;
+      task.status = status;
+      return { ...task };
+    });
+  }
+
+  /**
+   * Wrap a function in the queue if a queue is configured, or run directly.
+   * When using the queue, the session is loaded by the queue and passed to
+   * the callback — operations use this reference directly so saves are
+   * consistently handled by the queue.
+   */
+  private async runInQueue<T>(
+    sessionId: string,
+    fn: (session: WorkflowSession | null) => Promise<T>
+  ): Promise<T> {
+    if (this.queue) {
+      return this.queue.enqueue(sessionId, async (session) => fn(session));
+    }
+    // No queue: load session directly and save after the operation
+    const session = await this.requireSession(sessionId);
+    const result = await fn(session);
     await this.store.save(session);
-    return { ...task };
+    return result;
   }
 
   private async requireSession(sessionId: string): Promise<WorkflowSession> {

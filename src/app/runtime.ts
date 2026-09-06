@@ -83,6 +83,14 @@ class StateMachineRuntime {
   private readonly profilesDir: string;
   private readonly projectDir: string;
 
+  /**
+   * Normalize tool identifiers to lowercase for consistent comparison.
+   * SDK may send tool names in any casing (Bash, bash, BASH).
+   */
+  private normalizeTool(tool: string): string {
+    return tool.toLowerCase();
+  }
+
   constructor(context: PluginInput) {
     this.context = context;
     this.log = createLogFn(context.client);
@@ -109,15 +117,19 @@ class StateMachineRuntime {
       context.client.session,
       this.log
     );
-    this.taskApi = new TaskApi(this.store, async (profileId) => {
-      const profileRoot = this.profilesDir;
-      const profile = await resolveConfig(profileId, profileRoot);
-      return profile.schemas.flatMap((schema) =>
-        Object.values(schema.phases ?? {})
-          .map((phase) => phase.loop)
-          .filter((loop): loop is string => loop !== undefined && loop !== '$currentTask.id')
-      );
-    });
+    this.taskApi = new TaskApi(
+      this.store,
+      async (profileId) => {
+        const profileRoot = this.profilesDir;
+        const profile = await resolveConfig(profileId, profileRoot);
+        return profile.schemas.flatMap((schema) =>
+          Object.values(schema.phases ?? {})
+            .map((phase) => phase.loop)
+            .filter((loop): loop is string => loop !== undefined && loop !== '$currentTask.id')
+        );
+      },
+      this.queue
+    );
 
     // Initialize the rules sub-system — rule files are discovered lazily
     // inside OpenCodeRulesRuntime on first use.
@@ -148,36 +160,44 @@ class StateMachineRuntime {
         tasksInput = args.tasks;
       }
 
-      const session = await this.store.load(ctx.sessionID);
-      if (!session) {
-        return { output: 'No workflow session found. Call workflow.create first.' };
-      }
+      // Move listKey resolution and ID computation into the queue scope
+      // so they see consistent state with the setTasks call
+      const result = await this.queue.enqueue(ctx.sessionID, async (session) => {
+        if (!session) {
+          return { output: 'No workflow session found. Call workflow.create first.' } as ToolResult;
+        }
 
-      // Determine listKey from active loop runs, fallback to 'implementation'
-      const activeRun = Object.values(session.loopRuns).find(
-        (run) => run.status === 'running' || run.status === 'awaiting_decision'
-      );
-      const listKey = activeRun?.listKey ?? 'implementation';
+        // Determine listKey from active loop runs, fallback to 'implementation'
+        const activeRun = Object.values(session.loopRuns).find(
+          (run) => run.status === 'running' || run.status === 'awaiting_decision'
+        );
+        const listKey = activeRun?.listKey ?? 'implementation';
 
-      // Compute next available task ID across all existing lists
-      const maxExisting = Object.values(session.tasks)
-        .flat()
-        .reduce((max, t) => {
-          const num = parseInt(t.id.replace('task-', ''), 10);
-          return num > max ? num : max;
-        }, -1);
+        // Compute next available task ID across all existing lists
+        const maxExisting = Object.values(session.tasks)
+          .flat()
+          .reduce((max, t) => {
+            const num = parseInt(t.id.replace('task-', ''), 10);
+            return num > max ? num : max;
+          }, -1);
 
-      // Assign IDs to incoming tasks
-      const tasksWithIds = tasksInput.map((task, i) => ({
-        ...task,
-        id: `task-${maxExisting + 1 + i}`,
-      }));
+        // Assign IDs to incoming tasks
+        const tasksWithIds = tasksInput.map((task, i) => ({
+          ...task,
+          id: `task-${maxExisting + 1 + i}`,
+        }));
 
-      const tasks = await this.taskApi.setTasks(ctx.sessionID, { listKey, tasks: tasksWithIds });
-      return {
-        output: `Stored ${tasks.length} task(s) in ${listKey}`,
-        metadata: { sessionId: ctx.sessionID, listKey, taskCount: tasks.length },
-      };
+        const tasks = await this.taskApi.setTasks(ctx.sessionID, {
+          listKey,
+          tasks: tasksWithIds,
+        });
+        return {
+          output: `Stored ${tasks.length} task(s) in ${listKey}`,
+          metadata: { sessionId: ctx.sessionID, listKey, taskCount: tasks.length },
+        } as ToolResult;
+      });
+
+      return result;
     } catch (error) {
       return { output: error instanceof Error ? error.message : String(error) };
     }
@@ -558,6 +578,9 @@ class StateMachineRuntime {
     input: { tool: string; sessionID: string; callID: string },
     output: { args: unknown }
   ): Promise<void> {
+    // Normalize tool name to lowercase (SDK may send any casing)
+    const tool = this.normalizeTool(input.tool);
+
     // SDK передаёт args вызова в output.args для tool.execute.before,
     // НЕ в input.args (в input.args нет поля args по типам SDK).
     const args = output.args;
@@ -574,11 +597,11 @@ class StateMachineRuntime {
     }
 
     // 2. Consent parsing (Question tool)
-    if (await this.consentBefore(input.tool, input.sessionID, input.callID, args)) return;
+    if (await this.consentBefore(tool, input.sessionID, input.callID, args)) return;
 
     // 3. Task admission — correlate the native call with declarative workflow work.
     // Проверяем только task с маркером [workflow-task:] — обычные task (architect и т.д.) проходят без admission.
-    if (this.isWorkflowTask(input.tool, args)) {
+    if (this.isWorkflowTask(tool, args)) {
       await this.handleTaskBefore(input.sessionID, input.callID, args, output);
       if (
         output.args &&
@@ -590,10 +613,10 @@ class StateMachineRuntime {
     }
 
     // 4. Commit Permit: block forbidden git commands, issue deliveryPermit for commit-task
-    await this.commitBefore(input.tool, input.sessionID, input.callID, args, output);
+    await this.commitBefore(tool, input.sessionID, input.callID, args, output);
 
     // 5. Mutation guard (Bash/Write tool)
-    await this.mutationBefore(input.tool, input.sessionID, input.callID, output);
+    await this.mutationBefore(tool, input.sessionID, input.callID, output);
   }
 
   private isWorkflowTask(tool: string, args: unknown): boolean {
@@ -763,9 +786,6 @@ class StateMachineRuntime {
         displayDescription:
           typeof description === 'string' ? description.slice(match[0].length).trimStart() : '',
       });
-
-      // Save session to persist currentPhase for TUI
-      await this.store.save(session);
     });
   }
 
@@ -893,11 +913,14 @@ class StateMachineRuntime {
     input: { tool: string; sessionID: string; callID: string; args: unknown },
     output: { title: string; output: string; metadata: unknown }
   ): Promise<void> {
+    // Normalize tool name to lowercase (SDK may send any casing)
+    const tool = this.normalizeTool(input.tool);
+
     // 1. Guardrails — always sanitize output
-    this.guardrailAfter(output.output, input.tool);
+    output.output = this.guardrailAfter(output.output, tool);
 
     // 1b. Workflow result — parse and record <workflow-result> tags
-    await this.handleWorkflowResult(input.tool, input.sessionID, input.callID, output);
+    await this.handleWorkflowResult(tool, input.sessionID, input.callID, output);
 
     // 1c. Rules — PostToolUse evaluation + file observations
     await this.rulesRuntime.handleToolExecuteAfter(input, output);
@@ -906,19 +929,19 @@ class StateMachineRuntime {
     await this.handleFileToolAfter(input, output);
 
     // 2. Commit Permit: verify HEAD changed after commit-task
-    if (input.tool === 'Bash') {
+    if (tool === 'bash') {
       await this.handleCommitTaskAfter(input.sessionID, input.callID);
     }
 
     // 3. Question tool — consent request (approve/decline plan)
-    if (input.tool === 'Question') {
-      await this.consentAfter(input.tool, input.sessionID, input.callID, input.args, output);
+    if (tool === 'question') {
+      await this.consentAfter(tool, input.sessionID, input.callID, input.args, output);
     }
 
     // 5. Finish mutation (Bash/Write tool) — единственный путь finalization.
     //    MutationOrchestrator.finishMutation вычисляет scope, валидацию
     //    инвариантов и устанавливает gate через один вызов domain finishMutation.
-    await this.mutationAfter(input.tool, input.sessionID, input.callID, output);
+    await this.mutationAfter(tool, input.sessionID, input.callID, output);
 
     // 6. Try transitions — после любого инструмента проверяем, можно ли перейти
     await this.transitionAfter(input.sessionID);
@@ -1064,23 +1087,23 @@ class StateMachineRuntime {
   async handleEvent(event: {
     event: {
       type: string;
-      message?: { id: string; parts?: Array<{ type: string; status?: string }> };
-      part?: { id: string; status?: string };
+      message?: { id: string; parts?: Array<{ type: string; status?: string; callID?: string }> };
+      part?: { id: string; status?: string; callID?: string };
     };
   }): Promise<void> {
     // Check if event indicates an error
     const isError = this.isErrorEvent(event);
-    if (!isError) return;
 
-    // Find the matching callId
-    // Part ID convention: parts with errors carry 'failed' status
-    const callId = this.extractCallId(event);
-    if (!callId) return;
+    if (isError) {
+      // Find the matching callId
+      const callId = this.extractCallId(event);
+      if (callId) {
+        await this.mutationOrchestrator.clearOnError(callId);
+        await this.markTaskOperationInterrupted(callId);
+      }
+    }
 
-    await this.mutationOrchestrator.clearOnError(callId);
-    await this.markTaskOperationInterrupted(callId);
-
-    // Delegate to rules sub-system
+    // Always delegate to rules sub-system — even for non-error events
     await this.rulesRuntime.handleEvent(event);
   }
 
@@ -1102,8 +1125,8 @@ class StateMachineRuntime {
   private isErrorEvent(event: {
     event: {
       type: string;
-      message?: { id: string; parts?: Array<{ type: string; status?: string }> };
-      part?: { id: string; status?: string };
+      message?: { id: string; parts?: Array<{ type: string; status?: string; callID?: string }> };
+      part?: { id: string; status?: string; callID?: string };
     };
   }): boolean {
     return event.event.type === 'message.part.updated' && event.event.part?.status === 'failed';
@@ -1112,11 +1135,15 @@ class StateMachineRuntime {
   private extractCallId(event: {
     event: {
       type: string;
-      message?: { id: string; parts?: Array<{ type: string; status?: string }> };
-      part?: { id: string; status?: string };
+      message?: { id: string; parts?: Array<{ type: string; status?: string; callID?: string }> };
+      part?: { id: string; status?: string; callID?: string };
     };
   }): string | null {
-    // Try part ID first
+    // Prefer part.callID when available (SDK correlation identifier)
+    if (event.event.part?.callID) {
+      return event.event.part.callID;
+    }
+    // Fallback to part.id for backward compatibility
     if (event.event.part?.id) {
       return event.event.part.id;
     }
@@ -1332,11 +1359,12 @@ class StateMachineRuntime {
     return false;
   }
 
-  private guardrailAfter(toolOutput: string, tool: string): void {
+  private guardrailAfter(toolOutput: string, tool: string): string {
     const sanitized = sanitizeToolOutput(toolOutput, tool);
     if (sanitized.hits.length > 0) {
       void this.log('warn', `Sanitized output from ${tool}`, { hits: sanitized.hits });
     }
+    return sanitized.output;
   }
 
   // ── Inlined handler methods (former ConsentHandler) ──────────────────
@@ -1347,7 +1375,7 @@ class StateMachineRuntime {
     callID: string,
     args: unknown
   ): Promise<boolean> {
-    if (tool !== 'Question' || !args) return false;
+    if (tool !== 'question' || !args) return false;
     const questionArgs = args as { questions?: Array<{ question?: string }> };
     const questionText = questionArgs?.questions?.[0]?.question ?? '';
     if (questionText) {
@@ -1363,7 +1391,7 @@ class StateMachineRuntime {
     args: unknown,
     output: { title: string; output: string; metadata: unknown }
   ): Promise<boolean> {
-    if (tool !== 'Question') return false;
+    if (tool !== 'question') return false;
     await this.consentOrchestrator.after(sessionID, callID, args, output);
     return true;
   }
@@ -1377,7 +1405,7 @@ class StateMachineRuntime {
     args: unknown,
     output: { args: unknown }
   ): Promise<boolean> {
-    if (tool === 'Bash') {
+    if (tool === 'bash') {
       const command = typeof args === 'string' ? args : JSON.stringify(args ?? '');
       if (hasForbiddenGitSubcommand(command)) {
         output.args = {
@@ -1409,7 +1437,7 @@ class StateMachineRuntime {
     callID: string,
     output: { args: unknown }
   ): Promise<void> {
-    if (tool !== 'Bash' && tool !== 'Write') return;
+    if (tool !== 'bash' && tool !== 'write') return;
     await this.mutationOrchestrator.beginMutation({ sessionID, callID }, output);
   }
 
@@ -1419,7 +1447,7 @@ class StateMachineRuntime {
     callID: string,
     output: { title: string; output: string; metadata: unknown }
   ): Promise<void> {
-    if (tool !== 'Bash' && tool !== 'Write') return;
+    if (tool !== 'bash' && tool !== 'write') return;
     await this.mutationOrchestrator.finishMutation(
       { sessionID, callID, metadata: output.metadata },
       (text) => {
