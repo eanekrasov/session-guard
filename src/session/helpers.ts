@@ -19,14 +19,26 @@ export interface SetGateStatusOptions {
   bumpRetry?: string;
 }
 
+/**
+ * Record a verdict about a gate, creating the gate if this is the first one.
+ *
+ * A session carries no gate list of its own — the profile declares what the
+ * workflow waits for, and a gate exists here only once somebody has spoken
+ * about it. Returning early on an unknown id would drop that first verdict on
+ * the floor, which is why this upserts rather than looks up.
+ */
 export function setGateStatus(
   session: WorkflowSession,
   gateId: string,
   status: GateStatus,
   options?: SetGateStatusOptions
 ): void {
-  const gate = session.gates.find((g) => g.id === gateId);
-  if (!gate) return;
+  if (!gateId) return;
+  let gate = session.gates.find((g) => g.id === gateId);
+  if (!gate) {
+    gate = { id: gateId, status };
+    session.gates.push(gate);
+  }
   gate.status = status;
   if (status === 'passed' || status === 'failed') {
     gate.resolvedAt = new Date().toISOString();

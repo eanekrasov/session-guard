@@ -285,17 +285,3 @@ export type WorkflowSessionRead = z.input<typeof WorkflowSessionSchema>;
 
 /** Key for the plan document reference in `refs`. */
 export const REF_PLAN = 'plan';
-
-// ─── CORE_GATES ───────────────────────────────────────────────────────────────
-
-export const CORE_GATES = [
-  { id: 'invariants', status: 'pending' as const, label: 'Invariants check' },
-  { id: 'review', status: 'pending' as const, label: 'Code review' },
-  { id: 'qa', status: 'pending' as const, label: 'QA verification' },
-  { id: 'checkout_done', status: 'pending' as const, label: 'Checkout complete' },
-  { id: 'build_done', status: 'pending' as const, label: 'Build complete' },
-  { id: 'deploy_done', status: 'pending' as const, label: 'Deploy complete' },
-  { id: 'unit', status: 'pending' as const, label: 'Unit tests' },
-  { id: 'integration', status: 'pending' as const, label: 'Integration tests' },
-  { id: 'smoke', status: 'pending' as const, label: 'Smoke tests' },
-] satisfies Gate[];

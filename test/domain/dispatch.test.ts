@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { WorkflowSession } from '../../src/session/session-schema.ts';
-import { CORE_GATES } from '../../src/session/session-schema.ts';
+import { baseGates } from '../support/task-factory.ts';
 import { clearActiveMutation } from '../../src/domain/operation-lifecycle.ts';
 import { markOutputReady, getExecutionProgress, canExitExecution } from '../../test/helpers.ts';
 import { createTask } from '../support/task-factory.ts';
@@ -12,7 +12,7 @@ function makeSession(overrides: Partial<WorkflowSession> = {}): WorkflowSession 
     schemaVersion: 2,
     revision: 0,
     title: '',
-    gates: CORE_GATES.map((g) => ({ ...g })),
+    gates: baseGates(),
     approvals: [],
     refs: {},
     tasks: {},

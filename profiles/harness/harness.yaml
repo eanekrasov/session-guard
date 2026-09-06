@@ -4,9 +4,10 @@
 # (stages, transitions, guards) is inherited. Resolution order is
 # parent-then-child, so these values win.
 #
-# NOTE: stage-level `allowedAgents` is deliberately NOT declared. The engine
-# compares it against an agent id the host never supplies, so any value there
-# blocks every mutation in that stage. See profiles/README.md.
+# NOTE: stage-level `allowedAgents` is deliberately NOT declared. It is checked
+# at task admission, against a nested stage's roster or its parent's, so a
+# stage without `stages` never reaches the check and a roster there is inert —
+# not dangerous, just unread. See profiles/README.md, "Known traps".
 
 # The harness profile ships a single agent, so it is also the one allowed to
 # drive workflow task state. Every other profile defaults to `orchestrator`.

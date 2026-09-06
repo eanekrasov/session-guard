@@ -52,6 +52,7 @@ export function mergeSchemasToEngineConfig(schemas: ResolvedSchema[]): EngineCon
   const transitionsMap = new Map<string, NonNullable<ResolvedSchema['transitions']>[number]>();
   const actionGuardMap: Record<string, string> = {};
   let requiredGates: string[] | undefined;
+  let gates: ResolvedSchema['gates'];
   let taskControlAgents: string[] | undefined;
 
   for (const schema of schemas) {
@@ -73,6 +74,10 @@ export function mergeSchemasToEngineConfig(schemas: ResolvedSchema[]): EngineCon
       requiredGates = [...schema.requiredGates];
     }
 
+    if (schema.gates !== undefined) {
+      gates = schema.gates.map((gate) => ({ ...gate }));
+    }
+
     if (schema.taskControlAgents !== undefined) {
       taskControlAgents = [...schema.taskControlAgents];
     }
@@ -84,6 +89,7 @@ export function mergeSchemasToEngineConfig(schemas: ResolvedSchema[]): EngineCon
     transitions: Array.from(transitionsMap.values()),
     actionGuards: Object.keys(actionGuardMap).length > 0 ? actionGuardMap : undefined,
     requiredGates,
+    gates,
     taskControlAgents,
   };
 }

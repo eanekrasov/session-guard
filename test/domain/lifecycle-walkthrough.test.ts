@@ -6,7 +6,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import type { WorkflowSession } from '../../src/session/session-schema.ts';
-import { CORE_GATES } from '../../src/session/session-schema.ts';
+import { baseGates } from '../support/task-factory.ts';
 import type { EngineConfig, TransitionCheck } from '../../src/domain/engine.ts';
 import { StateMachineEngine } from '../../src/domain/engine.ts';
 import { approve } from '../../src/domain/approvals.ts';
@@ -42,7 +42,7 @@ function createSession(): WorkflowSession {
     schemaVersion: 1,
     revision: 0,
     title: '',
-    gates: CORE_GATES.map((g) => ({ ...g })),
+    gates: baseGates(),
     approvals: [],
     refs: {},
     tasks: { implementation: [] },

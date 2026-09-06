@@ -1,6 +1,6 @@
 import { type GuardEvaluationContext, GuardEvaluator } from '../schema/guard-evaluator.ts';
 import type { TaskStatus, WorkflowSession } from '../session/session-schema.ts';
-import type { StageAssignmentRule, StageDef, TransitionDef } from '../schema/types.ts';
+import type { GateItem, StageAssignmentRule, StageDef, TransitionDef } from '../schema/types.ts';
 import type { SessionFacts } from './session-facts.ts';
 import { toSessionFacts } from './session-facts.ts';
 import { bumpRetry } from '../session/helpers.ts';
@@ -66,6 +66,8 @@ export interface EngineConfig {
   stageLevelGuards?: Record<string, StageEntryExitGuards>;
   /** gate IDs that must pass for kind=pass transitions (schema-level, last wins) */
   requiredGates?: string[];
+  /** The gates the workflow declares — what a stage's `gates:` is checked against. */
+  gates?: GateItem[];
   /** agents allowed to drive workflow task state (schema-level, last wins) */
   taskControlAgents?: string[];
 }

@@ -35,8 +35,9 @@ transitions its parent declared for that stage.
 There is one unit of workflow state: the **stage**. A stage that names a task
 list in `loop:` runs its own `stages` once per task, moved by its own
 `transitions`. Nesting is the only difference between an inner stage and an
-outer one — `allowedAgents`, `gates`, `transitions`, guards, effects and retry
-budgets mean the same at either level.
+outer one: `gates`, `transitions`, guards, effects and retry budgets mean the
+same at either level. `allowedAgents` is the exception — it is read only at
+task admission, so outside a loop it is inert. See "Known traps" below.
 
 `gates:` on a stage declares what it waits for. Its agents finish with a
 `<workflow-result>` whose `stage` field names one of those gates — never the

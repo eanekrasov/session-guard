@@ -14,16 +14,19 @@ import { createTask } from '../support/task-factory.ts';
  * What the compiler refuses at load.
  *
  * Every one of these was previously a silence: a guard that read false
- * forever, a verdict recorded against a gate nobody carries, a retry that
- * spent a counter no one was watching. A defect in the file should stop the
- * workflow when the file is read.
+ * forever, a verdict recorded against a gate the profile never declared, a
+ * retry that spent a counter no one was watching. A defect in the file should
+ * stop the workflow when the file is read.
  */
+
+/** What the fixture profile declares, so a stage's `gates:` has a list to be wrong about. */
+const DECLARED_GATES = [{ id: 'invariants' }, { id: 'review' }, { id: 'qa' }];
 
 function schema(
   stages: ResolvedSchema['stages'],
   transitions: ResolvedSchema['transitions'] = []
 ): ResolvedSchema {
-  return { source: 'test.yaml', stages, transitions };
+  return { source: 'test.yaml', stages, transitions, gates: DECLARED_GATES };
 }
 
 function messages(input: ResolvedSchema): string[] {
@@ -59,20 +62,31 @@ describe('a workflow that cannot run is refused when it is read', () => {
     );
   });
 
-  it('refuses a gate no session carries', () => {
+  it('refuses a gate the profile does not declare', () => {
     const input = schema({
       execution: {
         loop: 'implementation',
         stages: { verify: { gates: ['review', 'security'] } },
       },
     });
-    expect(messages(input)).toContain('Gate "security" is not a gate any session carries');
+    expect(messages(input)).toContain('Gate "security" is not a gate this profile declares');
   });
 
-  it('refuses a gate no session carries on an outer stage too', () => {
+  it('refuses a gate the profile does not declare on an outer stage too', () => {
     expect(messages(schema({ validation: { gates: ['smoke'] } }))).toContain(
-      'Gate "smoke" is not a gate any session carries'
+      'Gate "smoke" is not a gate this profile declares'
     );
+  });
+
+  it('accepts any gate name when the profile declares none', () => {
+    // No declaration is not an empty declaration: there is nothing to be wrong
+    // about, so the compiler must not invent a list of its own to reject against.
+    const undeclared: ResolvedSchema = {
+      source: 'test.yaml',
+      stages: { validation: { gates: ['smoke'] } },
+      transitions: [],
+    };
+    expect(messages(undeclared)).toEqual([]);
   });
 
   it('refuses a transition to a stage the loop does not have', () => {

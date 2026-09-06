@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { WorkflowSession } from '../../src/session/session-schema.ts';
-import { CORE_GATES } from '../../src/session/session-schema.ts';
+import { baseGates } from '../support/task-factory.ts';
 import { StateMachineEngine, type EngineConfig } from '../../src/domain/engine.ts';
 import { compileWorkflow, type CompiledWorkflow } from '../../src/schema/compile-workflow.ts';
 import type { ResolvedSchema } from '../../src/schema/types.ts';
@@ -12,7 +12,7 @@ function createSession(overrides: Partial<WorkflowSession> = {}): WorkflowSessio
     schemaVersion: 1,
     revision: 0,
     title: 'Control flow test',
-    gates: CORE_GATES.map((g) => ({ ...g })),
+    gates: baseGates(),
     approvals: [],
     refs: {},
     tasks: { implementation: [] },

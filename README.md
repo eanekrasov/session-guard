@@ -283,15 +283,29 @@ WorkflowSession (Zod-схема)
 └── updatedAt      — ISO timestamp
 ```
 
-### CORE_GATES
+### Гейты
 
-```typescript
-const CORE_GATES = [
-  { id: 'invariants', status: 'pending', label: 'Invariants check' },
-  { id: 'review',     status: 'pending', label: 'Code review' },
-  { id: 'qa',         status: 'pending', label: 'QA verification' },
-];
+Сессия не несёт собственного списка гейтов. Гейт появляется в ней тогда, когда
+по нему приходит первый вердикт (`setGateStatus`), а гейт, о котором никто не
+говорил, отсутствует — и любой guard читает отсутствие как «не passed».
+
+Список объявляет профиль, а не код:
+
+```yaml
+# profiles/base/base.yaml
+gates:
+  - id: invariants
+    label: Invariants check
+  - id: review
+    label: Code review
+  - id: qa
+    label: QA verification
 ```
+
+Компилятор (`src/schema/compile-workflow.ts`) сверяет `gates:` каждой стадии с
+этим объявлением, поэтому опечатка в имени гейта — ошибка компиляции, а не
+стадия, которая ждёт вечно. Профиль, не объявивший гейтов, сверять не с чем:
+проверка пропускается, а не выдумывает список за него.
 
 ### SessionStore — файловое I/O (src/session/session-store.ts)
 
@@ -1228,7 +1242,7 @@ tool({
 })
 ```
 - Проверка существующей сессии (idempotent)
-- `createSession(sessionId, profileId)` — начальная сессия с CORE_GATES
+- `createSession(sessionId, profileId)` — начальная сессия с пустым списком гейтов
 
 **workflow.list**
 ```typescript

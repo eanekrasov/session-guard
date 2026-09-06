@@ -2,7 +2,7 @@ import { mkdir, readFile, rename, writeFile, readdir, unlink } from 'node:fs/pro
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { WorkflowSessionSchema, CORE_GATES } from './session-schema.ts';
+import { WorkflowSessionSchema } from './session-schema.ts';
 import type { WorkflowSession } from './session-schema.ts';
 import type { LogFn } from '../app/logger.ts';
 
@@ -15,7 +15,11 @@ export function createSession(sessionId: string, profileId: string): WorkflowSes
     profileId,
     revision: 0,
     title: '',
-    gates: CORE_GATES.map((g) => ({ ...g })),
+    // Gates are created on demand by the first verdict about them. A gate
+    // nobody has spoken about is absent, and every reader already treats
+    // absent as pending — so a seeded list would only be a copy of the
+    // profile's declaration that can drift from it.
+    gates: [],
     approvals: [],
     refs: {},
     tasks: {},

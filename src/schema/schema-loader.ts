@@ -136,6 +136,7 @@ export class SchemaLoader {
       editingAgents: extension.editingAgents ?? base.editingAgents,
       verifiers: extension.verifiers ?? base.verifiers,
       requiredGates: extension.requiredGates ?? base.requiredGates,
+      gates: extension.gates ?? base.gates,
       taskControlAgents: extension.taskControlAgents ?? base.taskControlAgents,
       actionGuards: extension.actionGuards ?? base.actionGuards,
       stageAssignments: extension.stageAssignments ?? base.stageAssignments,

@@ -26,10 +26,19 @@ import { buildDashboardSchema } from './dashboard-contract.ts';
 import type { WorkflowSession } from '../session/session-schema.ts';
 import { StateMachineEngine } from '../domain/engine.ts';
 import type { EngineConfig } from '../domain/engine.ts';
-import { CORE_GATES } from '../session/session-schema.ts';
 import { getIssue, postComment } from './beads-bridge.ts';
 
 // ─── Config ──────────────────────────────────────────────────────────────────
+
+/**
+ * The gates the base workflow declares, for the static `/api/schema` reply.
+ *
+ * That endpoint describes a workflow, not a session, and it already hardcodes
+ * its stages and transitions rather than loading the running profile. This is
+ * the same placeholder at the same fidelity — sessions themselves now carry no
+ * gate list to read.
+ */
+const BASE_WORKFLOW_GATES = ['invariants', 'review', 'qa'] as const;
 
 const SESSIONS_DIR = join(import.meta.dir, '..', '..', '.opencode', 'state-machine', 'sessions');
 const OPENCODE_ROOT = resolve(join(import.meta.dir, '..', '..', '.opencode'));
@@ -450,13 +459,13 @@ serve({
           { from: 'execution', to: 'commit' },
           { from: 'commit', to: 'done' },
         ],
-        gates: CORE_GATES.map((g) => ({ id: g.id })),
+        gates: BASE_WORKFLOW_GATES.map((id) => ({ id })),
         profile: {
           id: process.env['HARNESS_PROFILE'] ?? 'base',
           version: '1.0',
           description: 'State machine workflow',
           invariants: [],
-          mandatoryStages: ['invariants', 'review', 'qa'],
+          mandatoryStages: [...BASE_WORKFLOW_GATES],
           agents: [],
           skills: [],
         },

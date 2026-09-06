@@ -5,7 +5,6 @@ import {
   WorkflowSessionSchema,
   ApprovalSchema,
   GateSchema,
-  CORE_GATES,
   MutationTaskSchema,
   ActiveOperationSchema,
 } from '../../src/session/session-schema.ts';
@@ -309,17 +308,5 @@ describe('ActiveOperationSchema', () => {
 
     expect(result.baseline).toBeUndefined();
     expect(result.invariants).toBeUndefined();
-  });
-});
-
-describe('CORE_GATES', () => {
-  it('has 3 gates: invariants, review, qa — all pending', () => {
-    expect(CORE_GATES).toHaveLength(3);
-    expect(CORE_GATES[0].id).toBe('invariants');
-    expect(CORE_GATES[0].status).toBe('pending');
-    expect(CORE_GATES[1].id).toBe('review');
-    expect(CORE_GATES[1].status).toBe('pending');
-    expect(CORE_GATES[2].id).toBe('qa');
-    expect(CORE_GATES[2].status).toBe('pending');
   });
 });

@@ -7,6 +7,7 @@ import type { Hooks, PluginInput } from '@opencode-ai/plugin';
 import { createRuntime } from '../../src/app/runtime.ts';
 import { createSession, WorkflowStore } from '../../src/session/session-store.ts';
 import type { WorkflowSession } from '../../src/session/session-schema.ts';
+import { setGateStatus } from '../../src/session/helpers.ts';
 import { createTask } from '../support/task-factory.ts';
 
 /**
@@ -478,8 +479,7 @@ describe('a guard inside a loop reads the session the same way one outside it do
     const hooks = createRuntime(pluginInput());
 
     const session = await load(store);
-    const invariants = session.gates.find((gate) => gate.id === 'invariants')!;
-    invariants.status = 'passed';
+    setGateStatus(session, 'invariants', 'passed');
     await store.save(session);
 
     await dispatch(hooks, 'call-code', 'code');

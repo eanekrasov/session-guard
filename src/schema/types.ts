@@ -18,6 +18,7 @@ import type {
   StageDef,
   StageAssignmentRule,
   TransitionDef,
+  GateItem,
   TransitionEffect,
 } from './profile-schema.ts';
 
@@ -43,7 +44,7 @@ export interface ResolvedMetadata {
   skillsDir: string;
 }
 
-// ResolvedSchema — resolved версия ProfileSchema без extends/gates/tools/gateMapping.
+// ResolvedSchema — resolved версия ProfileSchema без extends/tools/gateMapping.
 // Индексная сигнатура для совместимости с z.infer (ProfileSchemaSchema.passthrough()).
 
 /**
@@ -75,6 +76,14 @@ export interface ResolvedSchema {
   editingAgents?: string[];
   verifiers?: string[];
   requiredGates?: string[];
+  /**
+   * The gates this workflow declares.
+   *
+   * The compiler checks a stage's `gates:` against this, so a typo is caught
+   * by comparing it with the profile that owns the workflow rather than with a
+   * whitelist of names hardcoded in the compiler.
+   */
+  gates?: GateItem[];
   taskControlAgents?: string[];
   actionGuards?: Record<string, string>;
   stageAssignments?: StageAssignmentRule[];

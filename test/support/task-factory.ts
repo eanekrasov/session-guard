@@ -1,4 +1,4 @@
-import type { MutationTask } from '../../src/session/session-schema.ts';
+import type { Gate, MutationTask } from '../../src/session/session-schema.ts';
 
 /**
  * Build one `MutationTask` for tests. Returns the inferred `MutationTask`
@@ -17,3 +17,17 @@ export const createTask = (overrides: Partial<MutationTask> = {}): MutationTask 
  */
 export const createTasks = (...overrides: Array<Partial<MutationTask>>): MutationTask[] =>
   overrides.map((o, i) => createTask({ id: `task-${i + 1}`, ...o }));
+
+/**
+ * The three gates the base workflow declares, all pending.
+ *
+ * Sessions no longer seed a gate list — gates are created by the first verdict
+ * about them (`setGateStatus`). Tests that want a session already carrying the
+ * base workflow's gates say so here rather than importing a constant from
+ * production code that exists only for them.
+ */
+export const baseGates = (): Gate[] => [
+  { id: 'invariants', status: 'pending', label: 'Invariants check' },
+  { id: 'review', status: 'pending', label: 'Code review' },
+  { id: 'qa', status: 'pending', label: 'QA verification' },
+];

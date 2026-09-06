@@ -263,6 +263,7 @@ export class ProfileResolver {
       editingAgents: currentSchema.editingAgents,
       verifiers: currentSchema.verifiers,
       requiredGates: currentSchema.requiredGates,
+      gates: currentSchema.gates,
       taskControlAgents: currentSchema.taskControlAgents,
       actionGuards: currentSchema.actionGuards,
       stageAssignments: currentSchema.stageAssignments,

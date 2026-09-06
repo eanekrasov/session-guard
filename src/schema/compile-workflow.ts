@@ -108,8 +108,14 @@ export function compileWorkflow(schema: ResolvedSchema): {
     };
   }
 
+  // A stage's `gates:` is checked against what the profile declares, not
+  // against a list of names kept in the compiler. A profile that declares no
+  // gates has nothing to check against, so the check is skipped rather than
+  // guessed at.
+  const declaredGates = schema.gates ? new Set(schema.gates.map((gate) => gate.id)) : null;
+
   for (const [stageId, stageDef] of Object.entries(schema.stages ?? {})) {
-    validateNestedStages(stageId, stageDef, errors);
+    validateNestedStages(stageId, stageDef, declaredGates, errors);
   }
 
   // Build compiled transitions
@@ -142,23 +148,6 @@ export function compileWorkflow(schema: ResolvedSchema): {
   };
 }
 
-/**
- * Gates a session carries. A stage may only close one of these — a gate named
- * by nobody is a verdict that goes nowhere, which is exactly the silence this
- * compiler exists to turn into an error.
- */
-const KNOWN_GATES = new Set([
-  'invariants',
-  'review',
-  'qa',
-  'checkout_done',
-  'build_done',
-  'deploy_done',
-  'unit',
-  'integration',
-  'smoke',
-]);
-
 /** The transition target that ends a task's work; never a stage of its own. */
 const TASK_DONE = 'done';
 
@@ -166,10 +155,18 @@ const TASK_DONE = 'done';
  * Check a stage's own stages and transitions.
  *
  * These are the rules the runtime would otherwise discover one failed workflow
- * at a time: a transition to a stage that does not exist, a gate no session
- * carries, a retry budget belonging to something other than the task.
+ * at a time: a transition to a stage that does not exist, a gate the profile
+ * never declared, a retry budget belonging to something other than the task.
+ *
+ * `declaredGates` is `null` when the profile declares no gates at all — there
+ * is then nothing to compare against, and no gate name is rejected.
  */
-function validateNestedStages(stageId: string, stageDef: StageDef, errors: CompileError[]): void {
+function validateNestedStages(
+  stageId: string,
+  stageDef: StageDef,
+  declaredGates: Set<string> | null,
+  errors: CompileError[]
+): void {
   const nested = nestedStages(stageDef);
   const nestedIds = new Set(nested.map((entry) => entry.id));
 
@@ -199,21 +196,21 @@ function validateNestedStages(stageId: string, stageDef: StageDef, errors: Compi
 
   for (const entry of nested) {
     for (const gate of entry.gates ?? []) {
-      if (!KNOWN_GATES.has(gate)) {
+      if (declaredGates && !declaredGates.has(gate)) {
         errors.push({
           path: `stages.${stageId}.stages.${entry.id}.gates`,
-          message: `Gate "${gate}" is not a gate any session carries`,
+          message: `Gate "${gate}" is not a gate this profile declares`,
         });
       }
     }
-    validateNestedStages(`${stageId}.stages.${entry.id}`, entry, errors);
+    validateNestedStages(`${stageId}.stages.${entry.id}`, entry, declaredGates, errors);
   }
 
   for (const gate of stageDef.gates ?? []) {
-    if (!KNOWN_GATES.has(gate)) {
+    if (declaredGates && !declaredGates.has(gate)) {
       errors.push({
         path: `stages.${stageId}.gates`,
-        message: `Gate "${gate}" is not a gate any session carries`,
+        message: `Gate "${gate}" is not a gate this profile declares`,
       });
     }
   }

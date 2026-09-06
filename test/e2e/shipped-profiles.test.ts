@@ -106,6 +106,17 @@ describe('shipped profiles', () => {
     expect(android.profile.schemas.some((s) => s.editingAgents?.includes('figma'))).toBe(true);
   });
 
+  it.each(['base', 'harness', 'android'])(
+    '%s declares the gates its stages wait on',
+    async (id) => {
+      // The compiler checks a stage's `gates:` against this declaration, so a
+      // profile that loses it on the way through resolution turns the check
+      // off instead of failing it.
+      const { config } = await engineConfigFor(id);
+      expect(config.gates?.map((gate) => gate.id)).toEqual(['invariants', 'review', 'qa']);
+    }
+  );
+
   it.each(['base', 'harness', 'android'])('%s compiles without errors', async (id) => {
     const { compileWorkflow } = await import('../../src/schema/compile-workflow.ts');
     const { config, profile } = await engineConfigFor(id);
@@ -114,6 +125,9 @@ describe('shipped profiles', () => {
       stages: config.stages,
       transitions: config.transitions,
       stageAssignments: config.stageAssignments,
+      // Without this the compiler has no declaration to check a stage's
+      // `gates:` against, and the gate-name check silently passes.
+      gates: config.gates,
     });
     expect(errors, errors.map((e) => `${e.path}: ${e.message}`).join('\n')).toEqual([]);
   });

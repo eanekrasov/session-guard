@@ -34,26 +34,18 @@ describe('createSession', () => {
     expect(session.preset).toBeUndefined();
   });
 
-  it('creates CORE_GATES deep copy — 3 gates, all pending', () => {
+  it('carries no gates — they are created by the first verdict about them', () => {
     const session = createSession('session-123', 'android');
 
-    expect(session.gates).toHaveLength(3);
-    expect(session.gates[0]).toEqual({
-      id: 'invariants',
-      status: 'pending',
-      label: 'Invariants check',
-    });
-    expect(session.gates[1]).toEqual({ id: 'review', status: 'pending', label: 'Code review' });
-    expect(session.gates[2]).toEqual({ id: 'qa', status: 'pending', label: 'QA verification' });
+    expect(session.gates).toEqual([]);
   });
 
-  it('creates CORE_GATES as a deep copy (mutating gates does not affect CORE_GATES)', () => {
+  it('does not share gate state between sessions', () => {
     const session = createSession('session-123', 'android');
-    session.gates[0].status = 'passed';
+    setGateStatus(session, 'invariants', 'passed');
 
-    // Re-create and verify the original CORE_GATES values are untouched
-    const session2 = createSession('session-456', 'ios');
-    expect(session2.gates[0].status).toBe('pending');
+    const other = createSession('session-456', 'ios');
+    expect(other.gates).toEqual([]);
   });
 
   it('initializes retryBudgets without a legacy global default', () => {
@@ -66,6 +58,7 @@ describe('createSession', () => {
 describe('getGate', () => {
   it('returns a gate by its id', () => {
     const session = createSession('session-123', 'android');
+    setGateStatus(session, 'invariants', 'pending');
 
     const gate = getGate(session, 'invariants');
 
@@ -134,13 +127,33 @@ describe('setGateStatus', () => {
     expect(gate!.resolvedAt).toBeUndefined();
   });
 
-  it('is a no-op for unknown gate id', () => {
+  it('creates a gate the session does not carry yet', () => {
     const session = createSession('session-123', 'android');
-    const originalGates = [...session.gates];
 
-    setGateStatus(session, 'nonexistent', 'passed');
+    setGateStatus(session, 'deploy_done', 'passed');
 
-    expect(session.gates).toEqual(originalGates);
+    const gate = getGate(session, 'deploy_done');
+    expect(gate).toBeDefined();
+    expect(gate!.status).toBe('passed');
+    expect(gate!.resolvedAt).toBeDefined();
+  });
+
+  it('records a second verdict on the gate it already created, not a duplicate', () => {
+    const session = createSession('session-123', 'android');
+
+    setGateStatus(session, 'review', 'failed');
+    setGateStatus(session, 'review', 'passed');
+
+    expect(session.gates.filter((g) => g.id === 'review')).toHaveLength(1);
+    expect(getGate(session, 'review')!.status).toBe('passed');
+  });
+
+  it('ignores an empty gate id rather than storing an unnameable gate', () => {
+    const session = createSession('session-123', 'android');
+
+    setGateStatus(session, '', 'passed');
+
+    expect(session.gates).toEqual([]);
   });
 });
 
