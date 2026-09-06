@@ -497,8 +497,7 @@ class StateMachineRuntime {
     args: { schemaId?: string },
     ctx: { sessionID: string }
   ): Promise<ToolResult> {
-    const requested =
-      args.schemaId ?? process.env.HARNESS_SCHEMA_ID ?? process.env.HARNESS_PROFILE;
+    const requested = args.schemaId ?? process.env.HARNESS_SCHEMA_ID ?? process.env.HARNESS_PROFILE;
 
     // `<profileId>/<schemaId>`. Schema names are unique only inside their
     // profile, so an unqualified name has to name the profile instead; the
@@ -1153,7 +1152,10 @@ class StateMachineRuntime {
     // rather than blocking a call it does not govern.
     if (!session) return;
 
-    const engine = await this.mutationOrchestrator.resolveEngine(session.profileId, session.schemaId);
+    const engine = await this.mutationOrchestrator.resolveEngine(
+      session.profileId,
+      session.schemaId
+    );
     const requiredGates = engine.getRequiredGates();
     if (!canCommit(session, requiredGates)) {
       throw new WorkflowBlockedError('Cannot commit: not all gates passed or tasks completed');
@@ -1658,9 +1660,7 @@ class StateMachineRuntime {
           if (operation.status !== 'running') {
             return;
           }
-          const loopStage = parsed
-            ? await this.resolveLoopStage(session, run.listKey)
-            : null;
+          const loopStage = parsed ? await this.resolveLoopStage(session, run.listKey) : null;
           const nested = loopStage ? nestedStages(loopStage) : [];
           const currentStage = nested.find((entry) => entry.id === run.stage);
           const declaredGates = currentStage?.gates ?? [];
@@ -1738,7 +1738,10 @@ class StateMachineRuntime {
           }
 
           if (failed || passed) {
-            const engine = await this.mutationOrchestrator.resolveEngine(session.profileId, session.schemaId);
+            const engine = await this.mutationOrchestrator.resolveEngine(
+              session.profileId,
+              session.schemaId
+            );
             const movement = nextTaskStage(
               loopStage,
               run,
@@ -1873,7 +1876,10 @@ class StateMachineRuntime {
 
     let stage: StageDef | undefined;
     try {
-      const engine = await this.mutationOrchestrator.resolveEngine(session.profileId, session.schemaId);
+      const engine = await this.mutationOrchestrator.resolveEngine(
+        session.profileId,
+        session.schemaId
+      );
       stage = engine.getStages()[stageId];
     } catch (error) {
       // A profile we cannot read declares no gates we can honour. The verdict
@@ -1933,8 +1939,14 @@ class StateMachineRuntime {
    * whichever the search order reaches first — a parent's guard from one file,
    * a child's roster from another, never the stage the workflow actually runs.
    */
-  private async resolveLoopStage(session: WorkflowSession, listKey: string): Promise<StageDef | null> {
-    const engine = await this.mutationOrchestrator.resolveEngine(session.profileId, session.schemaId);
+  private async resolveLoopStage(
+    session: WorkflowSession,
+    listKey: string
+  ): Promise<StageDef | null> {
+    const engine = await this.mutationOrchestrator.resolveEngine(
+      session.profileId,
+      session.schemaId
+    );
     return engine.getLoopStage(listKey);
   }
 

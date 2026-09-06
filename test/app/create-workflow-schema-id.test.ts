@@ -45,16 +45,19 @@ async function create(sessionID: string, schemaId: string | undefined): Promise<
     serverUrl: new URL('http://localhost:0'),
     $: {} as PluginInput['$'],
   });
-  const result = await runtime.tool!['workflow.create'].execute({ schemaId } as never, {
-    sessionID,
-    messageID: 'm1',
-    agent: 'test',
-    directory: '/tmp/test',
-    worktree: '/tmp/test',
-    abort: new AbortController().signal,
-    metadata: () => {},
-    ask: async () => {},
-  } as never);
+  const result = await runtime.tool!['workflow.create'].execute(
+    { schemaId } as never,
+    {
+      sessionID,
+      messageID: 'm1',
+      agent: 'test',
+      directory: '/tmp/test',
+      worktree: '/tmp/test',
+      abort: new AbortController().signal,
+      metadata: () => {},
+      ask: async () => {},
+    } as never
+  );
   return typeof result === 'string' ? result : result.output;
 }
 

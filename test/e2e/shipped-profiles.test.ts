@@ -9,7 +9,10 @@ const PROFILES_DIR = path.resolve(import.meta.dirname, '../../profiles');
 
 async function engineConfigFor(profileId: string) {
   const profile = await resolveConfig(profileId, PROFILES_DIR);
-  return { profile, config: schemaToEngineConfig(selectSchema(profileId, profile.schemas, undefined)) };
+  return {
+    profile,
+    config: schemaToEngineConfig(selectSchema(profileId, profile.schemas, undefined)),
+  };
 }
 
 function stage(config: { stages?: Record<string, StageDef> }, id: string): StageDef | undefined {

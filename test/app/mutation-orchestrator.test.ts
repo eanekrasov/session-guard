@@ -101,7 +101,7 @@ describe('MutationOrchestrator.resolveEngine', () => {
     await expect(orchestrator.resolveEngine('cycle-probe')).rejects.toThrow(/Gate "security"/);
   });
 
-  it('serves each of a profile\'s schemas as its own workflow', async () => {
+  it("serves each of a profile's schemas as its own workflow", async () => {
     // `two-schemas` holds two independent workflows that declare the same
     // stage and the same edge. Folding the profile's list into one config —
     // which is what resolution used to do — let the last file win and served
@@ -176,7 +176,7 @@ describe('MutationOrchestrator.beginMutation', () => {
     expect(reloaded?.activeOperations['call-begin']?.taskId).toBe('task-1');
   });
 
-  it('parks a mutation-before-dispatch run in the loop\'s first stage, not a literal', async () => {
+  it("parks a mutation-before-dispatch run in the loop's first stage, not a literal", async () => {
     // A bash/write arriving before any `task` dispatch synthesises the run.
     // Its stage used to be written as the literal 'mutation', which no profile
     // declares, so every later dispatch for that task was refused for ever —

@@ -71,7 +71,7 @@ describe('WorkflowStore optimistic concurrency', () => {
   });
 });
 
-describe('the shipped profile\'s validation-failure edge', () => {
+describe("the shipped profile's validation-failure edge", () => {
   it('saves the workflow-level budget it spends', async () => {
     // base.yaml's `validation → execution` edge bumps `cycles`. Saving the
     // session afterwards used to throw "Retry budget key must be a workflow

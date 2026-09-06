@@ -546,7 +546,9 @@ describe('E2E: Full state machine flow', () => {
     addImplementationTask(session);
 
     beginMutation(session, 'm-1', 'unknown', () => 'code');
-    expect(() => beginMutation(session, 'm-2', 'unknown', () => 'code')).toThrow('Active operation already exists');
+    expect(() => beginMutation(session, 'm-2', 'unknown', () => 'code')).toThrow(
+      'Active operation already exists'
+    );
   });
 
   // ─── TC20: Two consecutive mutations (begin→finish→begin→finish) ──────────

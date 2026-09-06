@@ -72,7 +72,7 @@ async function listProfilesThrough(hooks: Record<string, unknown>): Promise<stri
 }
 
 describe('two projects in one process', () => {
-  it('does not serve the first project\'s profiles to the second', async () => {
+  it("does not serve the first project's profiles to the second", async () => {
     // Initialisation used to write the computed profiles directory into
     // process.env, so the second instance found it already set — with the
     // first project's path — and listed the first project's profiles.

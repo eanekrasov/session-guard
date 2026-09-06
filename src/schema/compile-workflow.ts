@@ -203,7 +203,12 @@ function validateKnownKeys(schema: ResolvedSchema, errors: CompileError[]): void
     if (key.startsWith('_') || SCHEMA_KEYS.has(key)) continue;
     errors.push({
       path: key,
-      message: `Unknown key "${key}". A key nothing reads is silently ignored; allowed: ${[...SCHEMA_KEYS].filter((k) => k !== 'id' && k !== 'source').sort().join(', ')}`,
+      message: `Unknown key "${key}". A key nothing reads is silently ignored; allowed: ${[
+        ...SCHEMA_KEYS,
+      ]
+        .filter((k) => k !== 'id' && k !== 'source')
+        .sort()
+        .join(', ')}`,
     });
   }
 

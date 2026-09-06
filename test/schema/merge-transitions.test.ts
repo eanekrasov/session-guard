@@ -31,7 +31,7 @@ describe('mergeTransitions', () => {
     expect(merged).toEqual([edge('a', 'b', 'only this one now')]);
   });
 
-  it('appends a pair the parent does not declare, after the parent\'s own', () => {
+  it("appends a pair the parent does not declare, after the parent's own", () => {
     const merged = mergeTransitions([edge('a', 'b', 'x')], [edge('b', 'c', 'y')]);
 
     expect(merged).toEqual([edge('a', 'b', 'x'), edge('b', 'c', 'y')]);

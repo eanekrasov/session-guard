@@ -14,9 +14,7 @@ describe('extends resolution order', () => {
     const profile = await resolveConfig('extends-child', profilesDir);
     // The child's schema is the only one the profile offers: its parent's is
     // folded into it through `extends`, not listed beside it.
-    expect(profile.schemas.map((schema) => schema.source)).toEqual([
-      'extends-child/child.yaml',
-    ]);
+    expect(profile.schemas.map((schema) => schema.source)).toEqual(['extends-child/child.yaml']);
   });
 
   it('lets the extending profile override an inherited transition guard', async () => {

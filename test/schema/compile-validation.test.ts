@@ -289,7 +289,11 @@ describe('a guard that cannot be parsed is refused at load', () => {
   it('accepts the guards the shipped vocabulary actually uses', () => {
     const input = schema({ a: {}, b: {} }, [
       { from: 'a', to: 'b', guard: "session.approved('plan') && !isExhausted('cycles')" },
-      { from: 'b', to: 'a', guard: "session.activeOperations.some(o => o.result == 'output_ready')" },
+      {
+        from: 'b',
+        to: 'a',
+        guard: "session.activeOperations.some(o => o.result == 'output_ready')",
+      },
     ]);
 
     expect(messages(input)).toEqual([]);
