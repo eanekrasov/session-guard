@@ -577,10 +577,45 @@ Two related gaps in what the compiler catches at all:
 
 ## A fixture corpus, and the pattern that earns it
 
-Agreed 2026-09-06, not started. **Full plan and the survey behind it:
-`docs/plans/fixture-corpus.md`** — including which assertions block the
-rewrite, which is the part that cost the effort. Tests come first: the fixtures
-cannot move until the assertions over them do. `test/fixtures/presets/` is the ancestor of
+Agreed 2026-09-06, not started. **Tests come first** — the fixtures cannot move
+until the assertions over them do.
+
+`docs/plans/` is in `.gitignore`, so a plan file there is a local note and
+nothing a later session is guaranteed to find. The survey that cost the effort
+therefore lives here.
+
+**What the vocabulary change actually costs: one assertion.**
+
+| Consumer | What it asserts about the fixtures |
+| --- | --- |
+| `test/schema/schema-loader.test.ts` | **`stages.PLANNING` is defined** (line 31) — the only assertion naming a stage; then settings deep-merge (`mutationTtlMs` 600000 overrides, `retryMaxAttempts` 3 inherits) and that transitions are overridden |
+| `test/schema/profile-loader.test.ts` | the ids listed, `base` metadata, `agentsDir` / `skillsDir` defaults, `no-id-profile` deriving its id, `missing-extends` rejecting |
+| `test/public-api.test.ts` | android metadata and inherited fields, `schemas[0].source` |
+| `test/e2e/integration.test.ts` | the same metadata, plus the settings deep-merge |
+| `test/app/mutation-orchestrator.test.ts` | `base` only, for engine resolution |
+
+Everything else is metadata and merge mechanics, and that is what those tests
+are actually about — so it must survive the rewrite: `agents: ['code',
+'architect']`, the skills and invariants, android's custom `agentsDir` /
+`skillsDir`, iOS's `guardsTs`, and android's overriding `mutationTtlMs`.
+
+**Then the profiles.** `base/state-machine.yaml` becomes the current model —
+lowercase stages, the `execution` loop over `code` / `verify`, a top-level
+`gates:` declaration — keeping `settings`, `stageAssignments` (the only fixture
+exercising `deriveStageFn`) and `requiredGates`. Drop its
+`beginMutation: "session.approved('plan') || session.revision == 0"`: the
+`revision == 0` escape hatch is the one called wrong when it was found in the
+android profile, and a fixture should not teach it. `android` and `ios` stay
+deltas through schema-level `extends` and declare only what differs.
+
+**Deliberately-invalid fixtures** go alongside the good ones, as
+`missing-extends/` already does, and must be broken semantically — an
+undeclared gate, a transition to a stage that does not exist — never by shape.
+
+**Two tests added on 2026-09-06 write their profiles inline** into a temp
+directory (`test/app/mutation-orchestrator.test.ts`), which is the fourteenth
+and fifteenth instance of what this removes. They move first: one wants the
+invalid fixture, the other needs one profile id under two roots. `test/fixtures/presets/` is the ancestor of
 `base.yaml`: `high`/`medium`/`low.yaml` are ProfileSchema files of the same
 format, from before the stage model — stages in uppercase, not a `loop:` among
 them — and `default.yaml` is one generation older still, a flat `stages:` list
