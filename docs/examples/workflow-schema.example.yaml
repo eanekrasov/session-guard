@@ -62,10 +62,12 @@ transitions:
     to: failed
     guard: "isExhausted('cycles')"
 
-  # commit → done
+  # commit → done: receipt is written only after HEAD actually moved.
+  # The permit records permission to try, never the result — a failed commit
+  # leaves it set and must not advance the workflow.
   - from: commit
     to: done
-    guard: "session.deliveryPermit != null"
+    guard: "session.deliveryReceipt != null"
 
 
 

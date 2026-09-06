@@ -24,6 +24,7 @@ export function createSession(sessionId: string, profileId: string): WorkflowSes
     loopRuns: {},
     testStatus: {},
     deliveryPermit: null,
+    deliveryReceipt: null,
     retryBudgets: {},
     pendingDecisions: [],
     updatedAt: new Date().toISOString(),

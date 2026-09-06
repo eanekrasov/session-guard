@@ -1,3 +1,4 @@
+import { getGate } from '../session/helpers.ts';
 import type { WorkflowSession } from '../session/session-schema.ts';
 
 /**
@@ -18,25 +19,35 @@ export function extractBashCommand(args: unknown): string {
 }
 
 /**
+ * Check if the session can commit: all required gates must pass, all tasks completed.
+ */
+export function canCommit(session: WorkflowSession, requiredGates: string[]): boolean {
+  for (const gateId of requiredGates) {
+    const gate = getGate(session, gateId);
+    if (!gate) return false;
+    if (gate.status !== 'passed') return false;
+  }
+
+  const tasks = Object.values(session.tasks ?? {}).flat();
+  return tasks.every((t) => t.status === 'completed');
+}
+
+// ─── P1-012: Commit Permit helpers ────────────────────────────────────────────
+
+/**
  * Check if a command contains a forbidden git subcommand (commit or push).
- * Kept as a generic guard, not a commit-specific lifecycle.
  */
 export function hasForbiddenGitSubcommand(command: string): boolean {
   const normalized = command.trim().toLowerCase();
+  // Match git commit or git push at the start of the command
   if (/^git\s+(commit|push)\b/.test(normalized)) return true;
+  // Match git commit or git push after &&, ||, or ;
   return /[&|;]\s*git\s+(commit|push)\b/.test(normalized);
 }
 
 /**
- * @deprecated Commit has no privileged lifecycle. Use generic step completion.
+ * Check if a command is a commit task (commit-task.ts).
  */
-export function canCommit(_session: WorkflowSession, _requiredGates: string[]): boolean {
-  return false;
-}
-
-/**
- * @deprecated No special commit command detection. Steps use generic lifecycle.
- */
-export function isCommitTaskCommand(_command: string): boolean {
-  return false;
+export function isCommitTaskCommand(command: string): boolean {
+  return /commit-task\.ts\b/.test(command.trim());
 }

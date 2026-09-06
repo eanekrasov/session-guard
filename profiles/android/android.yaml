@@ -1,1 +1,31 @@
-../state-machine.yaml
+# Android profile — delta over base/base.yaml.
+#
+# Only what differs from the base workflow is declared here; everything else
+# (transitions, guards) is inherited. Resolution order is parent-then-child,
+# so these values win.
+#
+# Android work is split across dedicated agents, so each phase names the roles
+# allowed to act in it.
+
+phases:
+  planning:
+    allowedAgents: ['architect', 'orchestrator']
+  tasks_ready: {}
+  code:
+    allowedAgents: ['code', 'debug', 'figma']
+  review:
+    allowedAgents: ['review']
+  qa:
+    allowedAgents: ['qa']
+  commit: {}
+  done: {}
+  failed: {}
+
+editingAgents:
+  - code
+  - debug
+  - figma
+
+verifiers:
+  - review
+  - qa

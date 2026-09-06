@@ -1,1 +1,28 @@
-../state-machine.yaml
+# Harness self-edit profile — delta over base/base.yaml.
+#
+# Only what differs from the base workflow is declared here; everything else
+# (phases, transitions, guards) is inherited. Resolution order is
+# parent-then-child, so these values win.
+#
+# This profile ships a single agent (`harness`), so the base restriction of
+# planning to `architect` would leave the phase unreachable.
+
+phases:
+  planning:
+    allowedAgents: ['harness']
+  tasks_ready: {}
+  code:
+    allowedAgents: ['harness']
+  review:
+    allowedAgents: ['harness']
+  qa:
+    allowedAgents: ['harness']
+  commit: {}
+  done: {}
+  failed: {}
+
+editingAgents:
+  - harness
+
+verifiers:
+  - harness

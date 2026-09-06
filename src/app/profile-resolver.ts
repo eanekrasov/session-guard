@@ -37,9 +37,12 @@ export class ProfileResolver {
     const skillsDir = primary.skillsDir;
     const description = primary.description;
 
+    // The chain runs [extending, ...extended], but the resolved schema list is
+    // merged last-wins. Walk it from the root outwards so an extending profile's
+    // own schema is resolved last and can override what it inherits.
     const allSchemas = new Set<string>();
-    for (const profile of chain) {
-      for (const s of profile.schemas ?? []) allSchemas.add(s);
+    for (let i = chain.length - 1; i >= 0; i--) {
+      for (const s of chain[i].schemas ?? []) allSchemas.add(s);
     }
 
     let agents = primary.agents;

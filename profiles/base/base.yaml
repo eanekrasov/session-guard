@@ -1,1 +1,96 @@
-../state-machine.yaml
+# Base workflow: the canonical state machine every profile inherits.
+#
+# planning → tasks_ready → code → review → qa → commit → done
+#                            ↑______________|      |
+#                                                  └→ failed
+#
+# Guard functions: approved(type), isExhausted(key), hasPendingTasks(),
+# allTasksCompleted(listKey). Effects: bumpRetry(key, maxAttempts), approve(type).
+# `consent` blocks the transition until the operator approves.
+#
+# Format: ProfileSchema (src/schema/profile-schema.ts).
+
+phases:
+  planning:
+    allowedAgents: ['architect']
+  tasks_ready: {}
+  code: {}
+  review: {}
+  qa: {}
+  commit: {}
+  done: {}
+  failed: {}
+
+transitions:
+  # The operator approves the plan before any work is admitted.
+  - from: planning
+    to: tasks_ready
+    guard: "session.refs.plan != null"
+    consent: plan
+
+  - from: tasks_ready
+    to: code
+    guard: "hasPendingTasks()"
+
+  # Invariants are set by finishMutation. While they fail the agent stays in
+  # `code` and keeps fixing — that is the intended holding state, not a stall.
+  - from: code
+    to: review
+    guard: "session.gates.invariants == 'passed'"
+
+  - from: review
+    to: qa
+    guard: "session.gates.review == 'passed'"
+
+  # Review rejected the change — back to code against the same retry budget.
+  - from: review
+    to: code
+    guard: "session.gates.review == 'failed' && !isExhausted('cycles')"
+    effects:
+      - bumpRetry: cycles
+        maxAttempts: 5
+
+  - from: qa
+    to: commit
+    guard: "session.gates.qa == 'passed'"
+
+  - from: qa
+    to: code
+    guard: "session.gates.qa == 'failed' && !isExhausted('cycles')"
+    effects:
+      - bumpRetry: cycles
+        maxAttempts: 5
+
+  # Retry budget spent — terminal failure.
+  - from: qa
+    to: failed
+    guard: "isExhausted('cycles')"
+
+  - from: review
+    to: failed
+    guard: "session.gates.review == 'failed' && isExhausted('cycles')"
+
+  # The receipt is written only after HEAD actually moved. The permit records
+  # permission to try, never the result — a failed commit leaves the permit set
+  # and must not advance the workflow.
+  - from: commit
+    to: done
+    guard: "session.deliveryReceipt != null"
+
+actionGuards:
+  # No edit before the operator has approved a plan. There is deliberately no
+  # revision-based escape hatch: a fresh session is exactly the case this must
+  # hold for.
+  beginMutation: "session.approved('plan')"
+
+editingAgents:
+  - code
+  - debug
+  - architect
+
+verifiers:
+  - review
+  - qa
+
+settings:
+  enableDashboard: false
