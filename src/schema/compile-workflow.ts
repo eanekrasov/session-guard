@@ -1,5 +1,6 @@
 import { nestedStages } from './types.ts';
 import type { StageDef, TransitionDef, ResolvedSchema, StageAssignmentRule } from './types.ts';
+import { parse as parseGuard } from './guard-ast.ts';
 
 // ─── Compiled Types ──────────────────────────────────────────────────────────
 
@@ -113,6 +114,13 @@ export function compileWorkflow(schema: ResolvedSchema): {
     validateNestedStages(stageId, stageDef, declaredGates, errors);
   }
 
+  // Every expression the workflow will ever evaluate, parsed now rather than
+  // read as `false` for ever at runtime.
+  validateGuardSyntax(schema, errors);
+
+  // Keys nobody reads, reported rather than ignored.
+  validateKnownKeys(schema, errors);
+
   // Build compiled transitions
   const compiledTransitions = compileTransitions(schema.transitions ?? [], stageIds, errors);
 
@@ -145,6 +153,129 @@ export function compileWorkflow(schema: ResolvedSchema): {
 
 /** The transition target that ends a task's work; never a stage of its own. */
 const TASK_DONE = 'done';
+
+/**
+ * Fields a schema may declare. Anything else is reported.
+ *
+ * `ProfileSchemaSchema` is `.passthrough()` — a typo, or a key from an older
+ * vocabulary, parses cleanly and is then read by nobody. That is how
+ * `android.yaml` carried a dead `phases:` block for months while every test
+ * stayed green. Reporting them here rather than tightening the parser keeps
+ * `ResolvedSchema`'s index signature working and puts the complaint where the
+ * undeclared gate and the unreachable stage already are: one funnel, with a
+ * path and a name.
+ */
+const SCHEMA_KEYS = new Set([
+  // Added by the resolver, not authored: the schema's own name and the file
+  // it came from.
+  'id',
+  'source',
+  'extends',
+  'stages',
+  'stageAssignments',
+  'transitions',
+  'gates',
+  'tools',
+  'gateMapping',
+  'actionGuards',
+  'editingAgents',
+  'taskControlAgents',
+  'verifiers',
+  'requiredGates',
+  'settings',
+]);
+
+const STAGE_KEYS = new Set([
+  'loop',
+  'dispatch',
+  'retryBudget',
+  'allowedAgents',
+  'gates',
+  'entryGuards',
+  'exitGuards',
+  'stages',
+  'transitions',
+]);
+
+function validateKnownKeys(schema: ResolvedSchema, errors: CompileError[]): void {
+  for (const key of Object.keys(schema)) {
+    // The resolver adds provenance of its own; only authored keys are checked.
+    if (key.startsWith('_') || SCHEMA_KEYS.has(key)) continue;
+    errors.push({
+      path: key,
+      message: `Unknown key "${key}". A key nothing reads is silently ignored; allowed: ${[...SCHEMA_KEYS].filter((k) => k !== 'id' && k !== 'source').sort().join(', ')}`,
+    });
+  }
+
+  const walkStage = (path: string, stage: StageDef): void => {
+    for (const key of Object.keys(stage)) {
+      if (STAGE_KEYS.has(key)) continue;
+      errors.push({
+        path: `${path}.${key}`,
+        message: `Unknown key "${key}" on a stage; allowed: ${[...STAGE_KEYS].sort().join(', ')}`,
+      });
+    }
+    for (const [nestedId, nested] of Object.entries(stage.stages ?? {})) {
+      walkStage(`${path}.stages.${nestedId}`, nested);
+    }
+  };
+
+  for (const [stageId, stage] of Object.entries(schema.stages ?? {})) {
+    walkStage(`stages.${stageId}`, stage);
+  }
+}
+
+/**
+ * Parse every guard expression the workflow declares.
+ *
+ * The compiler exists to turn silence into an error, and this was its widest
+ * hole: `"session.gates.((("` compiled clean and then evaluated to `false` for
+ * ever, so the transition simply never fired. The evaluator reports the parse
+ * failure at runtime through `onError`, which is far too late — nothing
+ * refused the profile at load.
+ */
+function validateGuardSyntax(schema: ResolvedSchema, errors: CompileError[]): void {
+  const check = (path: string, expression: string | undefined): void => {
+    if (expression === undefined || expression.trim() === '') return;
+    try {
+      parseGuard(expression);
+    } catch (err) {
+      errors.push({
+        path,
+        message: `Guard expression does not parse: ${expression} (${err instanceof Error ? err.message : String(err)})`,
+      });
+    }
+  };
+
+  for (const [action, guard] of Object.entries(schema.actionGuards ?? {})) {
+    check(`actionGuards.${action}`, guard);
+  }
+  for (const [index, rule] of (schema.stageAssignments ?? []).entries()) {
+    check(`stageAssignments[${index}].condition`, rule.condition);
+  }
+  for (const [index, transition] of (schema.transitions ?? []).entries()) {
+    check(`transitions[${index}].guard`, transition.guard);
+  }
+
+  const walkStage = (path: string, stage: StageDef): void => {
+    for (const [index, expression] of (stage.entryGuards ?? []).entries()) {
+      check(`${path}.entryGuards[${index}]`, expression);
+    }
+    for (const [index, expression] of (stage.exitGuards ?? []).entries()) {
+      check(`${path}.exitGuards[${index}]`, expression);
+    }
+    for (const [index, transition] of (stage.transitions ?? []).entries()) {
+      check(`${path}.transitions[${index}].guard`, transition.guard);
+    }
+    for (const [nestedId, nested] of Object.entries(stage.stages ?? {})) {
+      walkStage(`${path}.stages.${nestedId}`, nested);
+    }
+  };
+
+  for (const [stageId, stage] of Object.entries(schema.stages ?? {})) {
+    walkStage(`stages.${stageId}`, stage);
+  }
+}
 
 /**
  * Check a stage's own stages and transitions.

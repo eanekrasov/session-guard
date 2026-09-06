@@ -33,6 +33,13 @@ function messages(input: ResolvedSchema): string[] {
   return compileWorkflow(input).errors.map((error) => error.message);
 }
 
+/** `<path>: <message>` — the shape the operator is shown. */
+function reported(input: ResolvedSchema): string {
+  return compileWorkflow(input)
+    .errors.map((error) => `${error.path}: ${error.message}`)
+    .join('\n');
+}
+
 describe('a workflow that cannot run is refused when it is read', () => {
   it('refuses a loop no task can finish', () => {
     const input = schema({
@@ -239,6 +246,82 @@ afterEach(async () => {
   else process.env.STATE_MACHINE_PROFILES_DIR = previousProfiles;
   await rm(storeDirectory, { recursive: true, force: true });
   await rm(profilesDirectory, { recursive: true, force: true });
+});
+
+describe('a guard that cannot be parsed is refused at load', () => {
+  it('refuses a transition guard that does not parse', () => {
+    // The widest hole in the compiler: `session.gates.(((` compiled clean and
+    // then read `false` for ever, so the transition simply never fired. The
+    // evaluator reported the parse failure at runtime, which is far too late.
+    const input = schema({ a: {}, b: {} }, [{ from: 'a', to: 'b', guard: 'session.gates.(((' }]);
+
+    expect(messages(input).join('\n')).toContain('Guard expression does not parse');
+  });
+
+  it('refuses an unparseable stage-assignment condition', () => {
+    const input: ResolvedSchema = {
+      source: 'test.yaml',
+      stages: { a: {} },
+      stageAssignments: [{ id: 'r', priority: 0, condition: '&& ||', result: 'a' }],
+    };
+
+    expect(reported(input)).toContain('stageAssignments[0].condition');
+  });
+
+  it('refuses an unparseable guard inside a loop', () => {
+    const input = schema({
+      execution: {
+        loop: 'implementation',
+        stages: { code: {}, verify: {} },
+        entryGuards: ['session.gates.((('],
+        transitions: [
+          { from: 'code', to: 'verify', guard: '1 +' },
+          { from: 'verify', to: 'done' },
+        ],
+      },
+    });
+
+    const joined = reported(input);
+    expect(joined).toContain('stages.execution.entryGuards[0]');
+    expect(joined).toContain('stages.execution.transitions[0].guard');
+  });
+
+  it('accepts the guards the shipped vocabulary actually uses', () => {
+    const input = schema({ a: {}, b: {} }, [
+      { from: 'a', to: 'b', guard: "session.approved('plan') && !isExhausted('cycles')" },
+      { from: 'b', to: 'a', guard: "session.activeOperations.some(o => o.result == 'output_ready')" },
+    ]);
+
+    expect(messages(input)).toEqual([]);
+  });
+});
+
+describe('a key nothing reads is reported, not ignored', () => {
+  it('names an unknown schema-level key', () => {
+    // ProfileSchemaSchema is `.passthrough()`, which is how android.yaml
+    // carried a dead `phases:` block for months while every test stayed green.
+    const input = { ...schema({ a: {} }), phases: { PLANNING: {} } } as ResolvedSchema;
+
+    expect(messages(input).join('\n')).toContain('Unknown key "phases"');
+  });
+
+  it('names an unknown key on a stage, at its path', () => {
+    const input = schema({
+      execution: {
+        loop: 'implementation',
+        stages: { code: { agents: ['code'] } as never },
+        transitions: [{ from: 'code', to: 'done' }],
+      },
+    });
+
+    const joined = reported(input);
+    expect(joined).toContain('stages.execution.stages.code.agents');
+    expect(joined).toContain('Unknown key "agents"');
+  });
+
+  it('says nothing about a schema that declares only known keys', () => {
+    expect(messages(schema({ a: {}, b: {} }, [{ from: 'a', to: 'b' }]))).toEqual([]);
+  });
 });
 
 describe('a schema that does not compile stops the work', () => {
