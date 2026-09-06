@@ -461,10 +461,28 @@ Ten tests specified the old behaviour and were rewritten. Each fix was
 mutation-tested: reverting the chain, the `indexOf` guard, or the operations
 read fails a test that names what broke.
 
-**Related, not fixed:** `test/fixtures` still write guards over
-`session.activeMutation?.outputReady` (`presets/medium.yaml`,
-`profiles/ios/state-machine.yaml`, `profiles/android/state-machine.yaml`,
-`profiles/ios/guards.ts`). Those are fixtures rather than shipped profiles, but
-they teach a field that does not exist. `test/domain/derive-phase.test.ts` is
-named after `src/domain/derive-stage.ts`, which was inlined into `engine.ts`,
-and after "phase", which was renamed to "stage".
+**The fixtures taught the same dead field, and now do not.**
+`presets/medium.yaml`, `profiles/ios/state-machine.yaml`,
+`profiles/android/state-machine.yaml` and `profiles/ios/guards.ts` all guarded
+on `session.activeMutation?.outputReady`. The replacement is
+`session.activeOperations.some(o => o.result == 'output_ready')`: `toSessionFacts`
+already exposes `activeOperations` as an array (`src/domain/session-facts.ts:67`)
+and `some` is in `ALLOWED_METHODS`. No test evaluates these guards — the fixture
+profiles are loaded to exercise schema loading and merging — so this was checked
+by evaluating both expressions against a real session: the new one returns
+false / false / true across no operation, a running one and one that is
+`output_ready`, while the old one returned false even for the last.
+
+**`test/fixtures/presets/default.yaml` is deliberately left alone.** Its
+`deriveStageRules` block is written in a condition language this project does
+not have — `exists`, `agentIs`, `equals`, `contains:status:false`, none of them
+operators in the guard DSL — and the file's own header says it was "adapted
+from parent state-machine/config/presets". Nothing reads `deriveStageRules`:
+`presets.test.ts` asserts only on `stages`. Renaming one field inside a block
+that cannot parse would make it look maintained. Decide whether these fixtures
+earn their keep before repairing them; they also still name stages in
+uppercase, which is what `presets.test.ts` asserts.
+
+**Also still stale:** `test/domain/derive-phase.test.ts` is named after
+`src/domain/derive-stage.ts`, which was inlined into `engine.ts`, and after
+"phase", which was renamed to "stage".

@@ -5,7 +5,10 @@ export function isInvariantsPass(session: {
 }
 
 export function mutationOutputReady(session: {
-  activeMutation?: { outputReady?: boolean };
+  activeOperations?: Array<{ result?: string }>;
 }): boolean {
-  return session.activeMutation?.outputReady === true;
+  // A session holds a map of open calls, exposed to guards as an array
+  // (`toSessionFacts`). `activeMutation` was a single object and is not a
+  // field of the session schema.
+  return (session.activeOperations ?? []).some((o) => o.result === 'output_ready');
 }

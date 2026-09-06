@@ -12,7 +12,7 @@ stages:
       build:
         allowedAgents: ["code"]
         exitGuards:
-          - "session.activeMutation?.outputReady == true"
+          - "session.activeOperations.some(o => o.result == 'output_ready')"
           - "session.testStatus['build'] == 'pass'"
 actionGuards:
   beginMutation: "session.approved('plan')"

@@ -21,7 +21,7 @@ stages:
         allowedAgents:
           - review
         entryGuards:
-          - "session.activeMutation?.outputReady == true"
+          - "session.activeOperations.some(o => o.result == 'output_ready')"
         exitGuards:
           - "session.gatePassed('review')"
 
