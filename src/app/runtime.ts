@@ -776,7 +776,7 @@ class StateMachineRuntime {
     // move's own baseline frame (move-invariants D1/D2/D3) before the tool
     // runs. `task`'s baseline is captured in handleTaskBefore instead, since
     // `task` never joins mutatingTools (D2).
-    await this.mutationBefore(tool, input.sessionID, input.callID, output);
+    await this.mutationBefore(tool, input.sessionID, input.callID, args, output);
   }
 
   private isWorkflowTask(tool: string, args: unknown): boolean {
@@ -1204,7 +1204,7 @@ class StateMachineRuntime {
     // 5. Finish mutation (Bash/Write tool) — единственный путь finalization.
     //    MutationOrchestrator.finishMutation вычисляет scope, валидацию
     //    инвариантов и устанавливает gate через один вызов domain finishMutation.
-    await this.mutationAfter(tool, input.sessionID, input.callID, output);
+    await this.mutationAfter(tool, input.sessionID, input.callID, input.args, output);
 
     // 6. Try transitions — после любого инструмента проверяем, можно ли перейти
     await this.transitionAfter(input.sessionID);
@@ -2325,13 +2325,32 @@ class StateMachineRuntime {
     }
   }
 
+  /**
+   * The commit step is delivery, not an edit inside a task loop.
+   *
+   * `commit-task` runs on the commit stage, where every task and run is
+   * finished by definition — that is what got the session there. The generic
+   * mutation lifecycle needs exactly one open run or one runnable task, so it
+   * refused the commit with "Cannot resolve a single workflow task run for
+   * mutation": the commit required completed tasks and the next handler
+   * required an unfinished one. The commit has its own lifecycle —
+   * `handleCommitTaskBefore` issues the permit, `handleCommitTaskAfter`
+   * writes the receipt only once HEAD actually moved — and does not want a
+   * second one.
+   */
+  private isCommitDelivery(tool: string, args: unknown): boolean {
+    return tool === 'bash' && isCommitTaskCommand(extractBashCommand(args));
+  }
+
   private async mutationBefore(
     tool: string,
     sessionID: string,
     callID: string,
+    args: unknown,
     output: { args: unknown }
   ): Promise<void> {
     if (!this.mutatingTools.has(tool)) return;
+    if (this.isCommitDelivery(tool, args)) return;
     await this.mutationOrchestrator.beginMutation({ sessionID, callID }, output);
   }
 
@@ -2339,9 +2358,11 @@ class StateMachineRuntime {
     tool: string,
     sessionID: string,
     callID: string,
+    args: unknown,
     output: { title: string; output: string; metadata: unknown }
   ): Promise<void> {
     if (!this.mutatingTools.has(tool)) return;
+    if (this.isCommitDelivery(tool, args)) return;
     await this.mutationOrchestrator.finishMutation(
       { sessionID, callID, metadata: output.metadata },
       (text) => {
