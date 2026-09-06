@@ -893,7 +893,8 @@ but unarmed.
 3. `workflow.create` accepts `{profileId}/{schemaId}`. A bare id stays legal and
    means "that profile, if it has exactly one schema"; a profile with several
    and a bare id is refused with the choices named, in keeping with refusing
-   rather than guessing. Every current caller passes a bare id —
+   rather than guessing. **Confirmed by the operator**, so it is the contract
+   rather than a proposal. Every current caller passes a bare id —
    `scripts/create-workflow.ts`, nine host-smoke instructions,
    `HARNESS_SCHEMA_ID` / `HARNESS_PROFILE` — and every one of them names a
    profile whose single schema file shares its name, so none of them changes.
