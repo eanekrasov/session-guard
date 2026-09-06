@@ -2,22 +2,31 @@
 // Без JSX: импортируется и плагином, и bun-тестами (scripts/tui.test.ts).
 // Контракт: specs/002-sidebar-state-display/contracts/runtime-state-read.md
 
+/**
+ * The base workflow's outer stages, in graph order, used only to guess the
+ * neighbours of the current stage when the host does not supply them.
+ *
+ * It listed `code`, `review` and `qa` until the stage model moved them: `code`
+ * became a nested stage of the `execution` loop and `review` / `qa` became
+ * gates that `verify` and `validation` declare. `indexOf` therefore missed on
+ * every real stage, and the sidebar told the operator that the stage after
+ * `execution` was `planning`.
+ *
+ * Still the base profile's chain rather than the running one — the TUI reads a
+ * session file, which carries `profileId` and `currentStage` but no graph.
+ * `neighbors()` in index.tsx is the accurate source; this is its fallback.
+ */
 export const STAGES = [
   'planning',
   'tasks_ready',
-  'code',
-  'review',
-  'qa',
+  'execution',
+  'validation',
   'commit',
   'done',
   'failed',
 ] as const;
 
 export type Stage = string;
-
-export type DispatchStage = 'EMPTY' | 'MUTATING' | 'BOTH_ACTIVE' | 'MUTATING_END';
-
-export const DISPATCH_STAGES = ['EMPTY', 'MUTATING', 'BOTH_ACTIVE', 'MUTATING_END'] as const;
 
 export type IdleReason =
   | 'no_session'
@@ -63,6 +72,14 @@ export interface GateInfo {
   status: string;
 }
 
+/** One open call, as the sidebar needs it. */
+export interface ActiveOperationInfo {
+  callId: string;
+  taskId: string;
+  agent: string;
+  outputReady: boolean;
+}
+
 export interface RetryInfo {
   key: string;
   attempts: number;
@@ -74,11 +91,11 @@ export type Tui = {
   stage: Stage;
   prevStage: Stage | null;
   nextStage: Stage | null;
-  dispatchStage: DispatchStage;
   revision: number;
   completedTasks: number;
   totalTasks: number;
-  activeMutation: { taskId: string; agent: string; outputReady: boolean } | null;
+  /** Every call the session is holding open. Verifiers run in parallel, so this is a list. */
+  activeOperations: ActiveOperationInfo[];
   gates: GateInfo[];
   /** Gates of each task still in flight — a verdict belongs to the work it judged. */
   taskGates: TaskGateInfo[];
@@ -94,59 +111,46 @@ export type TaskGateInfo = {
   gates: GateInfo[];
 };
 
+/**
+ * The stage the session is in.
+ *
+ * `currentStage` is authoritative: the engine derives the stage (which may go
+ * through `stageAssignments` and guards) and `runtime.ts` persists the result
+ * there, so reading it is seeing the engine's own answer rather than guessing
+ * at one. Profiles may name stages whatever they like, so no list is applied.
+ *
+ * The fallback that used to sit here read `planApproved`, `planDeclined`,
+ * `bugVerified`, `commitHash` and `commitPermit` — none of which the session
+ * schema has — and returned pre-stage-model names like `code` and `qa`. It was
+ * unreachable anyway: `currentStage` carries a schema default.
+ */
 function deriveStageFromSession(record: Record<string, unknown>): string | null {
-  // WorkflowSession stores the authoritative stage in currentStage. Profiles may
-  // define custom stage ids, so the TUI must not restrict this to built-in names.
   const currentStage = record.currentStage;
   if (typeof currentStage === 'string' && currentStage !== '') return currentStage;
-
-  // Старый формат: определяем по planApproved / planDeclined / bugVerified
-  const hasPlanApproved = 'planApproved' in record;
-  const planApproved = record.planApproved === true;
-  const planDeclined = record.planDeclined === true;
-  const bugVerified = record.bugVerified === true;
-  const hasCommitHash = typeof record.commitHash === 'string' && record.commitHash !== '';
-  const hasCommitPermit = record.commitPermit != null;
-  const hasDeliveryReceipt = record.deliveryReceipt != null && record.deliveryReceipt !== '';
-  const hasApprovals =
-    Array.isArray(record.approvals) && (record.approvals as Array<unknown>).length > 0;
-  const gates = record.gates;
-  const qaFailed = Array.isArray(gates)
-    ? (gates as Array<Record<string, unknown>>).some((g) => g.id === 'qa' && g.status === 'failed')
-    : false;
-
-  if (hasCommitHash || hasCommitPermit || hasDeliveryReceipt) return 'commit';
-  if (qaFailed) return 'qa';
-  if (bugVerified) return 'verify';
-  if (planDeclined) return 'planning';
-  if (planApproved) return 'code';
-  if (hasPlanApproved || hasApprovals) return 'planning';
   return null;
 }
 
-function deriveDispatchStage(record: Record<string, unknown>): DispatchStage {
-  const activeMutation = record.activeMutation as Record<string, unknown> | null;
-  const verifierOps = record.verifierOperations as Record<string, unknown> | null;
-  const hasVerifying =
-    record.activeVerifying != null || (verifierOps && Object.keys(verifierOps).length > 0);
-  if (!activeMutation && !hasVerifying) return 'EMPTY';
-  if (hasVerifying) return 'BOTH_ACTIVE';
-  if (activeMutation?.outputReady === true) return 'MUTATING_END';
-  return 'MUTATING';
-}
-
-function parseActiveMutation(
-  value: unknown
-): { taskId: string; agent: string; outputReady: boolean } | null {
-  if (typeof value !== 'object' || value === null) return null;
-  const obj = value as Record<string, unknown>;
-  const taskId = (obj.callID as string) ?? (obj.taskId as string);
-  if (!taskId) return null;
-  return {
-    taskId,
-    agent: (obj.agent as string) ?? '',
-    outputReady: obj.outputReady === true,
-  };
+/**
+ * The open calls, from `activeOperations`.
+ *
+ * This read `record.activeMutation` — a single object, and a field the session
+ * schema does not have — so the sidebar's "active" line never appeared. A
+ * session holds a map keyed by call id, and a verifier stage runs several
+ * agents at once, so there can be more than one.
+ */
+function parseActiveOperations(value: unknown): ActiveOperationInfo[] {
+  if (!isRecord(value)) return [];
+  const operations: ActiveOperationInfo[] = [];
+  for (const [callId, raw] of Object.entries(value)) {
+    if (!isRecord(raw)) continue;
+    operations.push({
+      callId: typeof raw.callId === 'string' && raw.callId !== '' ? raw.callId : callId,
+      taskId: typeof raw.taskId === 'string' ? raw.taskId : '',
+      agent: typeof raw.agent === 'string' ? raw.agent : '',
+      outputReady: raw.result === 'output_ready',
+    });
+  }
+  return operations;
 }
 
 export type ParseResult = { ok: true; value: Tui } | { ok: false; reason: IdleReason };
@@ -174,7 +178,6 @@ export function parseRuntimeState(raw: string): ParseResult {
   if (finalStage === null) {
     return { ok: false, reason: 'no_stage' };
   }
-  const dispatchStage = deriveDispatchStage(record);
   const taskLists = Array.isArray(record.tasks)
     ? [record.tasks]
     : isRecord(record.tasks)
@@ -185,10 +188,14 @@ export function parseRuntimeState(raw: string): ParseResult {
     (t) => isRecord(t) && (t.status === 'committed' || t.status === 'completed')
   ).length;
 
-  // Фазы в порядке графа
+  // Neighbours in the graph. A stage the chain does not know — a profile is
+  // free to name its own — has none: `indexOf` returns -1, and -1 satisfied
+  // `stageIndex < STAGES.length - 1`, so the sidebar offered STAGES[0] as the
+  // next stage for every stage it did not recognise.
   const stageIndex = (STAGES as readonly string[]).indexOf(finalStage);
   const prevStage: Stage | null = stageIndex > 0 ? STAGES[stageIndex - 1] : null;
-  const nextStage: Stage | null = stageIndex < STAGES.length - 1 ? STAGES[stageIndex + 1] : null;
+  const nextStage: Stage | null =
+    stageIndex >= 0 && stageIndex < STAGES.length - 1 ? STAGES[stageIndex + 1] : null;
 
   // Gates из массива или объекта
   const rawGates = record.gates;
@@ -244,11 +251,10 @@ export function parseRuntimeState(raw: string): ParseResult {
       stage: finalStage,
       prevStage,
       nextStage,
-      dispatchStage,
       revision: typeof record.revision === 'number' ? record.revision : 0,
       completedTasks: committedCount,
       totalTasks: tasks.length,
-      activeMutation: parseActiveMutation(record.activeMutation),
+      activeOperations: parseActiveOperations(record.activeOperations),
       gates,
       taskGates,
       retryBudgets,
@@ -456,10 +462,12 @@ export function formatDetailsLines(rawText: string): string[] | null {
     lines.push(`${key}: ${scalar(value)}`);
   }
 
-  if (isRecord(data.activeMutation)) {
-    const m = data.activeMutation as Record<string, unknown>;
+  // One line per open call. `activeMutation` was a single object and is not a
+  // field the session schema has, so this printed nothing.
+  for (const operation of parseActiveOperations(data.activeOperations)) {
     lines.push(
-      `activeMutation: callID=${scalar(m.callID)} agent=${scalar(m.agent)} outputReady=${scalar(m.outputReady)}`
+      `activeOperation: callID=${scalar(operation.callId)} task=${scalar(operation.taskId)} ` +
+        `agent=${scalar(operation.agent)} outputReady=${scalar(operation.outputReady)}`
     );
   }
 
@@ -504,7 +512,7 @@ export function formatDetailsLines(rawText: string): string[] | null {
 
   const known = new Set<string>([
     ...KNOWN_KEYS,
-    'activeMutation',
+    'activeOperations',
     'tasks',
     'gates',
     'testStatus',

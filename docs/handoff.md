@@ -207,18 +207,10 @@ a profile writes them, so these never compare equal to a real stage:
 - `profiles/android/agents/orchestrator.md:40` documents `PLANNING` to the
   agent. Prompt text, not code, but it teaches the wrong name.
 
-**Pre-stage-model chains left behind by the migration.** Same family as the
-`phases:` block that was still in `android.yaml`:
-
-- `src/tui/tui.ts:5` — `STAGES` is
-  `planning, tasks_ready, code, review, qa, commit, done, failed`. `code`,
-  `review` and `qa` stopped being top-level stages when `base.yaml` was rebuilt
-  around the `execution` loop. It is used at `tui.ts:189-191` to show the
-  previous and next stage, and `indexOf` returns `-1` for `execution` or
-  `validation` — so `prevStage` is `null` and `nextStage` is `STAGES[0]`. The
-  TUI tells the user that the next stage is `planning`, from anywhere real.
-- `src/tui/tui.ts:118-124` — `deriveStage` guesses a stage from approvals and
-  gates and can return `'code'`, `'qa'` or `'verify'`. Same vintage.
+**Pre-stage-model chains left behind by the migration — fixed, see below.**
+This was the same family as the `phases:` block still sitting in
+`android.yaml`, and it ran through the whole TUI. Written up under "The TUI
+read a session shape that no longer exists".
 
 **A hardcoded default that belongs to one profile.** `'planning'` is the base
 workflow's first stage, written into the core as a fallback:
@@ -413,3 +405,66 @@ behind them:
   now at least matches `base.yaml`. Loading the running profile is the real
   fix.
 - **`docs/feature-status.md` still said "фазы"** after the rename to stages.
+
+## The TUI read a session shape that no longer exists
+
+Fixed 2026-09-06. It was not one stale constant but three independent reads of
+a schema that had moved on, and the tests fed every one of them the old shape,
+so all of it was green while none of it worked. Proven before and after on a
+real `createSession` session with one running operation:
+
+| | Was | Now |
+| --- | --- | --- |
+| `stage` | `execution` | `execution` — always correct, it reads `currentStage` |
+| `prevStage` / `nextStage` | `null` / `planning` | `tasks_ready` / `validation` |
+| open calls | none shown | the operation, its task and its agent |
+
+**`STAGES` was the pre-stage-model chain** — `planning, tasks_ready, code,
+review, qa, commit, done, failed`. `code` became a nested stage of the
+`execution` loop and `review` / `qa` became gates, so `indexOf` missed on every
+real stage. Two defects, not one: the list was wrong, **and** `-1` satisfied
+`stageIndex < STAGES.length - 1`, so an unrecognised stage was still given
+`STAGES[0]` as its successor. A profile is free to name its own stages, so that
+second half would have misled even with a correct list. Both fixed; the chain
+is now the base workflow's outer stages.
+
+It is still the base profile's chain rather than the running one. The TUI reads
+a session file, which carries `profileId` and `currentStage` but no graph, so
+there is nothing to derive from. `neighbors()` in `index.tsx` is the accurate
+source and this is only its fallback — but a profile with different stages
+still gets base's neighbours guessed at it. Feeding the compiled workflow to
+the TUI is the real fix.
+
+**`deriveStageFromSession` carried a dead fallback** reading `planApproved`,
+`planDeclined`, `bugVerified`, `commitHash`, `commitPermit` — none of which the
+session schema has — and returning `'code'`, `'qa'` and `'verify'`. It was
+unreachable regardless: `currentStage` has a schema default. Deleted. What is
+left is the correct one-liner, and it is worth knowing why: the engine derives
+the stage through `stageAssignments` and guards, then `runtime.ts:784` persists
+the result to `currentStage`. Reading that field is seeing the engine's answer,
+not guessing at one.
+
+**`activeMutation` was singular and gone.** The session holds
+`activeOperations`, a map keyed by call id, and a verifier stage runs several
+agents at once — so a single object could not have described the session even
+if the field had survived. The sidebar's `active:` line therefore never
+appeared, and the details dialog printed nothing for it. Both now read
+`activeOperations` and render every open call.
+
+**`dispatchStage` is deleted, not repaired.** It read `activeMutation`,
+`verifierOperations` and `activeVerifying` — three fields the schema does not
+have — so it was permanently `EMPTY`; and nothing rendered it. Its only readers
+were four tests asserting the dead values. `DispatchStage` and
+`DISPATCH_STAGES` went with it.
+
+Ten tests specified the old behaviour and were rewritten. Each fix was
+mutation-tested: reverting the chain, the `indexOf` guard, or the operations
+read fails a test that names what broke.
+
+**Related, not fixed:** `test/fixtures` still write guards over
+`session.activeMutation?.outputReady` (`presets/medium.yaml`,
+`profiles/ios/state-machine.yaml`, `profiles/android/state-machine.yaml`,
+`profiles/ios/guards.ts`). Those are fixtures rather than shipped profiles, but
+they teach a field that does not exist. `test/domain/derive-phase.test.ts` is
+named after `src/domain/derive-stage.ts`, which was inlined into `engine.ts`,
+and after "phase", which was renamed to "stage".

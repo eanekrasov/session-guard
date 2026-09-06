@@ -86,42 +86,28 @@ describe('parseRuntimeState', () => {
     if (!r.ok) expect(r.reason).toBe('no_stage');
   });
 
-  test('planApproved false without currentStage returns planning (old fallback)', () => {
-    const r = parseRuntimeState(makeV1Session({ planApproved: false }));
-    expect(r.ok).toBe(true);
-    if (r.ok) expect(r.value.stage).toBe('planning');
-  });
-
-  test('approvals granted without currentStage returns planning (old fallback)', () => {
-    const r = parseRuntimeState(
-      makeV1Session({
-        approvals: [{ type: 'plan', status: 'granted' }],
-        activeMutation: { callID: 'c1', agent: 'architect', startedAt: '', outputReady: false },
-      })
-    );
-    expect(r.ok).toBe(true);
-    if (r.ok) expect(r.value.stage).toBe('planning');
-  });
-
-  test('commitPermit without currentStage returns commit (old fallback)', () => {
-    const r = parseRuntimeState(
-      makeV1Session({
+  // The fallback that read planApproved / commitPermit / deliveryReceipt is
+  // gone: none of those fields is in the session schema, and `currentStage`
+  // carries a schema default, so the branch was unreachable. A session without
+  // a stage is a session the TUI cannot place.
+  test('a session carrying none of the old fields has no stage', () => {
+    for (const legacy of [
+      { planApproved: false },
+      { approvals: [{ type: 'plan', status: 'granted' }] },
+      {
         commitPermit: {
           callID: 'commit_1',
           preCommitHead: 'a'.repeat(40),
           expectedFiles: [],
           createdAt: '',
         },
-      })
-    );
-    expect(r.ok).toBe(true);
-    if (r.ok) expect(r.value.stage).toBe('commit');
-  });
-
-  test('deliveryReceipt without currentStage returns commit (old fallback)', () => {
-    const r = parseRuntimeState(makeV1Session({ deliveryReceipt: 'a'.repeat(40) }));
-    expect(r.ok).toBe(true);
-    if (r.ok) expect(r.value.stage).toBe('commit');
+      },
+      { deliveryReceipt: 'a'.repeat(40) },
+    ]) {
+      const r = parseRuntimeState(makeV1Session(legacy));
+      expect(r.ok, JSON.stringify(legacy)).toBe(false);
+      if (!r.ok) expect(r.reason).toBe('no_stage');
+    }
   });
 
   test('currentStage=planning returns planning', () => {
@@ -160,50 +146,6 @@ describe('parseRuntimeState', () => {
     expect(r.value.stage).toBe('done');
   });
 
-  test('deriveDispatchStage: EMPTY when no activeMutation', () => {
-    const r = parseRuntimeState(makeV1Session({ currentStage: 'planning' }));
-    expect(r.ok).toBe(true);
-    if (!r.ok) return;
-    expect(r.value.dispatchStage).toBe('EMPTY');
-  });
-
-  test('deriveDispatchStage: MUTATING when code active', () => {
-    const r = parseRuntimeState(
-      makeV1Session({
-        currentStage: 'code',
-        activeMutation: { callID: 'c1', agent: 'code', startedAt: '', outputReady: false },
-      })
-    );
-    expect(r.ok).toBe(true);
-    if (!r.ok) return;
-    expect(r.value.dispatchStage).toBe('MUTATING');
-  });
-
-  test('deriveDispatchStage: BOTH_ACTIVE when verifierOperations present', () => {
-    const r = parseRuntimeState(
-      makeV1Session({
-        currentStage: 'code',
-        activeMutation: { callID: 'c1', agent: 'code', startedAt: '', outputReady: false },
-        verifierOperations: { qa_task: true },
-      })
-    );
-    expect(r.ok).toBe(true);
-    if (!r.ok) return;
-    expect(r.value.dispatchStage).toBe('BOTH_ACTIVE');
-  });
-
-  test('deriveDispatchStage: MUTATING_END when outputReady', () => {
-    const r = parseRuntimeState(
-      makeV1Session({
-        currentStage: 'code',
-        activeMutation: { callID: 'c1', agent: 'code', startedAt: '', outputReady: true },
-      })
-    );
-    expect(r.ok).toBe(true);
-    if (!r.ok) return;
-    expect(r.value.dispatchStage).toBe('MUTATING_END');
-  });
-
   test('completedTasks derived from committed tasks', () => {
     const tasks = makeTasks(3);
     tasks[1].status = 'committed';
@@ -213,18 +155,79 @@ describe('parseRuntimeState', () => {
     expect(r.value.completedTasks).toBe(1);
   });
 
-  test('activeMutation parsed from session.activeMutation', () => {
+  test('active operations are read from activeOperations, and there may be several', () => {
+    // A verifier stage runs review and qa at once, so a single `activeMutation`
+    // could not describe the session even when the field still existed.
     const r = parseRuntimeState(
       makeV1Session({
-        currentStage: 'code',
-        activeMutation: { callID: 'call_abc123', agent: 'code', startedAt: '', outputReady: true },
+        currentStage: 'execution',
+        activeOperations: {
+          'call-review': {
+            callId: 'call-review',
+            runId: 'run-1',
+            taskId: 'task-1',
+            agent: 'review',
+            status: 'running',
+            startedAt: '',
+            result: 'output_ready',
+          },
+          'call-qa': {
+            callId: 'call-qa',
+            runId: 'run-1',
+            taskId: 'task-1',
+            agent: 'qa',
+            status: 'running',
+            startedAt: '',
+          },
+        },
       })
     );
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.value.activeMutation?.taskId).toBe('call_abc123');
-    expect(r.value.activeMutation?.agent).toBe('code');
-    expect(r.value.activeMutation?.outputReady).toBe(true);
+    expect(r.value.activeOperations).toHaveLength(2);
+    const review = r.value.activeOperations.find((o) => o.agent === 'review');
+    expect(review?.callId).toBe('call-review');
+    expect(review?.taskId).toBe('task-1');
+    expect(review?.outputReady).toBe(true);
+    expect(r.value.activeOperations.find((o) => o.agent === 'qa')?.outputReady).toBe(false);
+  });
+
+  test('neighbours are the stages around the current one, for every stage of the chain', () => {
+    // The chain listed code / review / qa until the stage model moved them, so
+    // `indexOf` missed on every real stage and `nextStage` was STAGES[0] —
+    // the sidebar said the stage after `execution` was `planning`.
+    const expected: Array<[string, string | null, string | null]> = [
+      ['planning', null, 'tasks_ready'],
+      ['tasks_ready', 'planning', 'execution'],
+      ['execution', 'tasks_ready', 'validation'],
+      ['validation', 'execution', 'commit'],
+      ['commit', 'validation', 'done'],
+      ['done', 'commit', 'failed'],
+    ];
+    for (const [stage, previous, next] of expected) {
+      const r = parseRuntimeState(makeV1Session({ currentStage: stage }));
+      expect(r.ok, stage).toBe(true);
+      if (!r.ok) continue;
+      expect(r.value.prevStage, `prev of ${stage}`).toBe(previous);
+      expect(r.value.nextStage, `next of ${stage}`).toBe(next);
+    }
+  });
+
+  test('a stage the chain does not know has no neighbours to offer', () => {
+    // A profile may name its stages anything; guessing a neighbour for one the
+    // chain has never heard of is how `nextStage: planning` got shown.
+    const r = parseRuntimeState(makeV1Session({ currentStage: 'triage' }));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.prevStage).toBeNull();
+    expect(r.value.nextStage).toBeNull();
+  });
+
+  test('a session holding no open call reports none', () => {
+    const r = parseRuntimeState(makeV1Session({ currentStage: 'planning', activeOperations: {} }));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.activeOperations).toEqual([]);
   });
 
   test('corrupted JSON returns parse_error without throwing', () => {
@@ -442,16 +445,26 @@ describe('formatDetailsLines', () => {
     expect(lines!.some((l) => l.startsWith('title: My Task'))).toBe(true);
   });
 
-  test('activeMutation detail shows callID, agent, outputReady', () => {
+  test('one detail line per open call', () => {
     const lines = formatDetailsLines(
       makeV1Session({
-        activeMutation: { callID: 'call_xyz', agent: 'review', startedAt: '', outputReady: true },
+        activeOperations: {
+          call_xyz: {
+            callId: 'call_xyz',
+            runId: 'run-1',
+            taskId: 'task-1',
+            agent: 'review',
+            status: 'running',
+            startedAt: '',
+            result: 'output_ready',
+          },
+        },
       })
     );
     expect(lines).not.toBeNull();
     expect(
       lines!.some((l) =>
-        l.startsWith('activeMutation: callID=call_xyz agent=review outputReady=true')
+        l.startsWith('activeOperation: callID=call_xyz task=task-1 agent=review outputReady=true')
       )
     ).toBe(true);
   });

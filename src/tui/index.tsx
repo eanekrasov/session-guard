@@ -813,9 +813,16 @@ function WorkflowSidebarContent(props: {
                     </text>
                   )}
                 </For>
-                <Show when={current().activeMutation}>
+                <Show when={current().activeOperations.length > 0}>
                   <text fg={color('warning')}>
-                    active: {current().activeMutation?.agent || current().activeMutation?.taskId}
+                    active:{' '}
+                    {current()
+                      .activeOperations.map(
+                        (operation) =>
+                          `${operation.agent || operation.taskId || operation.callId}` +
+                          (operation.outputReady ? ' ✓' : '')
+                      )
+                      .join(', ')}
                   </text>
                 </Show>
                 <text width="100%" fg={(theme.info as unknown as string) ?? color('warning')}>
