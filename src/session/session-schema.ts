@@ -182,13 +182,26 @@ const LoopRunsSchema = z.record(LoopRunSchema).superRefine((loopRuns, context) =
   }
 });
 
+/**
+ * A budget key is either a workflow task id or a workflow-level budget name.
+ *
+ * There are two budgets, not one. Inside a loop the budget belongs to the task
+ * and is written `task.id`, which resolves to `task-N`. At workflow level it
+ * belongs to the session — `base.yaml` spends `cycles` when validation sends
+ * the whole body of work back into the loop. This used to accept only
+ * `task-N`, so the shipped profile's own validation-failure edge could not be
+ * saved: the session stayed in `validation` with an empty budget and no
+ * repetition helped.
+ */
+const BUDGET_KEY = /^(?:task-[0-9]+|[a-z][a-z0-9_-]*)$/;
+
 const RetryBudgetsSchema = z.record(RetryBudgetSchema).superRefine((retryBudgets, context) => {
-  for (const taskId of Object.keys(retryBudgets)) {
-    if (!/^task-[0-9]+$/.test(taskId)) {
+  for (const budgetKey of Object.keys(retryBudgets)) {
+    if (!BUDGET_KEY.test(budgetKey)) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
-        message: `Retry budget key must be a workflow task id: ${taskId}`,
-        path: [taskId],
+        message: `Retry budget key must be a workflow task id or a workflow-level budget name: ${budgetKey}`,
+        path: [budgetKey],
       });
     }
   }

@@ -276,6 +276,16 @@ function compileTransitions(
     if (!stageIds.has(t.to)) {
       errors.push({ path: `transitions[${i}]`, message: `Unknown target stage '${t.to}'` });
     }
+    for (const effect of t.effects ?? []) {
+      // The mirror of the loop rule below: inside a loop the budget is always
+      // the task's own, and at workflow level there is no task to name.
+      if (effect.bumpRetry === 'task.id') {
+        errors.push({
+          path: `transitions[${i}]`,
+          message: `Transition ${t.from} → ${t.to} bumps "task.id", but a workflow-level transition has no task; name a workflow budget instead`,
+        });
+      }
+    }
 
     return {
       from: t.from,

@@ -113,14 +113,32 @@ describe('WorkflowSessionSchema', () => {
     expect(result.retryBudgets['task-1']).toEqual({ attempts: 2, maximum: 5 });
   });
 
-  it('rejects retryBudgets not keyed by a workflow task ID', () => {
+  it('accepts a workflow-level budget key beside a task one', () => {
+    // There are two budgets, not one. `base.yaml` spends `cycles` when
+    // validation sends the whole body of work back into the loop; accepting
+    // only `task-N` meant that edge's own effect could never be saved.
+    const result = WorkflowSessionSchema.parse({
+      sessionId: 'session-123',
+      profileId: 'android',
+      schemaId: 'state-machine',
+      retryBudgets: {
+        cycles: { attempts: 0, maximum: 3 },
+        'task-1': { attempts: 1, maximum: 3 },
+      },
+    });
+
+    expect(result.retryBudgets['cycles']).toEqual({ attempts: 0, maximum: 3 });
+    expect(result.retryBudgets['task-1']).toEqual({ attempts: 1, maximum: 3 });
+  });
+
+  it('rejects a budget key that is neither a task id nor a budget name', () => {
     expect(() =>
       WorkflowSessionSchema.parse({
         sessionId: 'session-123',
         profileId: 'android',
         schemaId: 'state-machine',
         retryBudgets: {
-          cycles: { attempts: 0, maximum: 3 },
+          'Not A Key': { attempts: 0, maximum: 3 },
         },
       })
     ).toThrow();

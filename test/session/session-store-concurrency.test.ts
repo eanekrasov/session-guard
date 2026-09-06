@@ -70,3 +70,20 @@ describe('WorkflowStore optimistic concurrency', () => {
     expect((await store.load('repeat'))?.revision).toBe(3);
   });
 });
+
+describe('the shipped profile\'s validation-failure edge', () => {
+  it('saves the workflow-level budget it spends', async () => {
+    // base.yaml's `validation → execution` edge bumps `cycles`. Saving the
+    // session afterwards used to throw "Retry budget key must be a workflow
+    // task id: cycles", leaving the session in validation with an empty
+    // budget and no repetition that could help.
+    const { bumpRetry } = await import('../../src/session/helpers.ts');
+    const store = new WorkflowStore(storeDir);
+    const session = createSession('cycles', 'base', 'state-machine');
+
+    bumpRetry(session, 'cycles');
+    await store.save(session);
+
+    expect((await store.load('cycles'))?.retryBudgets['cycles']?.attempts).toBe(1);
+  });
+});
