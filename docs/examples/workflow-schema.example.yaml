@@ -10,7 +10,7 @@
 # Загружается через SchemaLoader → YAML.parse → ProfileSchemaSchema.parse
 
 # ─── Фазы ──────────────────────────────────────────────────────────────────────
-phases:
+stages:
   planning:
     allowedAgents: ['architect']
   tasks_ready: {}

@@ -41,7 +41,7 @@ export interface DispatchConfig {
 
 // ─── Stage-level config ───────────────────────────────────────────────────────
 
-export interface StageConfig {
+export interface TaskStageConfig {
   allowedAgents?: string[];
   entryGuards?: string[];
   exitGuards?: string[];

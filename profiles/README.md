@@ -22,7 +22,7 @@ profile.
 
 `profile.json.extends` builds a chain, and every schema file across that chain is
 resolved. The list is merged **last wins**, root first, so a profile's own schema
-overrides what it inherits. Transitions merge per `from→to`, phases per phase id,
+overrides what it inherits. Transitions merge per `from→to`, stages per phase id,
 action guards per action; `requiredGates` is replaced wholesale.
 
 Write a derived schema as a delta: declare only what differs.

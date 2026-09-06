@@ -514,10 +514,16 @@ class StateMachineRuntime {
     const primaryContent = fileContents[0];
     const consentEvidence = computeSha256(primaryContent);
 
+    // The tag's `revision` attribute and its manifest's `revision` must be the
+    // same number — `parseConsentRequest` rejects the tag otherwise. Snapshot it
+    // once: the save below advances `session.revision`, and reading it twice
+    // produced a tag that could never be parsed.
+    const revision = session.revision;
+
     // Build consent manifest for backward compat
     const manifest: ConsentManifest = {
       schema: 'harness.consent.evidence/v1' as const,
-      revision: session.revision,
+      revision,
       summary: args.summary,
       files: args.files,
     };
@@ -539,7 +545,7 @@ class StateMachineRuntime {
     const declineLabel = args.decline ?? 'decline';
 
     const consentTag =
-      `<consent-request schema="harness.consent/v1" revision="${session.revision}" ` +
+      `<consent-request schema="harness.consent/v1" revision="${revision}" ` +
       `evidence="${manifestEvidence}" grant="${grantLabel}" ` +
       `decline="${declineLabel}">` +
       `${JSON.stringify(manifest)}` +

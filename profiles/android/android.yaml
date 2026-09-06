@@ -1,12 +1,12 @@
 # Android profile — delta over base/base.yaml.
 #
 # Only what differs from the base workflow is declared here; everything else
-# (phases, transitions, guards) is inherited. Resolution order is
+# (stages, transitions, guards) is inherited. Resolution order is
 # parent-then-child, so these values win.
 #
-# NOTE: phase-level `allowedAgents` is deliberately NOT declared. The engine
+# NOTE: stage-level `allowedAgents` is deliberately NOT declared. The engine
 # compares it against an agent id the host never supplies, so any value there
-# blocks every mutation in that phase. Stage-level `allowedAgents` (see
+# blocks every mutation in that stage. Task-stage-level `allowedAgents` (see
 # task-cycles.yaml) uses the dispatched agent and does work.
 
 editingAgents:

@@ -235,7 +235,17 @@ export class MutationOrchestrator {
     ): boolean => {
       const evaluator = new GuardEvaluator(
         session as Record<string, unknown>,
-        guards as Record<string, Function> | undefined
+        guards as Record<string, Function> | undefined,
+        {},
+        (error, expression) => {
+          // A guard that fails to evaluate still blocks the transition, but it
+          // is a defect in the schema, not a decision — say so.
+          void this.log('warn', 'Guard expression failed to evaluate', {
+            profileId,
+            expression,
+            error: error.message,
+          });
+        }
       );
       return evaluator.evaluate(expression);
     };

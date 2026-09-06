@@ -189,7 +189,7 @@ git diff HEAD -- <file>
 Обнаружение маркера означает, что **вся реализация, построенная вокруг него, должна быть переписана**,
 а не просто переименована. Недостаточно заменить `planApproved` на `approved` через sed:
 - **Данные**: измени структуру session так, чтобы approval не знал о планах (например, очередь approvals вместо pendingPlanApproval)
-- **Логика**: перепиши derivePhase, guard-выражения, transition guards так, чтобы они не зависели от `plan.*` и `bug.*` полей
+- **Логика**: перепиши deriveStage, guard-выражения, transition guards так, чтобы они не зависели от `plan.*` и `bug.*` полей
 - **API**: публичные методы (approvePlan, declinePlan, markBugVerified) замени на обобщённые (approve, decline, setStageResult)
 - **GuardEvaluator**: guard-выражения вида `session.planApproved == true` замени на `granted('plan')`
 

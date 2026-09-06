@@ -8,7 +8,7 @@
 ## 2. Опишите фазы
 
 ```yaml
-phases:
+stages:
   planning: {}
   execution: {}
   review: {}

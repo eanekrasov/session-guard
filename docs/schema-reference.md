@@ -9,7 +9,7 @@ Schema описывает пользовательскую траекторию 
 | Раздел | Назначение |
 |---|---|
 | `extends` | Наследование другой schema |
-| `phases` | Фазы и их параметры |
+| `stages` | Фазы и их параметры |
 | `transitions` | Допустимые переходы между фазами |
 | `gates` | Проверки workflow |
 | `tools` | Дополнительные workflow tools |
@@ -26,7 +26,7 @@ Schema описывает пользовательскую траекторию 
 ## Фазы
 
 ```yaml
-phases:
+stages:
   planning:
     allowedAgents: [architect]
   review:

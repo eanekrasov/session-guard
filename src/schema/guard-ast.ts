@@ -23,6 +23,72 @@ const MAX_EVAL_STEPS = 10_000;
 /** Max callback invocations per evaluation. */
 const MAX_CALLBACK_CALLS = 128;
 
+/**
+ * Methods a guard may call, by name.
+ *
+ * An allowlist, not a denylist. Guards are expressions from a YAML file that
+ * decide whether the workflow may advance, so the language they run in says
+ * "no" by default: a method that is not named here is not reachable, and
+ * adding one is a deliberate edit rather than an accident of the runtime.
+ */
+const ALLOWED_METHODS = new Set([
+  'every',
+  'some',
+  'find',
+  'filter',
+  'map',
+  'includes',
+  'indexOf',
+  'at',
+  'slice',
+  'join',
+  'startsWith',
+  'endsWith',
+  'toLowerCase',
+  'toUpperCase',
+  'trim',
+]);
+
+/** Names that reach the prototype chain. Never readable, however they are written. */
+const FORBIDDEN_PROPERTIES = new Set(['__proto__', 'prototype', 'constructor']);
+
+const MISSING = Symbol('missing');
+
+/**
+ * Read one property under the allowlist.
+ *
+ * Own data is readable by its own name — that is what guards are written
+ * against. Anything inherited is only readable when it is an allowed method,
+ * and everything else reads as missing, so a name that is not on the list can
+ * never hand a guard a capability it was not given. Dynamic keys (`obj[expr]`)
+ * come through here too, so a computed name reaches no further than a literal.
+ */
+function readProperty(obj: unknown, key: string): unknown | typeof MISSING {
+  if (FORBIDDEN_PROPERTIES.has(key)) {
+    throw new EvalError(`Property '${key}' is not available to guard expressions`);
+  }
+
+  if (typeof obj === 'string' || Array.isArray(obj)) {
+    if (key === 'length') return (obj as { length: number }).length;
+    if (ALLOWED_METHODS.has(key)) {
+      const method = (obj as unknown as Record<string, unknown>)[key];
+      return typeof method === 'function' ? (method as Function).bind(obj) : MISSING;
+    }
+    return Array.isArray(obj) && /^[0-9]+$/.test(key)
+      ? (obj as unknown as Record<string, unknown>)[key]
+      : MISSING;
+  }
+
+  if (typeof obj === 'object' && obj !== null) {
+    if (Object.prototype.hasOwnProperty.call(obj, key)) {
+      return (obj as Record<string, unknown>)[key];
+    }
+    return MISSING;
+  }
+
+  return MISSING;
+}
+
 // ─── AST Node Types ─────────────────────────────────────────────────────────
 
 export type AstNode =
@@ -49,7 +115,10 @@ interface IdentifierNode {
 interface MemberNode {
   type: 'member';
   object: AstNode;
+  /** Static property name. Empty when `computed` carries the key expression. */
   property: string;
+  /** Key expression for `obj[expr]`. */
+  computed?: AstNode;
   optional: boolean;
 }
 
@@ -360,11 +429,49 @@ function parseUnary(tokens: Token[], depth: number): AstNode {
   return parsePrimary(tokens, depth);
 }
 
+/**
+ * Read `(a, b)` followed by `=>` without consuming anything otherwise.
+ *
+ * Returns the parameter names, or `undefined` when the parentheses are an
+ * ordinary grouping — the caller then parses them as an expression.
+ */
+function tryParseArrowParams(tokens: Token[], depth: number): string[] | undefined {
+  let index = 1; // tokens[0] is the '('
+  const params: string[] = [];
+  while (index < tokens.length && tokens[index]!.kind !== ')') {
+    const token = tokens[index]!;
+    if (token.kind === 'id') {
+      params.push(token.value);
+      index++;
+    } else if (token.kind === ',') {
+      index++;
+    } else {
+      return undefined;
+    }
+  }
+  if (index >= tokens.length) return undefined;
+  if (tokens[index + 1]?.kind !== '=>') return undefined;
+
+  // Committed: drop '(' … ')' and leave '=>' for the caller.
+  tokens.splice(0, index + 1);
+  void depth;
+  return params;
+}
+
 function parsePrimary(tokens: Token[], depth: number): AstNode {
   const token = peek(tokens, depth);
 
-  // Parenthesised expression
+  // Parenthesised expression, or an arrow function's parameter list.
+  // `(t) => …` and `(a, b) => …` are the forms people actually write; only the
+  // bare `t => …` form used to parse, and a guard using the parenthesised one
+  // failed to compile and silently evaluated to false.
   if (token === '(') {
+    const params = tryParseArrowParams(tokens, depth);
+    if (params) {
+      consume(tokens, '=>');
+      const body = parseExpr(tokens, depth + 1);
+      return parsePostfix({ type: 'arrow', params, body }, tokens, depth);
+    }
     consume(tokens, '(');
     const node = parseExpr(tokens, depth + 1);
     consume(tokens, ')');
@@ -461,21 +568,11 @@ function parsePostfix(node: AstNode, tokens: Token[], depth: number): AstNode {
         consume(tokens, '[');
         const index = parseExpr(tokens, depth + 1);
         consume(tokens, ']');
-        current = {
-          type: 'call',
-          callee: { type: 'member', object: current, property: 'at', optional: false },
-          args: [index],
-          optional: false,
-        };
+        current =
+          index.type === 'literal'
+            ? { type: 'member', object: current, property: String(index.value), optional: true }
+            : { type: 'member', object: current, property: '', computed: index, optional: true };
       } else {
-        // ?.[expr]
-        if (propTok === '[') {
-          consume(tokens, '[');
-          const index = parseExpr(tokens, depth + 1);
-          consume(tokens, ']');
-          current = { type: 'member', object: current, property: '', optional: true };
-          // approximate: wrap as member with computed access via identifier
-        }
         break;
       }
       // After optional chain, keep trying postfix
@@ -494,18 +591,10 @@ function parsePostfix(node: AstNode, tokens: Token[], depth: number): AstNode {
       consume(tokens, '[');
       const index = parseExpr(tokens, depth + 1);
       consume(tokens, ']');
-      // Evaluate bracket access as member access with a string key for literals
-      if (index.type === 'literal') {
-        current = {
-          type: 'member',
-          object: current,
-          property: String(index.value),
-          optional: false,
-        };
-      } else {
-        // For dynamic access, store a special marker
-        current = { type: 'member', object: current, property: '', optional: false };
-      }
+      current =
+        index.type === 'literal'
+          ? { type: 'member', object: current, property: String(index.value), optional: false }
+          : { type: 'member', object: current, property: '', computed: index, optional: false };
       continue;
     }
 
@@ -601,12 +690,16 @@ function evaluateNode(node: AstNode, ctx: EvalContext): unknown {
 
     case 'member': {
       const obj = evaluateNode(node.object, ctx);
-      if (obj == null) return node.optional ? undefined : undefined;
-      if (typeof obj === 'object' && obj !== null) {
-        return (obj as Record<string, unknown>)[node.property];
+      if (obj == null) {
+        if (node.optional) return undefined;
+        throw new EvalError(
+          `Cannot read '${node.computed ? '[…]' : node.property}' of ${String(obj)}`
+        );
       }
-      if (typeof obj === 'string' && node.property === 'length') return obj.length;
-      return undefined;
+
+      const key = node.computed ? String(evaluateNode(node.computed, ctx)) : node.property;
+      const value = readProperty(obj, key);
+      return value === MISSING ? undefined : value;
     }
 
     case 'call': {
@@ -683,15 +776,16 @@ function evaluateNode(node: AstNode, ctx: EvalContext): unknown {
       // Arrow functions capture the current ctx via closure
       const capturedCtx = ctx;
       return (...args: unknown[]) => {
+        // The budget is shared with the enclosing evaluation: a per-call budget
+        // makes MAX_EVAL_STEPS a limit on the smallest arrow rather than on the
+        // guard, and a nested callback could then run without bound.
         const localCtx: EvalContext = {
           ...capturedCtx,
           session: { ...capturedCtx.session },
-          budget: makeBudget(),
         };
         node.params.forEach((p, i) => {
           (localCtx.session as Record<string, unknown>)[p] = args[i];
         });
-        // Each arrow call gets its own fresh budget
         return evaluateNode(node.body, localCtx);
       };
     }
@@ -755,7 +849,8 @@ export function evaluateGuard(
   expression: string,
   session: Record<string, unknown>,
   builtins: Record<string, (...args: unknown[]) => unknown> = {},
-  guards: Record<string, (...args: unknown[]) => unknown> = {}
+  guards: Record<string, (...args: unknown[]) => unknown> = {},
+  onError?: (_error: Error, _expression: string) => void
 ): boolean {
   try {
     const node = parse(expression);
@@ -763,7 +858,11 @@ export function evaluateGuard(
     const ctx: EvalContext = { builtins, session: { ...session }, guards, budget };
     const result = evaluateNode(node, ctx);
     return Boolean(result);
-  } catch {
+  } catch (error) {
+    // Still fail closed — a guard that cannot be evaluated must not open a
+    // transition. But a guard that is *broken* and a guard that is *false* are
+    // different facts, and only one of them is a defect: report it.
+    onError?.(error instanceof Error ? error : new Error(String(error)), expression);
     return false;
   }
 }

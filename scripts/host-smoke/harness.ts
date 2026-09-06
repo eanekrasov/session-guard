@@ -40,6 +40,8 @@ export interface HostOptions {
   files?: Record<string, string>;
   /** Whether to `git init` the project and make a seed commit. */
   git?: boolean;
+  /** Extra environment for the host process. */
+  env?: Record<string, string>;
 }
 
 function run(cmd: string, args: string[], cwd: string): string {
@@ -50,7 +52,20 @@ function run(cmd: string, args: string[], cwd: string): string {
   return (result.stdout ?? '').trim();
 }
 
-/** Build and pack the plugin, so the host loads what would actually ship. */
+/**
+ * Build the plugin and hand the host the built entrypoint directory.
+ *
+ * This is the same spec form an operator puts in their own opencode config
+ * (`file://<...>/dist`), so the run loads the plugin the way a real install
+ * does. A packed `.tgz` is *not* used: the host does not load one from a
+ * `file://` spec, which is itself worth knowing before anyone ships that way.
+ */
+export function buildPlugin(): string {
+  run('bun', ['run', 'build'], REPO_ROOT);
+  return join(REPO_ROOT, 'dist');
+}
+
+/** Build and pack the plugin into a tarball. Kept for packaging checks. */
 export function packPlugin(): string {
   run('bun', ['run', 'build'], REPO_ROOT);
   const destination = join(tmpdir(), 'host-smoke-pack');
@@ -150,7 +165,7 @@ export async function startHost(options: HostOptions): Promise<Host> {
   const auth = join(homedir(), '.local/share/opencode/auth.json');
   if (existsSync(auth)) await cp(auth, join(dataDir, 'opencode', 'auth.json'));
 
-  const tarball = process.env.HOST_SMOKE_PLUGIN ?? packPlugin();
+  const pluginSpec = process.env.HOST_SMOKE_PLUGIN ?? buildPlugin();
   const operator = await operatorProviders();
   await writeFile(
     join(configDir, 'opencode', 'opencode.json'),
@@ -165,7 +180,10 @@ export async function startHost(options: HostOptions): Promise<Host> {
         ...(operator.disabled_providers
           ? { disabled_providers: operator.disabled_providers }
           : {}),
-        plugin: [`file://${tarball}`],
+        // Consent runs through the host's `question` tool, which is denied by
+        // default outside an interactive client.
+        permission: { question: 'allow' },
+        plugin: [`file://${pluginSpec}`],
         autoupdate: false,
         share: 'disabled',
       },
@@ -211,12 +229,16 @@ export async function startHost(options: HostOptions): Promise<Host> {
 
   const env = {
     ...process.env,
+    ...(options.env ?? {}),
     HOME: homeDir,
     XDG_CONFIG_HOME: configDir,
     XDG_DATA_HOME: dataDir,
     XDG_STATE_HOME: join(homeDir, 'state'),
     XDG_CACHE_HOME: join(homeDir, 'cache'),
     OPENCODE_DISABLE_AUTOUPDATE: '1',
+    // The consent path runs through the host's `question` tool, which the
+    // server only registers for interactive clients unless this is set.
+    OPENCODE_ENABLE_QUESTION_TOOL: '1',
   };
 
   let buffer = '';

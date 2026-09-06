@@ -40,19 +40,19 @@ const RetryBudgetSchema = z.object({
 });
 export type RetryBudget = z.infer<typeof RetryBudgetSchema>;
 
-const StageDefSchema = z.object({
+const TaskStageDefSchema = z.object({
   id: z.string(),
   allowedAgents: z.array(z.string()).optional(),
   entryGuards: z.array(z.string()).optional(),
   exitGuards: z.array(z.string()).optional(),
 });
-export type StageDef = z.infer<typeof StageDefSchema>;
+export type StageDef = z.infer<typeof TaskStageDefSchema>;
 
 const PhaseDefSchema = z.object({
   loop: LoopSourceSchema.optional(),
   dispatch: DispatchSchema.optional(),
   retryBudget: RetryBudgetSchema.optional(),
-  stages: z.array(StageDefSchema).optional(),
+  stages: z.array(TaskStageDefSchema).optional(),
   exitGuards: z.array(z.string()).optional(),
   allowedAgents: z.array(z.string()).optional(),
 });

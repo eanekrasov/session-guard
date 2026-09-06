@@ -253,7 +253,7 @@ WorkflowSession (Zod-схема)
 ├── revision       — монотонный счётчик (инкремент на каждом save)
 ├── title          — заголовок сессии
 │
-├── currentPhase   — фаза: planning | tasks_ready | code | review | qa | commit | done | failed
+├── currentStage   — фаза: planning | tasks_ready | code | review | qa | commit | done | failed
 ├── gates          — Gate[]: [{id, status, label?, resolvedAt?}]
 │   ├── invariants — pending | running | passed | failed | skipped
 │   ├── review     — ...
@@ -383,10 +383,10 @@ actionGuards:
 
 **tryApplyTransitions(session): TransitionCheck & { applied?: boolean }**
 
-Сканирует ВСЕ переходы из `session.currentPhase`, для каждого:
+Сканирует ВСЕ переходы из `session.currentStage`, для каждого:
 1. Если есть `consent` — проверяет `session.approved(consentType)`; если не approved — skip
 2. Если guard проходит — применяет переход:
-   - `session.currentPhase = transition.to`
+   - `session.currentStage = transition.to`
    - Выполняет effects (bumpRetry, approve)
 3. Если ни один не подошёл — `{ applied: false }`
 
@@ -596,7 +596,7 @@ interface OpenCodeSessionClient {
            │   │   ├── session.activeOperation = новый
            │   │   ├── session.verifications = []
            │   │   └── gate('invariants') = pending
-           │   └── liveMutations.set(callID, { rootSessionId, phaseBefore })
+           │   └── liveMutations.set(callID, { rootSessionId, stageBefore })
 ```
 
 ### AFTER — handleToolAfter (runtime.ts:382)
@@ -665,7 +665,7 @@ interface OpenCodeSessionClient {
 ```
 [workflow session: sess-abc123]
 [workflow profile: android]
-[workflow phase: code]
+[workflow stage: code]
 [workflow gates: invariants=passed]
 [workflow approvals: plan]
 [workflow mutation: call-xyz…]
@@ -779,7 +779,7 @@ DECLINE_KEYWORDS: decline, deny, reject, no, stop, отказ, нет...).
   │           │   ├── session.activeOperation = { callID, agent, status:'running' }
   │           │   ├── session.verifications = []
   │           │   └── gate('invariants') = pending
-  │           └── liveMutations.set(callID, { rootSessionId, phaseBefore })
+  │           └── liveMutations.set(callID, { rootSessionId, stageBefore })
   │
   ├── [Bash/Write executes]
   │
@@ -807,7 +807,7 @@ DECLINE_KEYWORDS: decline, deny, reject, no, stop, отказ, нет...).
 .opencode/profiles/
   base/                          ← наследуется всеми
     profile.json                 ← metadata: id, schemas, agents, invariants
-    state-machine.yaml           ← transitions, phases, guards
+    state-machine.yaml           ← transitions, stages, guards
     invariants.ts                ← EXPORT const INVARIANTS: InvariantCheck[]
 
   android/                       ← extends: base
@@ -887,7 +887,7 @@ interface ResolvedProfile {
 
 ```typescript
 // Extension override:
-result.phases = extension.phases ?? base.phases
+result.stages = extension.stages ?? base.stages
 result.transitions = extension.transitions ?? base.transitions
 result.settings = deepMerge(base.settings, extension.settings)
 
@@ -1130,10 +1130,10 @@ function resolvePresetAlias(value: string): string
 ```
 Tui {
   rootSessionID: string;
-  phase: Phase;           // planning | tasks_ready | code | review | qa | commit | done | failed
-  prevPhase: Phase | null;
-  nextPhase: Phase | null;
-  dispatchPhase: DispatchPhase;  // EMPTY | MUTATING | BOTH_ACTIVE | MUTATING_END
+  stage: Stage;           // planning | tasks_ready | execution | validation | commit | done | failed
+  prevStage: Stage | null;
+  nextStage: Stage | null;
+  dispatchStage: DispatchStage;  // EMPTY | MUTATING | BOTH_ACTIVE | MUTATING_END
   revision: number;
   completedTasks: number;
   totalTasks: number;
@@ -1174,7 +1174,7 @@ Tui {
 | GET | `/events` | SSE: snapshot + инкрементальные события |
 | GET | `/api/schema` | Контракт дашборда (DashboardSchema) |
 | GET | `/api/dump` | Все сессии |
-| GET | `/api/session/:id` | Одна сессия с `phase` |
+| GET | `/api/session/:id` | Одна сессия с `stage` |
 | GET | `/api/session/:id/timeline` | TimelineEvent[] (transitions, gates) |
 | GET | `/api/session/:id/invariants` | InvariantViolation[] |
 | GET | `/api/metrics` | Агрегированные метрики из `.opencode/metrics.jsonl` |
@@ -1298,7 +1298,7 @@ src/
   schema-loader.ts             — YAML → ProfileSchema, mergeSchemas
 
   schema/
-    types.ts                   — ProfileMetadata, TransitionDef, PhaseDef, ...
+    types.ts                   — ProfileMetadata, TransitionDef, StageDef, ...
     profile-metadata.ts        — Zod-схема profile.json
     profile-schema.ts          — Zod-схема schema.yaml
 

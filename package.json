@@ -50,7 +50,8 @@
     "build:decl": "tsc -p tsconfig.decl.json",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
-    "test:coverage": "bun test --coverage"
+    "test:coverage": "bun test --coverage",
+    "smoke": "bun run scripts/host-smoke/run.ts"
   },
   "files": [
     "dist",

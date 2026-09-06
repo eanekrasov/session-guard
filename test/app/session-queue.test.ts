@@ -323,6 +323,87 @@ describe('reentrant SessionQueue', () => {
   });
 });
 
+describe('SessionQueue — writes survive nesting and overlap', () => {
+  it('a reentrant write is not overwritten by the outer save', async () => {
+    // Reproduces the production failure the host smoke run surfaced: a tool
+    // reported "Stored 1 task(s)" while the persisted session held none.
+    await seedSession('sq-nested-write');
+
+    const { SessionQueue } = await import('../../src/app/session-queue.ts');
+    const queue = new SessionQueue(store);
+
+    await queue.enqueue('sq-nested-write', async (outer) => {
+      outer!.currentPhase = 'code';
+      await queue.enqueue('sq-nested-write', async (inner) => {
+        inner!.tasks.implementation = [
+          { id: 'task-0', path: 'src/a.ts', status: 'pending' },
+        ] as never;
+      });
+    });
+
+    const persisted = await store.load('sq-nested-write');
+    expect(persisted?.tasks.implementation).toHaveLength(1);
+    expect(persisted?.currentPhase).toBe('code');
+  });
+
+  it('a reentrant call sees the outer execution\'s session, not a reload', async () => {
+    await seedSession('sq-nested-identity');
+
+    const { SessionQueue } = await import('../../src/app/session-queue.ts');
+    const queue = new SessionQueue(store);
+
+    let sameInstance = false;
+    await queue.enqueue('sq-nested-identity', async (outer) => {
+      await queue.enqueue('sq-nested-identity', async (inner) => {
+        sameInstance = inner === outer;
+      });
+    });
+
+    expect(sameInstance).toBe(true);
+  });
+
+  it('two overlapping top-level calls serialise instead of running inline', async () => {
+    // Overlapping in time is not reentrancy. Before this was decided by call
+    // context, a second top-level call landed on the inline path and both
+    // executions raced on the same root.
+    await seedSession('sq-overlap');
+
+    const { SessionQueue } = await import('../../src/app/session-queue.ts');
+    const queue = new SessionQueue(store);
+
+    const started = deferred();
+    const release = deferred();
+    const order: string[] = [];
+
+    const first = queue.enqueue('sq-overlap', async (session) => {
+      order.push('first:start');
+      started.resolve();
+      await release.promise;
+      session!.tasks.implementation = [
+        { id: 'task-0', path: 'src/a.ts', status: 'pending' },
+      ] as never;
+      order.push('first:end');
+    });
+
+    await started.promise;
+    const second = queue.enqueue('sq-overlap', async (session) => {
+      order.push('second:start');
+      // Must observe the first execution's persisted write.
+      expect(session!.tasks.implementation).toHaveLength(1);
+      session!.currentPhase = 'review';
+      order.push('second:end');
+    });
+
+    release.resolve();
+    await Promise.all([first, second]);
+
+    expect(order).toEqual(['first:start', 'first:end', 'second:start', 'second:end']);
+    const persisted = await store.load('sq-overlap');
+    expect(persisted?.currentPhase).toBe('review');
+    expect(persisted?.tasks.implementation).toHaveLength(1);
+  });
+});
+
 describe('withSession', () => {
   it('returns null when session does not exist', async () => {
     const result = await withSession(store, 'nonexistent', async () => {

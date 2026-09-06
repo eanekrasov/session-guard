@@ -3,7 +3,7 @@
 ## Минимальный линейный workflow
 
 ```yaml
-phases:
+stages:
   planning: {}
   review: {}
   done: {}
@@ -30,7 +30,7 @@ transitions:
 ## Review и QA
 
 ```yaml
-phases:
+stages:
   review:
     allowedAgents: [review]
   qa:
@@ -48,7 +48,7 @@ transitions:
 ## Ошибка schema
 
 ```yaml
-phases:
+stages:
   execution:
     dispatch:
       strategy: parallel

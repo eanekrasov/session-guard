@@ -6,6 +6,7 @@ import {
   evidenceOf,
   calculatePlanEvidence as calculateDocumentEvidence,
   classifyConsentAnswer,
+  questionTextOf,
 } from './consent.ts';
 import type { LogFn } from './logger.ts';
 import { approve } from '../domain/approvals.ts';
@@ -230,8 +231,17 @@ export class ConsentOrchestrator {
         }
       }
 
-      const request = parseConsentRequest(output.output ?? '');
-      if (!request) return;
+      // The tag is in the question that was asked, not in the answer that came
+      // back. `output.output` is kept as a fallback for hosts that echo it.
+      const request =
+        parseConsentRequest(questionTextOf(args)) ?? parseConsentRequest(output.output ?? '');
+      if (!request) {
+        void this.log('warn', 'Consent after: no consent request found in the question', {
+          sessionID,
+          callID,
+        });
+        return;
+      }
 
       const result = classifyConsentAnswer(answers, request);
 

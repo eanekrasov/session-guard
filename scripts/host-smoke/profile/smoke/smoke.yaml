@@ -4,6 +4,13 @@
 # run. Only the agent roster is pinned to what the host really dispatches, so
 # the scenarios exercise the shipped transitions rather than a toy machine.
 
+# The base machine declares no task loop — profiles do (android's `code` phase
+# owns `implementation`). The smoke profile does the same, so task-list
+# scenarios exercise the shipped code path rather than a phase without a loop.
+phases:
+  code:
+    loop: implementation
+
 editingAgents:
   - build
 

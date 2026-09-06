@@ -24,6 +24,19 @@ export interface ConsentRequest {
 export type ConsentAnswer =
   { kind: 'grant' } | { kind: 'decline' } | { kind: 'unrecognized'; raw: string[] };
 
+/**
+ * The question text a `question` tool call carries.
+ *
+ * The consent tag travels in the call's arguments — the tool's *output* is the
+ * operator's answer, and never contains the tag.
+ */
+export function questionTextOf(args: unknown): string {
+  if (!args || typeof args !== 'object') return '';
+  const questions = (args as { questions?: Array<{ question?: string }> }).questions;
+  if (!Array.isArray(questions)) return '';
+  return questions.map((entry) => entry?.question ?? '').join('\n');
+}
+
 export function parseConsentRequest(questionText: string): ConsentRequest | undefined {
   const match = CONSENT_TAG_REGEX.exec(questionText);
   if (!match) return undefined;

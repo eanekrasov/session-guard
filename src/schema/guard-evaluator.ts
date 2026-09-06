@@ -26,11 +26,15 @@ export class GuardEvaluator {
    * @param guards — custom guard functions from guards.ts (optional)
    * @param evaluationContext — transient context for the guard evaluation
    */
+  private readonly onError?: (_error: Error, _expression: string) => void;
+
   constructor(
     session: Record<string, unknown>,
     guards?: Record<string, Function>,
-    evaluationContext: GuardEvaluationContext = {}
+    evaluationContext: GuardEvaluationContext = {},
+    onError?: (_error: Error, _expression: string) => void
   ) {
+    this.onError = onError;
     const sessionFacts = session as { approvals?: Array<{ type: string; status: string }> };
     const approvedFn = (type: string): boolean =>
       (sessionFacts.approvals ?? []).some((a) => a.type === type && a.status === 'granted');
@@ -137,8 +141,15 @@ export class GuardEvaluator {
    */
   evaluate(expression: string): boolean {
     try {
-      return astEvaluateGuard(expression, this.session, this.builtins, this.guards);
-    } catch {
+      return astEvaluateGuard(
+        expression,
+        this.session,
+        this.builtins,
+        this.guards,
+        this.onError
+      );
+    } catch (error) {
+      this.onError?.(error instanceof Error ? error : new Error(String(error)), expression);
       return false;
     }
   }

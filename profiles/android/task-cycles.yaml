@@ -1,6 +1,6 @@
 # Unregistered example of a declarative task-cycle profile schema.
 # It is intentionally not referenced by profiles/android/profile.json.
-phases:
+stages:
   execution:
     loop: implementation
     retryBudget:
@@ -9,11 +9,11 @@ phases:
       strategy: parallel
       maxConcurrent: 3
     stages:
-      - id: dev
+      dev:
         allowedAgents: [code, debug]
-      - id: review
+      review:
         allowedAgents: [review]
-      - id: qa
+      qa:
         allowedAgents: [qa]
     exitGuards:
       - 'allTasksCompleted()'
