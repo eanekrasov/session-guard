@@ -73,6 +73,7 @@ import { syncProfileAgents } from './profile-agent-sync.ts';
 import { agentIsAllowed } from './agent-names.ts';
 import { schemaId } from './profile-resolver.ts';
 import { WorkflowBlockedError } from './blocked-error.ts';
+import { createReporter, errorMessage, type Reporter } from './report.ts';
 
 export { schemaToEngineConfig };
 
@@ -120,6 +121,7 @@ class StateMachineRuntime {
   private taskApi: TaskApi;
   private context: PluginInput;
   private log: LogFn;
+  private report: Reporter;
   private rulesRuntime: OpenCodeRulesRuntime;
   private readonly fileTools = new Set(['edit', 'write', 'apply_patch']);
   /**
@@ -191,6 +193,7 @@ class StateMachineRuntime {
   constructor(context: PluginInput, paths?: RuntimePaths) {
     this.context = context;
     this.log = createLogFn(context.client);
+    this.report = createReporter(context.client, this.log);
     // The store lives outside the project, under OpenCode's own state
     // directory. It used to be told so through process.env, which the plugin
     // set from the first project it happened to initialise for — so a second
@@ -266,8 +269,24 @@ class StateMachineRuntime {
     const session = await this.loadGoverning(ctx.sessionID);
     if (!session) return null;
 
-    const engine = await this.mutationOrchestrator.resolveEngine(session.profileId, session.schemaId);
-    const allowed = engine.getTaskControlAgents();
+    // `tasks-get` is open to any caller and catches its own errors; the
+    // task-control tools resolve the engine here, before their handler's own
+    // try. A broken profile therefore escaped `workflow.tasks-set` as a raw
+    // ProfileConfigurationError while the same error became readable tool
+    // output next door. Two neighbouring tools, one broken profile, two shapes
+    // of failure.
+    let allowed: string[];
+    try {
+      const engine = await this.mutationOrchestrator.resolveEngine(
+        session.profileId,
+        session.schemaId
+      );
+      allowed = engine.getTaskControlAgents();
+    } catch (error) {
+      const message = `${toolName} is refused: ${errorMessage(error)}`;
+      this.report(message, { sessionID: ctx.sessionID, tool: toolName });
+      return { output: message, metadata: { refused: true, tool: toolName } };
+    }
     const agent = ctx.agent ?? '';
     if (agent !== '' && agentIsAllowed(agent, allowed, session.profileId)) return null;
 
@@ -495,25 +514,11 @@ class StateMachineRuntime {
 
     if (!resolvedProfileId) {
       if (profiles.length === 0) {
-        if (process.env.DEBUG_TUI !== '0') {
-          const client = this.context.client as unknown as {
-            post?: (
-              path: string,
-              input: { body: { message: string; variant: 'error' } }
-            ) => Promise<unknown>;
-          };
-          void client
-            .post?.('/tui/show-toast', {
-              body: {
-                message: `No workflow profiles found in ${this.profilesDir}. Set STATE_MACHINE_PROFILES_DIR env or create a profile to use workflow tools.`,
-                variant: 'error',
-              },
-            })
-            .catch(() => {});
-        }
-        return {
-          output: `No workflow profiles found in ${this.profilesDir}. Set STATE_MACHINE_PROFILES_DIR or create a profile to use workflow tools.`,
-        };
+        const message =
+          `No workflow profiles found in ${this.profilesDir}. ` +
+          `Set STATE_MACHINE_PROFILES_DIR or create a profile to use workflow tools.`;
+        this.report(message, { profilesDir: this.profilesDir });
+        return { output: message };
       }
       return {
         output: `schemaId is required or unknown. Available: ${profiles
@@ -2614,13 +2619,26 @@ class StateMachineRuntime {
         await this.handleChatMessage(input, output);
       },
       'tool.execute.before': async (input, output) => {
-        this.log('info', `[DEBUG] tool.execute.before raw input`, {
+        // Raw arguments carry file contents and whatever the agent typed, so
+        // they belong at `debug`, not on every call at `info`.
+        this.log('debug', `tool.execute.before raw input`, {
           raw: JSON.stringify(input, null, 0).slice(0, 2000),
         });
-        await this.handleToolBefore(input, output);
+        try {
+          await this.handleToolBefore(input, output);
+        } catch (error) {
+          // A refusal is an error the operator should see: the agent already
+          // reads it as a failed tool call, and this is the other two channels.
+          this.report(errorMessage(error), {
+            tool: input.tool,
+            sessionID: input.sessionID,
+            callID: input.callID,
+          });
+          throw error;
+        }
       },
       'tool.execute.after': async (input, output) => {
-        this.log('info', `[DEBUG] tool.execute.after raw input`, {
+        this.log('debug', `tool.execute.after raw input`, {
           raw: JSON.stringify(input, null, 0).slice(0, 2000),
         });
         await this.handleToolAfter(input, output);
