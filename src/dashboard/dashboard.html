@@ -16,11 +16,16 @@ h1 { font-size:18px; margin-bottom:16px; color:var(--blue); }
 .card { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:14px; }
 .card h2 { font-size:14px; color:var(--dim); margin-bottom:8px; text-transform:uppercase; letter-spacing:.5px; }
 .state-badge { display:inline-block; padding:4px 12px; border-radius:20px; font-weight:700; font-size:13px; }
-.state-PLANNING { background:#1a2a3a; color:var(--blue); }
-.state-TASKS_READY { background:#2a2a1a; color:var(--yellow); }
-.state-EXECUTION { background:#1a3a2a; color:var(--green); }
-.state-COMMIT { background:#3a1a1a; color:var(--red); }
-.state-DONE { background:#1a3a2a; color:var(--green); }
+/* Class names are built as "state-" + the stage id, and a stage id is
+   lowercase as the profile writes it. These were uppercase, so no badge was
+   ever styled. */
+.state-planning { background:#1a2a3a; color:var(--blue); }
+.state-tasks_ready { background:#2a2a1a; color:var(--yellow); }
+.state-execution { background:#1a3a2a; color:var(--green); }
+.state-validation { background:#2a1a3a; color:var(--purple); }
+.state-commit { background:#3a1a1a; color:var(--red); }
+.state-done { background:#1a3a2a; color:var(--green); }
+.state-failed { background:#3a1a1a; color:var(--red); }
 .inv-row { display:flex; justify-content:space-between; padding:4px 0; border-bottom:1px solid var(--border); }
 .inv-row:last-child { border-bottom:none; }
 .inv-pass { color:var(--green); } .inv-fail { color:var(--red); } .inv-pending { color:var(--yellow); }
@@ -40,11 +45,13 @@ button:hover { background:#484f58; }
 /* Светлая тема */
 body.light { --bg: #ffffff; --card: #f6f8fa; --border: #d0d7de; --text: #1f2328; --dim: #656d76;
   --green: #1a7f37; --red: #cf222e; --yellow: #9a6700; --blue: #0969da; --purple: #8250df; }
-body.light .state-PLANNING { background:#ddf4ff; color:var(--blue); }
-body.light .state-TASKS_READY { background:#fff8c5; color:var(--yellow); }
-body.light .state-EXECUTION { background:#dafbe1; color:var(--green); }
-body.light .state-COMMIT { background:#ffebe9; color:var(--red); }
-body.light .state-DONE { background:#dafbe1; color:var(--green); }
+body.light .state-planning { background:#ddf4ff; color:var(--blue); }
+body.light .state-tasks_ready { background:#fff8c5; color:var(--yellow); }
+body.light .state-execution { background:#dafbe1; color:var(--green); }
+body.light .state-validation { background:#fbefff; color:var(--purple); }
+body.light .state-commit { background:#ffebe9; color:var(--red); }
+body.light .state-done { background:#dafbe1; color:var(--green); }
+body.light .state-failed { background:#ffebe9; color:var(--red); }
 body.light .tl-green { background:#dafbe1; } body.light .tl-red { background:#ffebe9; }
 body.light .tl-yellow { background:#fff8c5; } body.light .tl-blue { background:#ddf4ff; }
 body.light .cycle-danger { background:#ffebe9; }
@@ -172,7 +179,7 @@ async function loadSchema() {
     const schema = await resp.json();
     GRAPH_STATES = schema.states.map(s => s.id);
     GRAPH_TRANSITIONS = schema.transitions.map(t => [t.from, t.to]);
-    renderGraph(currentState || (GRAPH_STATES[0] || "PLANNING"));
+    renderGraph(currentState || (GRAPH_STATES[0] || "planning"));
   } catch {}
 }
 

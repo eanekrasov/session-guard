@@ -21,6 +21,7 @@
  *      HOST_SMOKE_PLUGIN (skip build+pack, use this tarball),
  *      HOST_SMOKE_ATTEMPTS (default 3).
  */
+import { spawnSync } from 'node:child_process';
 import { appendFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {

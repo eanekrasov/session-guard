@@ -2,12 +2,15 @@ import { describe, it, expect } from 'vitest';
 import { buildDashboardSchema } from '../../src/dashboard/dashboard-contract.ts';
 import type { DashboardInput } from '../../src/dashboard/dashboard-contract.ts';
 
+// Stage ids as a profile writes them, and as dashboard-server passes them.
+// The uppercase ids this fixture used to carry appear nowhere in production,
+// so the description lookup was asserted against input no caller produces.
 const defaultInput: DashboardInput = {
-  stages: ['PLANNING', 'EXECUTION', 'COMMIT', 'DONE'],
+  stages: ['planning', 'execution', 'commit', 'done'],
   transitions: [
-    { from: 'PLANNING', to: 'EXECUTION' },
-    { from: 'EXECUTION', to: 'COMMIT' },
-    { from: 'COMMIT', to: 'DONE' },
+    { from: 'planning', to: 'execution' },
+    { from: 'execution', to: 'commit' },
+    { from: 'commit', to: 'done' },
   ],
   gates: [{ id: 'invariants' }, { id: 'review' }, { id: 'qa' }],
   profile: {
@@ -27,13 +30,13 @@ describe('buildDashboardSchema', () => {
 
     expect(schema.states).toHaveLength(4);
     expect(schema.states[0]).toEqual({
-      id: 'PLANNING',
-      label: 'PLANNING',
+      id: 'planning',
+      label: 'planning',
       description: 'Planning',
     });
     expect(schema.states[3]).toEqual({
-      id: 'DONE',
-      label: 'DONE',
+      id: 'done',
+      label: 'done',
       description: 'Done',
     });
   });
@@ -43,8 +46,8 @@ describe('buildDashboardSchema', () => {
 
     expect(schema.transitions).toHaveLength(3);
     expect(schema.transitions[0]).toEqual({
-      from: 'PLANNING',
-      to: 'EXECUTION',
+      from: 'planning',
+      to: 'execution',
       kind: '',
       gate: null,
     });

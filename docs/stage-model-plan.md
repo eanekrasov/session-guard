@@ -204,7 +204,7 @@ Until that is fixed, a profile whose `code` stage is worked by a subagent has
 to move on the agent's own result rather than on the invariants gate. The host
 smoke profile does exactly that, and says why in a comment.
 
-This is item 7 of `docs/handoff-2026-09-06.md`, reproduced end to end.
+This is item 2 of `docs/handoff.md` — parent/child session linkage — reproduced end to end.
 
 ## Defects fixed in the loop, after the model landed
 

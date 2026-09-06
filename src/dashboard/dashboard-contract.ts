@@ -74,12 +74,22 @@ const GATE_LABELS: Record<string, string> = {
   qa: 'QA verification',
 };
 
-const PHASE_DESCRIPTIONS: Record<string, string> = {
-  PLANNING: 'Planning',
-  TASKS_READY: 'Tasks ready',
-  EXECUTION: 'Execution',
-  COMMIT: 'Commit',
-  DONE: 'Done',
+/**
+ * Human labels for the base workflow's stages.
+ *
+ * Keyed by the stage id as a profile writes it — lowercase. These keys were
+ * uppercase while the only caller passed lowercase, so every description
+ * resolved to '' in production while the test, which fed uppercase ids of its
+ * own, stayed green.
+ */
+const STAGE_DESCRIPTIONS: Record<string, string> = {
+  planning: 'Planning',
+  tasks_ready: 'Tasks ready',
+  execution: 'Execution',
+  validation: 'Validation',
+  commit: 'Commit',
+  done: 'Done',
+  failed: 'Failed',
 };
 
 // ─── Factory ───────────────────────────────────────────────────────────────────
@@ -107,7 +117,7 @@ export function buildDashboardSchema(input: DashboardInput): DashboardSchema {
   const states: DashboardState[] = input.stages.map((id) => ({
     id,
     label: id.replace(/_/g, ' '),
-    description: PHASE_DESCRIPTIONS[id] ?? '',
+    description: STAGE_DESCRIPTIONS[id] ?? '',
   }));
 
   const transitions: DashboardTransition[] = input.transitions.map((t) => ({

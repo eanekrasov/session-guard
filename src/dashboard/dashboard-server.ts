@@ -452,11 +452,14 @@ serve({
     // GET /api/schema
     if (url.pathname === '/api/schema') {
       const schema = buildDashboardSchema({
-        stages: ['planning', 'tasks_ready', 'execution', 'commit', 'done'],
+        stages: ['planning', 'tasks_ready', 'execution', 'validation', 'commit', 'done', 'failed'],
         transitions: [
           { from: 'planning', to: 'tasks_ready' },
           { from: 'tasks_ready', to: 'execution' },
-          { from: 'execution', to: 'commit' },
+          { from: 'execution', to: 'validation' },
+          { from: 'validation', to: 'commit' },
+          { from: 'validation', to: 'execution' },
+          { from: 'validation', to: 'failed' },
           { from: 'commit', to: 'done' },
         ],
         gates: BASE_WORKFLOW_GATES.map((id) => ({ id })),
