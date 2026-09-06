@@ -119,7 +119,7 @@ The morning handoff listed 14-19 as open. Re-checked:
 | | Claim | Now |
 | --- | --- | --- |
 | 14 | `compileWorkflow` never called from `src` | **closed** — `src/app/mutation-orchestrator.ts:263` |
-| 15 | `exitGuards` unread, `stageLevelGuards` unpopulated | **half** — the array form is read (`src/domain/task-movement.ts:76`); `stageLevelGuards` is still never populated, `mergeSchemasToEngineConfig` does not return it |
+| 15 | `exitGuards` unread, `stageLevelGuards` unpopulated | **half** — the array form is read (`src/domain/task-movement.ts:76`); `stageLevelGuards` is still never populated, `schemaToEngineConfig` does not return it |
 | 16 | `onFailure` has no consumer | **open** — compiled into `CompiledTransition`, read by nobody |
 | 17 | no profile uses `kind: pass\|fail` | **open** — it appears only in `profiles/android/task-cycles.yaml`, which declares itself unregistered |
 | 18 | `deriveStageFn` falls back to `'PLANNING'` | **open** — see the stage-name audit below |
@@ -347,10 +347,10 @@ diff afterwards. Stated as a requirement in the spec so nobody "improves" it.
 
 **The dispatch strategy is called `serial_with_overlap`**, not `overlapping`.
 
-**Two different merge paths.** The four schemas resolve through
-`mergeSchemasToEngineConfig` (per-key, last-wins) and
-`SchemaLoader.mergeSchemas` (whole-field override, for schema-level
-`extends:`). Do not confuse them. A third projection sits in
+**One merge path, and a projection.** Schemas combine only through
+`SchemaLoader.mergeSchemas` (per-entry, for schema-level `extends:`);
+`schemaToEngineConfig` merges nothing — it projects the one schema a session
+runs. A second projection sits in
 `src/app/profile-resolver.ts:257-270` and is an **explicit field whitelist** —
 a new schema-level field that is not listed there never reaches the engine, and
 nothing fails loudly when it does not.
@@ -840,9 +840,9 @@ Keep the inline YAML in `test/schema/compile-validation.test.ts` where it is:
 those schemas are deliberately wrong, and they are the test's input rather than
 duplication.
 
-## Next: a profile holds several schemas, and a session runs one
+## Done: a profile holds several schemas, and a session runs one
 
-Decided 2026-09-07, not started.
+Decided and built 2026-09-07.
 
 **The rule.** A profile may hold as many schemas as it likes, and they are
 independent workflows. Schemas combine **only** through `extends`. Schema names
@@ -882,22 +882,38 @@ the seventh. **No profile in the repository declares more than one schema
 today**, shipped or fixture, so nothing is currently wrong — the mine is laid
 but unarmed.
 
-**The work.**
+**What was built.**
 
-1. The session records the schema beside the profile. This needs a session
-   schema migration, which is the thing deferred until release — the only real
-   cost here.
-2. `resolveEngine` takes a schema, not a profile's whole list.
-   `mergeSchemasToEngineConfig` stops merging a list; inheritance stays where it
-   already is, in `resolveSingleSchema`'s `extends` resolution.
-3. `workflow.create` accepts `{profileId}/{schemaId}`. A bare id stays legal and
-   means "that profile, if it has exactly one schema"; a profile with several
-   and a bare id is refused with the choices named, in keeping with refusing
-   rather than guessing. **Confirmed by the operator**, so it is the contract
-   rather than a proposal. Every current caller passes a bare id —
-   `scripts/create-workflow.ts`, nine host-smoke instructions,
-   `HARNESS_SCHEMA_ID` / `HARNESS_PROFILE` — and every one of them names a
-   profile whose single schema file shares its name, so none of them changes.
+1. `WorkflowSession.schemaId` is required beside `profileId`. No migration was
+   written, under the standing decision to ignore them until release: a session
+   file written before this logs `Session schema mismatch (not our format)` and
+   is ignored, which is what every other reader already does with one.
+2. `mergeSchemasToEngineConfig` is gone. `schemaToEngineConfig` projects **one**
+   `ResolvedSchema`, and `selectSchema(profileId, schemas, wanted)` picks which.
+   `resolveEngine(profileId, schemaId?)` takes both and keys its cache on both.
+   Inheritance stayed where it already was, in `resolveSingleSchema`'s `extends`.
+3. `workflow.create` accepts `{profileId}/{schemaId}`. A bare id names the
+   profile and is legal while that profile holds one schema; with several it is
+   refused with the choices named.
+
+**The half of it that was not in the plan.** Profile resolution used to union
+the schema *file lists* along the `extends` chain, so `android` resolved to
+`[base.yaml, android.yaml]` and relied on the flattening to become one
+workflow. Under the new rule that is two independent schemas and the session
+would have to choose between them. So a profile's schemas are now its own —
+inherited only when it declares none — and combining is left entirely to
+schema-level `extends`. That is a behaviour change for the two shipped deltas:
+`profiles/android/android.yaml` and `profiles/harness/harness.yaml` declared no
+`extends` at all and now say `extends: 'base/base.yaml'`. Every fixture already
+did. `profile.json.extends` still carries metadata and still makes a parent's
+schema files reachable by name.
+
+**Covered by** `test/app/mutation-orchestrator.test.ts` (two schemas in one
+profile stay two, and the refusals name the alternatives) over the new
+`test/fixtures/profiles/two-schemas`, whose `alpha.yaml` and `beta.yaml`
+declare the same stage and the same edge with different guards — the shape that
+used to collapse; and `test/app/create-workflow-schema-id.test.ts` over the
+tool. Both bite: checked by mutation.
 
 `profileId` keeps its meaning everywhere else, so profile-qualified agent names
 like `android/code` are untouched. The qualified form also matches the

@@ -22,7 +22,7 @@ async function createApi(): Promise<{ api: TaskApi; store: WorkflowStore; sessio
   const directory = await mkdtemp(path.join(tmpdir(), 'task-api-'));
   temporaryDirectories.push(directory);
   const store = new WorkflowStore(directory);
-  const session = createSession('s1', 'profile');
+  const session = createSession('s1', 'profile', 'cycle');
   await store.save(session);
 
   return {
@@ -41,7 +41,7 @@ async function createApiWithQueue(): Promise<{
   const directory = await mkdtemp(path.join(tmpdir(), 'task-api-queue-'));
   temporaryDirectories.push(directory);
   const store = new WorkflowStore(directory);
-  const session = createSession('s1', 'profile');
+  const session = createSession('s1', 'profile', 'cycle');
   await store.save(session);
   const queue = new SessionQueue(store);
 

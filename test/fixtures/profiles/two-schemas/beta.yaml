@@ -1,0 +1,23 @@
+# One of two independent workflows in a single profile. `alpha.yaml` declares
+# the same stage and the same edge with a different guard, so a resolver that
+# folded the profile's schemas together would silently serve one of them for
+# both.
+stages:
+  execution:
+    loop: implementation
+    dispatch:
+      strategy: serial
+    stages:
+      dev:
+        allowedAgents: ['code']
+  done: {}
+transitions:
+  - from: execution
+    to: done
+    guard: 'FROM_BETA'
+requiredGates: [betaGate]
+stageAssignments:
+  - id: execution
+    priority: 1
+    condition: 'true'
+    result: execution

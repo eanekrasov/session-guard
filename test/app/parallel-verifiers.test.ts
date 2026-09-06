@@ -60,7 +60,7 @@ function setVerifyFixtureProfilesDir(
 
 async function seed(): Promise<WorkflowStore> {
   const store = new WorkflowStore(storeDirectory);
-  const session = createSession('s1', verifyProfileId);
+  const session = createSession('s1', verifyProfileId, 'cycle');
   session.tasks.implementation = [createTask()];
   await store.save(session);
   return store;

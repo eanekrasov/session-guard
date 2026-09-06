@@ -8,11 +8,16 @@ import type { LogFn } from '../app/logger.ts';
 
 // ─── Factory ──────────────────────────────────────────────────────────────────
 
-export function createSession(sessionId: string, profileId: string): WorkflowSession {
+export function createSession(
+  sessionId: string,
+  profileId: string,
+  schemaId: string
+): WorkflowSession {
   return {
     schemaVersion: 2,
     sessionId,
     profileId,
+    schemaId,
     revision: 0,
     title: '',
     // Gates are created on demand by the first verdict about them. A gate

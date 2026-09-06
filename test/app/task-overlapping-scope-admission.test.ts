@@ -53,7 +53,7 @@ async function seed(
   taskB: Partial<MutationTask>
 ): Promise<WorkflowStore> {
   const store = new WorkflowStore(storeDirectory);
-  const session = createSession('s1', overlapProfileId);
+  const session = createSession('s1', overlapProfileId, 'cycle');
   session.tasks.implementation = [createTask(taskA), createTask({ id: 'task-2', ...taskB })];
   await store.save(session);
   return store;

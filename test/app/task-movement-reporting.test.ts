@@ -47,7 +47,7 @@ function setMovementFixtureProfilesDir(profileId: string): void {
 
 async function seed(): Promise<WorkflowStore> {
   const store = new WorkflowStore(storeDirectory);
-  const session = createSession('s1', movementProfileId);
+  const session = createSession('s1', movementProfileId, 'cycle');
   session.tasks.implementation = [createTask()];
   await store.save(session);
   return store;

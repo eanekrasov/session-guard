@@ -70,7 +70,7 @@ async function createTestSession(
   overrides?: Partial<import('../../src/session/session-schema.ts').WorkflowSession>
 ): Promise<import('../../src/session/session-schema.ts').WorkflowSession> {
   const store = new WorkflowStore(process.env.STATE_MACHINE_STORE_DIR!);
-  const session = createSession(sessionId, profileId);
+  const session = createSession(sessionId, profileId, 'cycle');
   if (overrides) {
     Object.assign(session, overrides);
   }

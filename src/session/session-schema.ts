@@ -231,6 +231,9 @@ export const WorkflowSessionSchema = z
   .object({
     sessionId: z.string().min(1, 'sessionId is required'),
     profileId: z.string().min(1, 'profileId is required'),
+    // A profile may hold several independent schemas; the session runs exactly
+    // one of them, named here by its id within the profile.
+    schemaId: z.string().min(1, 'schemaId is required'),
     schemaVersion: z.number().int().positive().default(2),
     revision: z.number().int().min(0).default(0),
     title: z.string().default(''),

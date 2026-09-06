@@ -53,7 +53,7 @@ function setFixtureProfilesDir(profileId = 'cycle-minimal'): void {
 
 async function createWorkflowSession(): Promise<WorkflowStore> {
   const store = new WorkflowStore(storeDirectory);
-  const session = createSession('s1', taskControlProfileId);
+  const session = createSession('s1', taskControlProfileId, 'cycle');
   session.tasks.implementation = [createTask(), createTask({ id: 'task-2', status: 'pending' })];
   await store.save(session);
   return store;

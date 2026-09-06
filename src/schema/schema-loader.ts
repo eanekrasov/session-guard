@@ -129,6 +129,9 @@ export class SchemaLoader {
    */
   mergeSchemas(base: ProfileSchema, extension: ProfileSchema): ResolvedSchema {
     const result: ResolvedSchema = {
+      // An intermediate: the identity belongs to the file the resolver was
+      // asked for, and it stamps both `id` and `source` on the way out.
+      id: '',
       source: extension.extends ?? '',
       stages: mergeStages(base.stages, extension.stages),
       transitions: mergeTransitions(base.transitions, extension.transitions),

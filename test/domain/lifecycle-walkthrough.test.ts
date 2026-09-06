@@ -39,6 +39,7 @@ function createSession(): WorkflowSession {
   return {
     sessionId: 'walkthrough',
     profileId: 'base',
+    schemaId: 'state-machine',
     schemaVersion: 1,
     revision: 0,
     title: '',

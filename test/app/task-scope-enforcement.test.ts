@@ -75,7 +75,7 @@ async function seedSession(
   taskOverrides: Partial<MutationTask> = {}
 ): Promise<WorkflowStore> {
   const store = new WorkflowStore(storeDirectory);
-  const session = createSession(sessionId, 'scope-enforce');
+  const session = createSession(sessionId, 'scope-enforce', 'cycle');
   session.tasks.implementation = [createTask(taskOverrides)];
   await store.save(session);
   return store;

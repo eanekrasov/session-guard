@@ -44,7 +44,7 @@ function pluginInput(): PluginInput {
 
 async function seedTwoRunningTasks(): Promise<WorkflowStore> {
   const store = new WorkflowStore(storeDirectory);
-  const session = createSession('s1', 'parallel-scope');
+  const session = createSession('s1', 'parallel-scope', 'cycle');
   session.tasks.implementation = createTasks(
     { writeScope: ['src/auth/**'], readScope: ['src/auth/**'] },
     { writeScope: ['src/billing/**'], readScope: ['src/billing/**'] }

@@ -16,6 +16,7 @@ function makeFacts(overrides: Partial<SessionFacts> = {}): SessionFacts {
     },
     gates: {},
     profileId: 'android',
+    schemaId: 'state-machine',
     revision: 0,
     deliveryReceipt: null,
     refs: {},

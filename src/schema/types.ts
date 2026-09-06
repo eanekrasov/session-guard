@@ -69,6 +69,12 @@ export function nestedStages(stage: {
 }
 
 export interface ResolvedSchema {
+  /**
+   * The schema's name within its profile — its file name without the
+   * extension. Unique inside the profile, and the second half of the
+   * `<profileId>/<schemaId>` a session is created with.
+   */
+  id: string;
   source: string;
   stages?: Record<string, StageDef>;
   transitions?: TransitionDef[];

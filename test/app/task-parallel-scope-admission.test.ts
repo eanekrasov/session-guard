@@ -43,7 +43,7 @@ function setParallelProfilesDir(): void {
 
 async function seed(taskA: Partial<MutationTask>, taskB: Partial<MutationTask>) {
   const store = new WorkflowStore(storeDirectory);
-  const session = createSession('s1', 'parallel-scope');
+  const session = createSession('s1', 'parallel-scope', 'cycle');
   session.tasks.implementation = [createTask(taskA), createTask({ id: 'task-2', ...taskB })];
   await store.save(session);
   return store;
@@ -107,7 +107,7 @@ describe('a parallel scope-overlap refusal names the admissible task', () => {
   it('lists a pending task with a disjoint writeScope as admissible now', async () => {
     setParallelProfilesDir();
     const store = new WorkflowStore(storeDirectory);
-    const session = createSession('s1', 'parallel-scope');
+    const session = createSession('s1', 'parallel-scope', 'cycle');
     session.tasks.implementation = [
       createTask({ writeScope: ['src/auth/**'] }),
       createTask({ id: 'task-2', writeScope: ['src/auth/login.ts'] }),
@@ -123,7 +123,7 @@ describe('a parallel scope-overlap refusal names the admissible task', () => {
   it('names no admissible task when every other pending task also overlaps', async () => {
     setParallelProfilesDir();
     const store = new WorkflowStore(storeDirectory);
-    const session = createSession('s1', 'parallel-scope');
+    const session = createSession('s1', 'parallel-scope', 'cycle');
     session.tasks.implementation = [
       createTask({ writeScope: ['src/auth/**'] }),
       createTask({ id: 'task-2', writeScope: ['src/auth/login.ts'] }),

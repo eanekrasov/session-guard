@@ -20,7 +20,7 @@ async function seedSession(
   profileId = 'test',
   parentId?: string
 ): Promise<void> {
-  const session = createSession(sessionId, profileId);
+  const session = createSession(sessionId, profileId, 'cycle');
   if (parentId) {
     session.testStatus['parentID'] = parentId;
   }

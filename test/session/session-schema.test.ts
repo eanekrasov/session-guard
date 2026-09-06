@@ -14,6 +14,7 @@ describe('WorkflowSessionSchema', () => {
     const input = {
       sessionId: 'session-123',
       profileId: 'android',
+      schemaId: 'state-machine',
     };
 
     const result = WorkflowSessionSchema.parse(input);
@@ -26,6 +27,7 @@ describe('WorkflowSessionSchema', () => {
     const input = {
       sessionId: 'session-123',
       profileId: 'android',
+      schemaId: 'state-machine',
     };
 
     const result = WorkflowSessionSchema.parse(input);
@@ -52,6 +54,7 @@ describe('WorkflowSessionSchema', () => {
     const input = {
       sessionId: '',
       profileId: 'android',
+      schemaId: 'state-machine',
     };
 
     expect(() => WorkflowSessionSchema.parse(input)).toThrow();
@@ -61,6 +64,7 @@ describe('WorkflowSessionSchema', () => {
     const input = {
       sessionId: 'session-123',
       profileId: '',
+      schemaId: 'cycle',
     };
 
     expect(() => WorkflowSessionSchema.parse(input)).toThrow();
@@ -70,6 +74,7 @@ describe('WorkflowSessionSchema', () => {
     const input = {
       sessionId: 'session-123',
       profileId: 'android',
+      schemaId: 'state-machine',
       unknownField: 'should be stripped',
     };
 
@@ -83,6 +88,7 @@ describe('WorkflowSessionSchema', () => {
     const input = {
       sessionId: 'session-123',
       profileId: 'android',
+      schemaId: 'state-machine',
       futureField: 'should be preserved',
     };
 
@@ -96,6 +102,7 @@ describe('WorkflowSessionSchema', () => {
     const input = {
       sessionId: 'session-123',
       profileId: 'android',
+      schemaId: 'state-machine',
       retryBudgets: {
         'task-1': { attempts: 2, maximum: 5 },
       },
@@ -111,6 +118,7 @@ describe('WorkflowSessionSchema', () => {
       WorkflowSessionSchema.parse({
         sessionId: 'session-123',
         profileId: 'android',
+        schemaId: 'state-machine',
         retryBudgets: {
           cycles: { attempts: 0, maximum: 3 },
         },

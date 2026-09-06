@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { fixtureProfilesDir } from '../support/fixture-profiles.ts';
 import { resolveConfig } from '../../src/public-api.ts';
-import { mergeSchemasToEngineConfig } from '../../src/app/mutation-orchestrator.ts';
+import { schemaToEngineConfig, selectSchema } from '../../src/app/mutation-orchestrator.ts';
 
 // `extends-parent` and `extends-child` are a purpose-built pair under
 // test/fixtures/profiles: every value in them is a marker, so a merge that
@@ -12,34 +12,35 @@ const profilesDir = fixtureProfilesDir('profiles');
 describe('extends resolution order', () => {
   it('resolves parent schemas before the extending profile', async () => {
     const profile = await resolveConfig('extends-child', profilesDir);
-    const sources = profile.schemas.map((schema) => schema.source);
-    // The later schema wins in mergeSchemasToEngineConfig, so the extending
-    // profile's own schema must come last.
-    expect(sources[sources.length - 1]).toContain('child.yaml');
+    // The child's schema is the only one the profile offers: its parent's is
+    // folded into it through `extends`, not listed beside it.
+    expect(profile.schemas.map((schema) => schema.source)).toEqual([
+      'extends-child/child.yaml',
+    ]);
   });
 
   it('lets the extending profile override an inherited transition guard', async () => {
     const profile = await resolveConfig('extends-child', profilesDir);
-    const config = mergeSchemasToEngineConfig(profile.schemas);
+    const config = schemaToEngineConfig(selectSchema('extends-child', profile.schemas, undefined));
     const transition = config.transitions.find((t) => t.from === 'a' && t.to === 'b');
     expect(transition?.guard).toBe('FROM_CHILD');
   });
 
   it('lets the extending profile override an inherited action guard', async () => {
     const profile = await resolveConfig('extends-child', profilesDir);
-    const config = mergeSchemasToEngineConfig(profile.schemas);
+    const config = schemaToEngineConfig(selectSchema('extends-child', profile.schemas, undefined));
     expect(config.actionGuards?.beginMutation).toBe('CHILD_GUARD');
   });
 
   it('lets the extending profile override inherited requiredGates', async () => {
     const profile = await resolveConfig('extends-child', profilesDir);
-    const config = mergeSchemasToEngineConfig(profile.schemas);
+    const config = schemaToEngineConfig(selectSchema('extends-child', profile.schemas, undefined));
     expect(config.requiredGates).toEqual(['childGate']);
   });
 
   it('keeps stages contributed by both profiles', async () => {
     const profile = await resolveConfig('extends-child', profilesDir);
-    const config = mergeSchemasToEngineConfig(profile.schemas);
+    const config = schemaToEngineConfig(selectSchema('extends-child', profile.schemas, undefined));
     expect(Object.keys(config.stages ?? {}).sort()).toEqual(['a', 'b', 'c']);
   });
 });

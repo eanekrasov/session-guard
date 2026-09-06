@@ -91,7 +91,7 @@ function makeStore(): WorkflowStore {
 }
 
 function baseSession(): WorkflowSession {
-  return createSession('test-session', 'test');
+  return createSession('test-session', 'test', 'cycle');
 }
 
 function implementationTasks(session: WorkflowSession): WorkflowSession['tasks']['implementation'] {

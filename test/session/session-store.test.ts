@@ -24,7 +24,7 @@ describe('WorkflowStore', () => {
 
   describe('save and load', () => {
     it('roundtrip preserves all fields', async () => {
-      const session = createSession('test-session-1', 'android');
+      const session = createSession('test-session-1', 'android', 'state-machine');
       session.title = 'Test Session';
 
       await store.save(session);
@@ -38,7 +38,7 @@ describe('WorkflowStore', () => {
     });
 
     it('increments revision on save', async () => {
-      const session = createSession('test-revision', 'android');
+      const session = createSession('test-revision', 'android', 'state-machine');
       expect(session.revision).toBe(0);
 
       await store.save(session);
@@ -46,7 +46,7 @@ describe('WorkflowStore', () => {
     });
 
     it('increments revision on subsequent saves', async () => {
-      const session = createSession('test-revision-2', 'android');
+      const session = createSession('test-revision-2', 'android', 'state-machine');
 
       await store.save(session);
       await store.save(session);
@@ -56,7 +56,7 @@ describe('WorkflowStore', () => {
     });
 
     it('increments revision on second save', async () => {
-      const session = createSession('test-second', 'android');
+      const session = createSession('test-second', 'android', 'state-machine');
       await store.save(session);
       const rev1 = session.revision;
 
@@ -68,7 +68,7 @@ describe('WorkflowStore', () => {
 
   describe('atomic write', () => {
     it('writes atomically — no .tmp files remain after save', async () => {
-      const session = createSession('test-atomic', 'android');
+      const session = createSession('test-atomic', 'android', 'state-machine');
 
       await store.save(session);
 
@@ -78,7 +78,7 @@ describe('WorkflowStore', () => {
     });
 
     it('uses encodeURIComponent for session filenames', async () => {
-      const session = createSession('root/sub/session', 'android');
+      const session = createSession('root/sub/session', 'android', 'state-machine');
 
       await store.save(session);
 
@@ -90,7 +90,7 @@ describe('WorkflowStore', () => {
     });
 
     it('encodes session IDs with spaces', async () => {
-      const session = createSession('my session', 'android');
+      const session = createSession('my session', 'android', 'state-machine');
 
       await store.save(session);
 
@@ -120,6 +120,7 @@ describe('WorkflowStore', () => {
       const data: Record<string, unknown> = {
         sessionId: 'passthrough-test',
         profileId: 'android',
+        schemaId: 'state-machine',
         futureField: 'should survive',
       };
       const filePath = path.join(TEST_DIR, 'passthrough-test.json');
@@ -135,7 +136,7 @@ describe('WorkflowStore', () => {
 
   describe('delete and list', () => {
     it('deletes a session file', async () => {
-      const session = createSession('delete-session', 'android');
+      const session = createSession('delete-session', 'android', 'state-machine');
       await store.save(session);
 
       await store.delete('delete-session');
@@ -149,8 +150,8 @@ describe('WorkflowStore', () => {
     });
 
     it('lists session IDs', async () => {
-      await store.save(createSession('list-session-1', 'android'));
-      await store.save(createSession('list-session-2', 'ios'));
+      await store.save(createSession('list-session-1', 'android', 'state-machine'));
+      await store.save(createSession('list-session-2', 'ios', 'state-machine'));
 
       const ids = await store.list();
 
@@ -170,7 +171,7 @@ describe('WorkflowStore', () => {
 
   describe('concurrency', () => {
     it('sequential saves for same sessionId produce correct revision', async () => {
-      const session = createSession('concurrent-same', 'android');
+      const session = createSession('concurrent-same', 'android', 'state-machine');
 
       await Promise.all([store.save(session), store.save(session), store.save(session)]);
 
@@ -178,8 +179,8 @@ describe('WorkflowStore', () => {
     });
 
     it('concurrent saves for different sessionIds both complete', async () => {
-      const session1 = createSession('concurrent-diff-1', 'android');
-      const session2 = createSession('concurrent-diff-2', 'ios');
+      const session1 = createSession('concurrent-diff-1', 'android', 'state-machine');
+      const session2 = createSession('concurrent-diff-2', 'ios', 'state-machine');
 
       await Promise.all([store.save(session1), store.save(session2)]);
 

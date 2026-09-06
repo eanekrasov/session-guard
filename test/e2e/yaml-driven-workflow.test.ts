@@ -6,7 +6,7 @@ import YAML from 'yaml';
 import { createSession } from '../../src/session/session-store.ts';
 import { setGateStatus, isExhausted } from '../../src/session/helpers.ts';
 import { StateMachineEngine } from '../../src/domain/engine.ts';
-import { mergeSchemasToEngineConfig } from '../../src/app/mutation-orchestrator.ts';
+import { schemaToEngineConfig } from '../../src/app/mutation-orchestrator.ts';
 import type { ResolvedSchema, ProfileSchema } from '../../src/schema/types.ts';
 import type { WorkflowSession } from '../../src/session/session-schema.ts';
 import { createTask } from '../support/task-factory.ts';
@@ -39,7 +39,7 @@ function loadEngine(): StateMachineEngine {
     stageAssignments: raw.stageAssignments,
   };
 
-  const config = mergeSchemasToEngineConfig([resolvedSchema]);
+  const config = schemaToEngineConfig(resolvedSchema);
 
   if (!config.transitions || config.transitions.length === 0) {
     throw new Error('EngineConfig has zero transitions after merge');

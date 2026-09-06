@@ -100,11 +100,46 @@ describe('MutationOrchestrator.resolveEngine', () => {
     const { orchestrator } = await makeOrchestrator();
     await expect(orchestrator.resolveEngine('cycle-probe')).rejects.toThrow(/Gate "security"/);
   });
+
+  it('serves each of a profile\'s schemas as its own workflow', async () => {
+    // `two-schemas` holds two independent workflows that declare the same
+    // stage and the same edge. Folding the profile's list into one config —
+    // which is what resolution used to do — let the last file win and served
+    // one workflow under both names.
+    process.env.STATE_MACHINE_PROFILES_DIR = fixtureProfilesDir('profiles');
+    const { orchestrator } = await makeOrchestrator();
+
+    const alpha = await orchestrator.resolveEngine('two-schemas', 'alpha');
+    const beta = await orchestrator.resolveEngine('two-schemas', 'beta');
+
+    expect(alpha.config.transitions.map((t) => t.guard)).toEqual(['FROM_ALPHA']);
+    expect(beta.config.transitions.map((t) => t.guard)).toEqual(['FROM_BETA']);
+    expect(alpha.config.requiredGates).toEqual(['alphaGate']);
+    expect(beta.config.requiredGates).toEqual(['betaGate']);
+  });
+
+  it('refuses to guess which of several schemas a session runs', async () => {
+    process.env.STATE_MACHINE_PROFILES_DIR = fixtureProfilesDir('profiles');
+    const { orchestrator } = await makeOrchestrator();
+
+    await expect(orchestrator.resolveEngine('two-schemas')).rejects.toThrow(
+      /holds several schemas.*alpha, beta/s
+    );
+  });
+
+  it('names the schemas it has when asked for one it does not', async () => {
+    process.env.STATE_MACHINE_PROFILES_DIR = fixtureProfilesDir('profiles');
+    const { orchestrator } = await makeOrchestrator();
+
+    await expect(orchestrator.resolveEngine('two-schemas', 'gamma')).rejects.toThrow(
+      /no schema "gamma".*alpha, beta/s
+    );
+  });
 });
 
 describe('MutationOrchestrator.beginMutation', () => {
   it('rejects when engine resolution fails (no profiles dir)', async () => {
-    await store.save(createSession('mo-no-profiles', 'base'));
+    await store.save(createSession('mo-no-profiles', 'base', 'state-machine'));
     const { orchestrator } = await makeOrchestrator();
 
     const output: { args: unknown } = { args: 'echo hello' };
@@ -125,7 +160,7 @@ describe('MutationOrchestrator.beginMutation', () => {
 
   it('begins mutation for a plan-approved session and records liveMutations', async () => {
     setFixtureProfilesDir();
-    const session = createSession('mo-fresh', 'base');
+    const session = createSession('mo-fresh', 'base', 'state-machine');
     approve(session, 'plan', 'test-evidence', 'approve-call-id');
     addExecutableTaskCycle(session);
     await store.save(session);
@@ -143,7 +178,7 @@ describe('MutationOrchestrator.beginMutation', () => {
 
   it('rejects mutation when guard fails (no plan approval, non-zero revision)', async () => {
     setFixtureProfilesDir();
-    const session = createSession('mo-guarded', 'base');
+    const session = createSession('mo-guarded', 'base', 'state-machine');
     session.revision = 1;
     await store.save(session);
     const { orchestrator } = await makeOrchestrator();
@@ -159,7 +194,7 @@ describe('MutationOrchestrator.beginMutation', () => {
 
 describe('MutationOrchestrator.finishMutation', () => {
   it('handles missing mutationInfo without throwing', async () => {
-    await store.save(createSession('mo-finish-clean', 'base'));
+    await store.save(createSession('mo-finish-clean', 'base', 'state-machine'));
     const { orchestrator } = await makeOrchestrator();
 
     await expect(
@@ -181,7 +216,7 @@ describe('MutationOrchestrator.finishMutation', () => {
 
   it('completes the full begin → finish lifecycle without throwing (post-factum validation passes)', async () => {
     setFixtureProfilesDir();
-    const session = createSession('mo-lifecycle', 'base');
+    const session = createSession('mo-lifecycle', 'base', 'state-machine');
     approve(session, 'plan', 'test-evidence', 'approve-call-id');
     addExecutableTaskCycle(session);
     await store.save(session);
@@ -211,7 +246,7 @@ describe('MutationOrchestrator.finishMutation', () => {
   it('sets gate to passed and clears activeOperation on successful finishMutation', async () => {
     setFixtureProfilesDir();
     const gitDir = makeGitDir();
-    const session = createSession('mo-pass', 'base');
+    const session = createSession('mo-pass', 'base', 'state-machine');
     approve(session, 'plan', 'test-evidence', 'approve-call-id');
     addExecutableTaskCycle(session);
     await store.save(session);
@@ -231,7 +266,7 @@ describe('MutationOrchestrator.finishMutation', () => {
   it('sets gate to failed when output.metadata.failed is true', async () => {
     setFixtureProfilesDir();
     const gitDir = makeGitDir();
-    const session = createSession('mo-failed-md', 'base');
+    const session = createSession('mo-failed-md', 'base', 'state-machine');
     approve(session, 'plan', 'test-evidence', 'approve-call-id');
     addExecutableTaskCycle(session);
     await store.save(session);
@@ -257,7 +292,7 @@ describe('MutationOrchestrator.finishMutation', () => {
 
   it('fails gate closed when computeChangeScope throws (no git repo)', async () => {
     setFixtureProfilesDir();
-    const session = createSession('mo-scope-fail', 'base');
+    const session = createSession('mo-scope-fail', 'base', 'state-machine');
     approve(session, 'plan', 'test-evidence', 'approve-call-id');
     addExecutableTaskCycle(session);
     await store.save(session);
@@ -283,7 +318,7 @@ describe('MutationOrchestrator.finishMutation', () => {
   });
 
   it('handles finishMutation when beginMutation was not called (no liveMutations entry)', async () => {
-    const session = createSession('mo-direct-finish', 'base');
+    const session = createSession('mo-direct-finish', 'base', 'state-machine');
     await store.save(session);
     const { orchestrator } = await makeOrchestrator();
 
@@ -300,7 +335,7 @@ describe('MutationOrchestrator.finishMutation', () => {
   it('bumpRetry is called exactly once per finishMutation call (no double bump)', async () => {
     setFixtureProfilesDir();
     const gitDir = makeGitDir();
-    const session = createSession('mo-retry-once', 'base');
+    const session = createSession('mo-retry-once', 'base', 'state-machine');
     approve(session, 'plan', 'test-evidence', 'approve-call-id');
     addExecutableTaskCycle(session);
     await store.save(session);
@@ -330,7 +365,7 @@ describe('MutationOrchestrator.clearOnError', () => {
 
   it('clears the active operation for a tracked mutation', async () => {
     setFixtureProfilesDir();
-    const session = createSession('mo-clear', 'base');
+    const session = createSession('mo-clear', 'base', 'state-machine');
     approve(session, 'plan', 'test-evidence', 'approve-call-id');
     addExecutableTaskCycle(session);
     await store.save(session);

@@ -32,6 +32,10 @@
 #
 # Format: ProfileSchema (src/schema/profile-schema.ts).
 
+# Combines with the base workflow through `extends` — the only way two
+# schemas ever become one.
+extends: 'base/base.yaml'
+
 # ─── Editing agents ───────────────────────────────────────────────────────────
 # The android roster, which is what this profile is for.
 editingAgents:

@@ -45,7 +45,7 @@ function findOpenApproval(session: Awaited<ReturnType<WorkflowStore['load']>>) {
 
 describe('ConsentOrchestrator.before', () => {
   it('ignores question text without a consent-request tag', async () => {
-    await store.save(createSession('co-no-tag', 'base'));
+    await store.save(createSession('co-no-tag', 'base', 'state-machine'));
     const orchestrator = await makeOrchestrator();
 
     await orchestrator.before('co-no-tag', 'call-no-tag', 'Are you sure?');
@@ -55,7 +55,7 @@ describe('ConsentOrchestrator.before', () => {
   });
 
   it('ignores a consent request when the plan file does not exist', async () => {
-    await store.save(createSession('co-no-plan', 'base'));
+    await store.save(createSession('co-no-plan', 'base', 'state-machine'));
     const orchestrator = await makeOrchestrator();
     const { evidenceOf, CONSENT_EVIDENCE_SCHEMA } = await import('../../src/app/consent.ts');
 
@@ -75,7 +75,7 @@ describe('ConsentOrchestrator.before', () => {
   });
 
   it('sets a pending approval when the consent request is valid and the plan exists', async () => {
-    await store.save(createSession('co-valid', 'base'));
+    await store.save(createSession('co-valid', 'base', 'state-machine'));
     const orchestrator = await makeOrchestrator();
     const { evidenceOf, CONSENT_EVIDENCE_SCHEMA } = await import('../../src/app/consent.ts');
 
@@ -103,7 +103,7 @@ describe('ConsentOrchestrator.before', () => {
   });
 
   it('dedups when the callID has already consented', async () => {
-    const session = createSession('co-dedup', 'base');
+    const session = createSession('co-dedup', 'base', 'state-machine');
     session.consentedCallIDs = ['call-dup'];
     await store.save(session);
     const orchestrator = await makeOrchestrator();
@@ -147,7 +147,7 @@ describe('ConsentOrchestrator.after', () => {
     const planEvidence = calculatePlanEvidence(planContent);
     void planEvidence;
 
-    await store.save(createSession('co-grant', 'base'));
+    await store.save(createSession('co-grant', 'base', 'state-machine'));
 
     const questionText = `<consent-request schema="harness.consent/v1" revision="1" evidence="${manifestEvidence}" grant="grant" decline="decline">${JSON.stringify(manifest)}</consent-request>`;
 
@@ -170,7 +170,7 @@ describe('ConsentOrchestrator.after', () => {
   });
 
   it('is a no-op when there is no pending approval', async () => {
-    await store.save(createSession('co-no-pending', 'base'));
+    await store.save(createSession('co-no-pending', 'base', 'state-machine'));
     const orchestrator = await makeOrchestrator();
 
     await expect(
@@ -187,7 +187,7 @@ describe('ConsentOrchestrator.after', () => {
   });
 
   it('calls client.session.messages() in before() to verify session context', async () => {
-    await store.save(createSession('co-messages', 'base'));
+    await store.save(createSession('co-messages', 'base', 'state-machine'));
     const client = mockClient();
     const orchestrator = await makeOrchestrator(client);
     const { evidenceOf, CONSENT_EVIDENCE_SCHEMA } = await import('../../src/app/consent.ts');
@@ -229,7 +229,7 @@ describe('ConsentOrchestrator.after', () => {
     const evidence = evidenceOf(manifest as unknown as ConsentManifest);
     const questionText = `<consent-request schema="harness.consent/v1" revision="1" evidence="${evidence}" grant="grant" decline="decline">${JSON.stringify(manifest)}</consent-request>`;
 
-    await store.save(createSession('co-synthetic', 'base'));
+    await store.save(createSession('co-synthetic', 'base', 'state-machine'));
     await orchestrator.before('co-synthetic', 'call-synthetic', questionText);
     await orchestrator.after(
       'co-synthetic',
@@ -266,7 +266,7 @@ describe('ConsentOrchestrator.after', () => {
     const evidence = evidenceOf(manifest as unknown as ConsentManifest);
     const questionText = `<consent-request schema="harness.consent/v1" revision="1" evidence="${evidence}" grant="grant" decline="decline">${JSON.stringify(manifest)}</consent-request>`;
 
-    await store.save(createSession('co-mismatch', 'base'));
+    await store.save(createSession('co-mismatch', 'base', 'state-machine'));
     await orchestrator.before('co-mismatch', 'call-original', questionText);
 
     await orchestrator.after(
@@ -302,7 +302,7 @@ describe('ConsentOrchestrator.after', () => {
       const evidence = evidenceOf(manifest as unknown as ConsentManifest);
       const questionText = `<consent-request schema="harness.consent/v1" revision="1" evidence="${evidence}" grant="grant" decline="decline">${JSON.stringify(manifest)}</consent-request>`;
 
-      await store.save(createSession('co-stable', 'base'));
+      await store.save(createSession('co-stable', 'base', 'state-machine'));
       await orchestrator.before('co-stable', 'call-stable', questionText);
       await orchestrator.after(
         'co-stable',
@@ -336,7 +336,7 @@ describe('ConsentOrchestrator.after', () => {
       const evidence = evidenceOf(manifest as unknown as ConsentManifest);
       const questionText = `<consent-request schema="harness.consent/v1" revision="1" evidence="${evidence}" grant="grant" decline="decline">${JSON.stringify(manifest)}</consent-request>`;
 
-      await store.save(createSession('co-changed', 'base'));
+      await store.save(createSession('co-changed', 'base', 'state-machine'));
       await orchestrator.before('co-changed', 'call-changed', questionText);
 
       // Change the plan file between before() and after() — simulate race condition
@@ -379,7 +379,7 @@ describe('ConsentOrchestrator.after', () => {
       const evidence = evidenceOf(manifest as unknown as ConsentManifest);
       const questionText = `<consent-request schema="harness.consent/v1" revision="1" evidence="${evidence}" grant="grant" decline="decline">${JSON.stringify(manifest)}</consent-request>`;
 
-      await store.save(createSession('co-auto', 'base'));
+      await store.save(createSession('co-auto', 'base', 'state-machine'));
       await orchestrator.before('co-auto', 'call-auto', questionText);
 
       // After before(), plan should already be approved (auto-approve)
@@ -413,7 +413,7 @@ describe('ConsentOrchestrator.after', () => {
       const evidence = evidenceOf(manifest as unknown as ConsentManifest);
       const questionText = `<consent-request schema="harness.consent/v1" revision="1" evidence="${evidence}" grant="grant" decline="decline">${JSON.stringify(manifest)}</consent-request>`;
 
-      await store.save(createSession('co-no-auto', 'base'));
+      await store.save(createSession('co-no-auto', 'base', 'state-machine'));
       await orchestrator.before('co-no-auto', 'call-no-auto', questionText);
 
       // Plan should NOT be auto-approved

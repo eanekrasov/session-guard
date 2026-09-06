@@ -32,6 +32,7 @@ function makeSession(overrides: Partial<WorkflowSession> = {}): WorkflowSession 
     currentStage: 'planning',
     invariantViolations: [],
     profileId: 'test',
+    schemaId: 'cycle',
     consentedCallIDs: [],
     ...overrides,
   };

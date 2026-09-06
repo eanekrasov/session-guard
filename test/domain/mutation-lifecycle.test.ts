@@ -7,6 +7,7 @@ function createSession(): WorkflowSession {
   return {
     sessionId: 'test-session',
     profileId: 'test-profile',
+    schemaId: 'cycle',
     schemaVersion: 2,
     revision: 0,
     title: '',

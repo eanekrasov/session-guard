@@ -20,15 +20,29 @@ profile.
 
 ## Schema resolution
 
-`profile.json.extends` builds a chain, and every schema file across that chain is
-resolved. The list is merged **last wins**, root first, so a profile's own schema
-overrides what it inherits. Transitions merge per `from→to`; a stage merges
-field by field, and its nested stages and transitions merge by the same rule at
-any depth; action guards merge per action; `requiredGates` is replaced wholesale.
+A profile may hold as many schemas as it likes, and they are **independent
+workflows**. A session runs exactly one of them, named as
+`<profileId>/<schemaId>` when it is created; the schema id is the file name
+without its extension, and it has to be unique only inside its own profile.
 
-Write a derived schema as a delta: declare only what differs. Naming a stage
-refines it — a child that pins a roster keeps the loop, nested stages and
-transitions its parent declared for that stage.
+Two schemas become one **only through `extends`**, declared at the top of the
+schema file as `<profileId>/<file>`. That profile must be on the chain
+`profile.json.extends` builds. Schemas sitting side by side in one profile
+never merge — that is the whole point of the id.
+
+Merging a schema onto the one it extends is last-wins per entry: transitions
+merge per `from→to`; a stage merges field by field, and its nested stages and
+transitions merge by the same rule at any depth; action guards merge per
+action; `requiredGates` is replaced wholesale.
+
+Write a derived schema as a delta: declare `extends`, then only what differs.
+Naming a stage refines it — a child that pins a roster keeps the loop, nested
+stages and transitions its parent declared for that stage.
+
+`profile.json.extends` still governs metadata (agents, skills, invariants,
+directories) and is what makes a parent's schema files reachable by name. A
+profile that declares no `schemas` of its own inherits the nearest ancestor's
+list.
 
 ## The stage model
 

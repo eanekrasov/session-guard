@@ -53,7 +53,7 @@ async function makeOrchestrator(engine?: StateMachineEngine, log?: ReturnType<ty
 }
 
 function sessionWithTaskCycle(sid: string): WorkflowSession {
-  const s = createSession(sid, 'base');
+  const s = createSession(sid, 'base', 'state-machine');
   s.tasks.implementation = [createTask({ status: 'running' })];
   s.loopRuns['run-1'] = {
     id: 'run-1',

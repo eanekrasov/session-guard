@@ -50,6 +50,7 @@ function createSession(overrides: Partial<WorkflowSession> = {}): WorkflowSessio
   return {
     sessionId: 'lifecycle-test',
     profileId: 'base',
+    schemaId: 'state-machine',
     schemaVersion: 1,
     revision: 0,
     title: 'Lifecycle test',

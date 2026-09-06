@@ -227,7 +227,7 @@ beforeEach(async () => {
   );
 
   const store = new WorkflowStore(storeDirectory);
-  const session = createSession('s1', 'broken');
+  const session = createSession('s1', 'broken', 'cycle');
   session.tasks.implementation = [createTask()];
   await store.save(session);
 });

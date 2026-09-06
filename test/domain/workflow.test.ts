@@ -17,6 +17,7 @@ function makeSession(overrides: Partial<WorkflowSession> = {}): WorkflowSession 
   return {
     sessionId: 'test-session',
     profileId: 'android',
+    schemaId: 'state-machine',
     schemaVersion: 2,
     revision: 0,
     title: '',

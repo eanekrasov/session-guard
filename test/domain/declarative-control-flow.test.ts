@@ -9,6 +9,7 @@ function createSession(overrides: Partial<WorkflowSession> = {}): WorkflowSessio
   return {
     sessionId: 'ctrl-test',
     profileId: 'base',
+    schemaId: 'state-machine',
     schemaVersion: 1,
     revision: 0,
     title: 'Control flow test',

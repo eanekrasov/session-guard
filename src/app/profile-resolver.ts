@@ -39,13 +39,22 @@ export class ProfileResolver {
     const skillsDir = primary.skillsDir;
     const description = primary.description;
 
-    // The chain runs [extending, ...extended], but the resolved schema list is
-    // merged last-wins. Walk it from the root outwards so an extending profile's
-    // own schema is resolved last and can override what it inherits.
-    const allSchemas = new Set<string>();
-    for (let i = chain.length - 1; i >= 0; i--) {
-      for (const s of chain[i].schemas ?? []) allSchemas.add(s);
+    // A profile's schemas are its own. Schemas combine only through a
+    // schema-level `extends`, so unioning the chain's lists would put a
+    // parent's workflow beside the child's delta as a second, independent
+    // schema — and the session would then have to choose between them.
+    // A profile that declares none inherits the nearest ancestor's list, the
+    // same way its agents and skills are inherited.
+    let schemaFiles = primary.schemas;
+    if (schemaFiles === undefined) {
+      for (let i = 1; i < chain.length; i++) {
+        if (chain[i].schemas) {
+          schemaFiles = chain[i].schemas;
+          break;
+        }
+      }
     }
+    const allSchemas = new Set<string>(schemaFiles ?? []);
 
     let agents = primary.agents;
     let skills = primary.skills;
@@ -233,7 +242,7 @@ export class ProfileResolver {
     let currentSchema = await this.loadSchemaFromChain(schemaFile, chain);
 
     if (!currentSchema) {
-      return { source: `${chain[0].id}/${schemaFile}` };
+      return { id: schemaId(schemaFile), source: `${chain[0].id}/${schemaFile}` };
     }
 
     if (currentSchema.extends) {
@@ -256,6 +265,7 @@ export class ProfileResolver {
     }
 
     return {
+      id: schemaId(schemaFile),
       source: `${chain[0].id}/${schemaFile}`,
       stages: qualifyStageAgents(chain[0].id, currentSchema.stages),
       transitions: currentSchema.transitions,
@@ -282,6 +292,16 @@ export class ProfileResolver {
     }
     return null;
   }
+}
+
+/**
+ * A schema's name within its profile: the file name without its extension.
+ *
+ * Profiles declare their schemas as file names, but a session names one as
+ * `<profileId>/<schemaId>`, and an extension there would be noise.
+ */
+export function schemaId(schemaFile: string): string {
+  return schemaFile.replace(/\.ya?ml$/i, '');
 }
 
 /**

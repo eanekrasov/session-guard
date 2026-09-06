@@ -2,14 +2,14 @@ import { describe, expect, it } from 'vitest';
 import path from 'node:path';
 
 import { resolveConfig } from '../../src/public-api.ts';
-import { mergeSchemasToEngineConfig } from '../../src/app/mutation-orchestrator.ts';
+import { schemaToEngineConfig, selectSchema } from '../../src/app/mutation-orchestrator.ts';
 import type { StageDef } from '../../src/schema/types.ts';
 
 const PROFILES_DIR = path.resolve(import.meta.dirname, '../../profiles');
 
 async function engineConfigFor(profileId: string) {
   const profile = await resolveConfig(profileId, PROFILES_DIR);
-  return { profile, config: mergeSchemasToEngineConfig(profile.schemas) };
+  return { profile, config: schemaToEngineConfig(selectSchema(profileId, profile.schemas, undefined)) };
 }
 
 function stage(config: { stages?: Record<string, StageDef> }, id: string): StageDef | undefined {

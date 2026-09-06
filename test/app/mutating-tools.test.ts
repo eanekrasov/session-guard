@@ -51,7 +51,7 @@ beforeEach(async () => {
   setFixtureProfilesDir();
 
   const store = new WorkflowStore(storeDirectory);
-  const session = createSession('s1', 'mutation-guarded');
+  const session = createSession('s1', 'mutation-guarded', 'flow');
   session.currentStage = 'planning';
   await store.save(session);
 });

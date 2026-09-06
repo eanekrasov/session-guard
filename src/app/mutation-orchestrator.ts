@@ -30,68 +30,76 @@ export interface FinishMutationInput {
   metadata?: unknown;
 }
 
-// ─── Pure helper: merge ResolvedSchema[] → EngineConfig ──────────
+// ─── Pure helper: ResolvedSchema → EngineConfig ───────────────────────────
 
 /**
- * Merge ResolvedSchema[] → EngineConfig:
- * - transitions: full override (last schema wins)
- * - actionGuards: concat + unique
+ * Project one resolved schema onto the engine's configuration.
+ *
+ * A session runs **one** schema. Schemas combine only through `extends`, and
+ * that combining has already happened by the time a `ResolvedSchema` exists
+ * (`ProfileResolver.resolveSingleSchema`), so there is nothing left to merge
+ * here.
+ *
+ * This used to fold a profile's whole schema list into one config. Stages
+ * survived that only because their keys differ; `gates`, `requiredGates`,
+ * `taskControlAgents`, `actionGuards` and same-endpoint transitions were
+ * silently last-wins, so two independent workflows in one profile would have
+ * quietly become one. No profile declared two, so it never bit.
  */
-export function mergeSchemasToEngineConfig(schemas: ResolvedSchema[]): EngineConfig {
-  const stageAssignmentMap = new Map<string, import('../schema/types.ts').StageAssignmentRule>();
-  // Same rule as schema inheritance: a later schema refines a stage rather than
-  // replacing it, so declaring a roster does not drop the loop and transitions
-  // declared alongside it.
-  let stages: NonNullable<EngineConfig['stages']> = {};
-  for (const schema of schemas) {
-    stages = (mergeStages(stages, schema.stages) ?? stages) as NonNullable<EngineConfig['stages']>;
-    for (const rule of schema.stageAssignments ?? []) {
-      stageAssignmentMap.set(rule.id, rule);
+export function schemaToEngineConfig(schema: ResolvedSchema): EngineConfig {
+  const actionGuards: Record<string, string> = {};
+  for (const [action, guard] of Object.entries(schema.actionGuards ?? {})) {
+    if (typeof guard === 'string') {
+      actionGuards[action] = guard;
     }
   }
-  const transitionsMap = new Map<string, NonNullable<ResolvedSchema['transitions']>[number]>();
-  const actionGuardMap: Record<string, string> = {};
-  let requiredGates: string[] | undefined;
-  let gates: ResolvedSchema['gates'];
-  let taskControlAgents: string[] | undefined;
 
-  for (const schema of schemas) {
-    // Merge transitions: full override by "from→to" key
-    for (const t of schema.transitions ?? []) {
-      transitionsMap.set(`${t.from}→${t.to}`, t);
-    }
-
-    // Merge actionGuards: last schema's value for each action wins
-    if (schema.actionGuards) {
-      for (const [action, guard] of Object.entries(schema.actionGuards)) {
-        if (typeof guard === 'string') {
-          actionGuardMap[action] = guard;
-        }
-      }
-    }
-
-    if (schema.requiredGates !== undefined) {
-      requiredGates = [...schema.requiredGates];
-    }
-
-    if (schema.gates !== undefined) {
-      gates = schema.gates.map((gate) => ({ ...gate }));
-    }
-
-    if (schema.taskControlAgents !== undefined) {
-      taskControlAgents = [...schema.taskControlAgents];
-    }
-  }
+  const stages = (mergeStages({}, schema.stages) ?? {}) as NonNullable<EngineConfig['stages']>;
 
   return {
     stages: Object.keys(stages).length > 0 ? stages : undefined,
-    stageAssignments: Array.from(stageAssignmentMap.values()),
-    transitions: Array.from(transitionsMap.values()),
-    actionGuards: Object.keys(actionGuardMap).length > 0 ? actionGuardMap : undefined,
-    requiredGates,
-    gates,
-    taskControlAgents,
+    stageAssignments: [...(schema.stageAssignments ?? [])],
+    transitions: [...(schema.transitions ?? [])],
+    actionGuards: Object.keys(actionGuards).length > 0 ? actionGuards : undefined,
+    requiredGates: schema.requiredGates ? [...schema.requiredGates] : undefined,
+    gates: schema.gates?.map((gate) => ({ ...gate })),
+    taskControlAgents: schema.taskControlAgents ? [...schema.taskControlAgents] : undefined,
   };
+}
+
+/**
+ * Pick the schema a session runs out of the profile's list.
+ *
+ * A bare profile id — no schema named — is legal only while the profile holds
+ * exactly one schema. With several, the choice is the caller's to make, and
+ * guessing at it is how one workflow silently becomes another.
+ */
+export function selectSchema(
+  profileId: string,
+  schemas: ResolvedSchema[],
+  wanted: string | undefined
+): ResolvedSchema {
+  if (wanted !== undefined) {
+    const found = schemas.find((schema) => schema.id === wanted);
+    if (!found) {
+      throw new Error(
+        `Profile "${profileId}" has no schema "${wanted}". Available: ${
+          schemas.map((schema) => schema.id).join(', ') || '(none)'
+        }`
+      );
+    }
+    return found;
+  }
+
+  if (schemas.length === 1) return schemas[0]!;
+  if (schemas.length === 0) {
+    throw new Error(`Profile "${profileId}" declares no schema to run`);
+  }
+  throw new Error(
+    `Profile "${profileId}" holds several schemas, so one must be named as ${profileId}/<schemaId>. Available: ${schemas
+      .map((schema) => schema.id)
+      .join(', ')}`
+  );
 }
 
 // ─── Pure: processScopeAndInvariants ───────────────────────────────────────────
@@ -237,7 +245,7 @@ export class MutationOrchestrator {
   /**
    * Resolve (lazy-init) an engine for the given profileId.
    */
-  async resolveEngine(profileId: string): Promise<StateMachineEngine> {
+  async resolveEngine(profileId: string, schemaId?: string): Promise<StateMachineEngine> {
     // The engine depends on the directory as much as on the id, and the
     // directory is read from the environment on every call. Keying on the id
     // alone returns the first directory's engine for every later one — which
@@ -245,7 +253,7 @@ export class MutationOrchestrator {
     // test suite that points the same profile id at two fixture directories
     // does not notice either: it just silently gets the first.
     const profilesDir = process.env.STATE_MACHINE_PROFILES_DIR ?? this.profilesDir;
-    const cacheKey = `${profilesDir}\u0000${profileId}`;
+    const cacheKey = `${profilesDir}\u0000${profileId}\u0000${schemaId ?? ''}`;
     const cached = this.engineCache.get(cacheKey);
     if (cached) {
       return cached;
@@ -262,13 +270,15 @@ export class MutationOrchestrator {
     // gate no session carries, or a retry budget belonging to something other
     // than the task are all defects in the file, and a defect in the file
     // should stop the workflow at load rather than one silent guard at a time.
-    const engineConfig = mergeSchemasToEngineConfig(resolved.schemas);
+    const schema = selectSchema(profileId, resolved.schemas, schemaId);
+    const engineConfig = schemaToEngineConfig(schema);
 
-    // Compile the merged workflow, not each file: a delta profile names stages
-    // its parent declares, and a file read alone would call every one of them
-    // unknown. What must hold is the schema the session actually runs.
+    // Compile the schema the session actually runs, after its `extends` chain
+    // has been folded in: a delta schema names stages its parent declares, and
+    // reading the delta's own file alone would call every one of them unknown.
     const { errors } = compileWorkflow({
-      source: resolved.schemas.map((schema) => schema.source).join(' + '),
+      id: schema.id,
+      source: schema.source,
       stages: engineConfig.stages,
       transitions: engineConfig.transitions,
       stageAssignments: engineConfig.stageAssignments,
@@ -279,13 +289,10 @@ export class MutationOrchestrator {
     if (errors.length > 0) {
       await this.log('error', 'Profile schema failed to compile', {
         profileId,
+        schemaId: schema.id,
         errors: errors.map((error) => `${error.path}: ${error.message}`),
       });
-      throw new ProfileConfigurationError(
-        profileId,
-        resolved.schemas.map((schema) => schema.source).join(' + '),
-        errors
-      );
+      throw new ProfileConfigurationError(profileId, schema.source, errors);
     }
     const evaluateGuardFn: EvaluateGuardFn = (
       expression: string,
@@ -327,7 +334,7 @@ export class MutationOrchestrator {
     try {
       const preCheck = await this.store.load(input.sessionID);
       if (!preCheck) return;
-      engine = await this.resolveEngine(preCheck.profileId);
+      engine = await this.resolveEngine(preCheck.profileId, preCheck.schemaId);
     } catch (err) {
       await this.log('error', `beginMutation: failed to load session or resolve engine`, {
         error: err instanceof Error ? err.message : String(err),
@@ -446,7 +453,7 @@ export class MutationOrchestrator {
 
       // After mutation completes, check for auto-proceed transitions
       try {
-        const engine = await this.resolveEngine(session.profileId);
+        const engine = await this.resolveEngine(session.profileId, session.schemaId);
         const transitionResult = engine.tryApplyTransitions(session);
         if (transitionResult.applied) {
           void transitionResult;
@@ -460,7 +467,7 @@ export class MutationOrchestrator {
       // Post-factum transition validation: if stage changed, validate the transition
       if (mutationInfo) {
         try {
-          const engine = await this.resolveEngine(session.profileId);
+          const engine = await this.resolveEngine(session.profileId, session.schemaId);
           const stageAfter = session.currentStage ?? 'planning';
 
           if (stageAfter !== mutationInfo.stageBefore) {
@@ -499,7 +506,7 @@ export class MutationOrchestrator {
    * Применить transitions для сессии. Вызывается из runtime после approve.
    */
   async applyTransitions(session: WorkflowSession): Promise<void> {
-    const engine = await this.resolveEngine(session.profileId);
+    const engine = await this.resolveEngine(session.profileId, session.schemaId);
     engine.tryApplyTransitions(session);
   }
 

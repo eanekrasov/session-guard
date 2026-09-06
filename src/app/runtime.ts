@@ -23,7 +23,11 @@ import { toGuardContext } from '../domain/engine.ts';
 import { SessionQueue } from './session-queue.ts';
 import { sanitizeToolOutput, validateUserInput } from './guardrails.ts';
 import { listProfiles } from '../public-api.ts';
-import { mergeSchemasToEngineConfig, MutationOrchestrator } from './mutation-orchestrator.ts';
+import {
+  schemaToEngineConfig,
+  selectSchema,
+  MutationOrchestrator,
+} from './mutation-orchestrator.ts';
 import { ConsentOrchestrator } from './consent-orchestrator.ts';
 import { parseWorkflowResult } from '../domain/evidence.ts';
 import type { LogFn } from './logger.ts';
@@ -67,9 +71,10 @@ import { OpenCodeRulesRuntime } from '../rules/runtime.ts';
 import { MatchedRulesStateStore } from '../rules/matched-rules-state.ts';
 import { syncProfileAgents } from './profile-agent-sync.ts';
 import { agentIsAllowed } from './agent-names.ts';
+import { schemaId } from './profile-resolver.ts';
 import { WorkflowBlockedError } from './blocked-error.ts';
 
-export { mergeSchemasToEngineConfig };
+export { schemaToEngineConfig };
 
 const DEFAULT_TASK_RETRY_MAXIMUM = 3;
 const RETRY_EXHAUSTED_DECISION_KIND = 'retry_exhausted';
@@ -218,7 +223,7 @@ class StateMachineRuntime {
     const session = await this.store.load(ctx.sessionID);
     if (!session) return null;
 
-    const engine = await this.mutationOrchestrator.resolveEngine(session.profileId);
+    const engine = await this.mutationOrchestrator.resolveEngine(session.profileId, session.schemaId);
     const allowed = engine.getTaskControlAgents();
     const agent = ctx.agent ?? '';
     if (agent !== '' && agentIsAllowed(agent, allowed, session.profileId)) return null;
@@ -399,7 +404,7 @@ class StateMachineRuntime {
             return;
           }
           budget.maximum = args.maximum;
-          const stage = await this.resolveLoopStage(session.profileId, run.listKey);
+          const stage = await this.resolveLoopStage(session, run.listKey);
           run.stage = firstNestedStageId(stage) ?? run.stage;
           run.status = 'running';
           task.status = 'running';
@@ -430,19 +435,20 @@ class StateMachineRuntime {
     args: { schemaId?: string },
     ctx: { sessionID: string }
   ): Promise<ToolResult> {
-    const requestedSchemaId =
+    const requested =
       args.schemaId ?? process.env.HARNESS_SCHEMA_ID ?? process.env.HARNESS_PROFILE;
-    const schemaFile = requestedSchemaId
-      ? requestedSchemaId.endsWith('.yaml')
-        ? requestedSchemaId
-        : `${requestedSchemaId}.yaml`
-      : undefined;
+
+    // `<profileId>/<schemaId>`. Schema names are unique only inside their
+    // profile, so an unqualified name has to name the profile instead; the
+    // schema is then the profile's, provided it holds exactly one.
+    const slash = requested?.indexOf('/') ?? -1;
+    const requestedProfileId = slash === -1 ? requested : requested!.substring(0, slash);
+    const requestedSchemaId = slash === -1 ? undefined : requested!.substring(slash + 1);
 
     const profiles = await listProfiles(this.profilesDir);
-    const matchingProfiles = schemaFile
-      ? profiles.filter((profile) => profile.schemas?.includes(schemaFile))
-      : [];
-    const resolvedProfileId = matchingProfiles.length === 1 ? matchingProfiles[0]!.id : undefined;
+    const resolvedProfileId = profiles.some((profile) => profile.id === requestedProfileId)
+      ? requestedProfileId
+      : undefined;
 
     if (!resolvedProfileId) {
       if (profiles.length === 0) {
@@ -467,8 +473,10 @@ class StateMachineRuntime {
         };
       }
       return {
-        output: `schemaId is required or unknown. Available schemas: ${profiles
-          .flatMap((profile) => profile.schemas ?? [])
+        output: `schemaId is required or unknown. Available: ${profiles
+          .flatMap((profile) =>
+            (profile.schemas ?? []).map((file) => `${profile.id}/${schemaId(file)}`)
+          )
           .join(', ')}`,
       };
     }
@@ -479,8 +487,11 @@ class StateMachineRuntime {
       return { output: `Session already exists: ${ctx.sessionID}` };
     }
 
+    let resolvedSchemaId: string;
     try {
-      await this.mutationOrchestrator.resolveEngine(resolvedProfileId);
+      const resolved = await resolveConfig(resolvedProfileId, this.profilesDir);
+      resolvedSchemaId = selectSchema(resolvedProfileId, resolved.schemas, requestedSchemaId).id;
+      await this.mutationOrchestrator.resolveEngine(resolvedProfileId, resolvedSchemaId);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const prefix =
@@ -490,12 +501,13 @@ class StateMachineRuntime {
       return { output: `${prefix}: ${message}` };
     }
 
-    const session = createSession(ctx.sessionID, resolvedProfileId);
+    const session = createSession(ctx.sessionID, resolvedProfileId, resolvedSchemaId);
     await this.store.save(session);
 
     void this.log('info', `Workflow session created`, {
       sessionID: session.sessionId,
       profileId: resolvedProfileId,
+      schemaId: resolvedSchemaId,
     });
 
     return {
@@ -772,7 +784,7 @@ class StateMachineRuntime {
       try {
         const profileRoot = getProfilesDir(this.context.directory);
         profile = await resolveConfig(session.profileId, profileRoot);
-        engine = await this.mutationOrchestrator.resolveEngine(session.profileId);
+        engine = await this.mutationOrchestrator.resolveEngine(session.profileId, session.schemaId);
       } catch (error) {
         this.blockTaskAdmission(
           `Cannot resolve workflow admission profile: ${error instanceof Error ? error.message : String(error)}`
@@ -1092,7 +1104,7 @@ class StateMachineRuntime {
     // rather than blocking a call it does not govern.
     if (!session) return;
 
-    const engine = await this.mutationOrchestrator.resolveEngine(session.profileId);
+    const engine = await this.mutationOrchestrator.resolveEngine(session.profileId, session.schemaId);
     const requiredGates = engine.getRequiredGates();
     if (!canCommit(session, requiredGates)) {
       throw new WorkflowBlockedError('Cannot commit: not all gates passed or tasks completed');
@@ -1577,7 +1589,7 @@ class StateMachineRuntime {
             return;
           }
           const loopStage = parsed
-            ? await this.resolveLoopStage(session.profileId, run.listKey)
+            ? await this.resolveLoopStage(session, run.listKey)
             : null;
           const nested = loopStage ? nestedStages(loopStage) : [];
           const currentStage = nested.find((entry) => entry.id === run.stage);
@@ -1656,7 +1668,7 @@ class StateMachineRuntime {
           }
 
           if (failed || passed) {
-            const engine = await this.mutationOrchestrator.resolveEngine(session.profileId);
+            const engine = await this.mutationOrchestrator.resolveEngine(session.profileId, session.schemaId);
             const movement = nextTaskStage(
               loopStage,
               run,
@@ -1791,7 +1803,7 @@ class StateMachineRuntime {
 
     let stage: StageDef | undefined;
     try {
-      const engine = await this.mutationOrchestrator.resolveEngine(session.profileId);
+      const engine = await this.mutationOrchestrator.resolveEngine(session.profileId, session.schemaId);
       stage = engine.getStages()[stageId];
     } catch (error) {
       // A profile we cannot read declares no gates we can honour. The verdict
@@ -1851,8 +1863,8 @@ class StateMachineRuntime {
    * whichever the search order reaches first — a parent's guard from one file,
    * a child's roster from another, never the stage the workflow actually runs.
    */
-  private async resolveLoopStage(profileId: string, listKey: string): Promise<StageDef | null> {
-    const engine = await this.mutationOrchestrator.resolveEngine(profileId);
+  private async resolveLoopStage(session: WorkflowSession, listKey: string): Promise<StageDef | null> {
+    const engine = await this.mutationOrchestrator.resolveEngine(session.profileId, session.schemaId);
     return engine.getLoopStage(listKey);
   }
 

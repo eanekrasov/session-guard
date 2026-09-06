@@ -9,6 +9,10 @@
 # stage without `stages` never reaches the check and a roster there is inert —
 # not dangerous, just unread. See profiles/README.md, "Known traps".
 
+# Combines with the base workflow through `extends` — the only way two
+# schemas ever become one.
+extends: 'base/base.yaml'
+
 # The harness profile ships a single agent, so it is also the one allowed to
 # drive workflow task state. Every other profile defaults to `orchestrator`.
 taskControlAgents:
