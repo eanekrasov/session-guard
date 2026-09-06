@@ -94,3 +94,39 @@ describe('DeliveryPermit schema', () => {
     expect(result.expectedFiles).toEqual([]);
   });
 });
+
+// ─── extractBashCommand ───────────────────────────────────────────────────────
+
+describe('extractBashCommand', () => {
+  it('unwraps the host bash argument object', async () => {
+    const { extractBashCommand } = await import('../../src/domain/session-queries.ts');
+    expect(extractBashCommand({ command: 'git commit -m "x"' })).toBe('git commit -m "x"');
+    expect(extractBashCommand({ command: 'npm test', description: 'run tests' })).toBe('npm test');
+  });
+
+  it('passes a bare string through unchanged', async () => {
+    const { extractBashCommand } = await import('../../src/domain/session-queries.ts');
+    expect(extractBashCommand('git push origin main')).toBe('git push origin main');
+  });
+
+  it('falls back to the serialised form for unrecognised shapes', async () => {
+    const { extractBashCommand } = await import('../../src/domain/session-queries.ts');
+    expect(extractBashCommand({ cmd: 'git push' })).toBe('{"cmd":"git push"}');
+    expect(extractBashCommand(undefined)).toBe('""');
+  });
+
+  it('detects forbidden git commands in the host argument shape', async () => {
+    const { extractBashCommand, hasForbiddenGitSubcommand } = await import(
+      '../../src/domain/session-queries.ts'
+    );
+    // Regression: stringifying the whole object hid the command behind JSON
+    // punctuation, so the anchored pattern never matched.
+    expect(hasForbiddenGitSubcommand(extractBashCommand({ command: 'git commit -m "x"' }))).toBe(
+      true
+    );
+    expect(hasForbiddenGitSubcommand(extractBashCommand({ command: 'git push origin main' }))).toBe(
+      true
+    );
+    expect(hasForbiddenGitSubcommand(extractBashCommand({ command: 'git status' }))).toBe(false);
+  });
+});

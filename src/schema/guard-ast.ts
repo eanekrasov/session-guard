@@ -406,7 +406,8 @@ function parsePrimary(tokens: Token[], depth: number): AstNode {
     if (id === 'false') return parsePostfix({ type: 'literal', value: false }, tokens, depth);
     if (id === 'null') return parsePostfix({ type: 'literal', value: null }, tokens, depth);
     if (id === 'undefined') {
-      consume(tokens, 'undefined');
+      // The `id` token was already consumed above — `undefined` is a literal,
+      // not a prefix keyword, so nothing further may be consumed here.
       return parsePostfix({ type: 'literal', value: undefined as unknown as null }, tokens, depth);
     }
 

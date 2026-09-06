@@ -6,6 +6,7 @@ import { resolveConfig } from '../public-api.ts';
 import { GuardEvaluator } from '../schema/guard-evaluator.ts';
 import type { ResolvedSchema } from '../schema/types.ts';
 import { SessionQueue } from './session-queue.ts';
+import { WorkflowBlockedError } from './blocked-error.ts';
 import { computeChangeScope, type BaselineHashes } from './change-scope.ts';
 import { getAllProfileInvariants, validateFiles, SUPPORTED_EXTENSIONS } from './invariants.ts';
 import {
@@ -258,8 +259,7 @@ export class MutationOrchestrator {
       await this.log('error', `beginMutation: failed to load session or resolve engine`, {
         error: err instanceof Error ? err.message : String(err),
       });
-      output.args = { blocked: true, reason: 'Failed to load session or resolve engine' };
-      return;
+      throw new WorkflowBlockedError('Failed to load session or resolve engine');
     }
 
     // Enqueue the actual mutation work — serialised per root session.
@@ -267,20 +267,16 @@ export class MutationOrchestrator {
     // so the early guard here is redundant for safety; the enqueue
     // isolates the concurrent write path.
     await this.queue.enqueue(input.sessionID, async (session) => {
-      if (!session) {
-        output.args = { blocked: true, reason: 'Session not found' };
-        return;
-      }
+      // No workflow session means the plugin does not govern this call.
+      if (!session) return;
 
       const canMutate = engine.canPerformAction(session, 'beginMutation', {
         agentId: this.agentId,
       });
       if (!canMutate.allowed) {
-        output.args = {
-          blocked: true,
-          reason: `Mutation blocked by engine: ${canMutate.reason ?? 'unknown'}`,
-        };
-        return;
+        throw new WorkflowBlockedError(
+          `Mutation blocked by engine: ${canMutate.reason ?? 'unknown'}`
+        );
       }
 
       // P1-014: Release interrupted locks — if active operations exist but are
@@ -295,11 +291,9 @@ export class MutationOrchestrator {
           callID: input.callID,
           error: err instanceof Error ? err.message : String(err),
         });
-        output.args = {
-          blocked: true,
-          reason: `Mutation failed: ${err instanceof Error ? err.message : String(err)}`,
-        };
-        return;
+        throw new WorkflowBlockedError(
+          `Mutation failed: ${err instanceof Error ? err.message : String(err)}`
+        );
       }
 
       // Save phase BEFORE mutation for post-mutation transition validation

@@ -15,3 +15,10 @@ coverage/
 .opencode.jsonc
 .tui.json
 .tui.jsonc
+.atl
+.codegraph
+.opencode/plugin
+scripts/check-spec-consistency.ts
+scripts/tmr-workflow-create.ts
+openspec/
+docs/plans

@@ -124,7 +124,7 @@ async function beforeTask(
   callID: string,
   taskId = 'task-1',
   agent = 'code'
-): Promise<{ args: unknown }> {
+): Promise<{ args: unknown; blockedReason?: string }> {
   const nativeArgs: Record<string, unknown> = {
     subagent_type: agent,
     task_id: 'native-subagent-session',
@@ -136,8 +136,14 @@ async function beforeTask(
     sessionID: 's1',
     callID,
   };
-  await hooks['tool.execute.before']!(input, output);
-  return output;
+  // A refusal is a rejected hook — that is the only signal the host acts on.
+  let blockedReason: string | undefined;
+  try {
+    await hooks['tool.execute.before']!(input, output);
+  } catch (err) {
+    blockedReason = err instanceof Error ? err.message : String(err);
+  }
+  return { args: output.args, blockedReason };
 }
 
 async function afterTask(
@@ -229,7 +235,7 @@ describe('task-cycle retry and recovery', () => {
         status: 'pending',
       }),
     ]);
-    expect(rejected.args).toEqual({ blocked: true, reason: expect.any(String) });
+    expect(rejected.blockedReason).toEqual(expect.any(String));
     expect(system.system).toContain(
       '[workflow pending decision: task task-1 retry_exhausted; use workflow.tasks-resolve-decision (no taskId needed)]'
     );

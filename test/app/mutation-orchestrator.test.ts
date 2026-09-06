@@ -73,14 +73,15 @@ function addExecutableTaskCycle(session: ReturnType<typeof createSession>): void
 // ─── Tests ─────────────────────────────────────────────────────────
 
 describe('MutationOrchestrator.beginMutation', () => {
-  it('sets output.args to blocked object when engine resolution fails (no profiles dir)', async () => {
+  it('rejects when engine resolution fails (no profiles dir)', async () => {
     await store.save(createSession('mo-no-profiles', 'base'));
     const { orchestrator } = await makeOrchestrator();
 
     const output: { args: unknown } = { args: 'echo hello' };
-    await orchestrator.beginMutation({ sessionID: 'mo-no-profiles', callID: 'call-1' }, output);
-
-    expect(output.args).toEqual({ blocked: true, reason: expect.any(String) });
+    // A refusal must reject: rewriting args would not stop the tool from running.
+    await expect(
+      orchestrator.beginMutation({ sessionID: 'mo-no-profiles', callID: 'call-1' }, output)
+    ).rejects.toThrow();
   });
 
   it('is a no-op when no session exists (preCheck returns null)', async () => {
@@ -118,9 +119,9 @@ describe('MutationOrchestrator.beginMutation', () => {
     const { orchestrator } = await makeOrchestrator();
 
     const output: { args: unknown } = { args: 'echo hi' };
-    await orchestrator.beginMutation({ sessionID: 'mo-guarded', callID: 'call-guarded' }, output);
-
-    expect(output.args).toEqual({ blocked: true, reason: expect.any(String) });
+    await expect(
+      orchestrator.beginMutation({ sessionID: 'mo-guarded', callID: 'call-guarded' }, output)
+    ).rejects.toThrow(/Mutation blocked by engine/);
     const reloaded = await store.load('mo-guarded');
     expect(reloaded?.activeOperations).toEqual({});
   });

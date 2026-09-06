@@ -106,7 +106,6 @@ export class WorkflowModule {
     const filePath = this.runPath(snapshot.run.id);
     const tmpPath = `${filePath}.${genId()}.tmp`;
     await writeFile(tmpPath, JSON.stringify(snapshot, null, 2), 'utf-8');
-    await writeFile(tmpPath, JSON.stringify(snapshot, null, 2), 'utf-8');
     // Atomic rename
     const { rename } = await import('node:fs/promises');
     await rename(tmpPath, filePath);

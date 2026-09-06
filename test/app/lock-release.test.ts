@@ -110,10 +110,11 @@ describe('releaseInterruptedLock', () => {
     const session = sessionWithActiveOp('test-retry', 'same-call');
     await store.save(session);
 
-    await orchestrator.beginMutation(
-      { sessionID: 'test-retry', callID: 'same-call' },
-      { args: {} }
-    );
+    // The domain refuses a second begin for a call that is already active, and
+    // a refusal now rejects instead of rewriting args.
+    await expect(
+      orchestrator.beginMutation({ sessionID: 'test-retry', callID: 'same-call' }, { args: {} })
+    ).rejects.toThrow();
     await drainQueue('test-retry');
 
     const reloaded = await store.load('test-retry');
@@ -148,7 +149,9 @@ describe('releaseInterruptedLock', () => {
 
     // Starting a beginMutation with the same callID populates liveMutations.
     // Since the callID matches, releaseInterruptedLock won't clear it.
-    await orchestrator.beginMutation({ sessionID: 'test-live', callID: 'live-call' }, { args: {} });
+    await expect(
+      orchestrator.beginMutation({ sessionID: 'test-live', callID: 'live-call' }, { args: {} })
+    ).rejects.toThrow();
     await drainQueue('test-live');
 
     const reloaded = await store.load('test-live');

@@ -98,7 +98,7 @@ async function beforeTask(
   callID: string,
   description: string | undefined,
   agent = 'code'
-): Promise<{ args: unknown; nativeArgs: Record<string, unknown> }> {
+): Promise<{ args: unknown; nativeArgs: Record<string, unknown>; blockedReason?: string }> {
   const nativeArgs: Record<string, unknown> = {
     subagent_type: agent,
     task_id: 'native-subagent-session',
@@ -111,8 +111,14 @@ async function beforeTask(
     sessionID: 's1',
     callID,
   };
-  await hooks['tool.execute.before']!(input, output);
-  return { args: output.args, nativeArgs };
+  // A refusal is a rejected hook — that is the only signal the host acts on.
+  let blockedReason: string | undefined;
+  try {
+    await hooks['tool.execute.before']!(input, output);
+  } catch (err) {
+    blockedReason = err instanceof Error ? err.message : String(err);
+  }
+  return { args: output.args, nativeArgs, blockedReason };
 }
 
 async function afterTask(hooks: Hooks, callID: string, outputText: string): Promise<void> {
@@ -201,8 +207,7 @@ describe('task-cycle admission', () => {
       const invocation = await beforeTask(hooks, 'bad-call', description);
 
       // isWorkflowTask отсекает такие вызовы — они проходят без admission
-      const blocked = (invocation.args as Record<string, unknown> | undefined)?.blocked;
-      expect(blocked).toBeUndefined();
+      expect(invocation.blockedReason).toBeUndefined();
 
       const session = await load(store);
       expect(session.activeOperations).toEqual({});
@@ -221,7 +226,7 @@ describe('task-cycle admission', () => {
       '[workflow-task:task-99] Unknown task'
     );
 
-    expect(invocation.args).toEqual({ blocked: true, reason: expect.any(String) });
+    expect(invocation.blockedReason).toEqual(expect.any(String));
     expect((await load(store)).activeOperations).toEqual({});
   });
 
@@ -237,7 +242,7 @@ describe('task-cycle admission', () => {
       'review'
     );
 
-    expect(invocation.args).toEqual({ blocked: true, reason: expect.any(String) });
+    expect(invocation.blockedReason).toEqual(expect.any(String));
     expect((await load(store)).activeOperations).toEqual({});
   });
 
@@ -255,7 +260,7 @@ describe('task-cycle admission', () => {
     const rejected = await beforeTask(hooks, 'call-3', '[workflow-task:task-3] Third');
     const session = await load(store);
 
-    expect(rejected.args).toEqual({ blocked: true, reason: expect.any(String) });
+    expect(rejected.blockedReason).toEqual(expect.any(String));
     expect(Object.keys(session.activeOperations)).toEqual(['call-1', 'call-2']);
     expect(
       new Set(Object.values(session.activeOperations).map((operation) => operation.runId)).size
@@ -273,7 +278,7 @@ describe('task-cycle admission', () => {
 
     const rejected = await beforeTask(hooks, 'call-2', '[workflow-task:task-2] Second');
 
-    expect(rejected.args).toEqual({ blocked: true, reason: expect.any(String) });
+    expect(rejected.blockedReason).toEqual(expect.any(String));
     expect(Object.keys((await load(store)).loopRuns)).toHaveLength(1);
   });
 
@@ -343,7 +348,7 @@ describe('task-cycle admission', () => {
 
     const admitted = await beforeTask(hooks, 'call-next', '[workflow-task:task-2] Next');
     session = await load(store);
-    expect(admitted.args).toEqual({ blocked: true, reason: expect.any(String) });
+    expect(admitted.blockedReason).toEqual(expect.any(String));
     expect(session.activeOperations).toEqual({});
   });
 
@@ -355,7 +360,7 @@ describe('task-cycle admission', () => {
     await beforeTask(hooks, 'call-1', '[workflow-task:task-1] First');
     const rejected = await beforeTask(hooks, 'call-2', '[workflow-task:task-1] Duplicate');
 
-    expect(rejected.args).toEqual({ blocked: true, reason: expect.any(String) });
+    expect(rejected.blockedReason).toEqual(expect.any(String));
     expect(Object.keys((await load(store)).activeOperations)).toEqual(['call-1']);
   });
 
@@ -368,7 +373,7 @@ describe('task-cycle admission', () => {
     await beforeTask(hooks, 'call-1', '[workflow-task:task-1] First');
     const session = await load(store);
 
-    expect(outOfOrder.args).toEqual({ blocked: true, reason: expect.any(String) });
+    expect(outOfOrder.blockedReason).toEqual(expect.any(String));
     expect(Object.keys(session.activeOperations)).toEqual(['call-1']);
   });
 
@@ -384,7 +389,7 @@ describe('task-cycle admission', () => {
     const admitted = await beforeTask(hooks, 'call-2', '[workflow-task:task-2] Second');
     const loaded = await load(store);
 
-    expect(tooEarly.args).toEqual({ blocked: true, reason: expect.any(String) });
+    expect(tooEarly.blockedReason).toEqual(expect.any(String));
     expect(admitted.args).toEqual(expect.objectContaining({ description: expect.any(String) }));
     expect(loaded.activeOperations['call-2'].taskId).toBe('task-2');
     expect(Object.keys(loaded.loopRuns)).toHaveLength(2);

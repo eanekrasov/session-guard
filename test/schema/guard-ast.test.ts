@@ -382,3 +382,26 @@ describe('GuardAST', () => {
     });
   });
 });
+
+// ─── undefined literal ────────────────────────────────────────────────────────
+
+describe('undefined literal', () => {
+  it('parses `undefined` as a literal instead of throwing', () => {
+    expect(() => parse('session.flag !== undefined')).not.toThrow();
+    expect(() => parse('undefined')).not.toThrow();
+  });
+
+  it('compares a present field against undefined', () => {
+    const session = { flag: true };
+    expect(evaluateGuard('session.flag !== undefined', session, makeBuiltins(session))).toBe(true);
+    expect(evaluateGuard('session.flag === undefined', session, makeBuiltins(session))).toBe(false);
+  });
+
+  it('compares a missing field against undefined', () => {
+    expect(evaluateGuard('session.missing === undefined', {}, makeBuiltins({}))).toBe(true);
+  });
+
+  it('keeps `undefined` falsy on its own', () => {
+    expect(evaluateGuard('undefined', {}, makeBuiltins({}))).toBe(false);
+  });
+});

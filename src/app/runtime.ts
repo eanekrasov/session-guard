@@ -21,6 +21,7 @@ import type { LogFn } from './logger.ts';
 import { createLogFn } from './logger.ts';
 import {
   canCommit,
+  extractBashCommand,
   hasForbiddenGitSubcommand,
   isCommitTaskCommand,
 } from '../domain/session-queries.ts';
@@ -50,6 +51,7 @@ import { sessionsDir, profilesDir as getProfilesDir } from './paths.ts';
 import { OpenCodeRulesRuntime } from '../rules/runtime.ts';
 import { MatchedRulesStateStore } from '../rules/matched-rules-state.ts';
 import { syncProfileAgents } from './profile-agent-sync.ts';
+import { WorkflowBlockedError } from './blocked-error.ts';
 
 export { mergeSchemasToEngineConfig };
 
@@ -82,6 +84,16 @@ class StateMachineRuntime {
   private readonly fileTools = new Set(['edit', 'write', 'apply_patch']);
   private readonly profilesDir: string;
   private readonly projectDir: string;
+
+  /**
+   * The plugin is opt-in per session: until a workflow session exists, none of
+   * its mechanics apply — guardrails and rules included. Every host hook that
+   * carries a session id gates on this before doing any work.
+   */
+  private async hasWorkflowSession(sessionID: string | undefined): Promise<boolean> {
+    if (!sessionID) return false;
+    return (await this.store.load(sessionID)) !== null;
+  }
 
   /**
    * Normalize tool identifiers to lowercase for consistent comparison.
@@ -578,6 +590,9 @@ class StateMachineRuntime {
     input: { tool: string; sessionID: string; callID: string },
     output: { args: unknown }
   ): Promise<void> {
+    // 0. Opt-in gate — no workflow session means no plugin mechanics at all.
+    if (!(await this.hasWorkflowSession(input.sessionID))) return;
+
     // Normalize tool name to lowercase (SDK may send any casing)
     const tool = this.normalizeTool(input.tool);
 
@@ -585,16 +600,14 @@ class StateMachineRuntime {
     // НЕ в input.args (в input.args нет поля args по типам SDK).
     const args = output.args;
 
-    // 1. Guardrails — always check first
-    if (!this.guardrailBefore(args, output)) return;
+    // Every refusal below throws WorkflowBlockedError: the host cancels the
+    // tool call only when this hook rejects. See blocked-error.ts.
 
-    // 1b. Rules — PreToolUse evaluation (may throw to block the tool)
-    try {
-      await this.rulesRuntime.handleToolExecuteBefore(input, output);
-    } catch (blockError) {
-      output.args = { blocked: true, reason: String(blockError) };
-      return;
-    }
+    // 1. Guardrails — always check first
+    this.guardrailBefore(args);
+
+    // 1b. Rules — PreToolUse evaluation (throws to block the tool; let it through)
+    await this.rulesRuntime.handleToolExecuteBefore(input, output);
 
     // 2. Consent parsing (Question tool)
     if (await this.consentBefore(tool, input.sessionID, input.callID, args)) return;
@@ -603,13 +616,6 @@ class StateMachineRuntime {
     // Проверяем только task с маркером [workflow-task:] — обычные task (architect и т.д.) проходят без admission.
     if (this.isWorkflowTask(tool, args)) {
       await this.handleTaskBefore(input.sessionID, input.callID, args, output);
-      if (
-        output.args &&
-        typeof output.args === 'object' &&
-        (output.args as Record<string, unknown>).blocked === true
-      ) {
-        return;
-      }
     }
 
     // 4. Commit Permit: block forbidden git commands, issue deliveryPermit for commit-task
@@ -649,11 +655,11 @@ class StateMachineRuntime {
     await this.queue.enqueue(sessionID, async (session) => {
       if (!session) return;
       if (session.activeOperations[callID]) {
-        this.blockTaskAdmission(output, `Native call ${callID} is already correlated`);
+        this.blockTaskAdmission(`Native call ${callID} is already correlated`);
         return;
       }
       if (this.hasRunningOperationForTask(session, taskId)) {
-        this.blockTaskAdmission(output, `Workflow task ${taskId} already has an active call`);
+        this.blockTaskAdmission(`Workflow task ${taskId} already has an active call`);
         return;
       }
 
@@ -665,7 +671,6 @@ class StateMachineRuntime {
         engine = await this.mutationOrchestrator.resolveEngine(session.profileId);
       } catch (error) {
         this.blockTaskAdmission(
-          output,
           `Cannot resolve workflow admission profile: ${error instanceof Error ? error.message : String(error)}`
         );
         return;
@@ -679,7 +684,6 @@ class StateMachineRuntime {
       );
       if (!phase?.loop || !phase.dispatch || !phase.stages?.length) {
         this.blockTaskAdmission(
-          output,
           `Phase ${phaseId} does not declare an executable task loop`
         );
         return;
@@ -690,7 +694,6 @@ class StateMachineRuntime {
       const task = tasks?.find((candidate) => candidate.id === taskId);
       if (!listKey || !tasks || !task) {
         this.blockTaskAdmission(
-          output,
           `Workflow task ${taskId} is not eligible in phase ${phaseId}`
         );
         return;
@@ -700,27 +703,27 @@ class StateMachineRuntime {
         (run) => run.taskId === taskId && isOpenLoopRun(run)
       );
       if (nonterminalRuns.length > 1) {
-        this.blockTaskAdmission(output, `Workflow task ${taskId} has ambiguous active loop runs`);
+        this.blockTaskAdmission(`Workflow task ${taskId} has ambiguous active loop runs`);
         return;
       }
       const existingRun = nonterminalRuns[0];
       if (existingRun?.status === 'awaiting_decision') {
-        this.blockTaskAdmission(output, `Workflow task ${taskId} is awaiting a retry decision`);
+        this.blockTaskAdmission(`Workflow task ${taskId} is awaiting a retry decision`);
         return;
       }
       if (!existingRun && task.status !== 'pending') {
-        this.blockTaskAdmission(output, `Workflow task ${taskId} is not pending`);
+        this.blockTaskAdmission(`Workflow task ${taskId} is not pending`);
         return;
       }
 
       const stageId = existingRun?.stage ?? phase.stages[0].id;
       const stage = phase.stages.find((candidate) => candidate.id === stageId);
       if (!stage) {
-        this.blockTaskAdmission(output, `Stage ${stageId} is not declared by phase ${phaseId}`);
+        this.blockTaskAdmission(`Stage ${stageId} is not declared by phase ${phaseId}`);
         return;
       }
       if (stage.allowedAgents?.length && !stage.allowedAgents.includes(agent)) {
-        this.blockTaskAdmission(output, `Agent ${agent} is not allowed in stage ${stageId}`);
+        this.blockTaskAdmission(`Agent ${agent} is not allowed in stage ${stageId}`);
         return;
       }
       if (
@@ -728,7 +731,7 @@ class StateMachineRuntime {
           (guard) => !engine.evaluateGuard(guard, session, { currentLoopListKey: listKey })
         )
       ) {
-        this.blockTaskAdmission(output, `Entry guard rejected stage ${stageId}`);
+        this.blockTaskAdmission(`Entry guard rejected stage ${stageId}`);
         return;
       }
 
@@ -742,7 +745,7 @@ class StateMachineRuntime {
           phase.stages[0].id
         );
         if (rejection) {
-          this.blockTaskAdmission(output, rejection);
+          this.blockTaskAdmission(rejection);
           return;
         }
       }
@@ -789,8 +792,8 @@ class StateMachineRuntime {
     });
   }
 
-  private blockTaskAdmission(output: { args: unknown }, reason: string): void {
-    output.args = { blocked: true, reason };
+  private blockTaskAdmission(reason: string): never {
+    throw new WorkflowBlockedError(reason);
   }
 
   private resolveAdmissionListKey(
@@ -880,19 +883,14 @@ class StateMachineRuntime {
     output: { args: unknown }
   ): Promise<void> {
     const session = await this.store.load(sessionID);
-    if (!session) {
-      output.args = { blocked: true, reason: 'Session not found' };
-      return;
-    }
+    // No workflow session means the plugin does not apply — skip silently
+    // rather than blocking a call it does not govern.
+    if (!session) return;
 
     const engine = await this.mutationOrchestrator.resolveEngine(session.profileId);
     const requiredGates = engine.getRequiredGates();
     if (!canCommit(session, requiredGates)) {
-      output.args = {
-        blocked: true,
-        reason: 'Cannot commit: not all gates passed or tasks completed',
-      };
-      return;
+      throw new WorkflowBlockedError('Cannot commit: not all gates passed or tasks completed');
     }
 
     const preCommitHead = this.getPreCommitHead();
@@ -913,6 +911,9 @@ class StateMachineRuntime {
     input: { tool: string; sessionID: string; callID: string; args: unknown },
     output: { title: string; output: string; metadata: unknown }
   ): Promise<void> {
+    // 0. Opt-in gate — no workflow session means no plugin mechanics at all.
+    if (!(await this.hasWorkflowSession(input.sessionID))) return;
+
     // Normalize tool name to lowercase (SDK may send any casing)
     const tool = this.normalizeTool(input.tool);
 
@@ -926,7 +927,7 @@ class StateMachineRuntime {
     await this.rulesRuntime.handleToolExecuteAfter(input, output);
 
     // 1d. File tool — run invariants on written/edited files
-    await this.handleFileToolAfter(input, output);
+    await this.handleFileToolAfter(tool, input, output);
 
     // 2. Commit Permit: verify HEAD changed after commit-task
     if (tool === 'bash') {
@@ -1064,6 +1065,9 @@ class StateMachineRuntime {
     input: { sessionID?: string },
     output: { context: string[]; prompt?: string }
   ): Promise<void> {
+    // Opt-in gate — no workflow session means no plugin mechanics at all.
+    if (!(await this.hasWorkflowSession(input.sessionID))) return;
+
     const rulesOutput = { context: [...output.context], prompt: undefined as string | undefined };
     await this.rulesRuntime.handleSessionCompacting(input, rulesOutput);
     output.context = rulesOutput.context;
@@ -1088,14 +1092,18 @@ class StateMachineRuntime {
     event: {
       type: string;
       message?: { id: string; parts?: Array<{ type: string; status?: string; callID?: string }> };
-      part?: { id: string; status?: string; callID?: string };
+      part?: { id: string; status?: string; callID?: string; state?: { status?: string } };
+      properties?: Record<string, unknown>;
     };
   }): Promise<void> {
     // Check if event indicates an error
     const isError = this.isErrorEvent(event);
 
     if (isError) {
-      // Find the matching callId
+      // Find the matching callId. The owning session is unknown here, so
+      // markTaskOperationInterrupted resolves it by scanning stored sessions —
+      // it can only ever touch a session that already exists, which satisfies
+      // the opt-in rule without an explicit gate.
       const callId = this.extractCallId(event);
       if (callId) {
         await this.mutationOrchestrator.clearOnError(callId);
@@ -1103,8 +1111,16 @@ class StateMachineRuntime {
       }
     }
 
-    // Always delegate to rules sub-system — even for non-error events
-    await this.rulesRuntime.handleEvent(event);
+    // Rules are a per-session mechanic. The rules sub-system reads the session
+    // from `event.properties.sessionID` (not from `part`), so gate on that same
+    // field: no workflow session, no rules.
+    const rulesSessionID = event.event.properties?.['sessionID'];
+    if (
+      typeof rulesSessionID === 'string' &&
+      (await this.hasWorkflowSession(rulesSessionID))
+    ) {
+      await this.rulesRuntime.handleEvent(event);
+    }
   }
 
   private async markTaskOperationInterrupted(callId: string): Promise<void> {
@@ -1126,10 +1142,16 @@ class StateMachineRuntime {
     event: {
       type: string;
       message?: { id: string; parts?: Array<{ type: string; status?: string; callID?: string }> };
-      part?: { id: string; status?: string; callID?: string };
+      part?: { id: string; status?: string; callID?: string; state?: { status?: string } };
     };
   }): boolean {
-    return event.event.type === 'message.part.updated' && event.event.part?.status === 'failed';
+    if (event.event.type !== 'message.part.updated') return false;
+    const part = event.event.part;
+    if (!part) return false;
+    // SDK shape: ToolPart carries its status under `state.status`, and the
+    // failure value is 'error'. The flat `status: 'failed'` shape is kept for
+    // hosts that emit the legacy part payload.
+    return part.state?.status === 'error' || part.status === 'failed';
   }
 
   private extractCallId(event: {
@@ -1291,6 +1313,7 @@ class StateMachineRuntime {
    * Handle file tool after — run invariants on written/edited files.
    */
   private async handleFileToolAfter(
+    tool: string,
     input: {
       tool: string;
       sessionID: string;
@@ -1299,7 +1322,7 @@ class StateMachineRuntime {
     },
     output: { title: string; output: string; metadata: unknown }
   ): Promise<void> {
-    if (!this.fileTools.has(input.tool)) return;
+    if (!this.fileTools.has(tool)) return;
 
     const candidate = input.args?.filePath ?? input.args?.path ?? input.args?.file;
     if (typeof candidate !== 'string') return;
@@ -1343,20 +1366,18 @@ class StateMachineRuntime {
 
   // ── Inlined handler methods (former GuardrailHandler) ────────────────
 
-  private guardrailBefore(args: unknown, output: { args: unknown }): boolean {
-    if (!args || typeof args !== 'object') return true;
+  private guardrailBefore(args: unknown): void {
+    if (!args || typeof args !== 'object') return;
     const input = JSON.stringify(args);
     const guardResult = validateUserInput(input);
-    if (guardResult.passed) return true;
-    output.args = {
-      blocked: true,
-      reason: `Guardrail blocked: ${[...guardResult.blocked, ...guardResult.warnings].join(', ')}`,
-    };
+    if (guardResult.passed) return;
     void this.log('warn', `Guardrail blocked tool input`, {
       blocked: guardResult.blocked,
       warnings: guardResult.warnings,
     });
-    return false;
+    throw new WorkflowBlockedError(
+      `Guardrail blocked: ${[...guardResult.blocked, ...guardResult.warnings].join(', ')}`
+    );
   }
 
   private guardrailAfter(toolOutput: string, tool: string): string {
@@ -1406,24 +1427,15 @@ class StateMachineRuntime {
     output: { args: unknown }
   ): Promise<boolean> {
     if (tool === 'bash') {
-      const command = typeof args === 'string' ? args : JSON.stringify(args ?? '');
+      const command = extractBashCommand(args);
       if (hasForbiddenGitSubcommand(command)) {
-        output.args = {
-          blocked: true,
-          reason: 'Direct git commit/push is blocked. Use commit-task.ts instead.',
-        };
         void this.log('warn', `Blocked forbidden git command`, { callID: callID, command });
-        return;
+        throw new WorkflowBlockedError(
+          'Direct git commit/push is blocked. Use commit-task.ts instead.'
+        );
       }
       if (isCommitTaskCommand(command)) {
         await this.handleCommitTaskBefore(sessionID, callID, output);
-        if (
-          output.args &&
-          typeof output.args === 'object' &&
-          (output.args as Record<string, unknown>).blocked
-        ) {
-          return;
-        }
       }
     }
     return true;

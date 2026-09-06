@@ -1,6 +1,23 @@
 import type { WorkflowSession } from '../session/session-schema.ts';
 
 /**
+ * Extract the shell command from bash tool arguments.
+ *
+ * The host passes bash arguments as `{ command: "..." }`, so stringifying the
+ * whole object hides the command behind JSON punctuation and defeats the
+ * anchored patterns in `hasForbiddenGitSubcommand`. Unrecognised shapes fall
+ * back to the serialised form so they are still scanned.
+ */
+export function extractBashCommand(args: unknown): string {
+  if (typeof args === 'string') return args;
+  if (args && typeof args === 'object') {
+    const command = (args as { command?: unknown }).command;
+    if (typeof command === 'string') return command;
+  }
+  return JSON.stringify(args ?? '');
+}
+
+/**
  * Check if a command contains a forbidden git subcommand (commit or push).
  * Kept as a generic guard, not a commit-specific lifecycle.
  */
