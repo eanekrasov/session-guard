@@ -301,16 +301,18 @@ describe('E2E: checkTransition kind=pass/fail', () => {
 });
 
 describe('E2E: checkTransition — engine.checkTransition integration', () => {
-  test('engine.checkTransition without session bypasses kind and guard', async () => {
+  test('engine.checkTransition without session refuses a conditional edge', async () => {
     directory = await mkdtemp(join(tmpdir(), 'sm-e2e-no-session'));
     store = new WorkflowStore(join(directory, '.opencode/state-machine/sessions'));
 
     const engine = new StateMachineEngine(makeConfig({ requiredGates: ['invariants'] }));
     const result = engine.checkTransition('EXECUTION', 'COMMIT');
 
-    // No session → guard and kind skipped → allowed
-    expect(result.allowed).toBe(true);
+    // No session → the gates behind kind=pass cannot be read, and unread gates
+    // are not passed gates. The edge is refused, not waved through.
+    expect(result.allowed).toBe(false);
     expect(result.kind).toBe('pass');
+    expect(result.reason).toContain('cannot be checked without a session');
   });
 
   test('engine.checkTransition with session injects requiredGates', async () => {

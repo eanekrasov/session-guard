@@ -184,6 +184,28 @@ export function evaluateTransition(
   const from = transition.from;
   const to = transition.to;
   const guard = transition.guard;
+
+  // Without a session there is nothing to evaluate a condition against, and an
+  // unevaluated condition is not a satisfied one. Every conditional clause
+  // below used to be written `if (… && session)`, and `requiredGates` degraded
+  // to `[]`, so a caller with no session was told every conditional edge was
+  // allowed. An edge that carries no condition at all is still allowed: that
+  // answer is about the shape of the graph and needs no session.
+  const conditions: string[] = [];
+  if (guard && guard.trim() !== '') conditions.push('a guard');
+  if (transition.consent) conditions.push('consent');
+  if (transition.kind === 'pass' || transition.kind === 'fail') {
+    conditions.push(`kind=${transition.kind}`);
+  }
+  if (conditions.length > 0 && !session) {
+    return {
+      allowed: false,
+      kind: transition.kind,
+      reason: `Transition ${from} → ${to} carries ${conditions.join(' and ')} and cannot be checked without a session`,
+      guard,
+    };
+  }
+
   if (guard && guard.trim() !== '' && session) {
     const passed = evaluateGuard
       ? evaluateGuard(guard)

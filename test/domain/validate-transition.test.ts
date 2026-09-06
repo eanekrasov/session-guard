@@ -48,14 +48,25 @@ describe('checkTransition', () => {
     );
   });
 
-  it('allows a guarded transition when no session is provided (bypass)', () => {
+  it('refuses a guarded transition when no session is provided', () => {
+    // An unevaluated guard is not a satisfied one. Without a session there is
+    // nothing to evaluate against, so the edge is refused with the reason.
     const transitions: TransitionDef[] = [
       { from: 'PLANNING', to: 'EXECUTION', guard: "session.approved('plan')" },
     ];
 
     const result = checkTransition('PLANNING', 'EXECUTION', transitions);
 
-    expect(result.allowed).toBe(true);
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toContain('cannot be checked without a session');
+  });
+
+  it('allows an unconditional transition when no session is provided', () => {
+    // No guard, no consent, no kind — the answer is about the shape of the
+    // graph and needs no session.
+    const transitions: TransitionDef[] = [{ from: 'PLANNING', to: 'EXECUTION' }];
+
+    expect(checkTransition('PLANNING', 'EXECUTION', transitions).allowed).toBe(true);
   });
 
   it('evaluates a guard with gate lookup from SessionFacts', () => {
@@ -128,12 +139,12 @@ describe('checkTransition', () => {
       expect(result.allowed).toBe(true);
     });
 
-    it('allows a guarded transition without session', () => {
+    it('refuses a guarded transition without session', () => {
       const transitions: TransitionDef[] = [{ from: 'EXECUTION', to: 'COMMIT', guard: 'x == 1' }];
 
       const result = checkTransition('EXECUTION', 'COMMIT', transitions);
 
-      expect(result.allowed).toBe(true);
+      expect(result.allowed).toBe(false);
     });
   });
 });
