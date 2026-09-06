@@ -431,3 +431,51 @@ describe('withSession', () => {
     expect(actionCaller.called).toBe(false);
   });
 });
+
+describe('SessionQueue root resolution through the host', () => {
+  it('runs a child session action on the parent workflow session', async () => {
+    // `parentID` lives on the host's session record, never in a workflow
+    // session file — so before the host was asked, this resolution was
+    // identity and a dispatched subagent's writes never reached the parent's
+    // task scope, invariants or queue.
+    await seedSession('sq-root');
+
+    const { SessionQueue } = await import('../../src/app/session-queue.ts');
+    const asked: string[] = [];
+    const chain: Record<string, string> = { 'sq-child': 'sq-mid', 'sq-mid': 'sq-root' };
+    const queue = new SessionQueue(store, undefined, async (id) => {
+      asked.push(id);
+      return chain[id] ?? null;
+    });
+
+    const seen = await queue.enqueue('sq-child', async (session, root) => {
+      expect(root).toBe('sq-root');
+      return session?.sessionId ?? null;
+    });
+
+    expect(seen).toBe('sq-root');
+    // sq-root was seeded by its own save, so the cache already answers for it.
+    expect(asked).toEqual(['sq-child', 'sq-mid']);
+
+    // Every node walked is memoised to the root: a second call asks nothing.
+    asked.length = 0;
+    await queue.enqueue('sq-child', async (_session, root) => expect(root).toBe('sq-root'));
+    expect(asked).toEqual([]);
+  });
+
+  it('leaves a session as its own root when the host cannot answer', async () => {
+    await seedSession('sq-orphan');
+
+    const { SessionQueue } = await import('../../src/app/session-queue.ts');
+    const queue = new SessionQueue(store, undefined, async () => {
+      throw new Error('host unreachable');
+    });
+
+    const seen = await queue.enqueue('sq-orphan', async (session, root) => {
+      expect(root).toBe('sq-orphan');
+      return session?.sessionId ?? null;
+    });
+
+    expect(seen).toBe('sq-orphan');
+  });
+});

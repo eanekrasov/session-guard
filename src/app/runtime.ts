@@ -140,7 +140,44 @@ class StateMachineRuntime {
    */
   private async hasWorkflowSession(sessionID: string | undefined): Promise<boolean> {
     if (!sessionID) return false;
-    return (await this.store.load(sessionID)) !== null;
+    return (await this.loadGoverning(sessionID)) !== null;
+  }
+
+  /**
+   * Load the workflow session that governs a hook's session id.
+   *
+   * A hook fires with the id of the session the tool ran in; a dispatched
+   * subagent's is a child, and no workflow file is written under a child id.
+   * Loading by the raw id therefore found nothing, and the plugin governed
+   * only what the orchestrator did itself — which is not where the work
+   * happens.
+   */
+  private async loadGoverning(sessionID: string | undefined): Promise<WorkflowSession | null> {
+    if (!sessionID) return null;
+    return this.store.load(await this.queue.rootOf(sessionID));
+  }
+
+  /**
+   * The host's parent for a session, or null when it is a root or unknown.
+   *
+   * `parentID` lives on the host's session record, never in our session file,
+   * so this is the only place the chain can come from. A dispatched subagent
+   * runs in a child session; without this the parent's task scope, invariants
+   * and queue never saw its writes.
+   */
+  private async resolveHostParent(sessionID: string): Promise<string | null> {
+    try {
+      const result = await this.context.client.session.get({ path: { id: sessionID } });
+      const session = (result as { data?: { parentID?: string } }).data;
+      const parent = session?.parentID;
+      return typeof parent === 'string' && parent !== '' ? parent : null;
+    } catch (err) {
+      void this.log('debug', 'resolveHostParent: session.get failed', {
+        sessionID,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return null;
+    }
   }
 
   /**
@@ -156,7 +193,9 @@ class StateMachineRuntime {
     this.log = createLogFn(context.client);
     const storeDir = sessionsDir(context.directory);
     this.store = new WorkflowStore(storeDir, this.log);
-    this.queue = new SessionQueue(this.store, this.log);
+    this.queue = new SessionQueue(this.store, this.log, (sessionID) =>
+      this.resolveHostParent(sessionID)
+    );
 
     this.profilesDir = getProfilesDir(context.directory);
     this.projectDir = context.directory;
@@ -220,7 +259,7 @@ class StateMachineRuntime {
     ctx: { sessionID: string; agent?: string }
   ): Promise<ToolResult | null> {
     // No workflow session means the plugin does not apply at all.
-    const session = await this.store.load(ctx.sessionID);
+    const session = await this.loadGoverning(ctx.sessionID);
     if (!session) return null;
 
     const engine = await this.mutationOrchestrator.resolveEngine(session.profileId, session.schemaId);
@@ -537,7 +576,7 @@ class StateMachineRuntime {
     },
     ctx: { sessionID: string }
   ): Promise<ToolResult> {
-    const session = await this.store.load(ctx.sessionID);
+    const session = await this.loadGoverning(ctx.sessionID);
     if (!session) {
       return { output: 'No workflow session found. Call workflow.create first.' };
     }
@@ -635,7 +674,7 @@ class StateMachineRuntime {
     output?: { parts?: Array<Record<string, unknown>>; message?: { id?: string } }
   ): Promise<void> {
     const sessionID = input?.sessionID;
-    const session = sessionID ? await this.store.load(sessionID) : null;
+    const session = sessionID ? await this.loadGoverning(sessionID) : null;
     if (!session) {
       void this.log('debug', 'chat.message: no session found', { sessionID });
       return;
@@ -1099,7 +1138,7 @@ class StateMachineRuntime {
     callID: string,
     output: { args: unknown }
   ): Promise<void> {
-    const session = await this.store.load(sessionID);
+    const session = await this.loadGoverning(sessionID);
     // No workflow session means the plugin does not apply — skip silently
     // rather than blocking a call it does not govern.
     if (!session) return;
@@ -1186,7 +1225,7 @@ class StateMachineRuntime {
     callID: string,
     output: { output: string }
   ): Promise<void> {
-    const session = await this.store.load(sessionID);
+    const session = await this.loadGoverning(sessionID);
     if (!session) return;
     if (!session.deliveryPermit) return;
     if (session.deliveryPermit.callID !== callID) return;
@@ -1265,7 +1304,7 @@ class StateMachineRuntime {
   ): Promise<void> {
     if (!input.sessionID) return;
 
-    const session = await this.store.load(input.sessionID);
+    const session = await this.loadGoverning(input.sessionID);
     if (!session) return;
 
     const lines = [...output.system];
@@ -1466,7 +1505,7 @@ class StateMachineRuntime {
     if (tool !== 'task') return;
     if (!this.projectDir) return;
 
-    const session = await this.store.load(sessionID);
+    const session = await this.loadGoverning(sessionID);
     if (!session) return;
     const operation = session.activeOperations[callID];
     if (!operation || operation.status !== 'running') return;
@@ -2056,7 +2095,7 @@ class StateMachineRuntime {
 
     // Загружаем профиль сессии и запускаем инварианты
     try {
-      const session = await this.store.load(input.sessionID);
+      const session = await this.loadGoverning(input.sessionID);
       if (!session) return;
 
       const profilesDir = getProfilesDir(this.context.directory);
@@ -2236,7 +2275,7 @@ class StateMachineRuntime {
     const isRead = this.readTools.has(tool);
     if (!isWrite && !isRead) return;
 
-    const session = await this.store.load(sessionID);
+    const session = await this.loadGoverning(sessionID);
     if (!session) return;
 
     // Check against the UNION of every running task's scope, not a single
@@ -2315,7 +2354,7 @@ class StateMachineRuntime {
    * После каждого инструмента пытаемся применить переходы.
    */
   private async transitionAfter(sessionID: string): Promise<void> {
-    const session = await this.store.load(sessionID);
+    const session = await this.loadGoverning(sessionID);
     if (!session) return;
     try {
       await this.mutationOrchestrator.applyTransitions(session);

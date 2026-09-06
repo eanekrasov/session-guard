@@ -332,7 +332,10 @@ export class MutationOrchestrator {
   ): Promise<void> {
     let engine: StateMachineEngine;
     try {
-      const preCheck = await this.store.load(input.sessionID);
+      // The hook's id may be a dispatched subagent's; the workflow session is
+      // the root's. Loading by the raw id found nothing and the mutation went
+      // ungoverned.
+      const preCheck = await this.store.load(await this.queue.rootOf(input.sessionID));
       if (!preCheck) return;
       engine = await this.resolveEngine(preCheck.profileId, preCheck.schemaId);
     } catch (err) {
