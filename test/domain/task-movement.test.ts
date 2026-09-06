@@ -158,3 +158,65 @@ describe('a loop that is not there', () => {
     expect(nextTaskStage(null, runAt('code'), true, evaluate)).toMatchObject({ kind: 'stay' });
   });
 });
+
+describe('what holds a task inside a stage', () => {
+  const withConsent: StageDef = {
+    loop: 'implementation',
+    stages: { code: {}, verify: {} },
+    transitions: [{ from: 'code', to: 'done', consent: 'release' }],
+  };
+
+  it('will not end a task on a transition whose consent has not been given', () => {
+    const movement = nextTaskStage(withConsent, runAt('code'), true, evaluate, () => false);
+    expect(movement.kind, 'a task finished without the consent its transition asked for').toBe(
+      'stay'
+    );
+    expect(movement.kind === 'stay' && movement.reason).toContain('awaiting consent: release');
+  });
+
+  it('ends it once the operator has consented', () => {
+    expect(nextTaskStage(withConsent, runAt('code'), true, evaluate, () => true)).toEqual({
+      kind: 'complete',
+    });
+  });
+
+  it('honours the consent declared as an object', () => {
+    const objectForm: StageDef = {
+      loop: 'implementation',
+      stages: { code: {} },
+      transitions: [{ from: 'code', to: 'done', consent: { type: 'release' } }],
+    };
+    expect(nextTaskStage(objectForm, runAt('code'), true, evaluate, () => false).kind).toBe('stay');
+  });
+
+  it('keeps a stage shut while its own exit guard does not hold', () => {
+    const guarded: StageDef = {
+      loop: 'implementation',
+      stages: { code: { exitGuards: ["task.gates.review == 'passed'"] }, verify: {} },
+      transitions: [{ from: 'code', to: 'verify' }],
+    };
+    const movement = nextTaskStage(guarded, runAt('code'), true, evaluate);
+    expect(movement.kind, 'the stage let the task out with its exit guard unmet').toBe('stay');
+    expect(movement.kind === 'stay' && movement.reason).toContain('exit guard');
+  });
+
+  it('lets it out once the exit guard holds', () => {
+    const guarded: StageDef = {
+      loop: 'implementation',
+      stages: { code: { exitGuards: ["task.gates.review == 'passed'"] }, verify: {} },
+      transitions: [{ from: 'code', to: 'verify' }],
+    };
+    const run = runAt('code', { review: 'passed' });
+    expect(nextTaskStage(guarded, run, true, evaluate)).toMatchObject({ kind: 'move', to: 'verify' });
+  });
+
+  it('applies the exit guard to completion too, not only to a move', () => {
+    // Declaration order: `verify` is the last stage, so passing it would end
+    // the task. Its exit guard must still be asked.
+    const guarded: StageDef = {
+      loop: 'implementation',
+      stages: { code: {}, verify: { exitGuards: ["task.gates.qa == 'passed'"] } },
+    };
+    expect(nextTaskStage(guarded, runAt('verify'), true, evaluate).kind).toBe('stay');
+  });
+});

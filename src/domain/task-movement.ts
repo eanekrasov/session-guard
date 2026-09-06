@@ -12,7 +12,7 @@ import type { GateStatus, LoopRun } from '../session/session-schema.ts';
  */
 export type TaskMovement =
   | { kind: 'move'; to: string; effects: TransitionDef['effects'] }
-  | { kind: 'complete' }
+  | { kind: 'complete'; effects: TransitionDef['effects'] }
   /** Nothing applies: the task waits where it is, and `reason` says why. */
   | { kind: 'stay'; reason: string };
 
@@ -49,12 +49,23 @@ export function nextTaskStage(
   loopStage: StageDef | null,
   run: LoopRun,
   passed: boolean,
-  evaluateGuard: (_expression: string, _task: TaskFacts) => boolean
+  evaluateGuard: (_expression: string, _task: TaskFacts) => boolean,
+  hasConsent: (_type: string) => boolean = () => true
 ): TaskMovement {
   if (!loopStage) return { kind: 'stay', reason: 'no loop stage resolved' };
 
   const transitions = loopStage.transitions ?? [];
   const nested = nestedStages(loopStage);
+  const facts = taskFactsOf(run);
+
+  // A stage's own exit guards hold it shut. They are checked before any
+  // departure — including the one that ends the task — because a stage that
+  // says it is not finished is not finished, whatever a transition allows.
+  const current = nested.find((entry) => entry.id === run.stage);
+  const closed = (current?.exitGuards ?? []).find((guard) => !evaluateGuard(guard, facts));
+  if (closed !== undefined) {
+    return { kind: 'stay', reason: `exit guard of ${run.stage} does not hold: ${closed}` };
+  }
 
   if (transitions.length === 0) {
     // Declaration order: pass moves to the next stage, the last one completes
@@ -65,10 +76,11 @@ export function nextTaskStage(
       return { kind: 'stay', reason: `stage ${run.stage} is not one of this loop's stages` };
     }
     const next = nested[current + 1];
-    return next ? { kind: 'move', to: next.id, effects: undefined } : { kind: 'complete' };
+    return next
+      ? { kind: 'move', to: next.id, effects: undefined }
+      : { kind: 'complete', effects: undefined };
   }
 
-  const facts = taskFactsOf(run);
   const outgoing = transitions.filter((transition) => transition.from === run.stage);
 
   const blocked: string[] = [];
@@ -77,7 +89,18 @@ export function nextTaskStage(
       blocked.push(`${transition.from} → ${transition.to} (${transition.guard})`);
       continue;
     }
-    if (transition.to === TASK_DONE) return { kind: 'complete' };
+    // Consent is a decision by the operator, and it is required at either
+    // level. A transition inside a loop that asks for one and does not have it
+    // is as blocked as the guard version — including a transition that ends the
+    // task, which is exactly where a release would be asked for.
+    const consent = consentTypeOf(transition.consent);
+    if (consent && !hasConsent(consent)) {
+      blocked.push(`${transition.from} → ${transition.to} (awaiting consent: ${consent})`);
+      continue;
+    }
+    // The edge that ends a task carries its effects like any other: an
+    // approval granted on the way out is granted.
+    if (transition.to === TASK_DONE) return { kind: 'complete', effects: transition.effects };
     return { kind: 'move', to: transition.to, effects: transition.effects };
   }
 
@@ -87,7 +110,7 @@ export function nextTaskStage(
   // named. A loop declares its ending with `to: done`.
   if (outgoing.length === 0) {
     return passed
-      ? { kind: 'complete' }
+      ? { kind: 'complete', effects: undefined }
       : { kind: 'stay', reason: `stage ${run.stage} did not pass and leads nowhere` };
   }
   return {
@@ -96,6 +119,12 @@ export function nextTaskStage(
       ? `no transition out of ${run.stage} applies: ${blocked.join('; ')}`
       : `no transition out of ${run.stage} applies`,
   };
+}
+
+/** The approval a transition asks for, in either declared shape. */
+function consentTypeOf(consent: TransitionDef['consent']): string {
+  if (!consent) return '';
+  return typeof consent === 'string' ? consent : (consent.type ?? '');
 }
 
 /** The stage a task enters the loop at. */

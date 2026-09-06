@@ -206,6 +206,27 @@ smoke profile does exactly that, and says why in a comment.
 
 This is item 7 of `docs/handoff-2026-09-06.md`, reproduced end to end.
 
+## Defects fixed in the loop, after the model landed
+
+Nine, found by review and by the live run. Every one was a silence — the
+workflow kept going and told nobody.
+
+| # | Defect | Now |
+|---|---|---|
+| 1 | a task completed when every way out was **blocked**, skipping verify | a passed stage that no transition takes is only an ending when it has no transitions at all; a loop declares its ending with `to: done` |
+| 2 | any tool's output could close a gate — reading a file that quotes the marker counted as a verdict | a verdict counts only from a `task` call, by an agent the stage's roster allows |
+| 3 | `edit` and `apply_patch` bypassed the mutation lifecycle: no plan approval, no invariants | every tool that changes the repository runs under it |
+| 4 | two verifiers could not work one stage: the second call was refused | a stage with gates admits one call per gate; the same agent is still refused twice |
+| 5 | an errored tool left its operation running for ever — the event part was read from the wrong place | the part is read where the host puts it (`properties.part`), with the flat shape as fallback |
+| 6 | a retry edge without `bumpRetry` looped for ever | a failing move always spends an attempt; the effect documents it and may set a different maximum |
+| 7 | the budget path did not clear the task's gates, so a task was judged on work it had not redone | both failure paths clear them |
+| 8 | guards inside a loop got the raw session, where `gates` is an array — `session.gates.invariants` read `undefined` for ever | one normalisation for every guard, at either level |
+| 9 | a late verdict from a finished round spent the retry budget a second time | a run carries a round; a result stamped with an older one is refused and says so |
+| 10 | a nested transition ignored `consent` | consent is required at either level, including the transition that ends a task |
+| 11 | a nested stage's `exitGuards` were never evaluated | they are checked before any departure, including completion |
+
+Each is covered by a test that fails without its fix.
+
 ## Acceptance
 
 The model is done when:
@@ -218,3 +239,5 @@ The model is done when:
   to a stage that does not exist are all **load or runtime refusals with a
   reason**, never silence;
 - `bun test` green and `bun run smoke` green.
+| 12 | the round check ran *after* the gate was written, so a refused verdict still closed a gate of the round that replaced it | the check is the first thing that happens: a stale result writes no gate and files no verification |
+| 13 | a nested transition's `approve` effect was never applied — the effect handler only ran for a failure or a `bumpRetry`, and only knew about retries | every taken edge applies what it declares; the budget stays the one effect with its own conditions, and `to: done` carries its effects like any other departure |

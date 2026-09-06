@@ -134,6 +134,14 @@ export function deriveStageFn(
 
 // ─── Inlined checkTransition (from validate-transition.ts) ───────────────────
 
+/**
+ * Look up the edge between two stages and say whether it may be taken.
+ *
+ * A schema may declare several edges between the same pair, distinguished by
+ * their guards. This lookup returns the first of them, so callers that hold a
+ * specific candidate must use `evaluateTransition` instead — checking one
+ * candidate by its endpoints would silently judge a different edge.
+ */
 export function checkTransition(
   from: string,
   to: string,
@@ -147,6 +155,17 @@ export function checkTransition(
     return { allowed: false, reason: `Illegal stage transition: ${from} → ${to}` };
   }
 
+  return evaluateTransition(transition, session, evaluateGuard);
+}
+
+/** Whether this exact edge may be taken. */
+export function evaluateTransition(
+  transition: TransitionDef,
+  session?: SessionFacts & { requiredGates?: string[] },
+  evaluateGuard?: (expr: string) => boolean
+): TransitionCheck {
+  const from = transition.from;
+  const to = transition.to;
   const guard = transition.guard;
   if (guard && guard.trim() !== '' && session) {
     const passed = evaluateGuard
@@ -387,12 +406,12 @@ export class StateMachineEngine {
     const factsWithGates = { ...facts, requiredGates: gates };
 
     for (const transition of outgoing) {
-      const result = checkTransition(
-        currentStage,
-        transition.to,
-        this.config.transitions,
-        factsWithGates,
-        (expr) => this.evaluateGuard(expr, factsWithGates, evaluationContext)
+      // The candidate in hand, not one looked up again by its endpoints: a
+      // schema may declare several edges between the same two stages, and
+      // re-finding by `from`/`to` judges the first of them every time — so an
+      // alternative edge whose guard does hold is never reached.
+      const result = evaluateTransition(transition, factsWithGates, (expr) =>
+        this.evaluateGuard(expr, factsWithGates, evaluationContext)
       );
 
       if (result.allowed) {

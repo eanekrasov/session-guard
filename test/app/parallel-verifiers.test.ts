@@ -38,7 +38,13 @@ function pluginInput(): PluginInput {
   };
 }
 
-async function writeProfile(transitions = false, guardInvariants = false): Promise<void> {
+async function writeProfile(
+  transitions = false,
+  guardInvariants = false,
+  consentToFinish = false,
+  selfLoop = false,
+  approveOnMove = false
+): Promise<void> {
   const profileDirectory = join(profilesDirectory, 'verify');
   await mkdir(profileDirectory, { recursive: true });
   await writeFile(
@@ -62,6 +68,41 @@ async function writeProfile(transitions = false, guardInvariants = false): Promi
       '      verify:',
       "        allowedAgents: ['review', 'qa']",
       '        gates: [review, qa]',
+      ...(consentToFinish
+        ? [
+            '    transitions:',
+            '      - from: code',
+            '        to: done',
+            '        consent: release',
+          ]
+        : []),
+      ...(approveOnMove
+        ? [
+            '    transitions:',
+            '      - from: code',
+            '        to: verify',
+            '        effects:',
+            '          - approve: release',
+            '      - from: verify',
+            '        to: done',
+            '        consent: release',
+          ]
+        : []),
+      ...(selfLoop
+        ? [
+            '    transitions:',
+            '      - from: code',
+            '        to: verify',
+            '      - from: verify',
+            '        to: verify',
+            '        guard: "task.gates.review == \'failed\' || task.gates.qa == \'failed\'"',
+            '        effects:',
+            '          - bumpRetry: task.id',
+            '      - from: verify',
+            '        to: done',
+            '        guard: "task.gates.review == \'passed\' && task.gates.qa == \'passed\'"',
+          ]
+        : []),
       ...(guardInvariants
         ? [
             '    transitions:',
@@ -504,5 +545,181 @@ describe('a verdict from a round that is over', () => {
     await report(hooks, 'call-review', 'review', 'pass');
 
     expect(run(await load(store)).gates).toEqual({ review: 'passed' });
+  });
+
+  it('leaves no gate behind for the round that replaced it', async () => {
+    // Saying `[workflow-result-stale]` and writing the gate anyway is worse
+    // than not checking at all: the straggler's `qa: passed` survives into
+    // the fresh round, and the next review closes the stage on its own.
+    await writeProfile(false, false, false, true);
+    const store = await seed();
+    const hooks = createRuntime(pluginInput());
+
+    await dispatch(hooks, 'call-code', 'code');
+    await report(hooks, 'call-code', 'code', 'pass');
+    await dispatch(hooks, 'call-review', 'review');
+    await dispatch(hooks, 'call-qa', 'qa');
+
+    await report(hooks, 'call-review', 'review', 'fail');
+    const told = await report(hooks, 'call-qa', 'qa', 'pass');
+
+    const session = await load(store);
+    expect(told).toContain('[workflow-result-stale]');
+    expect(
+      run(session).gates,
+      'a verdict from a finished round was recorded against the new one'
+    ).toEqual({});
+  });
+
+  it('records no verification for a round that is over', async () => {
+    await writeProfile(false, false, false, true);
+    const store = await seed();
+    const hooks = createRuntime(pluginInput());
+
+    await dispatch(hooks, 'call-code', 'code');
+    await report(hooks, 'call-code', 'code', 'pass');
+    await dispatch(hooks, 'call-review', 'review');
+    await dispatch(hooks, 'call-qa', 'qa');
+
+    await report(hooks, 'call-review', 'review', 'fail');
+    await report(hooks, 'call-qa', 'qa', 'pass');
+
+    const session = await load(store);
+    expect(
+      session.verifications.filter((entry) => entry.stage === 'qa'),
+      'the stale verdict was still filed as evidence'
+    ).toEqual([]);
+  });
+
+  it('does not let the next round close on one verifier', async () => {
+    // The whole point: after the straggler is ignored, the fresh round still
+    // needs both gates. Review alone must not finish the stage.
+    await writeProfile(false, false, false, true);
+    const store = await seed();
+    const hooks = createRuntime(pluginInput());
+
+    await dispatch(hooks, 'call-code', 'code');
+    await report(hooks, 'call-code', 'code', 'pass');
+    await dispatch(hooks, 'call-review', 'review');
+    await dispatch(hooks, 'call-qa', 'qa');
+    await report(hooks, 'call-review', 'review', 'fail');
+    await report(hooks, 'call-qa', 'qa', 'pass');
+
+    // Round two: the stage runs again, and review passes it.
+    await dispatch(hooks, 'call-review-2', 'review');
+    await report(hooks, 'call-review-2', 'review', 'pass');
+
+    const session = await load(store);
+    expect(run(session).gates).toEqual({ review: 'passed' });
+    expect(run(session).stage, 'the stage closed without qa of the current round').toBe('verify');
+    expect(run(session).status).not.toBe('completed');
+  });
+});
+
+describe('a loop transition that asks for consent', () => {
+  it('does not finish the task until the operator has given it', async () => {
+    await writeProfile(false, false, true);
+    const store = await seed();
+    const hooks = createRuntime(pluginInput());
+
+    await dispatch(hooks, 'call-code', 'code');
+    await report(hooks, 'call-code', 'code', 'pass');
+
+    const session = await load(store);
+    expect(
+      session.tasks.implementation[0]!.status,
+      'the task finished without the consent its transition asked for'
+    ).not.toBe('completed');
+
+    // The operator consents, and the next result takes the same transition.
+    session.approvals.push({ type: 'release', callId: 'consent-1', status: 'granted' });
+    await store.save(session);
+
+    await dispatch(hooks, 'call-code-2', 'code');
+    await report(hooks, 'call-code-2', 'code', 'pass');
+
+    expect((await load(store)).tasks.implementation[0]!.status).toBe('completed');
+  });
+});
+
+describe('an effect on a transition inside a loop', () => {
+  it('grants the approval the edge declares', async () => {
+    // `effects: [{ approve: release }]` on `code → verify`. Outer transitions
+    // have always honoured it; nested ones ran only the retry branch, so a
+    // schema the loader accepted quietly did nothing.
+    await writeProfile(false, false, false, false, true);
+    const store = await seed();
+    const hooks = createRuntime(pluginInput());
+
+    await dispatch(hooks, 'call-code', 'code');
+    await report(hooks, 'call-code', 'code', 'pass');
+
+    const session = await load(store);
+    expect(run(session).stage).toBe('verify');
+    expect(
+      session.approvals.map((approval) => [approval.type, approval.status]),
+      'the edge declared an approval and granted none'
+    ).toEqual([['release', 'granted']]);
+  });
+
+  it('unblocks the consent a later edge asks for', async () => {
+    // The point of granting it: `verify → done` waits on `release`, which the
+    // earlier edge is supposed to have given.
+    await writeProfile(false, false, false, false, true);
+    const store = await seed();
+    const hooks = createRuntime(pluginInput());
+
+    await dispatch(hooks, 'call-code', 'code');
+    await report(hooks, 'call-code', 'code', 'pass');
+    await dispatch(hooks, 'call-review', 'review');
+    await dispatch(hooks, 'call-qa', 'qa');
+    await report(hooks, 'call-review', 'review', 'pass');
+    await report(hooks, 'call-qa', 'qa', 'pass');
+
+    const session = await load(store);
+    expect(
+      session.tasks.implementation[0]!.status,
+      'the task was held by a consent an earlier effect should have granted'
+    ).toBe('completed');
+  });
+
+  it('grants an approval declared on the edge that ends the task', async () => {
+    // `to: done` is a departure like any other, so it carries its effects too.
+    await writeProfile();
+    const profileDirectory = join(profilesDirectory, 'verify');
+    await writeFile(
+      join(profileDirectory, 'cycle.yaml'),
+      [
+        'stages:',
+        '  EXECUTION:',
+        '    loop: implementation',
+        '    stages:',
+        '      code:',
+        "        allowedAgents: ['code']",
+        '    transitions:',
+        '      - from: code',
+        '        to: done',
+        '        effects:',
+        '          - approve: release',
+        'stageAssignments:',
+        '  - id: execution',
+        '    priority: 1',
+        "    condition: 'true'",
+        '    result: EXECUTION',
+      ].join('\n'),
+      'utf-8'
+    );
+    const store = await seed();
+    const hooks = createRuntime(pluginInput());
+
+    await dispatch(hooks, 'call-code', 'code');
+    await report(hooks, 'call-code', 'code', 'pass');
+
+    const session = await load(store);
+    expect(session.tasks.implementation[0]!.status).toBe('completed');
+    expect(
+      session.approvals.map((approval) => approval.type),
+      'the finishing edge dropped its effects'
+    ).toEqual(['release']);
   });
 });

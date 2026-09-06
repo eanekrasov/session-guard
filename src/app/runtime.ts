@@ -17,7 +17,8 @@ import {
   type StageDef,
   type TransitionDef,
 } from '../schema/types.ts';
-import { nextTaskStage } from '../domain/task-movement.ts';
+import { nextTaskStage, TASK_DONE } from '../domain/task-movement.ts';
+import { approve } from '../domain/approvals.ts';
 import { toGuardContext } from '../domain/engine.ts';
 import { SessionQueue } from './session-queue.ts';
 import { sanitizeToolOutput, validateUserInput } from './guardrails.ts';
@@ -1361,6 +1362,38 @@ class StateMachineRuntime {
     await this.queue.enqueue(sessionID, async (session) => {
       if (!session) return;
 
+      const operation = session.activeOperations[callID];
+      const run = operation ? session.loopRuns[operation.runId] : undefined;
+      const task = operation ? findTask(session, operation.taskId) : undefined;
+
+      if (
+        operation &&
+        run &&
+        task &&
+        operation.status === 'running' &&
+        operation.round !== run.round
+      ) {
+        // The task has entered the stage again — or a different one — since
+        // this verifier was dispatched. Its verdict is about work that has
+        // already been judged, so NOTHING it says is recorded: not the gate,
+        // not the verification. This check has to come before every write,
+        // because a stale gate left behind lets a finished round vouch for
+        // the round that replaced it, and the stage closes with one verifier
+        // of the current round never heard from.
+        output.output +=
+          `\n\n[workflow-result-stale]\n` +
+          `This result was produced for an earlier round of ${task.id}, ` +
+          `which has since moved to ${run.stage}. Nothing was recorded.`;
+        void this.log('warn', 'Workflow result from a finished round', {
+          sessionID,
+          taskId: task.id,
+          resultRound: operation.round,
+          currentRound: run.round,
+        });
+        delete session.activeOperations[callID];
+        return;
+      }
+
       if (parsed) {
         session.verifications.push({
           stage: parsed.stage,
@@ -1369,10 +1402,7 @@ class StateMachineRuntime {
         });
       }
 
-      const operation = tool === 'task' ? session.activeOperations[callID] : undefined;
       if (operation) {
-        const run = session.loopRuns[operation.runId];
-        const task = findTask(session, operation.taskId);
         if (run && task) {
           if (operation.status !== 'running') {
             return;
@@ -1429,25 +1459,6 @@ class StateMachineRuntime {
           const failed = declaredGates.length > 0 ? stageFailed : parsed?.status === 'fail';
           const passed = declaredGates.length > 0 ? stagePassed : parsed?.status === 'pass';
 
-          if (operation.round !== run.round) {
-            // The task has entered the stage again — or a different one —
-            // since this verifier was dispatched. Its verdict is about work
-            // that has already been judged, and counting it would spend the
-            // task's retry budget a second time for one round of review.
-            output.output +=
-              `\n\n[workflow-result-stale]\n` +
-              `This result was produced for an earlier round of ${task.id}, ` +
-              `which has since moved to ${run.stage}. Nothing was recorded.`;
-            void this.log('warn', 'Workflow result from a finished round', {
-              sessionID,
-              taskId: task.id,
-              resultRound: operation.round,
-              currentRound: run.round,
-            });
-            delete session.activeOperations[callID];
-            return;
-          }
-
           if (!parsed) {
             // A workflow task that reports nothing is not a task that passed.
             // Saying so is the difference between a stalled loop and a stalled
@@ -1466,11 +1477,32 @@ class StateMachineRuntime {
 
           if (failed || passed) {
             const engine = await this.mutationOrchestrator.resolveEngine(session.profileId);
-            const movement = nextTaskStage(loopStage, run, passed, (expression, facts) =>
-              engine.evaluateGuard(expression, toGuardContext(session, { ...facts }), {
-                currentLoopListKey: run.listKey,
-              })
+            const movement = nextTaskStage(
+              loopStage,
+              run,
+              passed,
+              (expression, facts) =>
+                engine.evaluateGuard(expression, toGuardContext(session, { ...facts }), {
+                  currentLoopListKey: run.listKey,
+                }),
+              (type) =>
+                session.approvals.some(
+                  (approval) => approval.type === type && approval.status === 'granted'
+                )
             );
+
+            // An edge that is taken applies what it declares, at either level
+            // and whichever way it ends. The retry budget below is the one
+            // effect with its own conditions; everything else follows the
+            // edge, because a schema that is accepted has to be obeyed.
+            if (movement.kind === 'complete' || movement.kind === 'move') {
+              this.applyApprovalEffects(
+                session,
+                run,
+                movement.kind === 'move' ? movement.to : TASK_DONE,
+                movement.effects
+              );
+            }
 
             if (movement.kind === 'complete') {
               run.status = 'completed';
@@ -1620,6 +1652,33 @@ class StateMachineRuntime {
    * written as `task.id`: a budget key naming something else would silently
    * spend a counter nobody is watching.
    */
+  /**
+   * Apply the effects of a taken edge that are not the retry budget.
+   *
+   * The budget has its own conditions — a failure spends it whether the edge
+   * says so or not — but everything else on the edge is unconditional: the
+   * schema declared it, the edge was taken, so it happens. An approval granted
+   * here is what a later `consent:` on the same loop is waiting for.
+   */
+  private applyApprovalEffects(
+    session: WorkflowSession,
+    run: LoopRun,
+    to: string,
+    effects: TransitionDef['effects']
+  ): void {
+    for (const effect of effects ?? []) {
+      if (!effect.approve) continue;
+      approve(session, effect.approve, '', `transition:${run.stage}->${to}`);
+      void this.log('info', 'Task transition granted an approval', {
+        sessionID: session.sessionId,
+        taskId: run.taskId,
+        approval: effect.approve,
+        from: run.stage,
+        to,
+      });
+    }
+  }
+
   private applyTaskEffects(
     session: WorkflowSession,
     run: LoopRun,
