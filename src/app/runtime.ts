@@ -66,7 +66,7 @@ import { parseConsentRequest, evidenceOf, type ConsentManifest } from './consent
 import { canonicalizePlan, computeSha256 } from './sdd-artifacts.ts';
 import { TaskApi, type SetTasksInput } from './task-api.ts';
 import { resolveConfig } from '../public-api.ts';
-import { sessionsDir, profilesDir as getProfilesDir } from './paths.ts';
+import { sessionsDir, profilesDir as getProfilesDir, opencodeStateDir } from './paths.ts';
 import { OpenCodeRulesRuntime } from '../rules/runtime.ts';
 import { MatchedRulesStateStore } from '../rules/matched-rules-state.ts';
 import { syncProfileAgents } from './profile-agent-sync.ts';
@@ -188,16 +188,20 @@ class StateMachineRuntime {
     return tool.toLowerCase();
   }
 
-  constructor(context: PluginInput) {
+  constructor(context: PluginInput, paths?: RuntimePaths) {
     this.context = context;
     this.log = createLogFn(context.client);
-    const storeDir = sessionsDir(context.directory);
+    // The store lives outside the project, under OpenCode's own state
+    // directory. It used to be told so through process.env, which the plugin
+    // set from the first project it happened to initialise for — so a second
+    // project in the same process read the first's value.
+    const storeDir = paths?.storeDir ?? sessionsDir(opencodeStateDir());
     this.store = new WorkflowStore(storeDir, this.log);
     this.queue = new SessionQueue(this.store, this.log, (sessionID) =>
       this.resolveHostParent(sessionID)
     );
 
-    this.profilesDir = getProfilesDir(context.directory);
+    this.profilesDir = paths?.profilesDir ?? getProfilesDir(context.directory);
     this.projectDir = context.directory;
 
     this.mutationOrchestrator = new MutationOrchestrator(
@@ -2645,7 +2649,20 @@ class StateMachineRuntime {
 /**
  * Create a new StateMachineRuntime and return its Hooks.
  */
-export function createRuntime(context: PluginInput): Hooks {
-  const runtime = new StateMachineRuntime(context);
+/**
+ * Directories this instance works in, passed rather than exported.
+ *
+ * `STATE_MACHINE_PROFILES_DIR` / `STATE_MACHINE_STORE_DIR` remain the
+ * operator's override, read by `paths.ts`; what must not happen is a plugin
+ * instance *writing* them, which turns one project's local default into every
+ * later instance's global override.
+ */
+export interface RuntimePaths {
+  storeDir?: string;
+  profilesDir?: string;
+}
+
+export function createRuntime(context: PluginInput, paths?: RuntimePaths): Hooks {
+  const runtime = new StateMachineRuntime(context, paths);
   return runtime.hooks;
 }

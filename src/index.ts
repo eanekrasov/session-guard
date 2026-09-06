@@ -23,16 +23,13 @@ export const StateMachinePlugin: Plugin = async (ctx: PluginInput) => {
     /* не критично */
   }
 
-  if (!process.env.STATE_MACHINE_STORE_DIR) {
-    process.env.STATE_MACHINE_STORE_DIR = runtime;
-  }
-  if (!process.env.STATE_MACHINE_PROFILES_DIR) {
-    process.env.STATE_MACHINE_PROFILES_DIR = profiles;
-  }
-
+  // The computed defaults are handed to this instance, never written into
+  // process.env. Writing them turned the first project's local default into a
+  // global override, and a second plugin instance for another project was
+  // served the first project's profiles and sessions.
   try {
     const { createRuntime } = await import('./app/runtime.ts');
-    return createRuntime(ctx);
+    return createRuntime(ctx, { storeDir: runtime, profilesDir: profiles });
   } catch (e) {
     console.error('[state-machine] init error:', process.env.OPENCODE_HARNESS_DIR);
     writeFileSync(
