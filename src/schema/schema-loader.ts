@@ -63,7 +63,15 @@ function mergeStage(base: StageDef, extension: StageDef): StageDef {
 
 /**
  * Merge transition lists by their endpoints: a child redeclaring `a → b`
- * replaces that edge and leaves every other edge of the parent alone.
+ * replaces the parent's edges for that pair and leaves every other pair alone.
+ *
+ * A pair may carry several edges, told apart by their guards — one for the
+ * gates that passed and one for the gates that failed. Keying a single edge per
+ * pair collapsed them: two `a → b` edges became the last one declared, and the
+ * alternative was gone before the engine ever saw it, so a session sat in `a`
+ * with an edge that could never fire. A child's redeclaration replaces the
+ * parent's group as a whole — replacing one edge of a pair and keeping the
+ * others would leave a parent's guard behind a child that meant to supersede it.
  */
 export function mergeTransitions(
   base: TransitionDef[] | undefined,
@@ -71,11 +79,32 @@ export function mergeTransitions(
 ): TransitionDef[] | undefined {
   if (!base) return extension;
   if (!extension) return base;
-  const byEdge = new Map<string, (typeof base)[number]>();
-  for (const transition of [...base, ...extension]) {
-    byEdge.set(`${transition.from}→${transition.to}`, transition);
+
+  const edge = (transition: TransitionDef): string => `${transition.from}→${transition.to}`;
+  const order: string[] = [];
+  const groups = new Map<string, TransitionDef[]>();
+
+  for (const transition of base) {
+    const key = edge(transition);
+    if (!groups.has(key)) {
+      groups.set(key, []);
+      order.push(key);
+    }
+    groups.get(key)!.push(transition);
   }
-  return [...byEdge.values()];
+
+  const replacements = new Map<string, TransitionDef[]>();
+  for (const transition of extension) {
+    const key = edge(transition);
+    if (!replacements.has(key)) {
+      replacements.set(key, []);
+      if (!groups.has(key)) order.push(key);
+    }
+    replacements.get(key)!.push(transition);
+  }
+  for (const [key, list] of replacements) groups.set(key, list);
+
+  return order.flatMap((key) => groups.get(key) ?? []);
 }
 
 export class SchemaLoader {
