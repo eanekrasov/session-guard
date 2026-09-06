@@ -1,18 +1,42 @@
 # Delta over base/base.yaml for the host smoke run.
 #
-# The state machine itself is inherited unchanged — that is the point of the
-# run. Only the agent roster is pinned to what the host really dispatches, so
-# the scenarios exercise the shipped transitions rather than a toy machine.
+# The state machine is inherited unchanged — that is the point of the run. Only
+# the agent roster is pinned to what the host actually dispatches, so the
+# scenarios exercise the shipped stages rather than a toy machine.
+#
+# `base` declares no rosters (see profiles/base/base.yaml), so they are named
+# here. Stages merge entry by entry, so naming `execution` again keeps the loop
+# and transitions it inherits.
 
-# The base machine declares no task loop — profiles do (android's `code` phase
-# owns `implementation`). The smoke profile does the same, so task-list
-# scenarios exercise the shipped code path rather than a phase without a loop.
-phases:
-  code:
+stages:
+  planning:
+    allowedAgents: [orchestrator]
+  tasks_ready:
+    allowedAgents: [orchestrator]
+  execution:
     loop: implementation
+    stages:
+      code:
+        allowedAgents: [coder, orchestrator]
+      verify:
+        allowedAgents: [reviewer, tester]
+        gates: [review, qa]
+    transitions:
+      # Base guards this edge on the invariants gate. A subagent's edits are
+      # made in its own session, and the plugin does not link a child session to
+      # its parent (see docs/stage-model-plan.md), so the parent's invariants
+      # gate never turns green from delegated work. This run is about the
+      # verifier gates, so the edge is refined to move on the coder's own result.
+      - from: code
+        to: verify
+  validation:
+    allowedAgents: [reviewer, tester]
+    gates: [review, qa]
 
 editingAgents:
-  - build
+  - coder
+  - orchestrator
 
 verifiers:
-  - build
+  - reviewer
+  - tester

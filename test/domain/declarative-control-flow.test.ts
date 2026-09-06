@@ -25,7 +25,7 @@ function createSession(overrides: Partial<WorkflowSession> = {}): WorkflowSessio
     verifications: [],
     baselineHashes: [],
     changedFiles: [],
-    currentPhase: 'PLANNING',
+    currentStage: 'PLANNING',
     invariantViolations: [],
     consentedCallIDs: [],
     ...overrides,
@@ -48,7 +48,7 @@ function engineFromCompiled(cw: CompiledWorkflow): StateMachineEngine {
           ...(e.approve ? { approve: e.approve } : {}),
         })),
     })),
-    phases: {},
+    stages: {},
   });
 }
 
@@ -60,33 +60,33 @@ function engineFromSchema(schema: ResolvedSchema): StateMachineEngine {
 
 describe('declarative control flow', () => {
   describe('sequence: A → B → C', () => {
-    it('advances through an ordered sequence of phases with auto transitions', () => {
+    it('advances through an ordered sequence of stages with auto transitions', () => {
       const engine = engineFromSchema({
         source: 'test.yaml',
-        phases: { START: {}, MIDDLE: {}, END: {} },
+        stages: { START: {}, MIDDLE: {}, END: {} },
         transitions: [
           { from: 'START', to: 'MIDDLE', kind: 'auto' },
           { from: 'MIDDLE', to: 'END', kind: 'auto' },
         ],
-        phaseAssignments: [{ id: 'main', priority: 1, condition: 'true', result: 'START' }],
+        stageAssignments: [{ id: 'main', priority: 1, condition: 'true', result: 'START' }],
       });
 
-      const session = createSession({ currentPhase: 'START' });
+      const session = createSession({ currentStage: 'START' });
 
       // START → MIDDLE
       const r1 = engine.tryApplyTransitions(session);
       expect(r1.applied).toBe(true);
-      expect(session.currentPhase).toBe('MIDDLE');
+      expect(session.currentStage).toBe('MIDDLE');
 
       // MIDDLE → END
       const r2 = engine.tryApplyTransitions(session);
       expect(r2.applied).toBe(true);
-      expect(session.currentPhase).toBe('END');
+      expect(session.currentStage).toBe('END');
 
       // END — no outgoing
       const r3 = engine.tryApplyTransitions(session);
       expect(r3.applied).toBe(false);
-      expect(session.currentPhase).toBe('END');
+      expect(session.currentStage).toBe('END');
     });
   });
 
@@ -94,57 +94,57 @@ describe('declarative control flow', () => {
     it('chooses the first matching outgoing transition by guard', () => {
       const engine = engineFromSchema({
         source: 'test.yaml',
-        phases: { CHOOSE: { stages: [{ id: 'step' }] }, PATH_A: {}, PATH_B: {} },
+        stages: { CHOOSE: { stages: { step: {} } }, PATH_A: {}, PATH_B: {} },
         transitions: [
           { from: 'CHOOSE', to: 'PATH_A', guard: "session.gates.review == 'passed'", kind: 'auto' },
           { from: 'CHOOSE', to: 'PATH_B', kind: 'auto' },
         ],
-        phaseAssignments: [{ id: 'main', priority: 1, condition: 'true', result: 'CHOOSE' }],
+        stageAssignments: [{ id: 'main', priority: 1, condition: 'true', result: 'CHOOSE' }],
       });
 
-      const session = createSession({ currentPhase: 'CHOOSE' });
+      const session = createSession({ currentStage: 'CHOOSE' });
 
       // Neither gate passed → PATH_B (no guard, kind=auto)
       const r = engine.tryApplyTransitions(session);
 
       expect(r.applied).toBe(true);
-      expect(session.currentPhase).toBe('PATH_B');
+      expect(session.currentStage).toBe('PATH_B');
     });
 
     it('takes the guarded branch when its condition is met', () => {
       const engine = engineFromSchema({
         source: 'test.yaml',
-        phases: { CHOOSE: { stages: [{ id: 'step' }] }, PATH_A: {}, PATH_B: {} },
+        stages: { CHOOSE: { stages: { step: {} } }, PATH_A: {}, PATH_B: {} },
         transitions: [
           { from: 'CHOOSE', to: 'PATH_A', guard: "session.gates.review == 'passed'", kind: 'auto' },
           { from: 'CHOOSE', to: 'PATH_B', kind: 'auto' },
         ],
-        phaseAssignments: [{ id: 'main', priority: 1, condition: 'true', result: 'CHOOSE' }],
+        stageAssignments: [{ id: 'main', priority: 1, condition: 'true', result: 'CHOOSE' }],
       });
 
-      const session = createSession({ currentPhase: 'CHOOSE' });
+      const session = createSession({ currentStage: 'CHOOSE' });
       session.gates = session.gates.map((g) =>
         g.id === 'review' ? { ...g, status: 'passed' } : g
       );
 
       const r = engine.tryApplyTransitions(session);
       expect(r.applied).toBe(true);
-      expect(session.currentPhase).toBe('PATH_A');
+      expect(session.currentStage).toBe('PATH_A');
     });
   });
 
   describe('terminal outcome', () => {
-    it('stops at an explicitly declared terminal phase', () => {
+    it('stops at an explicitly declared terminal stage', () => {
       const engine = engineFromSchema({
         source: 'test.yaml',
-        phases: { ACTIVE: {}, DONE: {} },
+        stages: { ACTIVE: {}, DONE: {} },
         transitions: [{ from: 'ACTIVE', to: 'DONE', kind: 'auto' }],
-        phaseAssignments: [{ id: 'main', priority: 1, condition: 'true', result: 'ACTIVE' }],
+        stageAssignments: [{ id: 'main', priority: 1, condition: 'true', result: 'ACTIVE' }],
       });
 
-      const session = createSession({ currentPhase: 'ACTIVE' });
+      const session = createSession({ currentStage: 'ACTIVE' });
       engine.tryApplyTransitions(session);
-      expect(session.currentPhase).toBe('DONE');
+      expect(session.currentStage).toBe('DONE');
 
       const r = engine.tryApplyTransitions(session);
       expect(r.applied).toBe(false);
@@ -152,10 +152,10 @@ describe('declarative control flow', () => {
   });
 
   describe('retry with budget', () => {
-    it('resets to the retry target phase when budget is not exhausted', () => {
+    it('resets to the retry target stage when budget is not exhausted', () => {
       const engine = engineFromSchema({
         source: 'test.yaml',
-        phases: { CODE: { stages: [{ id: 'dev' }] }, REVIEW: { stages: [{ id: 'check' }] } },
+        stages: { CODE: { stages: { dev: {} } }, REVIEW: { stages: { check: {} } } },
         transitions: [
           { from: 'CODE', to: 'REVIEW', kind: 'auto' },
           {
@@ -166,53 +166,53 @@ describe('declarative control flow', () => {
             effects: [{ bumpRetry: 'cycles', maxAttempts: 3 }],
           },
         ],
-        phaseAssignments: [{ id: 'main', priority: 1, condition: 'true', result: 'CODE' }],
+        stageAssignments: [{ id: 'main', priority: 1, condition: 'true', result: 'CODE' }],
       });
 
-      const session = createSession({ currentPhase: 'CODE' });
+      const session = createSession({ currentStage: 'CODE' });
 
       // CODE → REVIEW
       engine.tryApplyTransitions(session);
-      expect(session.currentPhase).toBe('REVIEW');
+      expect(session.currentStage).toBe('REVIEW');
 
       // Fail review, budget not exhausted → back to CODE
       session.gates = session.gates.map((g) =>
         g.id === 'review' ? { ...g, status: 'failed' } : g
       );
       engine.tryApplyTransitions(session);
-      expect(session.currentPhase).toBe('CODE');
+      expect(session.currentStage).toBe('CODE');
       expect(session.retryBudgets.cycles).toBeDefined();
       expect(session.retryBudgets.cycles.attempts).toBe(1);
     });
   });
 
   describe('node re-entry creates new occurrence context', () => {
-    it('re-entering a phase after completion keeps previous result intact', () => {
+    it('re-entering a stage after completion keeps previous result intact', () => {
       const engine = engineFromSchema({
         source: 'test.yaml',
-        phases: { START: {}, LOOP: {}, END: {} },
+        stages: { START: {}, LOOP: {}, END: {} },
         transitions: [
           { from: 'START', to: 'LOOP', kind: 'auto' },
           { from: 'LOOP', to: 'END', guard: "session.gates.qa == 'passed'", kind: 'auto' },
           { from: 'LOOP', to: 'START', guard: "session.gates.qa == 'failed'", kind: 'auto' },
         ],
-        phaseAssignments: [{ id: 'main', priority: 1, condition: 'true', result: 'START' }],
+        stageAssignments: [{ id: 'main', priority: 1, condition: 'true', result: 'START' }],
       });
 
-      const session = createSession({ currentPhase: 'START' });
+      const session = createSession({ currentStage: 'START' });
 
       // START → LOOP
       engine.tryApplyTransitions(session);
-      expect(session.currentPhase).toBe('LOOP');
+      expect(session.currentStage).toBe('LOOP');
 
       // LOOP → START (re-entry)
       session.gates = session.gates.map((g) => (g.id === 'qa' ? { ...g, status: 'failed' } : g));
       engine.tryApplyTransitions(session);
-      expect(session.currentPhase).toBe('START');
+      expect(session.currentStage).toBe('START');
 
       // START → LOOP again (second occurrence)
       engine.tryApplyTransitions(session);
-      expect(session.currentPhase).toBe('LOOP');
+      expect(session.currentStage).toBe('LOOP');
     });
   });
 });

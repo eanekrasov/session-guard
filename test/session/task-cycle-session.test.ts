@@ -40,6 +40,8 @@ describe('task-cycle session persistence', () => {
         ancestry: [],
         stage: 'implementation',
         status: 'running',
+        gates: {},
+        round: 0,
       },
       'run-2': {
         id: 'run-2',
@@ -48,6 +50,8 @@ describe('task-cycle session persistence', () => {
         ancestry: [],
         stage: 'implementation',
         status: 'pending',
+        gates: {},
+        round: 0,
       },
     };
     session.activeOperations = {
@@ -58,6 +62,7 @@ describe('task-cycle session persistence', () => {
         agent: 'implementer',
         status: 'running',
         startedAt: '2026-09-01T00:00:00.000Z',
+        round: 0,
       },
       'call-2': {
         callId: 'call-2',
@@ -67,6 +72,7 @@ describe('task-cycle session persistence', () => {
         status: 'interrupted',
         startedAt: '2026-09-01T00:01:00.000Z',
         interruptedAt: '2026-09-01T00:02:00.000Z',
+        round: 0,
       },
     };
     session.retryBudgets = {
@@ -147,6 +153,8 @@ describe('task-cycle session persistence', () => {
             ancestry: [],
             stage: 'implementation',
             status: 'running',
+            gates: {},
+            round: 0,
           },
         },
       })

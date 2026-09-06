@@ -22,7 +22,7 @@ describe('createSession', () => {
     expect(session.testStatus).toEqual({});
     expect(session.deliveryPermit).toBeNull();
     expect(session.verifications).toEqual([]);
-    expect(session.currentPhase).toBe('planning');
+    expect(session.currentStage).toBe('planning');
     expect(session.refs).toEqual({});
     expect(session.tasks).toEqual({});
     expect(session.approvals).toEqual([]);

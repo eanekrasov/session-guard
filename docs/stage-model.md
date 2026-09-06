@@ -67,10 +67,13 @@ dispatched agent and worked. One rule, one implementation, one behaviour.
 Its presence says all of it:
 
 - the stage is a verifier: its agent must finish with a `<workflow-result>` tag;
-- the tag's `stage` must equal the stage id — a mismatch is a recorded refusal,
-  not a silent no-op;
-- `pass` sets the named gates to `passed`, `fail` sets them to `failed`, which
-  is what the retry transitions above read;
+- the tag names one of the stage's gates — several agents may work in one stage
+  (review and qa in parallel), so a tag names what it verifies, never the stage
+  it ran in; a name the stage does not declare is a recorded refusal, not a
+  silent no-op;
+- `pass` sets that gate to `passed`, `fail` sets it to `failed`, which is what
+  the retry transitions above read; the stage is passed when every gate it
+  declares is passed, and failed as soon as one fails;
 - a gate named here that no session carries is a schema **load** error, caught
   by `compileWorkflow`, not silence at runtime.
 

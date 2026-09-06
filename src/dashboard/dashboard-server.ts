@@ -9,7 +9,7 @@
  *
  * API:
  *   GET /api/schema                       — контракт дашборда (dashboard-schema-v1)
- *   GET /api/session/:id                  — одна сессия по ID, с вычисляемым phase
+ *   GET /api/session/:id                  — одна сессия по ID, с вычисляемым stage
  *   GET /api/session/:id/timeline         — TimelineEvent[] с таймстампами
  *   GET /api/session/:id/invariants       — InvariantViolation[] из invariantViolations[]
  *   GET /api/metrics                      — чтение .opencode/metrics.jsonl
@@ -134,10 +134,10 @@ function loadSession(id: string): unknown | null {
   }
 }
 
-// ─── Engine (default config for derivePhase) ────────────────────────────────
+// ─── Engine (default config for deriveStage) ────────────────────────────────
 
 const DEFAULT_ENGINE_CONFIG: EngineConfig = {
-  phaseAssignments: [
+  stageAssignments: [
     { id: 'default', priority: 0, condition: 'true', result: 'planning' },
     {
       id: 'hasPlanApproval',
@@ -190,13 +190,13 @@ const _engine = new StateMachineEngine(DEFAULT_ENGINE_CONFIG);
 // ─── Session helpers ─────────────────────────────────────────────────────────
 
 interface EnrichedSession {
-  phase: string;
+  stage: string;
   [key: string]: unknown;
 }
 
-function phaseOf(session: Record<string, unknown>): string {
+function stageOf(session: Record<string, unknown>): string {
   try {
-    return _engine.derivePhase(session as unknown as WorkflowSession);
+    return _engine.deriveStage(session as unknown as WorkflowSession);
   } catch {
     return 'UNKNOWN';
   }
@@ -256,7 +256,7 @@ function enrichSession(session: unknown): EnrichedSession | null {
   const s = session as Record<string, unknown>;
   return {
     ...s,
-    phase: phaseOf(s),
+    stage: stageOf(s),
   } as EnrichedSession;
 }
 
@@ -271,8 +271,8 @@ function diffSessions(
     const oldSession = oldSessions[sessionId] as Record<string, unknown> | undefined;
     if (!oldSession) continue;
 
-    const oldState = phaseOf(oldSession);
-    const newState = phaseOf(newSession);
+    const oldState = stageOf(oldSession);
+    const newState = stageOf(newSession);
     if (oldState !== newState) {
       events.push({
         type: 'transition',
@@ -443,7 +443,7 @@ serve({
     // GET /api/schema
     if (url.pathname === '/api/schema') {
       const schema = buildDashboardSchema({
-        phases: ['planning', 'tasks_ready', 'execution', 'commit', 'done'],
+        stages: ['planning', 'tasks_ready', 'execution', 'commit', 'done'],
         transitions: [
           { from: 'planning', to: 'tasks_ready' },
           { from: 'tasks_ready', to: 'execution' },

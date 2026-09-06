@@ -1,7 +1,7 @@
 # test/fixtures/presets/high.yaml
 # State machine config for high (full feature workflow).
 
-phases:
+stages:
   PLANNING: {}
 
   TASKS_READY: {}

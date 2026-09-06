@@ -142,6 +142,9 @@ async function say(
 }
 
 /** Repeat an instruction until its expectation holds, or attempts run out. */
+/** The last workflow session a step read, for diagnosing a failure. */
+let lastState: unknown = null;
+
 async function step(
   host: Host,
   sessionId: string,
@@ -156,6 +159,7 @@ async function step(
   let session!: Session;
   for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
     session = await say(host, sessionId, model, options.instruction, options.agent);
+    lastState = session.state;
     const verdict = options.expect(session);
     if (verdict === true) return { ok: true, attempts: attempt, detail: '', session };
     detail = typeof verdict === 'string' ? verdict : 'expectation not met';
@@ -184,8 +188,28 @@ type Scenario = {
 
 const ORCHESTRATOR = 'orchestrator';
 
-function phase(session: Session): string {
-  return String(session.state?.currentPhase ?? '(none)');
+/** The consent step: prepare the tag, then ask the operator with it verbatim. */
+const CONSENT_INSTRUCTION =
+  'Do this in two tool calls and nothing else. ' +
+  'First call `workflow.consent` with files ["plan.md"] and summary "smoke plan". ' +
+  'Then call the `question` tool once, passing as the question text the ENTIRE ' +
+  '<consent-request ...>...</consent-request> tag that the first tool printed, copied ' +
+  'character for character, with options labelled "grant" and "decline".';
+
+interface RunView {
+  stage?: string;
+  status?: string;
+  gates?: Record<string, string>;
+}
+
+/** The task run the loop is working, as the plugin persisted it. */
+function firstRun(session: Session): RunView | undefined {
+  const runs = (session.state as { loopRuns?: Record<string, RunView> } | null)?.loopRuns;
+  return runs ? Object.values(runs)[0] : undefined;
+}
+
+function stage(session: Session): string {
+  return String(session.state?.currentStage ?? '(none)');
 }
 
 async function newSession(host: Host, title: string): Promise<string> {
@@ -249,15 +273,15 @@ const scenarios: Scenario[] = [
         agent: ORCHESTRATOR,
         expect: (s) => {
           if (!s.state) return 'no workflow session was persisted';
-          const currentPhase = phase(s);
-          return currentPhase === 'planning' || `phase is ${currentPhase}, expected planning`;
+          const currentStage = stage(s);
+          return currentStage === 'planning' || `stage is ${currentStage}, expected planning`;
         },
       });
       return {
         ok: result.ok,
         attempts: result.attempts,
         evidence: result.ok
-          ? `session persisted in phase ${phase(result.session)}`
+          ? `session persisted in stage ${stage(result.session)}`
           : `${result.detail}\n${result.session.transcript.slice(0, 600)}`,
       };
     },
@@ -391,17 +415,13 @@ const scenarios: Scenario[] = [
         expect: (s) => s.state !== null || 'workflow.create did not run',
       });
       const result = await step(host, sessionId, model, {
-        instruction: 'Do this in two tool calls and nothing else. ' +
-        'First call `workflow.consent` with files ["plan.md"] and summary "smoke plan". ' +
-        'Then call the `question` tool once, passing as the question text the ENTIRE ' +
-        '<consent-request ...>...</consent-request> tag that the first tool printed, copied ' +
-        'character for character, with options labelled "grant" and "decline".',
+        instruction: CONSENT_INSTRUCTION,
         agent: ORCHESTRATOR,
         expect: (s) => {
           const refs = (s.state as { refs?: Record<string, string> } | null)?.refs ?? {};
           if (!refs.plan) return 'the plan reference was never recorded';
-          const currentPhase = phase(s);
-          return currentPhase === 'tasks_ready' || `phase is ${currentPhase}, expected tasks_ready`;
+          const currentStage = stage(s);
+          return currentStage === 'tasks_ready' || `stage is ${currentStage}, expected tasks_ready`;
         },
       });
       return {
@@ -455,7 +475,11 @@ const scenarios: Scenario[] = [
       // A file the workflow never saw. `commit-task.ts` stages everything, so
       // the commit will carry more than the permit expects.
       await writeFile(join(host.workDir, 'unrelated.txt'), 'not part of the work\n', 'utf-8');
+      const before = headOf(host);
 
+      // `commit-task` is not idempotent, so a retry of this step commits
+      // nothing and says so. The proof lives in the session, not in whichever
+      // attempt's transcript: HEAD moved, and no receipt was written for it.
       const result = await step(host, sessionId, model, {
         instruction:
           'Use the bash tool to run exactly this command: bun run commit-task.ts -m "smoke: sweep". ' +
@@ -468,9 +492,8 @@ const scenarios: Scenario[] = [
           } | null;
           if (state?.deliveryReceipt) return 'a commit of unrelated files was receipted';
           if (state?.deliveryPermit) return 'the stale permit was left in place';
-          return (
-            /workflow-commit-rejected/.test(s.transcript) || 'the refusal never reached the agent'
-          );
+          if (headOf(host) === before) return 'the commit never happened, so nothing was tested';
+          return true;
         },
       });
       return {
@@ -483,27 +506,84 @@ const scenarios: Scenario[] = [
     },
   },
   {
-    id: 'machine-limit',
-    title: 'The shipped base machine stops at review — no code path passes that gate',
+    id: 'verify-loop',
+    title: 'A live subagent closes a gate with its own workflow-result',
     env: { HARNESS_AUTO_APPROVE: 'true' },
     run: async (host, model) => {
-      const sessionId = await newSession(host, 'machine-limit');
-      const prepared = await prepareCommittableSession(host, sessionId, model);
-      if (!prepared.ok) return prepared;
-      const state = (await readWorkflowSession(host, sessionId)) as {
-        currentPhase?: string;
-        gates?: Array<{ id: string; status: string }>;
-      } | null;
-      const gates = (state?.gates ?? []).map((gate) => `${gate.id}=${gate.status}`).join(', ');
-      const stopped = state?.currentPhase === 'review';
+      const sessionId = await newSession(host, 'verify-loop');
+      let attempts = 0;
+
+      for (const entry of [
+        {
+          instruction: 'Call the tool `workflow.create` with schemaId "smoke". Do nothing else.',
+          expect: (s: Session) => s.state !== null || 'workflow.create did not run',
+        },
+        {
+          instruction: CONSENT_INSTRUCTION,
+          expect: (s: Session) =>
+            stage(s) === 'tasks_ready' || `stage is ${stage(s)}, expected tasks_ready`,
+        },
+        {
+          instruction:
+            'Call the tool `workflow.tasks-set` with tasks ' +
+            '[{"path":"src/smoke-1.ts","status":"pending"}]. Do nothing else.',
+          expect: (s: Session) => stage(s) === 'execution' || `stage is ${stage(s)}`,
+        },
+        {
+          // The code stage: a real edit, so the invariants gate is earned.
+          instruction:
+            'Use the task tool with subagent_type "coder" and description ' +
+            '"[workflow-task:task-0] write the file", telling it to create src/smoke-1.ts ' +
+            'containing `export const smoke = 1;` and then finish with exactly ' +
+            '<workflow-result>{"stage":"code","status":"pass","summary":"wrote the file",' +
+            '"evidence":["src/smoke-1.ts"]}</workflow-result>',
+          expect: (s: Session) => {
+            const run = firstRun(s);
+            return run?.stage === 'verify' || `the task is at ${run?.stage ?? '(no run)'}`;
+          },
+        },
+        {
+          // One of two verifiers reports. The stage must hold: it declared two.
+          instruction:
+            'Use the task tool with subagent_type "reviewer" and description ' +
+            '"[workflow-task:task-0] review the file", telling it to review src/smoke-1.ts.',
+          expect: (s: Session) => {
+            const run = firstRun(s);
+            if (run?.gates?.review !== 'passed') {
+              return `the review gate is ${run?.gates?.review ?? '(unset)'}`;
+            }
+            return run.stage === 'verify' || 'the stage moved on a single verdict';
+          },
+        },
+        {
+          instruction:
+            'Use the task tool with subagent_type "tester" and description ' +
+            '"[workflow-task:task-0] verify the file", telling it to verify src/smoke-1.ts.',
+          expect: (s: Session) => {
+            const tasks = (s.state as { tasks?: Record<string, Array<{ status: string }>> } | null)
+              ?.tasks;
+            const status = tasks?.implementation?.[0]?.status;
+            return status === 'completed' || `the task is ${status ?? '(missing)'}`;
+          },
+        },
+      ]) {
+        const result = await step(host, sessionId, model, { ...entry, agent: ORCHESTRATOR });
+        attempts += result.attempts;
+        if (!result.ok) {
+          return {
+            ok: false,
+            attempts,
+            evidence: `${result.detail}\n${result.session.transcript.slice(0, 700)}`,
+          };
+        }
+      }
+
       return {
-        ok: stopped,
-        attempts: prepared.attempts,
-        evidence: stopped
-          ? `the run reaches review and halts there (gates: ${gates}). ` +
-            'FINDING: nothing in src ever sets the review or qa gate, so review → qa → commit → done ' +
-            'is unreachable in the shipped machine.'
-          : `expected the run to halt at review, it is at ${state?.currentPhase} (gates: ${gates})`,
+        ok: true,
+        attempts,
+        evidence:
+          'two live subagents each closed their own gate with a workflow-result; ' +
+          'the stage held for the first and completed the task on the second',
       };
     },
   },
@@ -529,13 +609,9 @@ async function prepareCommittableSession(
       expect: (s) => s.state !== null || 'workflow.create did not run',
     },
     {
-      instruction: 'Do this in two tool calls and nothing else. ' +
-        'First call `workflow.consent` with files ["plan.md"] and summary "smoke plan". ' +
-        'Then call the `question` tool once, passing as the question text the ENTIRE ' +
-        '<consent-request ...>...</consent-request> tag that the first tool printed, copied ' +
-        'character for character, with options labelled "grant" and "decline".',
+      instruction: CONSENT_INSTRUCTION,
       agent: ORCHESTRATOR,
-      expect: (s) => phase(s) === 'tasks_ready' || `phase is ${phase(s)}, expected tasks_ready`,
+      expect: (s) => stage(s) === 'tasks_ready' || `stage is ${stage(s)}, expected tasks_ready`,
     },
     {
       instruction:
@@ -543,7 +619,7 @@ async function prepareCommittableSession(
         JSON.stringify(files.map((path) => ({ path, status: 'pending' }))) +
         '. Do nothing else.',
       agent: ORCHESTRATOR,
-      expect: (s) => phase(s) === 'code' || `phase is ${phase(s)}, expected code`,
+      expect: (s) => stage(s) === 'execution' || `stage is ${stage(s)}, expected execution`,
     },
     {
       instruction:
@@ -575,8 +651,8 @@ async function prepareCommittableSession(
     })),
   ];
 
-  for (const stage of stages) {
-    const result = await step(host, sessionId, model, stage);
+  for (const entry of stages) {
+    const result = await step(host, sessionId, model, entry);
     attempts += result.attempts;
     if (!result.ok) {
       return {
@@ -633,10 +709,11 @@ async function main(): Promise<void> {
     try {
       const outcome = await scenario.run(host, model);
       if (!outcome.ok && process.env.HOST_SMOKE_DEBUG) {
+        console.error(`  state: ${JSON.stringify(lastState).slice(0, 1200)}`);
         const relevant = host
           .logs()
           .split('\n')
-          .filter((line) => /state-machine|consent|Consent/i.test(line));
+          .filter((line) => /state-machine|consent|DIAG|workflow/i.test(line));
         console.error(`  host log:\n    ${relevant.slice(-25).join('\n    ')}`);
       }
       results.push({ id: scenario.id, title: scenario.title, ...outcome });

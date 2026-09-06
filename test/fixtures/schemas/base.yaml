@@ -1,4 +1,4 @@
-phases:
+stages:
   PLANNING:
     dispatch:
       strategy: serial

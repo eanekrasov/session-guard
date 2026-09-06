@@ -10,7 +10,7 @@ import type {
 // ─── SessionFacts interface ────────────────────────────────────────────────────
 
 export interface SessionFacts {
-  currentPhase?: string;
+  currentStage?: string;
   lastApproval: {
     type?: string;
     callId?: string;
@@ -54,7 +54,7 @@ export function toSessionFacts(session: WorkflowSessionRead): SessionFacts {
   const retryBudgets = session.retryBudgets ?? {};
 
   return {
-    currentPhase: session.currentPhase,
+    currentStage: session.currentStage,
     lastApproval:
       session.approvals.length > 0
         ? (session.approvals[session.approvals.length - 1] ?? null)

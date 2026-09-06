@@ -40,23 +40,52 @@ const RetryBudgetSchema = z.object({
 });
 export type RetryBudget = z.infer<typeof RetryBudgetSchema>;
 
-const TaskStageDefSchema = z.object({
-  id: z.string(),
-  allowedAgents: z.array(z.string()).optional(),
-  entryGuards: z.array(z.string()).optional(),
-  exitGuards: z.array(z.string()).optional(),
-});
-export type StageDef = z.infer<typeof TaskStageDefSchema>;
+/**
+ * A stage — the one unit of workflow state.
+ *
+ * A stage that names a `loop` runs its own `stages` once per task in that
+ * list, moved by its own `transitions`. Nesting is the only difference between
+ * an inner stage and an outer one: `allowedAgents`, `gates`, `transitions`,
+ * guards, effects and retry budgets mean the same at either level, so a reader
+ * learns one set of rules rather than two. See docs/stage-model.md.
+ */
+export interface StageDef {
+  /** Task list this stage cycles over. Its `stages` then run once per task. */
+  loop?: LoopSource;
+  dispatch?: DispatchDef;
+  retryBudget?: RetryBudget;
+  /** Agents allowed to act while this stage is current. */
+  allowedAgents?: string[];
+  /**
+   * Gates this stage closes.
+   *
+   * Declaring it makes the stage a verifier: its agent must finish with a
+   * `<workflow-result>` tag whose `stage` equals this stage's id, `pass` sets
+   * these gates to `passed` and `fail` sets them to `failed`. A gate named
+   * here that no session carries is a schema load error, not runtime silence.
+   */
+  gates?: string[];
+  entryGuards?: string[];
+  exitGuards?: string[];
+  /** Stages run per task, when this stage declares a `loop`. */
+  stages?: Record<string, StageDef>;
+  /** Transitions between this stage's own `stages`. */
+  transitions?: TransitionDef[];
+}
 
-const PhaseDefSchema = z.object({
-  loop: LoopSourceSchema.optional(),
-  dispatch: DispatchSchema.optional(),
-  retryBudget: RetryBudgetSchema.optional(),
-  stages: z.array(TaskStageDefSchema).optional(),
-  exitGuards: z.array(z.string()).optional(),
-  allowedAgents: z.array(z.string()).optional(),
-});
-export type PhaseDef = z.infer<typeof PhaseDefSchema>;
+const StageDefSchema: z.ZodType<StageDef> = z.lazy(() =>
+  z.object({
+    loop: LoopSourceSchema.optional(),
+    dispatch: DispatchSchema.optional(),
+    retryBudget: RetryBudgetSchema.optional(),
+    allowedAgents: z.array(z.string()).optional(),
+    gates: z.array(z.string()).optional(),
+    entryGuards: z.array(z.string()).optional(),
+    exitGuards: z.array(z.string()).optional(),
+    stages: z.record(StageDefSchema).optional(),
+    transitions: z.array(TransitionDefSchema).optional(),
+  })
+);
 
 const TransitionEffectSchema = z.object({
   bumpRetry: z.string().optional(),
@@ -76,13 +105,13 @@ const TransitionDefSchema = z.object({
 });
 export type TransitionDef = z.infer<typeof TransitionDefSchema>;
 
-const PhaseAssignmentRuleSchema = z.object({
+const StageAssignmentRuleSchema = z.object({
   id: z.string(),
   priority: z.number(),
   condition: z.string(),
   result: z.string(),
 });
-export type PhaseAssignmentRule = z.infer<typeof PhaseAssignmentRuleSchema>;
+export type StageAssignmentRule = z.infer<typeof StageAssignmentRuleSchema>;
 
 export const GateItemSchema = z.object({
   id: z.string(),
@@ -105,8 +134,8 @@ export type DispatchDef = z.infer<typeof DispatchSchema>;
 export const ProfileSchemaSchema = z
   .object({
     extends: z.string().optional(),
-    phases: z.record(PhaseDefSchema).optional(),
-    phaseAssignments: z.array(PhaseAssignmentRuleSchema).optional(),
+    stages: z.record(StageDefSchema).optional(),
+    stageAssignments: z.array(StageAssignmentRuleSchema).optional(),
     transitions: z.array(TransitionDefSchema).optional(),
     gates: z.array(GateItemSchema).optional(),
     tools: z.array(ToolItemSchema).optional(),
@@ -116,7 +145,7 @@ export const ProfileSchemaSchema = z
     /**
      * Agents allowed to drive workflow task state (workflow.tasks-set,
      * workflow.tasks-set-status, workflow.tasks-resolve-decision).
-     * Defaults to ['orchestrator'] — a worker must never close its own phase.
+     * Defaults to ['orchestrator'] — a worker must never close its own stage.
      */
     taskControlAgents: z.array(z.string()).optional(),
     verifiers: z.array(z.string()).optional(),
@@ -126,18 +155,18 @@ export const ProfileSchemaSchema = z
   .passthrough()
   .superRefine((value, ctx) => {
     const seen = new Map<string, string>();
-    for (const [phaseId, phase] of Object.entries(value.phases ?? {})) {
-      if (!phase.loop || phase.loop === '$currentTask.id') continue;
-      const previousPhase = seen.get(phase.loop);
-      if (previousPhase) {
+    for (const [stageId, stage] of Object.entries(value.stages ?? {})) {
+      if (!stage.loop || stage.loop === '$currentTask.id') continue;
+      const previousStage = seen.get(stage.loop);
+      if (previousStage) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          path: ['phases', phaseId, 'loop'],
-          message: `Loop source '${phase.loop}' is already used by phase '${previousPhase}'`,
+          path: ['stages', stageId, 'loop'],
+          message: `Loop source '${stage.loop}' is already used by stage '${previousStage}'`,
         });
         continue;
       }
-      seen.set(phase.loop, phaseId);
+      seen.set(stage.loop, stageId);
     }
   });
 

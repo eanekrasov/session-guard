@@ -86,7 +86,7 @@ const PHASE_DESCRIPTIONS: Record<string, string> = {
 
 export interface DashboardInput {
   /** Фазы стейт-машины (массив ID). */
-  phases: string[];
+  stages: string[];
   /** Переходы между фазами. */
   transitions: Array<{ from: string; to: string }>;
   /** Гейты (статусы не нужны — только описание). */
@@ -104,7 +104,7 @@ export interface DashboardInput {
 export function buildDashboardSchema(input: DashboardInput): DashboardSchema {
   const mandatoryStageIds = new Set(input.profile.mandatoryStages);
 
-  const states: DashboardState[] = input.phases.map((id) => ({
+  const states: DashboardState[] = input.stages.map((id) => ({
     id,
     label: id.replace(/_/g, ' '),
     description: PHASE_DESCRIPTIONS[id] ?? '',

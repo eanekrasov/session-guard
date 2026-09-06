@@ -55,10 +55,10 @@ describe('parseRuntimeState', () => {
     if (!r.ok) expect(r.reason).toBe('unknown_schema');
   });
 
-  test('valid v1 session with currentPhase returns Tui', () => {
+  test('valid v1 session with currentStage returns Tui', () => {
     const r = parseRuntimeState(
       makeV1Session({
-        currentPhase: 'code',
+        currentStage: 'code',
         approvals: [{ type: 'plan', status: 'granted' }],
         tasks: makeTasks(3),
         activeMutation: {
@@ -75,24 +75,24 @@ describe('parseRuntimeState', () => {
     expect(r.value.revision).toBe(1);
     expect(r.value.completedTasks).toBe(0);
     expect(r.value.totalTasks).toBe(3);
-    expect(r.value.phase).toBe('code');
+    expect(r.value.stage).toBe('code');
   });
 
-  test('no currentPhase and completely unrelated fields returns no_phase', () => {
+  test('no currentStage and completely unrelated fields returns no_stage', () => {
     const r = parseRuntimeState(
       JSON.stringify({ schemaVersion: 1, sessionId: 's1', something: 'x' })
     );
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.reason).toBe('no_phase');
+    if (!r.ok) expect(r.reason).toBe('no_stage');
   });
 
-  test('planApproved false without currentPhase returns planning (old fallback)', () => {
+  test('planApproved false without currentStage returns planning (old fallback)', () => {
     const r = parseRuntimeState(makeV1Session({ planApproved: false }));
     expect(r.ok).toBe(true);
-    if (r.ok) expect(r.value.phase).toBe('planning');
+    if (r.ok) expect(r.value.stage).toBe('planning');
   });
 
-  test('approvals granted without currentPhase returns planning (old fallback)', () => {
+  test('approvals granted without currentStage returns planning (old fallback)', () => {
     const r = parseRuntimeState(
       makeV1Session({
         approvals: [{ type: 'plan', status: 'granted' }],
@@ -100,10 +100,10 @@ describe('parseRuntimeState', () => {
       })
     );
     expect(r.ok).toBe(true);
-    if (r.ok) expect(r.value.phase).toBe('planning');
+    if (r.ok) expect(r.value.stage).toBe('planning');
   });
 
-  test('commitPermit without currentPhase returns commit (old fallback)', () => {
+  test('commitPermit without currentStage returns commit (old fallback)', () => {
     const r = parseRuntimeState(
       makeV1Session({
         commitPermit: {
@@ -115,33 +115,33 @@ describe('parseRuntimeState', () => {
       })
     );
     expect(r.ok).toBe(true);
-    if (r.ok) expect(r.value.phase).toBe('commit');
+    if (r.ok) expect(r.value.stage).toBe('commit');
   });
 
-  test('deliveryReceipt without currentPhase returns commit (old fallback)', () => {
+  test('deliveryReceipt without currentStage returns commit (old fallback)', () => {
     const r = parseRuntimeState(makeV1Session({ deliveryReceipt: 'a'.repeat(40) }));
     expect(r.ok).toBe(true);
-    if (r.ok) expect(r.value.phase).toBe('commit');
+    if (r.ok) expect(r.value.stage).toBe('commit');
   });
 
-  test('currentPhase=planning returns planning', () => {
-    const r = parseRuntimeState(makeV1Session({ currentPhase: 'planning' }));
+  test('currentStage=planning returns planning', () => {
+    const r = parseRuntimeState(makeV1Session({ currentStage: 'planning' }));
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.value.phase).toBe('planning');
+    expect(r.value.stage).toBe('planning');
   });
 
-  test('currentPhase=code returns code', () => {
-    const r = parseRuntimeState(makeV1Session({ currentPhase: 'code', tasks: makeTasks(2) }));
+  test('currentStage=code returns code', () => {
+    const r = parseRuntimeState(makeV1Session({ currentStage: 'code', tasks: makeTasks(2) }));
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.value.phase).toBe('code');
+    expect(r.value.stage).toBe('code');
   });
 
-  test('currentPhase=commit returns commit', () => {
+  test('currentStage=commit returns commit', () => {
     const r = parseRuntimeState(
       makeV1Session({
-        currentPhase: 'commit',
+        currentStage: 'commit',
         tasks: makeTasks(1).map((t) => {
           t.status = 'committed';
           return t;
@@ -150,64 +150,64 @@ describe('parseRuntimeState', () => {
     );
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.value.phase).toBe('commit');
+    expect(r.value.stage).toBe('commit');
   });
 
-  test('currentPhase=done returns done', () => {
-    const r = parseRuntimeState(makeV1Session({ currentPhase: 'done' }));
+  test('currentStage=done returns done', () => {
+    const r = parseRuntimeState(makeV1Session({ currentStage: 'done' }));
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.value.phase).toBe('done');
+    expect(r.value.stage).toBe('done');
   });
 
-  test('deriveDispatchPhase: EMPTY when no activeMutation', () => {
-    const r = parseRuntimeState(makeV1Session({ currentPhase: 'planning' }));
+  test('deriveDispatchStage: EMPTY when no activeMutation', () => {
+    const r = parseRuntimeState(makeV1Session({ currentStage: 'planning' }));
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.value.dispatchPhase).toBe('EMPTY');
+    expect(r.value.dispatchStage).toBe('EMPTY');
   });
 
-  test('deriveDispatchPhase: MUTATING when code active', () => {
+  test('deriveDispatchStage: MUTATING when code active', () => {
     const r = parseRuntimeState(
       makeV1Session({
-        currentPhase: 'code',
+        currentStage: 'code',
         activeMutation: { callID: 'c1', agent: 'code', startedAt: '', outputReady: false },
       })
     );
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.value.dispatchPhase).toBe('MUTATING');
+    expect(r.value.dispatchStage).toBe('MUTATING');
   });
 
-  test('deriveDispatchPhase: BOTH_ACTIVE when verifierOperations present', () => {
+  test('deriveDispatchStage: BOTH_ACTIVE when verifierOperations present', () => {
     const r = parseRuntimeState(
       makeV1Session({
-        currentPhase: 'code',
+        currentStage: 'code',
         activeMutation: { callID: 'c1', agent: 'code', startedAt: '', outputReady: false },
         verifierOperations: { qa_task: true },
       })
     );
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.value.dispatchPhase).toBe('BOTH_ACTIVE');
+    expect(r.value.dispatchStage).toBe('BOTH_ACTIVE');
   });
 
-  test('deriveDispatchPhase: MUTATING_END when outputReady', () => {
+  test('deriveDispatchStage: MUTATING_END when outputReady', () => {
     const r = parseRuntimeState(
       makeV1Session({
-        currentPhase: 'code',
+        currentStage: 'code',
         activeMutation: { callID: 'c1', agent: 'code', startedAt: '', outputReady: true },
       })
     );
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.value.dispatchPhase).toBe('MUTATING_END');
+    expect(r.value.dispatchStage).toBe('MUTATING_END');
   });
 
   test('completedTasks derived from committed tasks', () => {
     const tasks = makeTasks(3);
     tasks[1].status = 'committed';
-    const r = parseRuntimeState(makeV1Session({ currentPhase: 'code', tasks }));
+    const r = parseRuntimeState(makeV1Session({ currentStage: 'code', tasks }));
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.value.completedTasks).toBe(1);
@@ -216,7 +216,7 @@ describe('parseRuntimeState', () => {
   test('activeMutation parsed from session.activeMutation', () => {
     const r = parseRuntimeState(
       makeV1Session({
-        currentPhase: 'code',
+        currentStage: 'code',
         activeMutation: { callID: 'call_abc123', agent: 'code', startedAt: '', outputReady: true },
       })
     );
@@ -255,17 +255,17 @@ describe('formatIdleLine', () => {
   test('invalid_structure', () => check('invalid_structure'));
   test('unknown_schema', () => check('unknown_schema'));
   test('missing_session_id', () => check('missing_session_id'));
-  test('no_phase', () => check('no_phase'));
+  test('no_stage', () => check('no_stage'));
 });
 
 describe('formatSectionLines', () => {
   function parse(overrides: Record<string, unknown> = {}) {
-    const r = parseRuntimeState(makeV1Session({ currentPhase: 'code', ...overrides }));
+    const r = parseRuntimeState(makeV1Session({ currentStage: 'code', ...overrides }));
     if (!r.ok) throw new Error(`parse failed: ${r.reason}`);
     return r.value;
   }
 
-  test('contains phase name in first line', () => {
+  test('contains stage name in first line', () => {
     const view = parse({
       approvals: [{ type: 'plan', status: 'granted' }],
       tasks: makeTasks(2, ['dev', 'test']),
@@ -277,8 +277,8 @@ describe('formatSectionLines', () => {
     expect(lines[0]).toContain('✕');
   });
 
-  test('planning shown with prevPhase=· nextPhase=tasks_ready (compact at 37)', () => {
-    const r = parseRuntimeState(makeV1Session({ currentPhase: 'planning' }));
+  test('planning shown with prevStage=· nextStage=tasks_ready (compact at 37)', () => {
+    const r = parseRuntimeState(makeV1Session({ currentStage: 'planning' }));
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     const lines = formatSectionLines(r.value);
@@ -359,10 +359,10 @@ describe('formatSectionLines', () => {
     expect(lines[2].length).toBeLessThanOrEqual(44);
   });
 
-  test('graph line truncated for long phase names', () => {
+  test('graph line truncated for long stage names', () => {
     const r = parseRuntimeState(
       makeV1Session({
-        currentPhase: 'planning',
+        currentStage: 'planning',
         gates: [],
         retryBudgets: {},
       })
@@ -372,6 +372,59 @@ describe('formatSectionLines', () => {
     const lines = formatSectionLines(r.value);
     expect(lines).toHaveLength(3);
     expect(lines[1].length).toBeLessThanOrEqual(44);
+  });
+});
+
+describe('task gates in the status line', () => {
+  function parse(overrides: Record<string, unknown> = {}) {
+    const r = parseRuntimeState(makeV1Session({ currentStage: 'execution', ...overrides }));
+    if (!r.ok) throw new Error(`parse failed: ${r.reason}`);
+    return r.value;
+  }
+
+  const runs = {
+    'run-1': {
+      id: 'run-1',
+      taskId: 'task-1',
+      listKey: 'implementation',
+      ancestry: [],
+      stage: 'verify',
+      status: 'running',
+      gates: { review: 'passed', qa: 'pending' },
+    },
+    'run-2': {
+      id: 'run-2',
+      taskId: 'task-2',
+      listKey: 'implementation',
+      ancestry: [],
+      stage: 'code',
+      status: 'running',
+      gates: {},
+    },
+  };
+
+  test('reads each task’s own verdicts', () => {
+    const view = parse({ loopRuns: runs });
+    expect(view.taskGates).toEqual([
+      {
+        taskId: 'task-1',
+        stage: 'verify',
+        status: 'running',
+        gates: [
+          { id: 'review', status: 'passed' },
+          { id: 'qa', status: 'pending' },
+        ],
+      },
+      { taskId: 'task-2', stage: 'code', status: 'running', gates: [] },
+    ]);
+  });
+
+  test('shows the verdict against the task and stage it was given for', () => {
+    const view = parse({ loopRuns: runs });
+    const status = formatSectionLines(view).join('\n');
+    // Not "review passed" — task-1 passed review while task-2 is still coding.
+    expect(status).toContain('task-1@verify');
+    expect(status).not.toContain('task-2@code');
   });
 });
 

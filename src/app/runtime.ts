@@ -10,7 +10,15 @@ import type {
 import { tool as toolFn } from '@opencode-ai/plugin';
 import { z } from 'zod';
 import { createSession, WorkflowStore } from '../session/session-store.ts';
-import { ProfileConfigurationError, type PhaseDef } from '../schema/types.ts';
+import {
+  firstNestedStageId,
+  nestedStages,
+  ProfileConfigurationError,
+  type StageDef,
+  type TransitionDef,
+} from '../schema/types.ts';
+import { nextTaskStage } from '../domain/task-movement.ts';
+import { toGuardContext } from '../domain/engine.ts';
 import { SessionQueue } from './session-queue.ts';
 import { sanitizeToolOutput, validateUserInput } from './guardrails.ts';
 import { listProfiles } from '../public-api.ts';
@@ -32,6 +40,7 @@ import {
   upsertActiveTaskContext,
   removeActiveTaskContext,
   findPendingRetryContext,
+  setGateStatus,
 } from '../session/helpers.ts';
 import {
   TASK_STATUS,
@@ -73,6 +82,25 @@ function tool<A extends Record<string, unknown>>(def: {
 
 // ─── StateMachineRuntime ─────────────────────────────────────────────────────
 
+/** A tool part as it arrives on the event stream, in either host shape. */
+interface EventPart {
+  id?: string;
+  status?: string;
+  callID?: string;
+  state?: { status?: string };
+}
+
+interface EventEnvelope {
+  event: {
+    type: string;
+    message?: { id: string; parts?: EventPart[] };
+    /** Legacy flat shape. */
+    part?: EventPart;
+    /** The shape OpenCode actually emits. */
+    properties?: { part?: EventPart } & Record<string, unknown>;
+  };
+}
+
 class StateMachineRuntime {
   private store: WorkflowStore;
   private queue: SessionQueue;
@@ -83,6 +111,14 @@ class StateMachineRuntime {
   private log: LogFn;
   private rulesRuntime: OpenCodeRulesRuntime;
   private readonly fileTools = new Set(['edit', 'write', 'apply_patch']);
+  /**
+   * Tools that change the repository, and therefore run under the mutation
+   * lifecycle: the plan approval is checked, invariants are re-run, and the
+   * change scope is recorded. `edit` and `apply_patch` write files exactly as
+   * `write` does — leaving them out let an agent edit a file it was not allowed
+   * to create.
+   */
+  private readonly mutatingTools = new Set(['bash', 'write', 'edit', 'apply_patch']);
   private readonly profilesDir: string;
   private readonly projectDir: string;
 
@@ -136,8 +172,8 @@ class StateMachineRuntime {
         const profileRoot = this.profilesDir;
         const profile = await resolveConfig(profileId, profileRoot);
         return profile.schemas.flatMap((schema) =>
-          Object.values(schema.phases ?? {})
-            .map((phase) => phase.loop)
+          Object.values(schema.stages ?? {})
+            .map((stage) => stage.loop)
             .filter((loop): loop is string => loop !== undefined && loop !== '$currentTask.id')
         );
       },
@@ -159,7 +195,7 @@ class StateMachineRuntime {
    * Workflow task state is orchestrator-owned.
    *
    * Task status is exactly what `allTasksCompleted()` and `hasPendingTasks()`
-   * read, so an agent able to write it closes its own phase — evidence-free,
+   * read, so an agent able to write it closes its own stage — evidence-free,
    * the same hole the delivery permit closes on the commit side. The host
    * reports the calling agent in `ToolContext.agent`; anything outside the
    * schema's `taskControlAgents` (default `['orchestrator']`) is refused, and
@@ -357,8 +393,8 @@ class StateMachineRuntime {
             return;
           }
           budget.maximum = args.maximum;
-          const phase = await this.resolveLoopPhase(session.profileId, run.listKey);
-          run.stage = phase?.stages?.[0]?.id ?? run.stage;
+          const stage = await this.resolveLoopStage(session.profileId, run.listKey);
+          run.stage = firstNestedStageId(stage) ?? run.stage;
           run.status = 'running';
           task.status = 'running';
           this.upsertActiveTaskContextFromSession(session, run.id, 'running');
@@ -587,7 +623,7 @@ class StateMachineRuntime {
       return;
     }
 
-    const phase = session.currentPhase ?? 'planning';
+    const stage = session.currentStage ?? 'planning';
     const activeGates = session.gates
       .filter((g) => g.status !== 'pending')
       .map((g) => `${g.id}=${g.status}`);
@@ -597,7 +633,7 @@ class StateMachineRuntime {
 
     void this.log('debug', 'Chat message — workflow state', {
       sessionID,
-      phase,
+      stage,
       gates: activeGates.length > 0 ? activeGates.join(',') : undefined,
       approvals: grantedApprovals.length > 0 ? grantedApprovals.join(',') : undefined,
       referenceId: session.refs?.plan ?? undefined,
@@ -709,10 +745,6 @@ class StateMachineRuntime {
         this.blockTaskAdmission(`Native call ${callID} is already correlated`);
         return;
       }
-      if (this.hasRunningOperationForTask(session, taskId)) {
-        this.blockTaskAdmission(`Workflow task ${taskId} already has an active call`);
-        return;
-      }
 
       let profile;
       let engine;
@@ -727,25 +759,24 @@ class StateMachineRuntime {
         return;
       }
 
-      const phaseId = engine.derivePhase(session);
-      session.currentPhase = phaseId;
-      const phase = profile.schemas.reduce(
-        (selected, schema) => schema.phases?.[phaseId] ?? selected,
-        undefined
-      );
-      if (!phase?.loop || !phase.dispatch || !phase.stages?.length) {
-        this.blockTaskAdmission(
-          `Phase ${phaseId} does not declare an executable task loop`
-        );
+      const loopStageId = engine.deriveStage(session);
+      session.currentStage = loopStageId;
+      const loopStage = engine.getStages()[loopStageId];
+      if (!loopStage?.loop || nestedStages(loopStage).length === 0) {
+        this.blockTaskAdmission(`Stage ${loopStageId} does not declare an executable task loop`);
         return;
       }
+      // A loop that names no dispatch runs one task at a time. Requiring the
+      // field made every profile repeat boilerplate, and forgetting it stopped
+      // the loop with a message about a loop that is plainly declared.
+      const dispatch = loopStage.dispatch ?? { strategy: 'serial' as const, maxConcurrent: 1 };
 
-      const listKey = this.resolveAdmissionListKey(session, phase.loop, taskId);
+      const listKey = this.resolveAdmissionListKey(session, loopStage.loop, taskId);
       const tasks = listKey ? session.tasks[listKey] : undefined;
       const task = tasks?.find((candidate) => candidate.id === taskId);
       if (!listKey || !tasks || !task) {
         this.blockTaskAdmission(
-          `Workflow task ${taskId} is not eligible in phase ${phaseId}`
+          `Workflow task ${taskId} is not eligible in loopStage ${loopStageId}`
         );
         return;
       }
@@ -767,22 +798,50 @@ class StateMachineRuntime {
         return;
       }
 
-      const stageId = existingRun?.stage ?? phase.stages[0].id;
-      const stage = phase.stages.find((candidate) => candidate.id === stageId);
+      const stageId = existingRun?.stage ?? firstNestedStageId(loopStage)!;
+      const stage = nestedStages(loopStage).find((candidate) => candidate.id === stageId);
       if (!stage) {
-        this.blockTaskAdmission(`Stage ${stageId} is not declared by phase ${phaseId}`);
+        this.blockTaskAdmission(`Stage ${stageId} is not declared by stage ${loopStageId}`);
         return;
       }
-      // A stage may narrow the phase's roster; when it declares none, the
-      // phase's own list applies. This is the only place agent identity is
+      // A nested stage may narrow its parent's roster; when it declares none,
+      // the parent's list applies. This is the only place agent identity is
       // known, so it is the only place `allowedAgents` can be enforced.
-      const allowedAgents = stage.allowedAgents ?? phase.allowedAgents;
+      const allowedAgents = stage.allowedAgents ?? loopStage.allowedAgents;
       if (allowedAgents?.length && !agentIsAllowed(agent, allowedAgents, session.profileId)) {
         this.blockTaskAdmission(
           `Agent ${agent} is not allowed in stage ${stageId}. Allowed: ${allowedAgents.join(', ')}`
         );
         return;
       }
+      // A stage that declares gates is waiting for several verdicts, so it may
+      // have one call per gate at a time — review and qa run together. Every
+      // other stage is one call at a time, and the same agent may never hold
+      // two: one agent cannot judge the same work twice at once.
+      const running = Object.values(session.activeOperations).filter(
+        (operation) => operation.taskId === taskId && operation.status === 'running'
+      );
+      const gateCount = stage.gates?.length ?? 0;
+      if (running.length > 0) {
+        const sameAgent = running.some((operation) => operation.agent === agent);
+        if (gateCount === 0) {
+          this.blockTaskAdmission(`Workflow task ${taskId} already has an active call`);
+          return;
+        }
+        if (sameAgent) {
+          this.blockTaskAdmission(
+            `Agent ${agent} already has an active call for workflow task ${taskId}`
+          );
+          return;
+        }
+        if (running.length >= gateCount) {
+          this.blockTaskAdmission(
+            `Stage ${stageId} is waiting on ${gateCount} verdict(s) and already has that many calls`
+          );
+          return;
+        }
+      }
+
       if (
         stage.entryGuards?.some(
           (guard) => !engine.evaluateGuard(guard, session, { currentLoopListKey: listKey })
@@ -795,11 +854,11 @@ class StateMachineRuntime {
       const activeRuns = Object.values(session.loopRuns).filter((run) => isOpenLoopRun(run));
       if (!existingRun) {
         const rejection = this.taskAdmissionRejection(
-          phase.dispatch,
+          dispatch,
           tasks,
           taskId,
           activeRuns,
-          phase.stages[0].id
+          firstNestedStageId(loopStage)!
         );
         if (rejection) {
           this.blockTaskAdmission(rejection);
@@ -816,6 +875,8 @@ class StateMachineRuntime {
           ancestry: this.resolveTaskAncestry(session.tasks, listKey),
           stage: stageId,
           status: 'running',
+          gates: {},
+          round: 0,
         };
         task.status = 'running';
       }
@@ -826,6 +887,9 @@ class StateMachineRuntime {
         agent,
         status: 'running',
         startedAt: new Date().toISOString(),
+        // The occupancy of the stage this call belongs to. A verdict that
+        // arrives after the task has moved on belongs to a round that is over.
+        round: session.loopRuns[runId]?.round ?? 0,
       };
 
       upsertActiveTaskContext(session, {
@@ -871,7 +935,7 @@ class StateMachineRuntime {
   }
 
   private taskAdmissionRejection(
-    dispatch: NonNullable<PhaseDef['dispatch']>,
+    dispatch: NonNullable<StageDef['dispatch']>,
     tasks: MutationTask[],
     taskId: string,
     activeRuns: LoopRun[],
@@ -978,7 +1042,7 @@ class StateMachineRuntime {
     output.output = this.guardrailAfter(output.output, tool);
 
     // 1b. Workflow result — parse and record <workflow-result> tags
-    await this.handleWorkflowResult(tool, input.sessionID, input.callID, output);
+    await this.handleWorkflowResult(tool, input.sessionID, input.callID, input.args, output);
 
     // 1c. Rules — PostToolUse evaluation + file observations
     await this.rulesRuntime.handleToolExecuteAfter(input, output);
@@ -1089,7 +1153,7 @@ class StateMachineRuntime {
 
   /**
    * SDK-005: Inject workflow session context into the system prompt.
-   * Called before each model request — adds phase, gates, and approvals
+   * Called before each model request — adds stage, gates, and approvals
    * so the model is aware of the current workflow state.
    */
   async handleSystemTransform(
@@ -1105,10 +1169,10 @@ class StateMachineRuntime {
     lines.push(`[workflow session: ${session.sessionId}]`);
     lines.push(`[workflow profile: ${session.profileId}]`);
 
-    // Read phase directly from session — currentPhase is set by tryApplyTransitions.
+    // Read stage directly from session — currentStage is set by tryApplyTransitions.
     // Falls back to 'planning' if not yet set (new sessions).
-    const phase = session.currentPhase ?? 'planning';
-    lines.push(`[workflow phase: ${phase}]`);
+    const stage = session.currentStage ?? 'planning';
+    lines.push(`[workflow stage: ${stage}]`);
 
     const gateLines = session.gates
       .filter((g) => g.status !== 'pending')
@@ -1174,13 +1238,8 @@ class StateMachineRuntime {
    * Handle events — clear only errored callId from the mutation orchestrator's
    * in-flight mutation tracking.
    */
-  async handleEvent(event: {
-    event: {
-      type: string;
-      message?: { id: string; parts?: Array<{ type: string; status?: string; callID?: string }> };
-      part?: { id: string; status?: string; callID?: string; state?: { status?: string } };
-      properties?: Record<string, unknown>;
-    };
+  async handleEvent(event: EventEnvelope & {
+    event: { properties?: Record<string, unknown> & { part?: EventPart } };
   }): Promise<void> {
     // Check if event indicates an error
     const isError = this.isErrorEvent(event);
@@ -1224,48 +1283,80 @@ class StateMachineRuntime {
     }
   }
 
-  private isErrorEvent(event: {
-    event: {
-      type: string;
-      message?: { id: string; parts?: Array<{ type: string; status?: string; callID?: string }> };
-      part?: { id: string; status?: string; callID?: string; state?: { status?: string } };
-    };
-  }): boolean {
+  /**
+   * The tool part an event carries, whatever shape the host used.
+   *
+   * OpenCode emits `message.part.updated` with the part under
+   * `properties.part` (`cli/cmd/run.ts` reads it there, and so does its own
+   * demo feed). Reading `event.part` found nothing, so a tool that errored
+   * left its operation running for ever.
+   */
+  private eventPart(event: EventEnvelope): EventPart | undefined {
+    return event.event.properties?.part ?? event.event.part;
+  }
+
+  private isErrorEvent(event: EventEnvelope): boolean {
     if (event.event.type !== 'message.part.updated') return false;
-    const part = event.event.part;
+    const part = this.eventPart(event);
     if (!part) return false;
-    // SDK shape: ToolPart carries its status under `state.status`, and the
-    // failure value is 'error'. The flat `status: 'failed'` shape is kept for
-    // hosts that emit the legacy part payload.
+    // A ToolPart carries its status under `state.status`, and the failure
+    // value is 'error'. The flat `status: 'failed'` shape is kept for hosts
+    // that emit the legacy payload.
     return part.state?.status === 'error' || part.status === 'failed';
   }
 
-  private extractCallId(event: {
-    event: {
-      type: string;
-      message?: { id: string; parts?: Array<{ type: string; status?: string; callID?: string }> };
-      part?: { id: string; status?: string; callID?: string };
-    };
-  }): string | null {
-    // Prefer part.callID when available (SDK correlation identifier)
-    if (event.event.part?.callID) {
-      return event.event.part.callID;
-    }
-    // Fallback to part.id for backward compatibility
-    if (event.event.part?.id) {
-      return event.event.part.id;
-    }
-    return null;
+  private extractCallId(event: EventEnvelope): string | null {
+    const part = this.eventPart(event);
+    // `callID` is the correlation identifier; `id` is the fallback for hosts
+    // that do not send one.
+    return part?.callID ?? part?.id ?? null;
+  }
+
+  /**
+   * Record a `<workflow-result>` — but only from a verifier that was actually
+   * dispatched to produce one.
+   *
+   * The marker is plain text, so it can appear in anything a tool returns: a
+   * file that documents the format, a grep hit, a log. Reading such a file
+   * must not close a gate. A verdict counts only when it comes back from a
+   * `task` call — the one place the host tells us which agent ran — and, for a
+   * stage that declares gates, only when that agent is one the stage allows.
+   */
+  /** The subagent a `task` call dispatched, as the host reports it. */
+  private dispatchedAgent(args: unknown): string | undefined {
+    if (!args || typeof args !== 'object') return undefined;
+    const value = (args as Record<string, unknown>).subagent_type;
+    return typeof value === 'string' && value !== '' ? value : undefined;
+  }
+
+  /**
+   * Whether an agent's verdict counts for a stage.
+   *
+   * A stage that names a roster is naming who may judge it. A stage that names
+   * none accepts any dispatched agent — but never a caller the host did not
+   * name, because an unnamed judge is not a judge.
+   */
+  private mayVerify(
+    agent: string | undefined,
+    stage: { allowedAgents?: string[] } | undefined,
+    profileId: string
+  ): boolean {
+    if (!agent) return false;
+    const roster = stage?.allowedAgents ?? [];
+    if (roster.length === 0) return true;
+    return agentIsAllowed(agent, roster, profileId);
   }
 
   private async handleWorkflowResult(
     tool: string,
     sessionID: string,
     callID: string,
+    args: unknown,
     output: { output: string }
   ): Promise<void> {
+    if (tool !== 'task') return;
     const parsed = parseWorkflowResult(output.output);
-    if (!parsed && tool !== 'task') return;
+    const reportingAgent = this.dispatchedAgent(args);
 
     await this.queue.enqueue(sessionID, async (session) => {
       if (!session) return;
@@ -1286,25 +1377,144 @@ class StateMachineRuntime {
           if (operation.status !== 'running') {
             return;
           }
-          if (parsed?.status === 'fail') {
-            const phase = await this.resolveLoopPhase(session.profileId, run.listKey);
-            this.recordTaskRetryFailure(session, run, task, phase);
-          } else if (parsed?.status === 'pass') {
-            const phase = await this.resolveLoopPhase(session.profileId, run.listKey);
-            const stageIndex = phase?.stages?.findIndex((stage) => stage.id === run.stage) ?? -1;
-            const nextStage =
-              stageIndex >= 0 && phase?.stages ? phase.stages[stageIndex + 1] : undefined;
-            if (nextStage) {
-              run.stage = nextStage.id;
-            } else if (stageIndex >= 0) {
+          const loopStage = parsed
+            ? await this.resolveLoopStage(session.profileId, run.listKey)
+            : null;
+          const nested = loopStage ? nestedStages(loopStage) : [];
+          const currentStage = nested.find((entry) => entry.id === run.stage);
+          const declaredGates = currentStage?.gates ?? [];
+
+          if (parsed && declaredGates.length > 0) {
+            // A verifier stage may run several agents at once — review and qa
+            // in parallel — so a tag names the gate it closes, never the stage
+            // it ran in. A name the stage does not declare is refused: it is
+            // evidence for something nobody asked about.
+            if (!this.mayVerify(reportingAgent, currentStage, session.profileId)) {
+              output.output +=
+                `\n\n[workflow-result-rejected]\n` +
+                `Stage ${run.stage} accepts results from ` +
+                `[${(currentStage?.allowedAgents ?? []).join(', ') || '(no roster)'}], ` +
+                `and this one came from '${reportingAgent ?? '(unknown agent)'}'. ` +
+                `Nothing was recorded.`;
+              void this.log('warn', 'Workflow result from an agent the stage does not allow', {
+                sessionID,
+                stage: run.stage,
+                agent: reportingAgent ?? null,
+              });
+              delete session.activeOperations[callID];
+              return;
+            }
+            if (!declaredGates.includes(parsed.stage)) {
+              output.output +=
+                `\n\n[workflow-result-rejected]\n` +
+                `Stage ${run.stage} is waiting on [${declaredGates.join(', ')}], ` +
+                `and this result reports '${parsed.stage}'. Nothing was recorded.`;
+              void this.log('warn', 'Workflow result names an undeclared gate', {
+                sessionID,
+                stage: run.stage,
+                reported: parsed.stage,
+                declared: declaredGates,
+              });
+              delete session.activeOperations[callID];
+              return;
+            }
+            run.gates[parsed.stage] = parsed.status === 'pass' ? 'passed' : 'failed';
+          }
+
+          const stageFailed = declaredGates.some((gate) => run.gates[gate] === 'failed');
+          const stagePassed =
+            declaredGates.length > 0 && declaredGates.every((gate) => run.gates[gate] === 'passed');
+          // A stage with no gates keeps the old contract: its single agent's
+          // own pass or fail decides.
+          const failed = declaredGates.length > 0 ? stageFailed : parsed?.status === 'fail';
+          const passed = declaredGates.length > 0 ? stagePassed : parsed?.status === 'pass';
+
+          if (operation.round !== run.round) {
+            // The task has entered the stage again — or a different one —
+            // since this verifier was dispatched. Its verdict is about work
+            // that has already been judged, and counting it would spend the
+            // task's retry budget a second time for one round of review.
+            output.output +=
+              `\n\n[workflow-result-stale]\n` +
+              `This result was produced for an earlier round of ${task.id}, ` +
+              `which has since moved to ${run.stage}. Nothing was recorded.`;
+            void this.log('warn', 'Workflow result from a finished round', {
+              sessionID,
+              taskId: task.id,
+              resultRound: operation.round,
+              currentRound: run.round,
+            });
+            delete session.activeOperations[callID];
+            return;
+          }
+
+          if (!parsed) {
+            // A workflow task that reports nothing is not a task that passed.
+            // Saying so is the difference between a stalled loop and a stalled
+            // loop nobody can explain.
+            output.output +=
+              `\n\n[workflow-result-missing]\n` +
+              `Stage ${run.stage} of ${task.id} ended without a <workflow-result> marker, ` +
+              `so nothing was recorded and the task did not move.`;
+            void this.log('warn', 'Workflow task returned no result', {
+              sessionID,
+              taskId: task.id,
+              stage: run.stage,
+              outputPreview: output.output.slice(0, 200),
+            });
+          }
+
+          if (failed || passed) {
+            const engine = await this.mutationOrchestrator.resolveEngine(session.profileId);
+            const movement = nextTaskStage(loopStage, run, passed, (expression, facts) =>
+              engine.evaluateGuard(expression, toGuardContext(session, { ...facts }), {
+                currentLoopListKey: run.listKey,
+              })
+            );
+
+            if (movement.kind === 'complete') {
               run.status = 'completed';
               task.status = 'completed';
               removeActiveTaskContext(session, run.id);
+            } else if (movement.kind === 'move') {
+              // A move that walks a failure back into the loop spends the
+              // task's budget whether or not the edge remembered to say so.
+              // An edge without the effect would otherwise cycle forever, and
+              // the operator would never be asked.
+              const spendsBudget =
+                failed || (movement.effects ?? []).some((e) => e.bumpRetry !== undefined);
+              const exhausted = spendsBudget
+                ? this.applyTaskEffects(session, run, task, loopStage, movement.effects, failed)
+                : false;
+              run.stage = movement.to;
+              // Each stage judges its own work: the next one starts with no
+              // verdicts carried over from the last, and a new round, so any
+              // verifier still working the previous one is answered too late.
+              run.gates = {};
+              run.round += 1;
+              if (exhausted) {
+                run.status = 'awaiting_decision';
+                this.upsertActiveTaskContextFromSession(session, run.id, 'awaiting_decision');
+                this.upsertPendingDecision(session, task.id, run.id);
+              } else {
+                task.status = 'running';
+                run.status = 'running';
+                this.upsertActiveTaskContextFromSession(session, run.id, 'running');
+              }
+            } else if (failed) {
+              // No transition took the failure, so the loop's own retry budget
+              // decides: back to the first stage, or a decision for the operator.
+              this.recordTaskRetryFailure(session, run, task, loopStage);
             }
           }
         }
         delete session.activeOperations[callID];
-      } else if (parsed && session.activeOperations[callID]) {
+      } else if (parsed) {
+        // A verdict about the whole body of work, not about one task: the
+        // current stage's own gates. A stage is a stage at either level, so the
+        // rule is the same — the tag names a gate the stage declared, or it is
+        // refused.
+        await this.recordStageGate(session, parsed, reportingAgent, output);
         delete session.activeOperations[callID];
       }
 
@@ -1319,30 +1529,169 @@ class StateMachineRuntime {
     });
   }
 
-  private async resolveLoopPhase(profileId: string, listKey: string): Promise<PhaseDef | null> {
-    const profileRoot = getProfilesDir(this.context.directory);
-    const profile = await resolveConfig(profileId, profileRoot);
-    const phases = profile.schemas.flatMap((schema) => Object.values(schema.phases ?? {}));
-    return (
-      phases.find((phase) => phase.loop === listKey || phase.loop === '$currentTask.id') ?? null
-    );
+  /**
+   * Close a gate on the session's current stage from a `<workflow-result>`.
+   *
+   * The loop case records a verdict about one task; this records one about the
+   * work as a whole — the `validation` stage of the shipped workflow, where the
+   * same review and qa agents check everything that was built.
+   */
+  private async recordStageGate(
+    session: WorkflowSession,
+    parsed: { stage: string; status: 'pass' | 'fail' },
+    reportingAgent: string | undefined,
+    output: { output: string }
+  ): Promise<void> {
+    const stageId = session.currentStage;
+    if (!stageId) return;
+
+    let stage: StageDef | undefined;
+    try {
+      const engine = await this.mutationOrchestrator.resolveEngine(session.profileId);
+      stage = engine.getStages()[stageId];
+    } catch (error) {
+      // A profile we cannot read declares no gates we can honour. The verdict
+      // is still recorded in `verifications`; nothing is invented here.
+      void this.log('warn', 'recordStageGate: profile could not be resolved', {
+        sessionID: session.sessionId,
+        profileId: session.profileId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return;
+    }
+    const declaredGates = stage?.gates ?? [];
+    if (declaredGates.length === 0) return;
+
+    if (!this.mayVerify(reportingAgent, stage, session.profileId)) {
+      output.output +=
+        `\n\n[workflow-result-rejected]\n` +
+        `Stage ${stageId} accepts results from ` +
+        `[${(stage?.allowedAgents ?? []).join(', ') || '(no roster)'}], and this one came from ` +
+        `'${reportingAgent ?? '(unknown agent)'}'. Nothing was recorded.`;
+      void this.log('warn', 'Workflow result from an agent the stage does not allow', {
+        sessionID: session.sessionId,
+        stage: stageId,
+        agent: reportingAgent ?? null,
+      });
+      return;
+    }
+
+    if (!declaredGates.includes(parsed.stage)) {
+      output.output +=
+        `\n\n[workflow-result-rejected]\n` +
+        `Stage ${stageId} is waiting on [${declaredGates.join(', ')}], ` +
+        `and this result reports '${parsed.stage}'. Nothing was recorded.`;
+      void this.log('warn', 'Workflow result names an undeclared gate', {
+        sessionID: session.sessionId,
+        stage: stageId,
+        reported: parsed.stage,
+        declared: declaredGates,
+      });
+      return;
+    }
+
+    setGateStatus(session, parsed.stage, parsed.status === 'pass' ? 'passed' : 'failed');
+    void this.log('info', 'Stage gate recorded', {
+      sessionID: session.sessionId,
+      stage: stageId,
+      gate: parsed.stage,
+      status: parsed.status,
+    });
+  }
+
+  /**
+   * The stage that cycles over a task list.
+   *
+   * Resolved through the engine, which holds the merged stage map: a profile
+   * resolves to several schema files, and searching them one by one returns
+   * whichever the search order reaches first — a parent's guard from one file,
+   * a child's roster from another, never the stage the workflow actually runs.
+   */
+  private async resolveLoopStage(profileId: string, listKey: string): Promise<StageDef | null> {
+    const engine = await this.mutationOrchestrator.resolveEngine(profileId);
+    return engine.getLoopStage(listKey);
+  }
+
+  /**
+   * Apply a task-scoped transition's effects. Returns true when a retry budget
+   * was spent to its limit, which is the operator's decision to make.
+   *
+   * `bumpRetry` inside a loop always means the task's own budget, and must be
+   * written as `task.id`: a budget key naming something else would silently
+   * spend a counter nobody is watching.
+   */
+  private applyTaskEffects(
+    session: WorkflowSession,
+    run: LoopRun,
+    task: MutationTask,
+    loopStage: StageDef | null,
+    effects: TransitionDef['effects'],
+    spendOnFailure = false
+  ): boolean {
+    let exhausted = false;
+    const declared = (effects ?? []).filter((effect) => effect.bumpRetry !== undefined);
+
+    // A failing stage always costs the task an attempt. Writing
+    // `effects: [{ bumpRetry: task.id }]` on the edge documents it and can set
+    // a different maximum; leaving it off does not buy an unbounded loop.
+    if (declared.length === 0 && spendOnFailure) {
+      return this.spendTaskAttempt(session, task, loopStage, undefined);
+    }
+
+    for (const effect of declared) {
+      if (effect.bumpRetry === undefined) continue;
+      if (effect.bumpRetry !== 'task.id') {
+        void this.log('warn', 'Task transition bumps a budget that is not the task', {
+          sessionID: session.sessionId,
+          stage: run.stage,
+          declared: effect.bumpRetry,
+        });
+        continue;
+      }
+      if (this.spendTaskAttempt(session, task, loopStage, effect.maxAttempts)) exhausted = true;
+    }
+    return exhausted;
+  }
+
+  /** Spend one attempt of a task's retry budget. True when it is now spent. */
+  private spendTaskAttempt(
+    session: WorkflowSession,
+    task: MutationTask,
+    loopStage: StageDef | null,
+    maxAttempts: number | undefined
+  ): boolean {
+    const budget = session.retryBudgets[task.id] ?? {
+      attempts: 0,
+      maximum: maxAttempts ?? loopStage?.retryBudget?.maximum ?? DEFAULT_TASK_RETRY_MAXIMUM,
+    };
+    if (maxAttempts !== undefined) budget.maximum = maxAttempts;
+    budget.attempts += 1;
+    session.retryBudgets[task.id] = budget;
+    return budget.attempts >= budget.maximum;
   }
 
   private recordTaskRetryFailure(
     session: WorkflowSession,
     run: LoopRun,
     task: MutationTask,
-    phase: PhaseDef | null
+    stage: StageDef | null
   ): void {
     const existingBudget = session.retryBudgets[task.id];
     const budget = existingBudget ?? {
       attempts: 0,
-      maximum: phase?.retryBudget?.maximum ?? DEFAULT_TASK_RETRY_MAXIMUM,
+      maximum: stage?.retryBudget?.maximum ?? DEFAULT_TASK_RETRY_MAXIMUM,
     };
     budget.attempts += 1;
     session.retryBudgets[task.id] = budget;
     task.status = 'running';
-    run.stage = phase?.stages?.[0]?.id ?? run.stage;
+    run.stage = firstNestedStageId(stage) ?? run.stage;
+    // The same rule as a transition-driven move: a stage starts with no
+    // verdicts carried over, and a new round. A task sent back to the beginning
+    // holding the failure that sent it there would be judged on work it has not
+    // redone, and a verifier still working the old round would spend its budget
+    // a second time.
+    run.gates = {};
+    run.round += 1;
 
     if (budget.attempts < budget.maximum) {
       run.status = 'running';
@@ -1535,7 +1884,7 @@ class StateMachineRuntime {
     callID: string,
     output: { args: unknown }
   ): Promise<void> {
-    if (tool !== 'bash' && tool !== 'write') return;
+    if (!this.mutatingTools.has(tool)) return;
     await this.mutationOrchestrator.beginMutation({ sessionID, callID }, output);
   }
 
@@ -1545,7 +1894,7 @@ class StateMachineRuntime {
     callID: string,
     output: { title: string; output: string; metadata: unknown }
   ): Promise<void> {
-    if (tool !== 'bash' && tool !== 'write') return;
+    if (!this.mutatingTools.has(tool)) return;
     await this.mutationOrchestrator.finishMutation(
       { sessionID, callID, metadata: output.metadata },
       (text) => {
@@ -1600,7 +1949,7 @@ class StateMachineRuntime {
       subtask: true,
     };
     config.command['sm-list'] = {
-      template: 'list all state-machine workflow sessions and their phases',
+      template: 'list all state-machine workflow sessions and their stages',
       description: 'List all active workflow sessions',
       agent: 'state-machine',
       subtask: true,
@@ -1622,7 +1971,7 @@ class StateMachineRuntime {
     config.agent['state-machine'] = {
       model: config.model,
       description:
-        'State machine workflow agent — manages sessions, profiles, phases, and gates. Use for sm-* commands.',
+        'State machine workflow agent — manages sessions, profiles, stages, and gates. Use for sm-* commands.',
       mode: 'subagent',
       color: '#6366F1',
     };

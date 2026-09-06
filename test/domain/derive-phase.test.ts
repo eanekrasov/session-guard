@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import type { PhaseAssignmentRule } from '../../src/schema/types.ts';
+import type { StageAssignmentRule } from '../../src/schema/types.ts';
 import type { SessionFacts } from '../../src/domain/session-facts.ts';
-import { derivePhaseFn as derivePhase } from '../../src/domain/engine.ts';
+import { deriveStageFn as deriveStage } from '../../src/domain/engine.ts';
 
 function makeFacts(overrides: Partial<SessionFacts> = {}): SessionFacts {
   return {
@@ -28,9 +28,9 @@ function makeFacts(overrides: Partial<SessionFacts> = {}): SessionFacts {
   };
 }
 
-describe('derivePhase', () => {
+describe('deriveStage', () => {
   it('returns the highest priority rule when condition is true', () => {
-    const rules: PhaseAssignmentRule[] = [
+    const rules: StageAssignmentRule[] = [
       {
         id: 'r1',
         priority: 100,
@@ -41,13 +41,13 @@ describe('derivePhase', () => {
     ];
     const facts = makeFacts({ gates: { invariants: 'passed' } });
 
-    const result = derivePhase(facts, rules);
+    const result = deriveStage(facts, rules);
 
     expect(result).toBe('EXECUTION');
   });
 
   it('falls back to lower priority when higher priority condition is false', () => {
-    const rules: PhaseAssignmentRule[] = [
+    const rules: StageAssignmentRule[] = [
       {
         id: 'r1',
         priority: 100,
@@ -58,13 +58,13 @@ describe('derivePhase', () => {
     ];
     const facts = makeFacts({ gates: { invariants: 'failed' } });
 
-    const result = derivePhase(facts, rules);
+    const result = deriveStage(facts, rules);
 
     expect(result).toBe('PLANNING');
   });
 
   it('returns PLANNING when no rule matches and no fallback', () => {
-    const rules: PhaseAssignmentRule[] = [
+    const rules: StageAssignmentRule[] = [
       {
         id: 'r1',
         priority: 100,
@@ -74,34 +74,34 @@ describe('derivePhase', () => {
     ];
     const facts = makeFacts({ verifications: [] });
 
-    const result = derivePhase(facts, rules);
+    const result = deriveStage(facts, rules);
 
     expect(result).toBe('PLANNING');
   });
 
   it('returns PLANNING for empty rules array', () => {
-    const rules: PhaseAssignmentRule[] = [];
+    const rules: StageAssignmentRule[] = [];
     const facts = makeFacts();
 
-    const result = derivePhase(facts, rules);
+    const result = deriveStage(facts, rules);
 
     expect(result).toBe('PLANNING');
   });
 
   it('skips a rule with a broken expression (safe-fail) and matches next', () => {
-    const rules: PhaseAssignmentRule[] = [
+    const rules: StageAssignmentRule[] = [
       { id: 'r1', priority: 100, condition: 'session.nonexistent.field == true', result: 'BROKEN' },
       { id: 'r2', priority: 50, condition: 'true', result: 'PLANNING' },
     ];
     const facts = makeFacts();
 
-    const result = derivePhase(facts, rules);
+    const result = deriveStage(facts, rules);
 
     expect(result).toBe('PLANNING');
   });
 
   it('evaluates expression with SessionFacts fields like gates', () => {
-    const rules: PhaseAssignmentRule[] = [
+    const rules: StageAssignmentRule[] = [
       {
         id: 'r1',
         priority: 100,
@@ -113,13 +113,13 @@ describe('derivePhase', () => {
       gates: { invariants: 'passed' },
     });
 
-    const result = derivePhase(facts, rules);
+    const result = deriveStage(facts, rules);
 
     expect(result).toBe('EXECUTION');
   });
 
   it('correctly resolves three-way priority: skips r100, matches r50', () => {
-    const rules: PhaseAssignmentRule[] = [
+    const rules: StageAssignmentRule[] = [
       {
         id: 'r1',
         priority: 100,
@@ -131,13 +131,13 @@ describe('derivePhase', () => {
     ];
     const facts = makeFacts({ tasks: [{ id: 't1', status: 'running' }] });
 
-    const result = derivePhase(facts, rules);
+    const result = deriveStage(facts, rules);
 
     expect(result).toBe('EXECUTION');
   });
 
   it('returns VERIFY when bug stage is confirmed', () => {
-    const rules: PhaseAssignmentRule[] = [
+    const rules: StageAssignmentRule[] = [
       {
         id: 'r1',
         priority: 100,
@@ -148,13 +148,13 @@ describe('derivePhase', () => {
     ];
     const facts = makeFacts({ verifications: [{ stage: 'bug', status: 'confirmed' }] });
 
-    const result = derivePhase(facts, rules);
+    const result = deriveStage(facts, rules);
 
     expect(result).toBe('VERIFY');
   });
 
   it('skips r100 false, skips r50 false, matches r0 true', () => {
-    const rules: PhaseAssignmentRule[] = [
+    const rules: StageAssignmentRule[] = [
       {
         id: 'r1',
         priority: 100,
@@ -166,7 +166,7 @@ describe('derivePhase', () => {
     ];
     const facts = makeFacts({ verifications: [] });
 
-    const result = derivePhase(facts, rules);
+    const result = deriveStage(facts, rules);
 
     expect(result).toBe('PLANNING');
   });

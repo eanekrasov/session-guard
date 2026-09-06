@@ -182,7 +182,13 @@ export async function startHost(options: HostOptions): Promise<Host> {
           : {}),
         // Consent runs through the host's `question` tool, which is denied by
         // default outside an interactive client.
-        permission: { question: 'allow' },
+        // The equivalent of `opencode run --auto` for a served session: nobody
+        // is at the keyboard, so a permission the host stops to ask about would
+        // hang the run instead of failing it. `serve` has no such flag, so the
+        // approval is declared in config. `question` is listed on its own
+        // because consent runs through it and it is denied by default outside
+        // an interactive client.
+        permission: { '*': 'allow', question: 'allow' },
         plugin: [`file://${pluginSpec}`],
         autoupdate: false,
         share: 'disabled',

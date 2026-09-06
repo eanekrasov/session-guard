@@ -54,19 +54,19 @@ async function writeProfile(
   await writeFile(
     join(profileDirectory, 'cycle.yaml'),
     [
-      'phases:',
+      'stages:',
       '  EXECUTION:',
       '    loop: implementation',
       '    dispatch:',
       ...dispatch,
       '    stages:',
-      '      - id: dev',
+      '      dev:',
       `        allowedAgents: [${allowedAgents.map((agent) => `'${agent}'`).join(', ')}]`,
-      '      - id: review',
+      '      review:',
       "        allowedAgents: ['review']",
-      '      - id: qa',
+      '      qa:',
       "        allowedAgents: ['qa']",
-      'phaseAssignments:',
+      'stageAssignments:',
       '  - id: execution',
       '    priority: 1',
       "    condition: 'true'",
@@ -187,6 +187,8 @@ describe('task-cycle admission', () => {
       ancestry: [],
       stage: 'dev',
       status: 'running',
+      gates: {},
+      round: 0,
     });
     expect(session.tasks.implementation[0].status).toBe('running');
   });

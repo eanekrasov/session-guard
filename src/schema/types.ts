@@ -2,11 +2,10 @@
 // Все изменения схемы в profile-schema.ts автоматически подхватываются.
 export type {
   ProfileSchema,
-  PhaseDef,
-  PhaseAssignmentRule,
+  StageDef,
+  StageAssignmentRule,
   TransitionDef,
   TransitionEffect,
-  StageDef,
   DispatchDef,
   ConsentOnTransition,
   RetryBudget,
@@ -16,11 +15,10 @@ export type {
 } from './profile-schema.ts';
 
 import type {
-  PhaseDef,
-  PhaseAssignmentRule,
+  StageDef,
+  StageAssignmentRule,
   TransitionDef,
   TransitionEffect,
-  StageDef,
 } from './profile-schema.ts';
 
 export interface ProfileMetadata {
@@ -47,9 +45,31 @@ export interface ResolvedMetadata {
 
 // ResolvedSchema — resolved версия ProfileSchema без extends/gates/tools/gateMapping.
 // Индексная сигнатура для совместимости с z.infer (ProfileSchemaSchema.passthrough()).
+
+/**
+ * A stage's nested stages, in declaration order.
+ *
+ * YAML mappings keep their file order through the parser, so the first entry
+ * is where a task enters the loop and the order is what movement falls back on
+ * until the stage's own `transitions` drive it.
+ */
+/** The stage a task enters this loop at: the first nested stage declared. */
+export function firstNestedStageId(
+  stage: { stages?: Record<string, StageDef> } | null | undefined
+): string | undefined {
+  if (!stage) return undefined;
+  return Object.keys(stage.stages ?? {})[0];
+}
+
+export function nestedStages(stage: { stages?: Record<string, StageDef> }): Array<
+  { id: string } & StageDef
+> {
+  return Object.entries(stage.stages ?? {}).map(([id, def]) => ({ id, ...def }));
+}
+
 export interface ResolvedSchema {
   source: string;
-  phases?: Record<string, PhaseDef>;
+  stages?: Record<string, StageDef>;
   transitions?: TransitionDef[];
   settings?: Record<string, unknown>;
   editingAgents?: string[];
@@ -57,7 +77,7 @@ export interface ResolvedSchema {
   requiredGates?: string[];
   taskControlAgents?: string[];
   actionGuards?: Record<string, string>;
-  phaseAssignments?: PhaseAssignmentRule[];
+  stageAssignments?: StageAssignmentRule[];
   [key: string]: unknown;
 }
 

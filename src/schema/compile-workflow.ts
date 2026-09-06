@@ -1,17 +1,20 @@
+import { nestedStages } from './types.ts';
 import type {
-  PhaseDef,
   StageDef,
   TransitionDef,
   ResolvedSchema,
-  PhaseAssignmentRule,
+  StageAssignmentRule,
 } from './types.ts';
 
 // ─── Compiled Types ──────────────────────────────────────────────────────────
 
+/** One nested stage of a loop, addressed as `<owner>/<nested>`. */
 export interface CompiledNode {
   id: string;
-  phase: string;
-  stage?: string;
+  /** The stage that owns the loop this node runs in. */
+  owner: string;
+  /** The nested stage itself. */
+  stage: string;
   allowedAgents: string[];
   entryGuards: string[];
   exitGuards: string[];
@@ -33,7 +36,7 @@ export interface CompiledTransitionEffect {
   approve: string | null;
 }
 
-export interface CompiledPhase {
+export interface CompiledStage {
   id: string;
   loop: string | null;
   dispatch: CompiledDispatch | null;
@@ -49,7 +52,7 @@ export interface CompiledDispatch {
   overlapRoles: string[];
 }
 
-export interface CompiledPhaseAssignment {
+export interface CompiledStageAssignment {
   id: string;
   priority: number;
   condition: string;
@@ -58,11 +61,11 @@ export interface CompiledPhaseAssignment {
 
 export interface CompiledWorkflow {
   version: 1;
-  phases: Record<string, CompiledPhase>;
+  stages: Record<string, CompiledStage>;
   transitions: CompiledTransition[];
-  phaseAssignments: CompiledPhaseAssignment[];
-  initialPhase: string;
-  terminalPhases: string[];
+  stageAssignments: CompiledStageAssignment[];
+  initialStage: string;
+  terminalStages: string[];
 }
 
 export interface CompileError {
@@ -72,7 +75,7 @@ export interface CompileError {
 
 // ─── Compiler ────────────────────────────────────────────────────────────────
 
-const TERMINAL_PHASES = new Set(['done', 'terminal', 'completed', 'failed', 'cancelled']);
+const TERMINAL_STAGES = new Set(['done', 'terminal', 'completed', 'failed', 'cancelled']);
 
 /**
  * Compile a resolved schema into a `CompiledWorkflow`.
@@ -86,74 +89,165 @@ export function compileWorkflow(schema: ResolvedSchema): {
 } {
   const errors: CompileError[] = [];
 
-  // Collect phase IDs
-  const phaseIds = new Set(Object.keys(schema.phases ?? {}));
+  // Collect stage IDs
+  const stageIds = new Set(Object.keys(schema.stages ?? {}));
 
-  // Build compiled phases with normalised defaults
-  const compiledPhases: Record<string, CompiledPhase> = {};
-  for (const [phaseId, phaseDef] of Object.entries(schema.phases ?? {})) {
-    const compiledNodes = compileNodes(phaseId, phaseDef, phaseIds, errors);
+  // Build compiled stages with normalised defaults
+  const compiledStages: Record<string, CompiledStage> = {};
+  for (const [stageId, stageDef] of Object.entries(schema.stages ?? {})) {
+    const compiledNodes = compileNodes(stageId, stageDef, stageIds, errors);
 
-    compiledPhases[phaseId] = {
-      id: phaseId,
-      loop: phaseDef.loop ?? null,
-      dispatch: compileDispatch(phaseDef.dispatch, errors),
-      retryBudget: phaseDef.retryBudget?.maximum ?? null,
+    compiledStages[stageId] = {
+      id: stageId,
+      loop: stageDef.loop ?? null,
+      dispatch: compileDispatch(stageDef.dispatch, errors),
+      retryBudget: stageDef.retryBudget?.maximum ?? null,
       nodes: compiledNodes,
-      exitGuards: phaseDef.exitGuards ?? [],
-      allowedAgents: phaseDef.allowedAgents ?? [],
+      exitGuards: stageDef.exitGuards ?? [],
+      allowedAgents: stageDef.allowedAgents ?? [],
     };
   }
 
-  // Build compiled transitions
-  const compiledTransitions = compileTransitions(schema.transitions ?? [], phaseIds, errors);
-
-  // Build compiled phase assignments
-  const compiledAssignments = compileAssignments(schema.phaseAssignments ?? [], errors);
-
-  // Determine initial phase (first phase assignment result, or first phase)
-  let initialPhase = '';
-  if (compiledAssignments.length > 0) {
-    initialPhase = compiledAssignments[0].result;
-  } else if (phaseIds.size > 0) {
-    initialPhase = phaseIds.values().next().value as string;
+  for (const [stageId, stageDef] of Object.entries(schema.stages ?? {})) {
+    validateNestedStages(stageId, stageDef, errors);
   }
 
-  // Determine terminal phases (phases whose transitions lead to none, or explicitly named)
-  const terminalPhases = findTerminalPhases(phaseIds, compiledTransitions);
+  // Build compiled transitions
+  const compiledTransitions = compileTransitions(schema.transitions ?? [], stageIds, errors);
+
+  // Build compiled stage assignments
+  const compiledAssignments = compileAssignments(schema.stageAssignments ?? [], errors);
+
+  // Determine initial stage (first stage assignment result, or first stage)
+  let initialStage = '';
+  if (compiledAssignments.length > 0) {
+    initialStage = compiledAssignments[0].result;
+  } else if (stageIds.size > 0) {
+    initialStage = stageIds.values().next().value as string;
+  }
+
+  // Determine terminal stages (stages whose transitions lead to none, or explicitly named)
+  const terminalStages = findTerminalStages(stageIds, compiledTransitions);
 
   return {
     workflow: {
       version: 1,
-      phases: compiledPhases,
+      stages: compiledStages,
       transitions: compiledTransitions,
-      phaseAssignments: compiledAssignments,
-      initialPhase,
-      terminalPhases,
+      stageAssignments: compiledAssignments,
+      initialStage,
+      terminalStages,
     },
     errors,
   };
 }
 
+/**
+ * Gates a session carries. A stage may only close one of these — a gate named
+ * by nobody is a verdict that goes nowhere, which is exactly the silence this
+ * compiler exists to turn into an error.
+ */
+const KNOWN_GATES = new Set(['invariants', 'review', 'qa']);
+
+/** The transition target that ends a task's work; never a stage of its own. */
+const TASK_DONE = 'done';
+
+/**
+ * Check a stage's own stages and transitions.
+ *
+ * These are the rules the runtime would otherwise discover one failed workflow
+ * at a time: a transition to a stage that does not exist, a gate no session
+ * carries, a retry budget belonging to something other than the task.
+ */
+function validateNestedStages(stageId: string, stageDef: StageDef, errors: CompileError[]): void {
+  const nested = nestedStages(stageDef);
+  const nestedIds = new Set(nested.map((entry) => entry.id));
+
+  if (stageDef.loop && (stageDef.transitions?.length ?? 0) > 0) {
+    const ends = (stageDef.transitions ?? []).some((transition) => transition.to === TASK_DONE);
+    if (!ends) {
+      errors.push({
+        path: `stages.${stageId}.transitions`,
+        message: `Loop "${stageId}" declares transitions but none of them reaches "${TASK_DONE}", so no task can ever finish it`,
+      });
+    }
+  }
+
+  if (stageDef.loop && nested.length === 0) {
+    errors.push({
+      path: `stages.${stageId}`,
+      message: `Stage "${stageId}" cycles over "${stageDef.loop}" but declares no stages to run`,
+    });
+  }
+
+  if (!stageDef.loop && (stageDef.transitions?.length ?? 0) > 0) {
+    errors.push({
+      path: `stages.${stageId}.transitions`,
+      message: `Stage "${stageId}" declares transitions but no loop to move a task through`,
+    });
+  }
+
+  for (const entry of nested) {
+    for (const gate of entry.gates ?? []) {
+      if (!KNOWN_GATES.has(gate)) {
+        errors.push({
+          path: `stages.${stageId}.stages.${entry.id}.gates`,
+          message: `Gate "${gate}" is not a gate any session carries`,
+        });
+      }
+    }
+    validateNestedStages(`${stageId}.stages.${entry.id}`, entry, errors);
+  }
+
+  for (const gate of stageDef.gates ?? []) {
+    if (!KNOWN_GATES.has(gate)) {
+      errors.push({
+        path: `stages.${stageId}.gates`,
+        message: `Gate "${gate}" is not a gate any session carries`,
+      });
+    }
+  }
+
+  for (const transition of stageDef.transitions ?? []) {
+    // `done` is not a stage: it is how a loop says the task's work is over.
+    const endpoints = [transition.from, ...(transition.to === TASK_DONE ? [] : [transition.to])];
+    for (const endpoint of endpoints) {
+      if (!nestedIds.has(endpoint)) {
+        errors.push({
+          path: `stages.${stageId}.transitions`,
+          message: `Transition ${transition.from} → ${transition.to} names "${endpoint}", which is not a stage of "${stageId}"`,
+        });
+      }
+    }
+    for (const effect of transition.effects ?? []) {
+      if (effect.bumpRetry !== undefined && effect.bumpRetry !== 'task.id') {
+        errors.push({
+          path: `stages.${stageId}.transitions`,
+          message: `Transition ${transition.from} → ${transition.to} bumps "${effect.bumpRetry}"; inside a loop the budget is the task's own, written as task.id`,
+        });
+      }
+    }
+  }
+}
+
 function compileNodes(
-  phaseId: string,
-  phaseDef: PhaseDef,
-  _phaseIds: Set<string>,
+  stageId: string,
+  stageDef: StageDef,
+  _stageIds: Set<string>,
   _errors: CompileError[]
 ): CompiledNode[] {
-  const stages = phaseDef.stages ?? [];
-  return stages.map((stage: StageDef) => ({
-    id: `${phaseId}/${stage.id}`,
-    phase: phaseId,
+  return nestedStages(stageDef).map((stage) => ({
+    id: `${stageId}/${stage.id}`,
+    owner: stageId,
     stage: stage.id,
-    allowedAgents: stage.allowedAgents ?? phaseDef.allowedAgents ?? [],
+    allowedAgents: stage.allowedAgents ?? stageDef.allowedAgents ?? [],
     entryGuards: stage.entryGuards ?? [],
     exitGuards: stage.exitGuards ?? [],
   }));
 }
 
 function compileDispatch(
-  dispatch: PhaseDef['dispatch'],
+  dispatch: StageDef['dispatch'],
   _errors: CompileError[]
 ): CompiledDispatch | null {
   if (!dispatch) return null;
@@ -174,15 +268,15 @@ function compileDispatch(
 
 function compileTransitions(
   transitions: TransitionDef[],
-  phaseIds: Set<string>,
+  stageIds: Set<string>,
   errors: CompileError[]
 ): CompiledTransition[] {
   return transitions.map((t, i) => {
-    if (!phaseIds.has(t.from)) {
-      errors.push({ path: `transitions[${i}]`, message: `Unknown source phase '${t.from}'` });
+    if (!stageIds.has(t.from)) {
+      errors.push({ path: `transitions[${i}]`, message: `Unknown source stage '${t.from}'` });
     }
-    if (!phaseIds.has(t.to)) {
-      errors.push({ path: `transitions[${i}]`, message: `Unknown target phase '${t.to}'` });
+    if (!stageIds.has(t.to)) {
+      errors.push({ path: `transitions[${i}]`, message: `Unknown target stage '${t.to}'` });
     }
 
     return {
@@ -202,9 +296,9 @@ function compileTransitions(
 }
 
 function compileAssignments(
-  assignments: PhaseAssignmentRule[],
+  assignments: StageAssignmentRule[],
   _errors: CompileError[]
-): CompiledPhaseAssignment[] {
+): CompiledStageAssignment[] {
   return [...assignments]
     .sort((a, b) => b.priority - a.priority)
     .map((a) => ({
@@ -215,14 +309,14 @@ function compileAssignments(
     }));
 }
 
-function findTerminalPhases(phaseIds: Set<string>, transitions: CompiledTransition[]): string[] {
+function findTerminalStages(stageIds: Set<string>, transitions: CompiledTransition[]): string[] {
   const hasOutgoing = new Set<string>();
   for (const t of transitions) {
     hasOutgoing.add(t.from);
   }
   const terminals: string[] = [];
-  for (const pid of phaseIds) {
-    if (TERMINAL_PHASES.has(pid.toLowerCase())) {
+  for (const pid of stageIds) {
+    if (TERMINAL_STAGES.has(pid.toLowerCase())) {
       terminals.push(pid);
     } else if (!hasOutgoing.has(pid)) {
       terminals.push(pid);

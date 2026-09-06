@@ -1,4 +1,4 @@
-phases:
+stages:
   PLANNING:
     dispatch:
       strategy: serial
@@ -6,6 +6,11 @@ phases:
     dispatch:
       strategy: serial_with_overlap
       maxConcurrent: 2
+  # Declared because the transitions below name them: a transition to a stage
+  # that does not exist is a compile error, not a runtime surprise.
+  TASKS_READY: {}
+  COMMIT: {}
+  DONE: {}
 transitions:
   - from: PLANNING
     to: EXECUTION
@@ -21,7 +26,7 @@ gateMapping:
 settings:
   mutationTtlMs: 1800000
   retryMaxAttempts: 3
-phaseAssignments:
+stageAssignments:
   - id: default
     priority: 0
     condition: 'true'

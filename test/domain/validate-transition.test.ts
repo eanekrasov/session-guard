@@ -18,7 +18,7 @@ describe('checkTransition', () => {
     const result = checkTransition('EXECUTION', 'DONE', transitions);
 
     expect(result.allowed).toBe(false);
-    expect(result.reason).toBe('Illegal phase transition: EXECUTION → DONE');
+    expect(result.reason).toBe('Illegal stage transition: EXECUTION → DONE');
   });
 
   it('allows when a guarded transition passes with approved()', () => {
@@ -77,7 +77,7 @@ describe('checkTransition', () => {
     const result = checkTransition('PLANNING', 'EXECUTION', transitions);
 
     expect(result.allowed).toBe(false);
-    expect(result.reason).toBe('Illegal phase transition: PLANNING → EXECUTION');
+    expect(result.reason).toBe('Illegal stage transition: PLANNING → EXECUTION');
   });
 
   it('allows transition with null guard', () => {

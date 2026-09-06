@@ -65,7 +65,7 @@ function createSession(overrides: Partial<WorkflowSession> = {}): WorkflowSessio
     verifications: [],
     baselineHashes: [],
     changedFiles: [],
-    currentPhase: 'planning',
+    currentStage: 'planning',
     invariantViolations: [],
     consentedCallIDs: [],
 
@@ -77,7 +77,7 @@ function createEngine(): StateMachineEngine {
   return new StateMachineEngine({
     transitions: SCHEMA_TRANSITIONS,
     actionGuards: SCHEMA_ACTION_GUARDS,
-    phases: {},
+    stages: {},
   });
 }
 
@@ -88,20 +88,20 @@ function createEngine(): StateMachineEngine {
 function advanceTo(
   session: WorkflowSession,
   engine: StateMachineEngine,
-  expectedPhase: string
+  expectedStage: string
 ): void {
   const result = engine.tryApplyTransitions(session);
   if (!result.applied) {
     throw new Error(
-      `Expected transition to '${expectedPhase}', ` +
+      `Expected transition to '${expectedStage}', ` +
         `but tryApplyTransitions returned: allowed=${result.allowed}, ` +
         `applied=${result.applied}, reason=${result.reason ?? '(no reason)'}`
     );
   }
-  if (session.currentPhase !== expectedPhase) {
+  if (session.currentStage !== expectedStage) {
     throw new Error(
-      `Expected phase '${expectedPhase}' after transition, ` +
-        `got '${session.currentPhase}'. Last result: ${JSON.stringify(result)}`
+      `Expected stage '${expectedStage}' after transition, ` +
+        `got '${session.currentStage}'. Last result: ${JSON.stringify(result)}`
     );
   }
 }
@@ -112,17 +112,17 @@ function advanceTo(
 function assertStaysAt(
   session: WorkflowSession,
   engine: StateMachineEngine,
-  expectedPhase: string
+  expectedStage: string
 ): void {
-  const currentBefore = session.currentPhase;
+  const currentBefore = session.currentStage;
   const result = engine.tryApplyTransitions(session);
   if (result.applied) {
     throw new Error(
-      `Expected to stay at '${expectedPhase}', but transition ` +
-        `'${currentBefore} → ${session.currentPhase}' was applied (result: ${JSON.stringify(result)})`
+      `Expected to stay at '${expectedStage}', but transition ` +
+        `'${currentBefore} → ${session.currentStage}' was applied (result: ${JSON.stringify(result)})`
     );
   }
-  expect(session.currentPhase).toBe(expectedPhase);
+  expect(session.currentStage).toBe(expectedStage);
 }
 
 // ─── Траектория 1: Нормальный путь ──────────────────────────────────────────────
@@ -319,7 +319,7 @@ describe('Guard contracts — каждый тип guard-выражения из 
         { from: 'planning', to: 'code', guard: "session.gates.invariants == 'passed'" },
       ],
     });
-    const session = createSession({ currentPhase: 'planning' });
+    const session = createSession({ currentStage: 'planning' });
 
     assertStaysAt(session, engine, 'planning');
 
@@ -331,7 +331,7 @@ describe('Guard contracts — каждый тип guard-выражения из 
     const engine = new StateMachineEngine({
       transitions: [{ from: 'planning', to: 'code', guard: 'session.refs.plan != null' }],
     });
-    const session = createSession({ currentPhase: 'planning' });
+    const session = createSession({ currentStage: 'planning' });
 
     assertStaysAt(session, engine, 'planning');
 
@@ -343,7 +343,7 @@ describe('Guard contracts — каждый тип guard-выражения из 
     const engine = new StateMachineEngine({
       transitions: [{ from: 'planning', to: 'code', guard: 'hasPendingTasks()' }],
     });
-    const session = createSession({ currentPhase: 'planning' });
+    const session = createSession({ currentStage: 'planning' });
 
     assertStaysAt(session, engine, 'planning');
 
@@ -355,7 +355,7 @@ describe('Guard contracts — каждый тип guard-выражения из 
     const engine = new StateMachineEngine({
       transitions: [{ from: 'planning', to: 'failed', guard: "isExhausted('cycles')" }],
     });
-    const session = createSession({ currentPhase: 'planning' });
+    const session = createSession({ currentStage: 'planning' });
 
     // Бюджета ещё нет — isExhausted возвращает false
     assertStaysAt(session, engine, 'planning');
@@ -369,7 +369,7 @@ describe('Guard contracts — каждый тип guard-выражения из 
     const engine = new StateMachineEngine({
       transitions: [{ from: 'planning', to: 'done', guard: 'session.deliveryReceipt != null' }],
     });
-    const session = createSession({ currentPhase: 'planning' });
+    const session = createSession({ currentStage: 'planning' });
 
     assertStaysAt(session, engine, 'planning');
 
@@ -388,7 +388,7 @@ describe('Guard contracts — каждый тип guard-выражения из 
         { from: 'planning', to: 'failed', guard: "isExhausted('cycles')" },
       ],
     });
-    const session = createSession({ currentPhase: 'planning' });
+    const session = createSession({ currentStage: 'planning' });
 
     // qa pending — не failed, не срабатывает
     assertStaysAt(session, engine, 'planning');

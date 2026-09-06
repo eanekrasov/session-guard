@@ -27,15 +27,15 @@ describe('SchemaLoader', () => {
       const result = await loader.loadSchemaFile('base', 'state-machine.yaml');
 
       expect(result).not.toBeNull();
-      expect(result!.phases).toBeDefined();
-      expect(result!.phases!.PLANNING).toBeDefined();
+      expect(result!.stages).toBeDefined();
+      expect(result!.stages!.PLANNING).toBeDefined();
     });
 
     it('loads schema from a direct path', async () => {
       const result = await loadSchemaFromPath(schemaFixturesDir, 'base.yaml');
 
       expect(result).not.toBeNull();
-      expect(result!.phases).toBeDefined();
+      expect(result!.stages).toBeDefined();
     });
 
     it('wraps schema diagnostics with the profile, file, and issue path', async () => {
@@ -44,7 +44,7 @@ describe('SchemaLoader', () => {
       await mkdir(profileDir);
       await writeFile(
         path.join(profileDir, 'task-cycles.yaml'),
-        'phases:\n  execution:\n    dispatch:\n      strategy: serial\n      maxConcurrent: 1\n'
+        'stages:\n  execution:\n    dispatch:\n      strategy: serial\n      maxConcurrent: 1\n'
       );
 
       const loader = new SchemaLoader(profilesDir);
@@ -53,7 +53,7 @@ describe('SchemaLoader', () => {
         name: 'ProfileConfigurationError',
         profileId: 'invalid',
         schemaFilename: 'task-cycles.yaml',
-        path: 'phases.execution.dispatch.maxConcurrent',
+        path: 'stages.execution.dispatch.maxConcurrent',
       } satisfies Partial<ProfileConfigurationError>);
     });
   });

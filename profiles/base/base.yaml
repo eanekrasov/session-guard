@@ -1,24 +1,68 @@
 # Base workflow: the canonical state machine every profile inherits.
 #
-# planning → tasks_ready → code → review → qa → commit → done
-#                            ↑______________|      |
-#                                                  └→ failed
+#   planning → tasks_ready → execution → validation → commit → done
+#                                ↑ loop      |
+#                          code → verify     └→ failed
+#                            ↑______|
+#
+# One unit of state: the stage. `execution` names a task list in `loop:`, so
+# its own stages run once per task, moved by its own transitions. Nesting is
+# the only difference between an inner stage and an outer one — see
+# docs/stage-model.md.
 #
 # Guard functions: approved(type), isExhausted(key), hasPendingTasks(),
-# allTasksCompleted(listKey). Effects: bumpRetry(key, maxAttempts), approve(type).
+# allTasksCompleted(listKey). Inside a loop, guards also read `task`.
+# Effects: bumpRetry(key, maxAttempts), approve(type).
 # `consent` blocks the transition until the operator approves.
 #
 # Format: ProfileSchema (src/schema/profile-schema.ts).
 
-# Phase-level `allowedAgents` is deliberately absent. The engine matches it
-# against an agent id the host never supplies (see profiles/README.md), so any
-# value here blocks every mutation in that phase instead of restricting it.
-phases:
+stages:
+  # The architect writes the plan, reworking it with the operator as often as
+  # it takes: each edit clears the verdicts about the draft it replaced.
+  #
+  # `allowedAgents` is deliberately absent throughout this file. A roster is a
+  # property of the profile that ships the agents, and every profile ships a
+  # different one — `harness` ships a single agent, `android` ships ten. A
+  # roster inherited from here would name agents the child does not have.
+  # Profiles declare their own; the stages themselves are the same everywhere.
   planning: {}
+
+  # Decomposition into the task list `execution` will cycle over.
   tasks_ready: {}
-  code: {}
-  review: {}
-  qa: {}
+
+  execution:
+    loop: implementation
+    retryBudget:
+      maximum: 5
+    stages:
+      code: {}
+      # Review and qa run here at the same time. A stage declares what it is
+      # waiting for, and each agent's result names the gate it closes — never
+      # the stage it ran in, because two of them ran in it.
+      verify:
+        gates: [review, qa]
+    transitions:
+      - from: code
+        to: verify
+        guard: "session.gates.invariants == 'passed'"
+      # Where a task's work ends. `done` is not a stage — it is the loop saying
+      # this task is finished, and it is guarded like any other departure so a
+      # task can never finish by having nowhere else to go.
+      - from: verify
+        to: done
+        guard: "task.gates.review == 'passed' && task.gates.qa == 'passed'"
+      - from: verify
+        to: code
+        guard: "task.gates.review == 'failed' || task.gates.qa == 'failed'"
+        effects:
+          - bumpRetry: task.id
+
+  # One check over the whole body of work, by the same two verifiers. Its
+  # verdicts are about the session, so they land on the session's gates.
+  validation:
+    gates: [review, qa]
+
   commit: {}
   done: {}
   failed: {}
@@ -31,46 +75,30 @@ transitions:
     consent: plan
 
   - from: tasks_ready
-    to: code
+    to: execution
     guard: "hasPendingTasks()"
 
-  # Invariants are set by finishMutation. While they fail the agent stays in
-  # `code` and keeps fixing — that is the intended holding state, not a stall.
-  - from: code
-    to: review
-    guard: "session.gates.invariants == 'passed'"
+  # Every task has been through code and verify.
+  - from: execution
+    to: validation
+    guard: "allTasksCompleted('implementation')"
 
-  - from: review
-    to: qa
-    guard: "session.gates.review == 'passed'"
-
-  # Review rejected the change — back to code against the same retry budget.
-  - from: review
-    to: code
-    guard: "session.gates.review == 'failed' && !isExhausted('cycles')"
-    effects:
-      - bumpRetry: cycles
-        maxAttempts: 5
-
-  - from: qa
+  - from: validation
     to: commit
-    guard: "session.gates.qa == 'passed'"
+    guard: "session.gates.review == 'passed' && session.gates.qa == 'passed'"
 
-  - from: qa
-    to: code
-    guard: "session.gates.qa == 'failed' && !isExhausted('cycles')"
+  # Validation rejected the work as a whole — back into the loop, against the
+  # session's own retry budget.
+  - from: validation
+    to: execution
+    guard: "(session.gates.review == 'failed' || session.gates.qa == 'failed') && !isExhausted('cycles')"
     effects:
       - bumpRetry: cycles
         maxAttempts: 5
 
-  # Retry budget spent — terminal failure.
-  - from: qa
+  - from: validation
     to: failed
-    guard: "isExhausted('cycles')"
-
-  - from: review
-    to: failed
-    guard: "session.gates.review == 'failed' && isExhausted('cycles')"
+    guard: "(session.gates.review == 'failed' || session.gates.qa == 'failed') && isExhausted('cycles')"
 
   # The receipt is written only after HEAD actually moved. The permit records
   # permission to try, never the result — a failed commit leaves the permit set

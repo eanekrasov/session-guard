@@ -361,12 +361,12 @@ function guardRows(
 }
 
 type AvailableStage = { id: string; status: 'allowed' | 'blocked' | 'unknown'; blockedBy?: string };
-type PhaseNeighbors = { previous: string | null; next: string | null; available: AvailableStage[] };
+type StageNeighbors = { previous: string | null; next: string | null; available: AvailableStage[] };
 
 type SessionGuardSnapshot = {
   view: Tui | null;
   profiles: ProfileMetadata[];
-  neighbors: PhaseNeighbors;
+  neighbors: StageNeighbors;
 };
 
 type SessionGuardCoordinator = {
@@ -375,18 +375,18 @@ type SessionGuardCoordinator = {
   dispose: () => void;
 };
 
-async function resolvePhaseNeighbors(
+async function resolveStageNeighbors(
   profileId: string,
-  phase: string,
+  stage: string,
   baseDir: string,
   rawSession?: Record<string, unknown>
-): Promise<PhaseNeighbors> {
+): Promise<StageNeighbors> {
   for (const dir of profileDirs(baseDir)) {
     if (!existsSync(dir)) continue;
     try {
       const profile = await resolveConfig(profileId, dir);
       const transitions = profile.schemas.flatMap((schema) => schema.transitions ?? []);
-      const outgoing = transitions.filter((transition) => transition.from === phase);
+      const outgoing = transitions.filter((transition) => transition.from === stage);
       const parsedSession = rawSession ? WorkflowSessionSchema.safeParse(rawSession) : null;
       const facts = parsedSession?.success
         ? {
@@ -400,7 +400,7 @@ async function resolvePhaseNeighbors(
         ...new Map(outgoing.map((transition) => [transition.to, transition])).entries(),
       ].map(([id, transition]) => {
         if (!facts) return { id, status: 'unknown' as const };
-        const result = checkTransition(phase, id, transitions, facts);
+        const result = checkTransition(stage, id, transitions, facts);
         if (result.allowed) return { id, status: 'allowed' as const };
         const reason = result.reason ?? '';
         const blockedBy =
@@ -414,7 +414,7 @@ async function resolvePhaseNeighbors(
         return { id, status: 'blocked' as const, blockedBy };
       });
       return {
-        previous: transitions.find((transition) => transition.to === phase)?.from ?? null,
+        previous: transitions.find((transition) => transition.to === stage)?.from ?? null,
         next: available[0]?.id ?? null,
         available,
       };
@@ -490,7 +490,7 @@ export function createSessionGuardCoordinator(options: {
       const profileId = typeof view?.raw.profileId === 'string' ? view.raw.profileId : null;
       const neighbors =
         profileId && view
-          ? await resolvePhaseNeighbors(profileId, view.phase, options.baseDir, view.raw)
+          ? await resolveStageNeighbors(profileId, view.stage, options.baseDir, view.raw)
           : { previous: null, next: null, available: [] };
       if (disposed || mine !== generation) return;
       options.onUpdate({ view, profiles, neighbors });
@@ -703,7 +703,7 @@ function WorkflowSidebarContent(props: {
 
   const sessionView = (): Tui | null => props.snapshot().view;
   const profiles = (): ProfileMetadata[] => props.snapshot().profiles;
-  const neighbors = (): PhaseNeighbors => props.snapshot().neighbors;
+  const neighbors = (): StageNeighbors => props.snapshot().neighbors;
 
   const theme = props.api.theme.current;
   const view = () => sessionView();
@@ -716,22 +716,22 @@ function WorkflowSidebarContent(props: {
     };
     return (themeColors[tone] as unknown as string) ?? (theme.text as unknown as string) ?? '#ccc';
   };
-  const previousPhase = () => neighbors().previous ?? view()?.prevPhase ?? null;
-  const nextPhase = () => neighbors().next ?? view()?.nextPhase ?? null;
+  const previousStage = () => neighbors().previous ?? view()?.prevStage ?? null;
+  const nextStage = () => neighbors().next ?? view()?.nextStage ?? null;
   const availableStages = () => {
-    const stages = neighbors().available;
-    return stages.length > 0
-      ? stages
+    const availableStages = neighbors().available;
+    return availableStages.length > 0
+      ? availableStages
           .map((stage) => {
             const marker =
               stage.status === 'allowed' ? '✓' : stage.status === 'blocked' ? '×' : '?';
             return `${stage.id} ${marker}${stage.blockedBy ? ` [${stage.blockedBy}]` : ''}`;
           })
           .join(', ')
-      : (nextPhase() ?? '—');
+      : (nextStage() ?? '—');
   };
   const title = () =>
-    view()?.phase ?? (view()?.raw.title ? compactValue(view()!.raw.title) : 'Workflow');
+    view()?.stage ?? (view()?.raw.title ? compactValue(view()!.raw.title) : 'Workflow');
   const panelPalette = createMemo(() =>
     buildPanelPalette(theme as unknown as Record<string, unknown>)
   );
@@ -781,7 +781,7 @@ function WorkflowSidebarContent(props: {
                 onMouseUp={() => props.section.openDetails(null)}
               >
                 <text fg={(theme.accent as unknown as string) ?? color('success')}>
-                  current: {current().phase}
+                  current: {current().stage}
                 </text>
                 <For each={current().gates}>
                   {(gate) => (

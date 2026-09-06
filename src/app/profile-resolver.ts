@@ -4,7 +4,7 @@ import { ProfileMetadataSchema } from '../schema/profile-metadata.ts';
 import type {
   ProfileMetadata,
   LoadedProfile,
-  PhaseDef,
+  StageDef,
   ResolvedSchema,
   ResolvedProfile,
 } from '../schema/types.ts';
@@ -257,7 +257,7 @@ export class ProfileResolver {
 
     return {
       source: `${chain[0].id}/${schemaFile}`,
-      phases: qualifyPhaseAgents(chain[0].id, currentSchema.phases),
+      stages: qualifyStageAgents(chain[0].id, currentSchema.stages),
       transitions: currentSchema.transitions,
       settings: currentSchema.settings,
       editingAgents: currentSchema.editingAgents,
@@ -265,7 +265,7 @@ export class ProfileResolver {
       requiredGates: currentSchema.requiredGates,
       taskControlAgents: currentSchema.taskControlAgents,
       actionGuards: currentSchema.actionGuards,
-      phaseAssignments: currentSchema.phaseAssignments,
+      stageAssignments: currentSchema.stageAssignments,
     };
   }
 
@@ -290,32 +290,20 @@ export class ProfileResolver {
  * `<profileId>/<name>` (see agent-names.ts). Qualifying at resolution keeps the
  * YAML readable while letting the runtime compare against the host's names.
  */
-function qualifyPhaseAgents(
+function qualifyStageAgents(
   profileId: string,
-  phases: Record<string, PhaseDef> | undefined
-): Record<string, PhaseDef> | undefined {
-  if (!phases) return phases;
-  const result: Record<string, PhaseDef> = {};
-  for (const [phaseId, def] of Object.entries(phases)) {
-    result[phaseId] = {
+  stages: Record<string, StageDef> | undefined
+): Record<string, StageDef> | undefined {
+  if (!stages) return stages;
+  const result: Record<string, StageDef> = {};
+  for (const [stageId, def] of Object.entries(stages)) {
+    result[stageId] = {
       ...def,
       ...(def.allowedAgents
         ? { allowedAgents: def.allowedAgents.map((a) => qualifyAgentName(profileId, a)) }
         : {}),
-      ...(def.stages
-        ? {
-            stages: def.stages.map((stage) => ({
-              ...stage,
-              ...(stage.allowedAgents
-                ? {
-                    allowedAgents: stage.allowedAgents.map((a) =>
-                      qualifyAgentName(profileId, a)
-                    ),
-                  }
-                : {}),
-            })),
-          }
-        : {}),
+      // Nested stages are stages: the same qualification applies at any depth.
+      ...(def.stages ? { stages: qualifyStageAgents(profileId, def.stages) } : {}),
     };
   }
   return result;

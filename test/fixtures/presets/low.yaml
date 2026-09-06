@@ -1,14 +1,14 @@
 # test/fixtures/presets/low.yaml
 # State machine config for low (minimal, no formal review).
 
-phases:
+stages:
   PLANNING: {}
 
   EXECUTION:
     dispatch:
       strategy: serial
     stages:
-      - id: dev
+      dev:
         allowedAgents:
           - code
         entryGuards: []

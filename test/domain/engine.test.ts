@@ -33,7 +33,7 @@ function makeSession(overrides: Partial<WorkflowSession> = {}): WorkflowSession 
 
 function makeConfig(overrides: Partial<EngineConfig> = {}): EngineConfig {
   return {
-    phaseAssignments: [],
+    stageAssignments: [],
     transitions: [],
     actionGuards: {},
     ...overrides,
@@ -41,21 +41,21 @@ function makeConfig(overrides: Partial<EngineConfig> = {}): EngineConfig {
 }
 
 describe('StateMachineEngine', () => {
-  it('derives PLANNING phase through engine', () => {
+  it('derives PLANNING stage through engine', () => {
     const config = makeConfig({
-      phaseAssignments: [{ id: 'always', priority: 0, condition: 'true', result: 'PLANNING' }],
+      stageAssignments: [{ id: 'always', priority: 0, condition: 'true', result: 'PLANNING' }],
     });
     const engine = new StateMachineEngine(config);
     const session = makeSession();
 
-    const phase = engine.derivePhase(session);
+    const stage = engine.deriveStage(session);
 
-    expect(phase).toBe('PLANNING');
+    expect(stage).toBe('PLANNING');
   });
 
-  it('derives EXECUTION phase from session with plan approval', () => {
+  it('derives EXECUTION stage from session with plan approval', () => {
     const config = makeConfig({
-      phaseAssignments: [
+      stageAssignments: [
         { id: 'p1', priority: 100, condition: "session.approved('plan')", result: 'EXECUTION' },
         { id: 'fallback', priority: 0, condition: 'true', result: 'PLANNING' },
       ],
@@ -65,9 +65,9 @@ describe('StateMachineEngine', () => {
       approvals: [{ type: 'plan', callId: 'c1', status: 'granted' }],
     });
 
-    const phase = engine.derivePhase(session);
+    const stage = engine.deriveStage(session);
 
-    expect(phase).toBe('EXECUTION');
+    expect(stage).toBe('EXECUTION');
   });
 
   it('canPerformAction returns allowed when no guards', () => {
@@ -153,13 +153,13 @@ describe('StateMachineEngine', () => {
     expect(result).toEqual({ allowed: true });
   });
 
-  // ─── Phase-level entry/exit guards ──────────────────────────────────────
+  // ─── Stage-level entry/exit guards ──────────────────────────────────────
 
-  it('canPerformAction blocks when phase-level entryGuard fails', () => {
+  it('canPerformAction blocks when stage-level entryGuard fails', () => {
     const engine = new StateMachineEngine(
       makeConfig({
-        phaseAssignments: [{ id: 'always', priority: 0, condition: 'true', result: 'PLANNING' }],
-        phaseLevelGuards: {
+        stageAssignments: [{ id: 'always', priority: 0, condition: 'true', result: 'PLANNING' }],
+        stageLevelGuards: {
           PLANNING: {
             entryGuards: { beginMutation: ['false'] },
           },
@@ -171,14 +171,14 @@ describe('StateMachineEngine', () => {
     const result = engine.canPerformAction(session, 'beginMutation');
 
     expect(result.allowed).toBe(false);
-    expect(result.reason).toContain('Phase-level guard failed');
+    expect(result.reason).toContain('Stage-level guard failed');
   });
 
-  it('canPerformAction passes when all phase-level guards pass', () => {
+  it('canPerformAction passes when all stage-level guards pass', () => {
     const engine = new StateMachineEngine(
       makeConfig({
-        phaseAssignments: [{ id: 'always', priority: 0, condition: 'true', result: 'PLANNING' }],
-        phaseLevelGuards: {
+        stageAssignments: [{ id: 'always', priority: 0, condition: 'true', result: 'PLANNING' }],
+        stageLevelGuards: {
           PLANNING: {
             entryGuards: { beginMutation: ['true'] },
           },
@@ -192,11 +192,11 @@ describe('StateMachineEngine', () => {
     expect(result.allowed).toBe(true);
   });
 
-  it('phase-level guards check exitGuards too', () => {
+  it('stage-level guards check exitGuards too', () => {
     const engine = new StateMachineEngine(
       makeConfig({
-        phaseAssignments: [{ id: 'always', priority: 0, condition: 'true', result: 'PLANNING' }],
-        phaseLevelGuards: {
+        stageAssignments: [{ id: 'always', priority: 0, condition: 'true', result: 'PLANNING' }],
+        stageLevelGuards: {
           PLANNING: {
             exitGuards: { beginMutation: ['false'] },
           },
@@ -210,11 +210,11 @@ describe('StateMachineEngine', () => {
     expect(result.allowed).toBe(false);
   });
 
-  it('phase-level guards only check current phase', () => {
+  it('stage-level guards only check current stage', () => {
     const engine = new StateMachineEngine(
       makeConfig({
-        phaseAssignments: [{ id: 'always', priority: 0, condition: 'true', result: 'PLANNING' }],
-        phaseLevelGuards: {
+        stageAssignments: [{ id: 'always', priority: 0, condition: 'true', result: 'PLANNING' }],
+        stageLevelGuards: {
           EXECUTION: {
             entryGuards: { beginMutation: ['false'] },
           },
@@ -223,18 +223,18 @@ describe('StateMachineEngine', () => {
     );
     const session = makeSession();
 
-    // Current phase is PLANNING, guards are for EXECUTION — allowed
+    // Current stage is PLANNING, guards are for EXECUTION — allowed
     const result = engine.canPerformAction(session, 'beginMutation');
 
     expect(result.allowed).toBe(true);
   });
 
-  it('phase-level guard blocks even when flat actionGuard allows', () => {
-    // phase-level blocks first, flat never reached
+  it('stage-level guard blocks even when flat actionGuard allows', () => {
+    // stage-level blocks first, flat never reached
     const engine = new StateMachineEngine(
       makeConfig({
-        phaseAssignments: [{ id: 'always', priority: 0, condition: 'true', result: 'PLANNING' }],
-        phaseLevelGuards: {
+        stageAssignments: [{ id: 'always', priority: 0, condition: 'true', result: 'PLANNING' }],
+        stageLevelGuards: {
           PLANNING: {
             entryGuards: { beginMutation: ['false'] },
           },
@@ -247,7 +247,7 @@ describe('StateMachineEngine', () => {
     const result = engine.canPerformAction(session, 'beginMutation');
 
     expect(result.allowed).toBe(false);
-    expect(result.reason).toContain('Phase-level guard failed');
+    expect(result.reason).toContain('Stage-level guard failed');
   });
 
   it('checkTransition allows valid transition through engine', () => {
@@ -270,7 +270,7 @@ describe('StateMachineEngine', () => {
     const result = engine.checkTransition('PLANNING', 'COMMIT');
 
     expect(result.allowed).toBe(false);
-    expect(result.reason).toBe('Illegal phase transition: PLANNING → COMMIT');
+    expect(result.reason).toBe('Illegal stage transition: PLANNING → COMMIT');
   });
 
   it('uses custom evaluateGuardFn when provided', () => {
@@ -289,7 +289,7 @@ describe('StateMachineEngine', () => {
     });
   });
 
-  it('tryApplyTransitions applies phaseOverride for matching transition', () => {
+  it('tryApplyTransitions applies stageOverride for matching transition', () => {
     const config = makeConfig({
       transitions: [{ from: 'PLANNING', to: 'EXECUTION', kind: 'auto' }],
     });
@@ -300,7 +300,7 @@ describe('StateMachineEngine', () => {
 
     expect(result.allowed).toBe(true);
     expect(result.applied).toBe(true);
-    expect(session.currentPhase).toBe('EXECUTION');
+    expect(session.currentStage).toBe('EXECUTION');
   });
 
   it('tryApplyTransitions does not apply when no outgoing transition matches', () => {
@@ -308,13 +308,13 @@ describe('StateMachineEngine', () => {
       transitions: [{ from: 'PLANNING', to: 'EXECUTION', kind: 'pass' }], // pass requires gate
     });
     const engine = new StateMachineEngine(config);
-    const session = makeSession({ currentPhase: 'planning' });
+    const session = makeSession({ currentStage: 'planning' });
 
     const result = engine.tryApplyTransitions(session);
 
     expect(result.allowed).toBe(false);
     expect(result.applied).toBe(false);
-    expect(session.currentPhase).toBe('planning');
+    expect(session.currentStage).toBe('planning');
   });
 
   it('tryApplyTransitions evaluates guard before applying transition', () => {
@@ -331,12 +331,12 @@ describe('StateMachineEngine', () => {
 
     expect(result.allowed).toBe(false);
     expect(result.applied).toBe(false);
-    expect(session.currentPhase).toBeUndefined();
+    expect(session.currentStage).toBeUndefined();
   });
 
-  // ─── Phase consistency tests (P2-4): derivePhase uses currentPhase, not phaseOverride ──
+  // ─── Stage consistency tests (P2-4): deriveStage uses currentStage, not stageOverride ──
 
-  it('tryApplyTransitions sets currentPhase (not phaseOverride) for matching transition', () => {
+  it('tryApplyTransitions sets currentStage (not stageOverride) for matching transition', () => {
     const config = makeConfig({
       transitions: [{ from: 'PLANNING', to: 'EXECUTION', kind: 'auto' }],
     });
@@ -345,34 +345,34 @@ describe('StateMachineEngine', () => {
 
     engine.tryApplyTransitions(session);
 
-    // After transition, currentPhase is set; phaseOverride was removed from schema
-    expect(session.currentPhase).toBe('EXECUTION');
-    expect((session as Record<string, unknown>).phaseOverride).toBeUndefined();
+    // After transition, currentStage is set; stageOverride was removed from schema
+    expect(session.currentStage).toBe('EXECUTION');
+    expect((session as Record<string, unknown>).stageOverride).toBeUndefined();
   });
 
-  it('derivePhase ignores phaseOverride (dead field, never read)', () => {
+  it('deriveStage ignores stageOverride (dead field, never read)', () => {
     const config = makeConfig({
-      phaseAssignments: [{ id: 'always', priority: 0, condition: 'true', result: 'PLANNING' }],
+      stageAssignments: [{ id: 'always', priority: 0, condition: 'true', result: 'PLANNING' }],
     });
     const engine = new StateMachineEngine(config);
-    // phaseOverride on the session object has no effect on derivePhase
-    const session = makeSession({ phaseOverride: 'COMMIT' as never });
+    // stageOverride on the session object has no effect on deriveStage
+    const session = makeSession({ stageOverride: 'COMMIT' as never });
 
-    // derivePhase evaluates rules — rules say true -> PLANNING
-    const phase = engine.derivePhase(session);
-    expect(phase).toBe('PLANNING');
+    // deriveStage evaluates rules — rules say true -> PLANNING
+    const stage = engine.deriveStage(session);
+    expect(stage).toBe('PLANNING');
   });
 
-  it('derivePhase evaluates rules when loading session from storage', () => {
+  it('deriveStage evaluates rules when loading session from storage', () => {
     const config = makeConfig({
-      phaseAssignments: [{ id: 'always', priority: 0, condition: 'true', result: 'PLANNING' }],
+      stageAssignments: [{ id: 'always', priority: 0, condition: 'true', result: 'PLANNING' }],
     });
     const engine = new StateMachineEngine(config);
-    // Session has currentPhase set, but derivePhase evaluates rules
+    // Session has currentStage set, but deriveStage evaluates rules
     const session = makeSession();
 
-    const phase = engine.derivePhase(session);
-    expect(phase).toBe('PLANNING');
+    const stage = engine.deriveStage(session);
+    expect(stage).toBe('PLANNING');
   });
 
   it('tryApplyTransitions does NOT re-execute transition effects on reload', () => {
@@ -388,16 +388,16 @@ describe('StateMachineEngine', () => {
     });
     const engine = new StateMachineEngine(config);
 
-    // Session that already has currentPhase=EXECUTION (simulating reload)
+    // Session that already has currentStage=EXECUTION (simulating reload)
     const session = makeSession({
-      currentPhase: 'EXECUTION',
+      currentStage: 'EXECUTION',
       retryBudgets: { 'task-1': { attempts: 0, maximum: 3 } },
     });
 
-    // tryApplyTransitions only scans transitions from the DERIVED phase.
-    // If derivePhase returns a different phase than currentPhase, it doesn't mean
-    // effects are re-executed — transitions are checked from the derived phase.
-    // derivePhase evaluates rules; with no rules, it falls back to currentPhase 'EXECUTION'.
+    // tryApplyTransitions only scans transitions from the DERIVED stage.
+    // If deriveStage returns a different stage than currentStage, it doesn't mean
+    // effects are re-executed — transitions are checked from the derived stage.
+    // deriveStage evaluates rules; with no rules, it falls back to currentStage 'EXECUTION'.
     const result = engine.tryApplyTransitions(session);
     // No outgoing transitions from EXECUTION in this config
     expect(result.applied).toBe(false);
@@ -425,6 +425,6 @@ describe('StateMachineEngine', () => {
 
     expect(result.allowed).toBe(true);
     expect(result.applied).toBe(true);
-    expect(session.currentPhase).toBe('EXECUTION');
+    expect(session.currentStage).toBe('EXECUTION');
   });
 });

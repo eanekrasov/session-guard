@@ -133,7 +133,7 @@ describe('sidebar-state: проводка плагина', () => {
       JSON.stringify({
         schemaVersion: 1,
         sessionId: 'ses_root',
-        currentPhase: 'code',
+        currentStage: 'code',
         gates: { invariants: 'pending', review: 'pending', qa: 'pending' },
         processedEventIds: ['evt_1', 'evt_2'],
       })
@@ -174,7 +174,7 @@ describe('sidebar-state: проводка плагина', () => {
     };
     // Устанавливаем lastDetails вручную, как это делает SidebarContent
     const initialMessage = [
-      'currentPhase: "code"',
+      'currentStage: "code"',
       'rootSessionID: ses_root',
       'processedEventIds: 2',
     ].join('\n');
@@ -194,7 +194,7 @@ describe('sidebar-state: проводка плагина', () => {
 
     command.run();
     expect(alerts.at(-1)!.title).toContain('full state');
-    expect(alerts.at(-1)!.message).toContain('currentPhase: "code"');
+    expect(alerts.at(-1)!.message).toContain('currentStage: "code"');
     expect(alerts.at(-1)!.message).toContain('processedEventIds: 2');
 
     await section.onSession('ses_root');
@@ -205,7 +205,7 @@ describe('sidebar-state: проводка плагина', () => {
     command.run();
     const last = alerts.at(-1)!;
     expect(last.title).toContain('full state');
-    expect(last.message).toContain('currentPhase: "code"');
+    expect(last.message).toContain('currentStage: "code"');
     expect(last.message).toContain('processedEventIds: 2');
   });
 });
@@ -213,7 +213,7 @@ describe('sidebar-state: проводка плагина', () => {
 describe('sidebar-state: onSession резолвит root-сессию', () => {
   test('корневая сессия с валидным файлом — activeRoot проставляется', async () => {
     enterProject();
-    writeState('ses_root', stateJson({ currentPhase: 'code' }));
+    writeState('ses_root', stateJson({ currentStage: 'code' }));
     const section = createStateSection(makeApi({}), projectDir!);
     await section.onSession('ses_root');
     expect(section.getActiveRoot()).toBe('ses_root');
@@ -221,7 +221,7 @@ describe('sidebar-state: onSession резолвит root-сессию', () => {
 
   test('дочерняя сессия — activeRoot указывает на корень', async () => {
     enterProject();
-    writeState('ses_root', stateJson({ currentPhase: 'planning' }));
+    writeState('ses_root', stateJson({ currentStage: 'planning' }));
     const section = createStateSection(makeApi({ ses_child: 'ses_root' }), projectDir!);
     await section.onSession('ses_child');
     expect(await until(() => section.getActiveRoot() === 'ses_root')).toBeGreaterThanOrEqual(0);
@@ -257,8 +257,8 @@ describe('sidebar-state: onSession резолвит root-сессию', () => {
 
   test('смена сессии обновляет activeRoot', async () => {
     enterProject();
-    writeState('ses_code', stateJson({ currentPhase: 'code' }));
-    writeState('ses_commit', stateJson({ currentPhase: 'commit' }));
+    writeState('ses_code', stateJson({ currentStage: 'code' }));
+    writeState('ses_commit', stateJson({ currentStage: 'commit' }));
     const section = createStateSection(makeApi({}), projectDir!);
     await section.onSession('ses_code');
     expect(section.getActiveRoot()).toBe('ses_code');
@@ -296,7 +296,7 @@ describe('sidebar-state: видимость секции', () => {
 describe('sidebar-state: coordinator событий', () => {
   test('coalesces multiple refresh requests into one snapshot update', async () => {
     enterProject();
-    writeState('ses_root', stateJson({ currentPhase: 'code' }));
+    writeState('ses_root', stateJson({ currentStage: 'code' }));
     const section = createStateSection(makeApi({}), projectDir!);
     const snapshots: Array<{ view: unknown }> = [];
     const coordinator = createSessionGuardCoordinator({
@@ -311,13 +311,13 @@ describe('sidebar-state: coordinator событий', () => {
     coordinator.refresh();
 
     expect(await until(() => snapshots.length === 1, 1000)).toBeGreaterThanOrEqual(0);
-    expect((snapshots[0]!.view as { phase?: string }).phase).toBe('code');
+    expect((snapshots[0]!.view as { stage?: string }).stage).toBe('code');
     coordinator.dispose();
   });
 
   test('dispose cancels a pending debounced refresh', async () => {
     enterProject();
-    writeState('ses_root', stateJson({ currentPhase: 'code' }));
+    writeState('ses_root', stateJson({ currentStage: 'code' }));
     const section = createStateSection(makeApi({}), projectDir!);
     let updates = 0;
     const coordinator = createSessionGuardCoordinator({
@@ -338,21 +338,21 @@ describe('sidebar-state: coordinator событий', () => {
 
   test('drops a stale snapshot after switching sessions during an async load', async () => {
     enterProject();
-    writeState('ses_slow', stateJson({ currentPhase: 'planning' }));
-    writeState('ses_fast', stateJson({ currentPhase: 'code' }));
+    writeState('ses_slow', stateJson({ currentStage: 'planning' }));
+    writeState('ses_fast', stateJson({ currentStage: 'code' }));
     const api = makeApi({});
     api.client.session.get = async ({ sessionID }: { sessionID: string }) => {
       if (sessionID === 'ses_slow') await new Promise((resolve) => setTimeout(resolve, 220));
       return { data: { id: sessionID } };
     };
     const section = createStateSection(api, projectDir!);
-    const phases: string[] = [];
+    const stages: string[] = [];
     const coordinator = createSessionGuardCoordinator({
       section,
       api,
       baseDir: projectDir!,
       onUpdate: ({ view }) => {
-        if (view !== null) phases.push(view.phase);
+        if (view !== null) stages.push(view.stage);
       },
     });
 
@@ -360,8 +360,8 @@ describe('sidebar-state: coordinator событий', () => {
     await new Promise((resolve) => setTimeout(resolve, 180));
     coordinator.setSession('ses_fast');
 
-    expect(await until(() => phases.includes('code'), 1500)).toBeGreaterThanOrEqual(0);
-    expect(phases).not.toContain('planning');
+    expect(await until(() => stages.includes('code'), 1500)).toBeGreaterThanOrEqual(0);
+    expect(stages).not.toContain('planning');
     coordinator.dispose();
   });
 });

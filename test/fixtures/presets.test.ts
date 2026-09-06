@@ -8,7 +8,7 @@ import { ProfileSchemaSchema } from '../../src/schema/profile-schema.ts';
 const FIXTURES_DIR = resolve(import.meta.dirname, 'presets');
 
 interface PresetsConfig {
-  phases: string[];
+  stages: string[];
 }
 
 function loadPresetsConfig(): PresetsConfig {
@@ -17,20 +17,20 @@ function loadPresetsConfig(): PresetsConfig {
 }
 
 describe('default.yaml (PresetsConfig)', () => {
-  it('loads 5 phases', () => {
+  it('loads 5 stages', () => {
     const config = loadPresetsConfig();
-    expect(config.phases).toEqual(['PLANNING', 'TASKS_READY', 'EXECUTION', 'COMMIT', 'DONE']);
+    expect(config.stages).toEqual(['PLANNING', 'TASKS_READY', 'EXECUTION', 'COMMIT', 'DONE']);
   });
 });
 
 describe('high.yaml (ProfileSchema)', () => {
-  it('loads with full feature workflow phases', async () => {
+  it('loads with full feature workflow stages', async () => {
     const schema = await loadSchemaFromPath(FIXTURES_DIR, 'high.yaml');
     expect(schema).not.toBeNull();
-    expect(Object.keys(schema!.phases!)).toContain('PLANNING');
-    expect(Object.keys(schema!.phases!)).toContain('EXECUTION');
-    expect(Object.keys(schema!.phases!)).toContain('COMMIT');
-    expect(Object.keys(schema!.phases!)).toContain('DONE');
+    expect(Object.keys(schema!.stages!)).toContain('PLANNING');
+    expect(Object.keys(schema!.stages!)).toContain('EXECUTION');
+    expect(Object.keys(schema!.stages!)).toContain('COMMIT');
+    expect(Object.keys(schema!.stages!)).toContain('DONE');
     expect(schema!.transitions).toBeDefined();
     expect(schema!.transitions!.length).toBeGreaterThan(0);
   });
@@ -43,7 +43,7 @@ describe('high.yaml (ProfileSchema)', () => {
 });
 
 describe('medium.yaml', () => {
-  it('loads with phases and transitions', async () => {
+  it('loads with stages and transitions', async () => {
     const schema = await loadSchemaFromPath(FIXTURES_DIR, 'medium.yaml');
     expect(schema).not.toBeNull();
     expect(schema!.transitions).toBeDefined();
@@ -51,9 +51,9 @@ describe('medium.yaml', () => {
 });
 
 describe('low.yaml', () => {
-  it('has no TASKS_READY phase', async () => {
+  it('has no TASKS_READY stage', async () => {
     const schema = await loadSchemaFromPath(FIXTURES_DIR, 'low.yaml');
-    expect(Object.keys(schema!.phases!)).not.toContain('TASKS_READY');
+    expect(Object.keys(schema!.stages!)).not.toContain('TASKS_READY');
   });
 
   it('has no actionGuards', async () => {

@@ -44,7 +44,13 @@ function resolveMutationRun(session: WorkflowSession): LoopRun | null {
 
 /**
  * Begin a new mutation. Throws when an active non-expired operation exists.
- * Resets verifications and sets invariants gate to pending.
+ *
+ * Every verdict about the work is cleared: verifications, the session's
+ * invariants gate, and the gates of the task being edited. A gate is evidence
+ * about the code as it was, and an edit is exactly what makes that code no
+ * longer the code. Editing twice inside one stage is ordinary — an architect
+ * reworking a plan with the operator does it every time — so each edit must
+ * start from no verdicts rather than inherit the last one's.
  */
 export function beginMutation(
   session: WorkflowSession,
@@ -78,6 +84,7 @@ export function beginMutation(
 
   session.verifications = [];
   setGateStatus(session, 'invariants', 'pending');
+  run.gates = {};
 }
 
 /**

@@ -1,5 +1,5 @@
 extends: "base/state-machine.yaml"
-phases:
+stages:
   PLANNING:
     dispatch:
       strategy: serial
@@ -9,7 +9,7 @@ phases:
       strategy: serial_with_overlap
       maxConcurrent: 2
     stages:
-      - id: build
+      build:
         allowedAgents: ["code"]
         exitGuards:
           - "session.activeMutation?.outputReady == true"

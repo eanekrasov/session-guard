@@ -54,7 +54,7 @@ function createSession(): WorkflowSession {
     verifications: [],
     baselineHashes: [],
     changedFiles: [],
-    currentPhase: 'planning',
+    currentStage: 'planning',
     invariantViolations: [],
     consentedCallIDs: [],
   };
@@ -64,7 +64,7 @@ function createEngine(): StateMachineEngine {
   return new StateMachineEngine({
     transitions: SCHEMA_TRANSITIONS,
     actionGuards: { beginMutation: "session.approved('plan') || session.revision == 0" },
-    phases: {},
+    stages: {},
   });
 }
 
@@ -75,10 +75,10 @@ function createEngine(): StateMachineEngine {
 function tryAndLog(
   engine: StateMachineEngine,
   session: WorkflowSession,
-  phase: string
+  stage: string
 ): { applied: boolean; to?: string; reason?: string } {
-  const outgoing = SCHEMA_TRANSITIONS.filter((t) => t.from === phase);
-  console.log(`\n  ── ${phase}: ${outgoing.length} outgoing transitions ──`);
+  const outgoing = SCHEMA_TRANSITIONS.filter((t) => t.from === stage);
+  console.log(`\n  ── ${stage}: ${outgoing.length} outgoing transitions ──`);
 
   for (const t of outgoing) {
     // Ручной checkTransition через engine
@@ -106,11 +106,11 @@ function tryAndLog(
 
   const result = engine.tryApplyTransitions(session);
   if (result.applied) {
-    console.log(`  ✅ Applied: ${phase} → ${session.currentPhase}`);
+    console.log(`  ✅ Applied: ${stage} → ${session.currentStage}`);
   } else {
     console.log(`  ⏳ Stuck: ${result.reason ?? 'no match'}`);
   }
-  return { applied: result.applied ?? false, to: session.currentPhase, reason: result.reason };
+  return { applied: result.applied ?? false, to: session.currentStage, reason: result.reason };
 }
 
 // ─── Тест: полный проход с диагностикой ─────────────────────────────────────────
@@ -133,17 +133,17 @@ describe('Пошаговый разбор lifecycle', () => {
 
     // tryApplyTransitions: 1 outgoing transition
     //   planning → tasks_ready: consent=plan → skip (hasConsent=false)
-    let r = tryAndLog(engine, session, session.currentPhase);
+    let r = tryAndLog(engine, session, session.currentStage);
     expect(r.applied).toBe(false);
-    expect(session.currentPhase).toBe('planning');
+    expect(session.currentStage).toBe('planning');
 
     // ── Шаг 2: Planning → установка refs.plan без approve ──────────────
     console.log('\n═══ Шаг 2: Устанавливаем refs.plan, НО без approve ═══');
     session.refs.plan = '/path/to/plan.md';
 
-    r = tryAndLog(engine, session, session.currentPhase);
+    r = tryAndLog(engine, session, session.currentStage);
     expect(r.applied).toBe(false); // consent:plan всё ещё не даёт
-    expect(session.currentPhase).toBe('planning');
+    expect(session.currentStage).toBe('planning');
     // guard "session.refs.plan != null" УЖЕ прошёл
     // но consent:plan скипает транзицию
 
@@ -154,13 +154,13 @@ describe('Пошаговый разбор lifecycle', () => {
       `  approvals=[{type:'${session.approvals[0]?.type}', status:'${session.approvals[0]?.status}'}]`
     );
 
-    r = tryAndLog(engine, session, session.currentPhase);
+    r = tryAndLog(engine, session, session.currentStage);
     expect(r.applied).toBe(true);
-    expect(session.currentPhase).toBe('tasks_ready');
+    expect(session.currentStage).toBe('tasks_ready');
 
     // ── Шаг 4: tasks_ready ─────────────────────────────────────────────
     console.log('\n═══ Шаг 4: tasks_ready — без tasks ═══');
-    r = tryAndLog(engine, session, session.currentPhase);
+    r = tryAndLog(engine, session, session.currentStage);
     expect(r.applied).toBe(false);
     // guard: hasPendingTasks() → false → stuck
 
@@ -176,13 +176,13 @@ describe('Пошаговый разбор lifecycle', () => {
       `  tasks.length=${session.tasks.implementation.length}, tasks[0].status=${session.tasks.implementation[0].status}`
     );
 
-    r = tryAndLog(engine, session, session.currentPhase);
+    r = tryAndLog(engine, session, session.currentStage);
     expect(r.applied).toBe(true);
-    expect(session.currentPhase).toBe('code');
+    expect(session.currentStage).toBe('code');
 
     // ── Шаг 6: code — без gate ─────────────────────────────────────────
     console.log('\n═══ Шаг 6: code — invariants pending ═══');
-    r = tryAndLog(engine, session, session.currentPhase);
+    r = tryAndLog(engine, session, session.currentStage);
     expect(r.applied).toBe(false);
     // guard: session.gates.invariants == 'passed' → false (pending)
 
@@ -190,37 +190,37 @@ describe('Пошаговый разбор lifecycle', () => {
     console.log('\n═══ Шаг 7: invariants passed → переход в review ═══');
     setGateStatus(session, 'invariants', 'passed');
 
-    r = tryAndLog(engine, session, session.currentPhase);
+    r = tryAndLog(engine, session, session.currentStage);
     expect(r.applied).toBe(true);
-    expect(session.currentPhase).toBe('review');
+    expect(session.currentStage).toBe('review');
 
     // ── Шаг 8–9: review → qa → commit → done ───────────────────────────
     console.log('\n═══ Шаг 8: review → qa ═══');
     setGateStatus(session, 'review', 'passed');
-    r = tryAndLog(engine, session, session.currentPhase);
+    r = tryAndLog(engine, session, session.currentStage);
     expect(r.applied).toBe(true);
-    expect(session.currentPhase).toBe('qa');
+    expect(session.currentStage).toBe('qa');
 
     console.log('\n═══ Шаг 9: qa → commit ═══');
     setGateStatus(session, 'qa', 'passed');
-    r = tryAndLog(engine, session, session.currentPhase);
+    r = tryAndLog(engine, session, session.currentStage);
     expect(r.applied).toBe(true);
-    expect(session.currentPhase).toBe('commit');
+    expect(session.currentStage).toBe('commit');
     // effects: [approve: commit]
     expect(session.approvals.some((a) => a.type === 'commit' && a.status === 'granted')).toBe(true);
 
     console.log('\n═══ Шаг 10: commit → done ═══');
-    r = tryAndLog(engine, session, session.currentPhase);
+    r = tryAndLog(engine, session, session.currentStage);
     expect(r.applied).toBe(false); // нет deliveryReceipt
-    expect(session.currentPhase).toBe('commit');
+    expect(session.currentStage).toBe('commit');
 
     session.deliveryReceipt = 'abc123';
-    r = tryAndLog(engine, session, session.currentPhase);
+    r = tryAndLog(engine, session, session.currentStage);
     expect(r.applied).toBe(true);
-    expect(session.currentPhase).toBe('done');
+    expect(session.currentStage).toBe('done');
 
     console.log('\n═══ Шаг 11: done — терминальная ═══');
-    r = tryAndLog(engine, session, session.currentPhase);
+    r = tryAndLog(engine, session, session.currentStage);
     expect(r.applied).toBe(false);
     // done: нет исходящих транзиций
 

@@ -86,14 +86,14 @@ async function loadSession(
 
 function taskCycle(): Pick<
   import('../../src/session/session-schema.ts').WorkflowSession,
-  'tasks' | 'loopRuns' | 'currentPhase'
+  'tasks' | 'loopRuns' | 'currentStage'
 > {
   return {
     tasks: {
       implementation: [{ id: 'task-1', path: 'src/task-1.ts', status: 'pending' }],
     },
     loopRuns: {},
-    currentPhase: 'EXECUTION',
+    currentStage: 'EXECUTION',
   };
 }
 
@@ -102,7 +102,7 @@ function activeOperation(
   agent = 'test'
 ): Pick<
   import('../../src/session/session-schema.ts').WorkflowSession,
-  'tasks' | 'loopRuns' | 'activeOperations' | 'currentPhase'
+  'tasks' | 'loopRuns' | 'activeOperations' | 'currentStage'
 > {
   return {
     tasks: {
@@ -128,7 +128,7 @@ function activeOperation(
         status: 'running',
       },
     },
-    currentPhase: 'EXECUTION',
+    currentStage: 'EXECUTION',
   };
 }
 
@@ -145,15 +145,15 @@ function setExecutableProfilesDir(): void {
   writeFileSync(
     join(profileDir, 'state-machine.yaml'),
     [
-      'phases:',
+      'stages:',
       '  EXECUTION:',
       '    loop: implementation',
       '    dispatch:',
       '      strategy: serial',
       '    stages:',
-      '      - id: dev',
+      '      dev:',
       "        allowedAgents: ['code', 'my-agent', 'fallback-agent']",
-      'phaseAssignments:',
+      'stageAssignments:',
       '  - id: execution',
       '    priority: 1',
       "    condition: 'true'",
@@ -167,7 +167,10 @@ function setExecutableProfilesDir(): void {
 // ─── handleWorkflowResult ────────────────────────────────────────────────────
 
 describe('handleWorkflowResult (via handleToolAfter)', () => {
-  test('adds verification to session when output contains <workflow-result>', async () => {
+  test('a read whose content holds the marker verifies nothing', async () => {
+    // The marker is plain text. It appears in the documentation that defines
+    // it, in a grep hit, in a log. Reading such a file must not close a gate —
+    // a verdict counts only when a dispatched verifier returns it.
     const hooks = await createRuntime();
     const sessionId = 'wf-result-1';
     await createTestSession(sessionId);
@@ -189,6 +192,27 @@ describe('handleWorkflowResult (via handleToolAfter)', () => {
 
     const session = await loadSession(sessionId);
     expect(session).not.toBeNull();
+    expect(session!.verifications.length, 'a file read was counted as a verification').toBe(0);
+  });
+
+  test('a dispatched verifier’s result is recorded', async () => {
+    const hooks = await createRuntime();
+    const sessionId = 'wf-result-1b';
+    await createTestSession(sessionId);
+
+    const output = {
+      title: 'test',
+      output:
+        '<workflow-result>{"stage":"review","status":"pass","summary":"All checks passed","evidence":["check-1"]}</workflow-result>',
+      metadata: {},
+    };
+
+    await hooks['tool.execute.after']!(
+      { tool: 'task', sessionID: sessionId, callID: 'call-wf-1b', args: { subagent_type: 'review' } },
+      output
+    );
+
+    const session = await loadSession(sessionId);
     expect(session!.verifications.length).toBe(1);
     expect(session!.verifications[0].stage).toBe('review');
     expect(session!.verifications[0].status).toBe('confirmed');

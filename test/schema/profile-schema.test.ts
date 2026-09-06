@@ -33,7 +33,7 @@ describe('ProfileSchemaSchema', () => {
 
     it('accepts schema without actionGuards', () => {
       const input = {
-        phases: {
+        stages: {
           PLANNING: {},
         },
       };
@@ -41,33 +41,32 @@ describe('ProfileSchemaSchema', () => {
       const result = ProfileSchemaSchema.parse(input);
 
       expect(result.actionGuards).toBeUndefined();
-      expect(result.phases).toBeDefined();
+      expect(result.stages).toBeDefined();
     });
   });
 
   describe('exitGuards', () => {
     it('accepts multiple exitGuards with logical operators', () => {
       const input = {
-        phases: {
+        stages: {
           PLANNING: {
             dispatch: { strategy: 'serial' },
-            stages: [
-              {
-                id: 'plan',
+            stages: {
+              plan: {
                 exitGuards: [
                   'session.activeMutation?.outputReady == true',
                   "session.testStatus['build'] == 'pass'",
                 ],
               },
-            ],
+            },
           },
         },
       };
 
       const result = ProfileSchemaSchema.parse(input);
-      const stages = result.phases!.PLANNING.stages!;
+      const nested = result.stages!.PLANNING.stages!;
 
-      expect(stages[0].exitGuards).toEqual([
+      expect(nested.plan!.exitGuards).toEqual([
         'session.activeMutation?.outputReady == true',
         "session.testStatus['build'] == 'pass'",
       ]);
@@ -77,40 +76,40 @@ describe('ProfileSchemaSchema', () => {
   describe('task cycles', () => {
     it('parses declarative loop metadata', () => {
       const parsed = ProfileSchemaSchema.parse({
-        phases: {
+        stages: {
           execution: {
             loop: 'implementation',
             retryBudget: { maximum: 3 },
             dispatch: { strategy: 'parallel', maxConcurrent: 3 },
-            stages: [{ id: 'dev' }, { id: 'review' }, { id: 'qa' }],
+            stages: { dev: {}, review: {}, qa: {} },
             exitGuards: ['allTasksCompleted()'],
           },
         },
         transitions: [{ from: 'execution', to: 'done', onFailure: 'terminal' }],
       });
 
-      expect(parsed.phases!.execution.loop).toBe('implementation');
-      expect(parsed.phases!.execution.retryBudget!.maximum).toBe(3);
+      expect(parsed.stages!.execution.loop).toBe('implementation');
+      expect(parsed.stages!.execution.retryBudget!.maximum).toBe(3);
 
       expect(() =>
         ProfileSchemaSchema.parse({
-          phases: { execution: { loop: 'implementation', retryBudget: { maximum: 0 } } },
+          stages: { execution: { loop: 'implementation', retryBudget: { maximum: 0 } } },
         })
       ).toThrow();
-      expect(parsed.phases!.execution.exitGuards).toEqual(['allTasksCompleted()']);
+      expect(parsed.stages!.execution.exitGuards).toEqual(['allTasksCompleted()']);
       expect(parsed.transitions![0].onFailure).toBe('terminal');
     });
 
     it('allows serial dispatch only without maxConcurrent', () => {
       expect(
         ProfileSchemaSchema.safeParse({
-          phases: { execution: { dispatch: { strategy: 'serial' } } },
+          stages: { execution: { dispatch: { strategy: 'serial' } } },
         }).success
       ).toBe(true);
 
       expect(
         ProfileSchemaSchema.safeParse({
-          phases: { execution: { dispatch: { strategy: 'serial', maxConcurrent: 1 } } },
+          stages: { execution: { dispatch: { strategy: 'serial', maxConcurrent: 1 } } },
         }).success
       ).toBe(false);
     });
@@ -121,14 +120,14 @@ describe('ProfileSchemaSchema', () => {
         for (const maxConcurrent of [undefined, 0, 1.5]) {
           expect(
             ProfileSchemaSchema.safeParse({
-              phases: { execution: { dispatch: { strategy, maxConcurrent } } },
+              stages: { execution: { dispatch: { strategy, maxConcurrent } } },
             }).success
           ).toBe(false);
         }
 
         expect(
           ProfileSchemaSchema.safeParse({
-            phases: { execution: { dispatch: { strategy, maxConcurrent: 2 } } },
+            stages: { execution: { dispatch: { strategy, maxConcurrent: 2 } } },
           }).success
         ).toBe(true);
       }
@@ -137,28 +136,28 @@ describe('ProfileSchemaSchema', () => {
     it('rejects unknown dispatch strategies', () => {
       expect(
         ProfileSchemaSchema.safeParse({
-          phases: { execution: { dispatch: { strategy: 'unordered' } } },
+          stages: { execution: { dispatch: { strategy: 'unordered' } } },
         }).success
       ).toBe(false);
     });
 
     it('rejects literal task instance loop keys', () => {
       expect(
-        ProfileSchemaSchema.safeParse({ phases: { execution: { loop: 'task-17' } } }).success
+        ProfileSchemaSchema.safeParse({ stages: { execution: { loop: 'task-17' } } }).success
       ).toBe(false);
     });
 
     it('allows $currentTask.id as a loop source', () => {
       expect(
         ProfileSchemaSchema.safeParse({
-          phases: { execution: { loop: '$currentTask.id' } },
+          stages: { execution: { loop: '$currentTask.id' } },
         }).success
       ).toBe(true);
     });
 
-    it('allows each loop source in only one phase', () => {
+    it('allows each loop source in only one stage', () => {
       const result = ProfileSchemaSchema.safeParse({
-        phases: {
+        stages: {
           implementation: { loop: 'implementation' },
           verification: { loop: 'implementation' },
         },
@@ -166,7 +165,7 @@ describe('ProfileSchemaSchema', () => {
 
       expect(result.success).toBe(false);
       if (!result.success) {
-        expect(result.error.issues[0].path).toEqual(['phases', 'verification', 'loop']);
+        expect(result.error.issues[0].path).toEqual(['stages', 'verification', 'loop']);
       }
     });
   });
@@ -239,10 +238,10 @@ describe('ProfileSchemaSchema', () => {
     });
   });
 
-  describe('phaseAssignments', () => {
-    it('accepts phaseAssignments with id, priority, condition, result', () => {
+  describe('stageAssignments', () => {
+    it('accepts stageAssignments with id, priority, condition, result', () => {
       const input = {
-        phaseAssignments: [
+        stageAssignments: [
           {
             id: 'rule-1',
             priority: 10,
@@ -254,11 +253,11 @@ describe('ProfileSchemaSchema', () => {
 
       const result = ProfileSchemaSchema.parse(input);
 
-      expect(result.phaseAssignments).toHaveLength(1);
-      expect(result.phaseAssignments![0].id).toBe('rule-1');
-      expect(result.phaseAssignments![0].priority).toBe(10);
-      expect(result.phaseAssignments![0].condition).toBe('session.tasks.length > 0');
-      expect(result.phaseAssignments![0].result).toBe('EXECUTION');
+      expect(result.stageAssignments).toHaveLength(1);
+      expect(result.stageAssignments![0].id).toBe('rule-1');
+      expect(result.stageAssignments![0].priority).toBe(10);
+      expect(result.stageAssignments![0].condition).toBe('session.tasks.length > 0');
+      expect(result.stageAssignments![0].result).toBe('EXECUTION');
     });
   });
 
@@ -291,7 +290,7 @@ describe('ProfileSchemaSchema', () => {
 
     it('accepts schema without extends', () => {
       const input = {
-        phases: { PLANNING: {} },
+        stages: { PLANNING: {} },
       };
 
       const result = ProfileSchemaSchema.parse(input);

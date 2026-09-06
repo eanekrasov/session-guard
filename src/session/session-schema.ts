@@ -40,6 +40,15 @@ export const ActiveOperationSchema = z.object({
   startedAt: z.string().min(1),
   interruptedAt: z.string().optional(),
   result: z.enum(['output_ready']).optional(),
+  /**
+   * Which occupancy of the stage this call belongs to.
+   *
+   * Two verifiers work one stage at once. When the first verdict moves the
+   * task, the second is still in flight — and it is a verdict about work the
+   * task has already left. Stamping the round is what lets a late result be
+   * recognised as belonging to a round that is over.
+   */
+  round: z.number().int().min(0).default(0),
 });
 
 export const RetryBudgetSchema = z.object({
@@ -82,6 +91,17 @@ export const LoopRunSchema = z.object({
   ),
   stage: z.string().min(1),
   status: z.enum(LOOP_RUN_STATUS),
+  /**
+   * Gates closed for this task, by gate id.
+   *
+   * A gate is evidence about the work it was produced for. Inside a loop the
+   * work is one task, so its gates live on its run: with a parallel dispatch a
+   * session-wide gate would let the first task to pass review close the stage
+   * on behalf of every other task.
+   */
+  gates: z.record(z.enum(GATE_STATUS)).default({}),
+  /** Increments every time the task enters a stage. See ActiveOperation.round. */
+  round: z.number().int().min(0).default(0),
 });
 
 const TasksSchema = z.record(z.array(MutationTaskSchema)).superRefine((taskLists, context) => {
@@ -194,7 +214,7 @@ export const WorkflowSessionSchema = z
     verifications: z.array(VerificationSchema).default([]),
     baselineHashes: z.array(z.string()).default([]),
     changedFiles: z.array(z.string()).default([]),
-    currentPhase: z.string().default('planning'),
+    currentStage: z.string().default('planning'),
     invariantViolations: z.array(InvariantViolationRecordSchema).default([]),
     consentedCallIDs: z.array(z.string()).default([]),
   })

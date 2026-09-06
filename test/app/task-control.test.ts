@@ -55,13 +55,13 @@ async function writeProfile(taskControlAgents?: string[]): Promise<void> {
   await writeFile(
     join(profileDirectory, 'cycle.yaml'),
     [
-      'phases:',
+      'stages:',
       '  EXECUTION:',
       '    loop: implementation',
       '    stages:',
-      '      - id: dev',
+      '      dev:',
       "        allowedAgents: ['code']",
-      'phaseAssignments:',
+      'stageAssignments:',
       '  - id: execution',
       '    priority: 1',
       "    condition: 'true'",

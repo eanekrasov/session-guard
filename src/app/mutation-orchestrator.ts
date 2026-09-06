@@ -3,6 +3,9 @@ import type { WorkflowSession } from '../session/session-schema.ts';
 import { WorkflowStore } from '../session/session-store.ts';
 import { StateMachineEngine, type EvaluateGuardFn, type EngineConfig } from '../domain/engine.ts';
 import { resolveConfig } from '../public-api.ts';
+import { compileWorkflow } from '../schema/compile-workflow.ts';
+import { mergeStages } from '../schema/schema-loader.ts';
+import { ProfileConfigurationError } from '../schema/types.ts';
 import { GuardEvaluator } from '../schema/guard-evaluator.ts';
 import type { ResolvedSchema } from '../schema/types.ts';
 import { SessionQueue } from './session-queue.ts';
@@ -35,12 +38,15 @@ export interface FinishMutationInput {
  * - actionGuards: concat + unique
  */
 export function mergeSchemasToEngineConfig(schemas: ResolvedSchema[]): EngineConfig {
-  const phaseAssignmentMap = new Map<string, import('../schema/types.ts').PhaseAssignmentRule>();
-  const phases: NonNullable<EngineConfig['phases']> = {};
+  const stageAssignmentMap = new Map<string, import('../schema/types.ts').StageAssignmentRule>();
+  // Same rule as schema inheritance: a later schema refines a stage rather than
+  // replacing it, so declaring a roster does not drop the loop and transitions
+  // declared alongside it.
+  let stages: NonNullable<EngineConfig['stages']> = {};
   for (const schema of schemas) {
-    Object.assign(phases, schema.phases ?? {});
-    for (const rule of schema.phaseAssignments ?? []) {
-      phaseAssignmentMap.set(rule.id, rule);
+    stages = (mergeStages(stages, schema.stages) ?? stages) as NonNullable<EngineConfig['stages']>;
+    for (const rule of schema.stageAssignments ?? []) {
+      stageAssignmentMap.set(rule.id, rule);
     }
   }
   const transitionsMap = new Map<string, NonNullable<ResolvedSchema['transitions']>[number]>();
@@ -73,8 +79,8 @@ export function mergeSchemasToEngineConfig(schemas: ResolvedSchema[]): EngineCon
   }
 
   return {
-    phases: Object.keys(phases).length > 0 ? phases : undefined,
-    phaseAssignments: Array.from(phaseAssignmentMap.values()),
+    stages: Object.keys(stages).length > 0 ? stages : undefined,
+    stageAssignments: Array.from(stageAssignmentMap.values()),
     transitions: Array.from(transitionsMap.values()),
     actionGuards: Object.keys(actionGuardMap).length > 0 ? actionGuardMap : undefined,
     requiredGates,
@@ -182,7 +188,7 @@ export async function processScopeAndInvariants(
 export class MutationOrchestrator {
   private engineCache = new Map<string, StateMachineEngine>();
   // callId → mutationInfo
-  private liveMutations = new Map<string, { rootSessionId: string; phaseBefore: string }>();
+  private liveMutations = new Map<string, { rootSessionId: string; stageBefore: string }>();
   private logNoop: LogFn;
   private readonly projectDir: string;
   private readonly client?: SessionClient;
@@ -227,7 +233,32 @@ export class MutationOrchestrator {
     });
     const resolved = await resolveConfig(profileId, profilesDir);
 
+    // Compile before running: a transition to a stage that does not exist, a
+    // gate no session carries, or a retry budget belonging to something other
+    // than the task are all defects in the file, and a defect in the file
+    // should stop the workflow at load rather than one silent guard at a time.
     const engineConfig = mergeSchemasToEngineConfig(resolved.schemas);
+
+    // Compile the merged workflow, not each file: a delta profile names stages
+    // its parent declares, and a file read alone would call every one of them
+    // unknown. What must hold is the schema the session actually runs.
+    const { errors } = compileWorkflow({
+      source: resolved.schemas.map((schema) => schema.source).join(' + '),
+      stages: engineConfig.stages,
+      transitions: engineConfig.transitions,
+      stageAssignments: engineConfig.stageAssignments,
+    });
+    if (errors.length > 0) {
+      await this.log('error', 'Profile schema failed to compile', {
+        profileId,
+        errors: errors.map((error) => `${error.path}: ${error.message}`),
+      });
+      throw new ProfileConfigurationError(
+        profileId,
+        resolved.schemas.map((schema) => schema.source).join(' + '),
+        errors
+      );
+    }
     const evaluateGuardFn: EvaluateGuardFn = (
       expression: string,
       session: object,
@@ -257,7 +288,7 @@ export class MutationOrchestrator {
 
   /**
    * Begin a mutation for a bash/write tool call. Guards via canPerformAction,
-   * then records the pre-mutation phase in liveMutations for later
+   * then records the pre-mutation stage in liveMutations for later
    * post-factum transition validation.
    */
   async beginMutation(
@@ -308,9 +339,9 @@ export class MutationOrchestrator {
         );
       }
 
-      // Save phase BEFORE mutation for post-mutation transition validation
-      const phaseBefore = session.currentPhase ?? 'planning';
-      this.liveMutations.set(input.callID, { rootSessionId: input.sessionID, phaseBefore });
+      // Save stage BEFORE mutation for post-mutation transition validation
+      const stageBefore = session.currentStage ?? 'planning';
+      this.liveMutations.set(input.callID, { rootSessionId: input.sessionID, stageBefore });
     });
   }
 
@@ -372,27 +403,27 @@ export class MutationOrchestrator {
         });
       }
 
-      // Post-factum transition validation: if phase changed, validate the transition
+      // Post-factum transition validation: if stage changed, validate the transition
       if (mutationInfo) {
         try {
           const engine = await this.resolveEngine(session.profileId);
-          const phaseAfter = session.currentPhase ?? 'planning';
+          const stageAfter = session.currentStage ?? 'planning';
 
-          if (phaseAfter !== mutationInfo.phaseBefore) {
+          if (stageAfter !== mutationInfo.stageBefore) {
             const validation = engine.checkTransition(
-              mutationInfo.phaseBefore,
-              phaseAfter,
+              mutationInfo.stageBefore,
+              stageAfter,
               session
             );
 
             if (!validation.allowed) {
               await this.log(
                 'warn',
-                'finishMutation: phase assignment changed without a direct transition',
+                'finishMutation: stage assignment changed without a direct transition',
                 {
                   sessionId: session.sessionId,
-                  from: mutationInfo.phaseBefore,
-                  to: phaseAfter,
+                  from: mutationInfo.stageBefore,
+                  to: stageAfter,
                   reason: validation.reason,
                 }
               );

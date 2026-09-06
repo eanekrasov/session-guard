@@ -1,6 +1,6 @@
 import { type GuardEvaluationContext, GuardEvaluator } from '../schema/guard-evaluator.ts';
 import type { TaskStatus, WorkflowSession } from '../session/session-schema.ts';
-import type { PhaseAssignmentRule, PhaseDef, TransitionDef } from '../schema/types.ts';
+import type { StageAssignmentRule, StageDef, TransitionDef } from '../schema/types.ts';
 import type { SessionFacts } from './session-facts.ts';
 import { toSessionFacts } from './session-facts.ts';
 import { bumpRetry } from '../session/helpers.ts';
@@ -8,16 +8,16 @@ import { approve } from './approvals.ts';
 
 // ─── Domain-specific type aliases ──────────────────────────────────────────────
 
-export type PhaseId = string;
+export type StageId = string;
 export type ActionId = string;
 export type { GateStatus, ApprovalStatus, TaskStatus } from '../session/session-schema.ts';
 
 // ─── Value interfaces ─────────────────────────────────────────────────────────
 
-export interface PhaseTransitionResult {
+export interface StageTransitionResult {
   allowed: boolean;
   reason?: string;
-  nextPhase?: PhaseId;
+  nextStage?: StageId;
 }
 
 export interface WorkflowResult {
@@ -39,7 +39,7 @@ export interface DispatchConfig {
   overlapRoles?: string[];
 }
 
-// ─── Stage-level config ───────────────────────────────────────────────────────
+// ─── Task-stage-level config ───────────────────────────────────────────────────────
 
 export interface TaskStageConfig {
   allowedAgents?: string[];
@@ -47,9 +47,9 @@ export interface TaskStageConfig {
   exitGuards?: string[];
 }
 
-// ─── Phase-level entry/exit guards keyed by action ────────────────────────────
+// ─── Stage-level entry/exit guards keyed by action ────────────────────────────
 
-export interface PhaseEntryExitGuards {
+export interface StageEntryExitGuards {
   entryGuards?: Partial<Record<ActionId, string[]>>;
   exitGuards?: Partial<Record<ActionId, string[]>>;
 }
@@ -57,13 +57,13 @@ export interface PhaseEntryExitGuards {
 // ─── Engine config ────────────────────────────────────────────────────────────
 
 export interface EngineConfig {
-  phases?: Record<string, PhaseDef>;
-  phaseAssignments: PhaseAssignmentRule[];
+  stages?: Record<string, StageDef>;
+  stageAssignments: StageAssignmentRule[];
   transitions: TransitionDef[];
   /** Action guards: action → guard expression (flat, priority resolved internally). */
   actionGuards?: Record<string, string>;
-  /** Phase-level entry/exit guards keyed by phase id */
-  phaseLevelGuards?: Record<string, PhaseEntryExitGuards>;
+  /** Stage-level entry/exit guards keyed by stage id */
+  stageLevelGuards?: Record<string, StageEntryExitGuards>;
   /** gate IDs that must pass for kind=pass transitions (schema-level, last wins) */
   requiredGates?: string[];
   /** agents allowed to drive workflow task state (schema-level, last wins) */
@@ -84,30 +84,45 @@ export interface TransitionCheck {
   guard?: string | null;
 }
 
-// ─── Inlined derivePhase (from derive-phase.ts) ────────────────────────────────
+// ─── Inlined deriveStage (from derive-stage.ts) ────────────────────────────────
 
 function deriveDefaultEvaluateGuard(expr: string, facts: SessionFacts): boolean {
   return new GuardEvaluator(facts as unknown as Record<string, unknown>).evaluate(expr);
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function toGuardContext(session: WorkflowSession): any {
+/**
+ * The context every guard is evaluated against.
+ *
+ * One normalisation for all of them. A guard reading `session.gates.invariants`
+ * must mean the same thing at any level: outer transitions were handed the
+ * normalised facts, where gates are a map, while inner ones were handed the raw
+ * session, where gates are an array of records — so the same expression read a
+ * status outside the loop and `undefined` inside it, silently and for ever.
+ *
+ * `task` is the facts of the task being moved, present only inside a loop.
+ */
+export function toGuardContext(
+  session: WorkflowSession,
+  task?: Record<string, unknown>
+): SessionFacts & { task?: Record<string, unknown> } {
   const facts = toSessionFacts(session);
   return Object.assign(facts, {
     tasks: session.tasks ?? {},
     loopRuns: session.loopRuns ?? {},
     pendingDecisions: session.pendingDecisions ?? [],
+    ...(task ? { task } : {}),
   });
 }
 
-export function derivePhaseFn(
+export function deriveStageFn(
   facts: SessionFacts,
-  rules: PhaseAssignmentRule[],
+  rules: StageAssignmentRule[],
   evaluateGuard?: (expr: string) => boolean
 ): string {
   if (rules.length === 0) {
-    const currentPhase = facts.currentPhase;
-    return currentPhase ?? 'PLANNING';
+    const currentStage = facts.currentStage;
+    return currentStage ?? 'PLANNING';
   }
   const sorted = [...rules].sort((a, b) => b.priority - a.priority);
   const guardFn = evaluateGuard ?? ((expr: string) => deriveDefaultEvaluateGuard(expr, facts));
@@ -129,7 +144,7 @@ export function checkTransition(
   const transition = transitions.find((t) => t.from === from && t.to === to);
 
   if (!transition) {
-    return { allowed: false, reason: `Illegal phase transition: ${from} → ${to}` };
+    return { allowed: false, reason: `Illegal stage transition: ${from} → ${to}` };
   }
 
   const guard = transition.guard;
@@ -203,7 +218,7 @@ export class StateMachineEngine {
   constructor(config: EngineConfig, evaluateGuardFn?: EvaluateGuardFn) {
     this.config = {
       ...config,
-      phaseAssignments: config.phaseAssignments ?? [],
+      stageAssignments: config.stageAssignments ?? [],
       transitions: config.transitions ?? [],
     };
     this.evaluateGuardFn = evaluateGuardFn ?? defaultEvaluateGuard;
@@ -222,12 +237,12 @@ export class StateMachineEngine {
   }
 
   /**
-   * Derive the current phase from a WorkflowSession.
+   * Derive the current stage from a WorkflowSession.
    */
-  derivePhase(session: WorkflowSession, evaluationContext: GuardEvaluationContext = {}): PhaseId {
+  deriveStage(session: WorkflowSession, evaluationContext: GuardEvaluationContext = {}): StageId {
     const facts = toSessionFacts(session);
     const guardContext = toGuardContext(session);
-    return derivePhaseFn(facts, this.config.phaseAssignments, (expr) =>
+    return deriveStageFn(facts, this.config.stageAssignments, (expr) =>
       this.evaluateGuard(expr, guardContext, evaluationContext)
     );
   }
@@ -235,7 +250,7 @@ export class StateMachineEngine {
   /**
    * Check whether an action is allowed for the current session.
    *
-   * Guard priority: phase-level → flat actionGuards.
+   * Guard priority: stage-level → flat actionGuards.
    * Kind=pass/fail проверяется checkTransition при детекте фактического
    * перехода фаз — не блокирует beginMutation внутри текущей фазы.
    *
@@ -248,16 +263,16 @@ export class StateMachineEngine {
     evaluationContext: GuardEvaluationContext = {}
   ): { allowed: boolean; reason?: string } {
     const facts = toGuardContext(session);
-    const phase = this.derivePhase(session, evaluationContext);
+    const stage = this.deriveStage(session, evaluationContext);
 
     // Agent identity is not checked here. `tool.execute.before` knows which
     // agent a call belongs to only for `task` (via subagent_type), so
     // `allowedAgents` is enforced during task admission, not on every mutation.
 
-    // Шаг 1: phase-level entry/exit guards
-    const phaseGuard = this.config.phaseLevelGuards?.[phase];
-    if (phaseGuard) {
-      const guards = phaseGuard.entryGuards?.[action] || phaseGuard.exitGuards?.[action];
+    // Шаг 1: stage-level entry/exit guards
+    const stageGuard = this.config.stageLevelGuards?.[stage];
+    if (stageGuard) {
+      const guards = stageGuard.entryGuards?.[action] || stageGuard.exitGuards?.[action];
       if (guards && guards.length > 0) {
         const allPassed = guards.every((g) =>
           this.evaluateGuardFn(g, facts, {}, evaluationContext)
@@ -265,7 +280,7 @@ export class StateMachineEngine {
         if (!allPassed) {
           return {
             allowed: false,
-            reason: `Phase-level guard failed for ${action} in phase ${phase}`,
+            reason: `Stage-level guard failed for ${action} in stage ${stage}`,
           };
         }
       }
@@ -284,12 +299,12 @@ export class StateMachineEngine {
   }
 
   /**
-   * Validate a phase transition. Converts session to SessionFacts internally
+   * Validate a stage transition. Converts session to SessionFacts internally
    * if a session is provided, and injects requiredGates from engine config.
    */
   checkTransition(
-    from: PhaseId,
-    to: PhaseId,
+    from: StageId,
+    to: StageId,
     session?: WorkflowSession,
     evaluationContext: GuardEvaluationContext = {}
   ): TransitionCheck {
@@ -316,19 +331,38 @@ export class StateMachineEngine {
    * Agents allowed to drive workflow task state.
    *
    * Task status is what `allTasksCompleted()` and `hasPendingTasks()` read, so
-   * an agent that can set it can close its own phase. Control therefore sits
+   * an agent that can set it can close its own stage. Control therefore sits
    * with the orchestrator unless a schema says otherwise.
    */
+  /**
+   * The workflow's stages, merged across every schema the profile resolves to.
+   *
+   * The single source for stage lookups: a profile resolves to several schema
+   * files, and searching them one by one gives whichever the search order
+   * happened to reach — a parent's guard here, a child's roster there.
+   */
+  getStages(): Record<string, StageDef> {
+    return this.config.stages ?? {};
+  }
+
+  /** The stage that cycles over the named task list, if any. */
+  getLoopStage(listKey: string): StageDef | null {
+    for (const stage of Object.values(this.getStages())) {
+      if (stage.loop === listKey || stage.loop === '$currentTask.id') return stage;
+    }
+    return null;
+  }
+
   getTaskControlAgents(): string[] {
     return this.config.taskControlAgents ?? ['orchestrator'];
   }
 
   /**
-   * Try to apply the first matching outgoing transition from the current phase.
+   * Try to apply the first matching outgoing transition from the current stage.
    *
-   * Scans ALL transitions from the current derived phase (any kind: auto, pass, fail),
+   * Scans ALL transitions from the current derived stage (any kind: auto, pass, fail),
    * validates each one's guard and gate requirements, and applies the first
-   * that passes by setting `session.currentPhase`.
+   * that passes by setting `session.currentStage`.
    *
    * Returns the result of the transition that was applied (if any).
    * Returns `{ allowed: false, applied: false }` when no outgoing transition matches.
@@ -337,14 +371,14 @@ export class StateMachineEngine {
     session: WorkflowSession,
     evaluationContext: GuardEvaluationContext = {}
   ): TransitionCheck & { applied?: boolean } {
-    const currentPhase = this.derivePhase(session, evaluationContext);
+    const currentStage = this.deriveStage(session, evaluationContext);
     const facts = toGuardContext(session);
 
-    const outgoing = this.config.transitions.filter((t) => t.from === currentPhase);
+    const outgoing = this.config.transitions.filter((t) => t.from === currentStage);
     if (outgoing.length === 0) {
       return {
         allowed: false,
-        reason: `No outgoing transitions from ${currentPhase}`,
+        reason: `No outgoing transitions from ${currentStage}`,
         applied: false,
       };
     }
@@ -354,7 +388,7 @@ export class StateMachineEngine {
 
     for (const transition of outgoing) {
       const result = checkTransition(
-        currentPhase,
+        currentStage,
         transition.to,
         this.config.transitions,
         factsWithGates,
@@ -370,10 +404,10 @@ export class StateMachineEngine {
             }
           }
           if (effect.approve) {
-            approve(session, effect.approve, '', `transition:${currentPhase}->${transition.to}`);
+            approve(session, effect.approve, '', `transition:${currentStage}->${transition.to}`);
           }
         }
-        session.currentPhase = transition.to;
+        session.currentStage = transition.to;
         return { ...result, applied: true };
       }
     }
@@ -381,7 +415,7 @@ export class StateMachineEngine {
     return {
       allowed: false,
       applied: false,
-      reason: 'No matching outgoing transition from ' + currentPhase,
+      reason: 'No matching outgoing transition from ' + currentStage,
     };
   }
 }

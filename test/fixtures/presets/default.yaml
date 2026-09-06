@@ -1,17 +1,17 @@
 # test/fixtures/presets/default.yaml
-# YAML source of truth for derivePhase rules.
+# YAML source of truth for deriveStage rules.
 # Loaded by tests to validate engine behavior.
 # Adapted from parent state-machine/config/presets/default.yaml
 # with generalized field names per AGENTS.md.
 
-phases:
+stages:
   - PLANNING
   - TASKS_READY
   - EXECUTION
   - COMMIT
   - DONE
 
-derivePhaseRules:
+deriveStageRules:
   - id: deliveryReceipt
     priority: 100
     condition: "session.deliveryReceipt exists"

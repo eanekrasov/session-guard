@@ -17,7 +17,7 @@ afterEach(async () => {
 
 function makeConfig(overrides?: Partial<EngineConfig>): EngineConfig {
   return {
-    phaseAssignments: [
+    stageAssignments: [
       { id: 'always', priority: 0, condition: 'true', result: 'PLANNING' },
       { id: 'approved', priority: 100, condition: "session.approved('plan')", result: 'EXECUTION' },
       {
@@ -51,7 +51,7 @@ async function createWorkflowSession(
   overrides?: Partial<WorkflowSession>
 ): Promise<WorkflowSession> {
   const session = createSession(sessionId, preset);
-  // Set tasks to avoid empty-state phase issues
+  // Set tasks to avoid empty-state stage issues
   session.tasks.implementation = [{ id: 'task-1', path: 'a.ts', status: 'running' }];
   Object.assign(session, overrides);
   await store.save(session);
@@ -60,12 +60,12 @@ async function createWorkflowSession(
 
 describe('E2E: checkTransition kind=pass/fail', () => {
   describe('kind=pass — gates must all be passed', () => {
-    test('allows COMMIT phase when invariants gate is passed', async () => {
+    test('allows COMMIT stage when invariants gate is passed', async () => {
       directory = await mkdtemp(join(tmpdir(), 'sm-e2e-pass'));
       store = new WorkflowStore(join(directory, '.opencode/state-machine/sessions'));
       const session = await createWorkflowSession('root', 'test');
 
-      // Set sessions facts to make EXECUTION current phase
+      // Set sessions facts to make EXECUTION current stage
       setGateStatus(session, 'invariants', 'passed');
       session.tasks.implementation[0].status = 'completed';
       await store.save(session);
@@ -77,7 +77,7 @@ describe('E2E: checkTransition kind=pass/fail', () => {
       expect(result.kind).toBe('pass');
     });
 
-    test('blocks COMMIT phase when invariants gate is pending', async () => {
+    test('blocks COMMIT stage when invariants gate is pending', async () => {
       directory = await mkdtemp(join(tmpdir(), 'sm-e2e-pass-block'));
       store = new WorkflowStore(join(directory, '.opencode/state-machine/sessions'));
       const session = await createWorkflowSession('root', 'test');
@@ -94,7 +94,7 @@ describe('E2E: checkTransition kind=pass/fail', () => {
       expect(result.reason).toContain('invariants');
     });
 
-    test('blocks COMMIT phase when invariants gate is failed', async () => {
+    test('blocks COMMIT stage when invariants gate is failed', async () => {
       directory = await mkdtemp(join(tmpdir(), 'sm-e2e-pass-fail'));
       store = new WorkflowStore(join(directory, '.opencode/state-machine/sessions'));
       const session = await createWorkflowSession('root', 'test');
@@ -125,7 +125,7 @@ describe('E2E: checkTransition kind=pass/fail', () => {
   });
 
   describe('kind=fail — at least one gate must be failed', () => {
-    test('allows FIXUP phase when invariants gate is failed', async () => {
+    test('allows FIXUP stage when invariants gate is failed', async () => {
       directory = await mkdtemp(join(tmpdir(), 'sm-e2e-fail-allow'));
       store = new WorkflowStore(join(directory, '.opencode/state-machine/sessions'));
       const session = await createWorkflowSession('root', 'test');
@@ -141,7 +141,7 @@ describe('E2E: checkTransition kind=pass/fail', () => {
       expect(result.kind).toBe('fail');
     });
 
-    test('blocks FIXUP phase when no gate is failed', async () => {
+    test('blocks FIXUP stage when no gate is failed', async () => {
       directory = await mkdtemp(join(tmpdir(), 'sm-e2e-fail-block'));
       store = new WorkflowStore(join(directory, '.opencode/state-machine/sessions'));
       const session = await createWorkflowSession('root', 'test');
@@ -197,7 +197,7 @@ describe('E2E: checkTransition kind=pass/fail', () => {
       expect(result.kind).toBe('auto');
     });
 
-    test('tryApplyTransitions sets currentPhase on session', async () => {
+    test('tryApplyTransitions sets currentStage on session', async () => {
       directory = await mkdtemp(join(tmpdir(), 'sm-e2e-auto-apply'));
       store = new WorkflowStore(join(directory, '.opencode/state-machine/sessions'));
       const session = await createWorkflowSession('root', 'test');
@@ -206,7 +206,7 @@ describe('E2E: checkTransition kind=pass/fail', () => {
 
       // Engine with a no-guard auto transition from PLANNING
       const engine = new StateMachineEngine({
-        phaseAssignments: [{ id: 'always', priority: 0, condition: 'true', result: 'planning' }],
+        stageAssignments: [{ id: 'always', priority: 0, condition: 'true', result: 'planning' }],
         transitions: [{ from: 'planning', to: 'execution', kind: 'auto' }],
         actionGuards: {},
         requiredGates: [],
@@ -214,7 +214,7 @@ describe('E2E: checkTransition kind=pass/fail', () => {
 
       const result = engine.tryApplyTransitions(session);
       expect(result.applied).toBe(true);
-      expect(session.currentPhase).toBe('execution');
+      expect(session.currentStage).toBe('execution');
     });
   });
 
@@ -336,6 +336,6 @@ describe('E2E: checkTransition — engine.checkTransition integration', () => {
     const result = engine.checkTransition('PLANNING', 'DONE');
 
     expect(result.allowed).toBe(false);
-    expect(result.reason).toBe('Illegal phase transition: PLANNING → DONE');
+    expect(result.reason).toBe('Illegal stage transition: PLANNING → DONE');
   });
 });

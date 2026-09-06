@@ -5,6 +5,7 @@ import YAML from 'yaml';
 import { z } from 'zod';
 
 import { ProfileSchemaSchema } from './profile-schema.ts';
+import type { StageDef, TransitionDef } from './types.ts';
 import { ProfileConfigurationError, type ProfileSchema, type ResolvedSchema } from './types.ts';
 
 /**
@@ -23,6 +24,58 @@ export async function loadSchemaFromPath(
   }
   const raw = YAML.parse(await fs.readFile(filePath, 'utf-8'));
   return ProfileSchemaSchema.parse(raw);
+}
+
+/**
+ * Merge stage maps entry by entry, and each entry field by field.
+ *
+ * A child that names a stage is refining it, not replacing it: overriding a
+ * roster must not drop the loop, the nested stages or the transitions the
+ * parent declared for that same stage. Nested stages merge by the same rule at
+ * any depth.
+ */
+export function mergeStages(
+  base: ProfileSchema['stages'],
+  extension: ProfileSchema['stages']
+): ProfileSchema['stages'] {
+  if (!base) return extension;
+  if (!extension) return base;
+  const result = { ...base };
+  for (const [stageId, override] of Object.entries(extension)) {
+    const inherited = base[stageId];
+    result[stageId] = inherited ? mergeStage(inherited, override) : override;
+  }
+  return result;
+}
+
+function mergeStage(base: StageDef, extension: StageDef): StageDef {
+  return {
+    ...base,
+    ...extension,
+    ...(base.stages || extension.stages
+      ? { stages: mergeStages(base.stages, extension.stages) }
+      : {}),
+    ...(base.transitions || extension.transitions
+      ? { transitions: mergeTransitions(base.transitions, extension.transitions) }
+      : {}),
+  };
+}
+
+/**
+ * Merge transition lists by their endpoints: a child redeclaring `a → b`
+ * replaces that edge and leaves every other edge of the parent alone.
+ */
+export function mergeTransitions(
+  base: TransitionDef[] | undefined,
+  extension: TransitionDef[] | undefined
+): TransitionDef[] | undefined {
+  if (!base) return extension;
+  if (!extension) return base;
+  const byEdge = new Map<string, (typeof base)[number]>();
+  for (const transition of [...base, ...extension]) {
+    byEdge.set(`${transition.from}→${transition.to}`, transition);
+  }
+  return [...byEdge.values()];
 }
 
 export class SchemaLoader {
@@ -66,20 +119,26 @@ export class SchemaLoader {
 
   /**
    * Merge two schemas. Extension fields override base when present.
+   *
+   * Stages and transitions merge per entry, not as whole fields: a profile
+   * that extends another is a delta over it, and replacing the whole map would
+   * mean a child touching one stage silently drops every other stage — and
+   * every transition that named them — from its parent.
+   *
    * Settings are deep-merged.
    */
   mergeSchemas(base: ProfileSchema, extension: ProfileSchema): ResolvedSchema {
     const result: ResolvedSchema = {
       source: extension.extends ?? '',
-      phases: extension.phases ?? base.phases,
-      transitions: extension.transitions ?? base.transitions,
+      stages: mergeStages(base.stages, extension.stages),
+      transitions: mergeTransitions(base.transitions, extension.transitions),
       settings: this.deepMerge(base.settings ?? {}, extension.settings ?? {}),
       editingAgents: extension.editingAgents ?? base.editingAgents,
       verifiers: extension.verifiers ?? base.verifiers,
       requiredGates: extension.requiredGates ?? base.requiredGates,
       taskControlAgents: extension.taskControlAgents ?? base.taskControlAgents,
       actionGuards: extension.actionGuards ?? base.actionGuards,
-      phaseAssignments: extension.phaseAssignments ?? base.phaseAssignments,
+      stageAssignments: extension.stageAssignments ?? base.stageAssignments,
     };
 
     // Strip undefined fields

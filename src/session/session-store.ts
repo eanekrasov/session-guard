@@ -31,7 +31,7 @@ export function createSession(sessionId: string, profileId: string): WorkflowSes
     verifications: [],
     baselineHashes: [],
     changedFiles: [],
-    currentPhase: 'planning',
+    currentStage: 'planning',
     invariantViolations: [],
     consentedCallIDs: [],
   };

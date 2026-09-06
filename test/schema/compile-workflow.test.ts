@@ -3,30 +3,30 @@ import { compileWorkflow } from '../../src/schema/compile-workflow.ts';
 import type { ResolvedSchema } from '../../src/schema/types.ts';
 
 describe('compileWorkflow', () => {
-  it('compiles a simple schema with one phase', () => {
+  it('compiles a simple schema with one stage', () => {
     const schema: ResolvedSchema = {
       source: 'test/cycle.yaml',
-      phases: {
+      stages: {
         PLANNING: {
-          stages: [{ id: 'dev' }, { id: 'review' }],
+          stages: { dev: {}, review: {} },
         },
         DONE: {
-          stages: [],
+          stages: {  },
         },
       },
       transitions: [{ from: 'PLANNING', to: 'DONE', kind: 'auto' }],
-      phaseAssignments: [{ id: 'main', priority: 1, condition: 'true', result: 'PLANNING' }],
+      stageAssignments: [{ id: 'main', priority: 1, condition: 'true', result: 'PLANNING' }],
     };
 
     const { workflow, errors } = compileWorkflow(schema);
     expect(errors).toHaveLength(0);
 
     expect(workflow.version).toBe(1);
-    expect(Object.keys(workflow.phases)).toEqual(['PLANNING', 'DONE']);
-    expect(workflow.phases.PLANNING.nodes).toHaveLength(2);
-    expect(workflow.phases.PLANNING.nodes[0].id).toBe('PLANNING/dev');
-    expect(workflow.initialPhase).toBe('PLANNING');
-    expect(workflow.terminalPhases).toContain('DONE');
+    expect(Object.keys(workflow.stages)).toEqual(['PLANNING', 'DONE']);
+    expect(workflow.stages.PLANNING.nodes).toHaveLength(2);
+    expect(workflow.stages.PLANNING.nodes[0].id).toBe('PLANNING/dev');
+    expect(workflow.initialStage).toBe('PLANNING');
+    expect(workflow.terminalStages).toContain('DONE');
     expect(workflow.transitions).toHaveLength(1);
     expect(workflow.transitions[0].from).toBe('PLANNING');
     expect(workflow.transitions[0].to).toBe('DONE');
@@ -36,79 +36,79 @@ describe('compileWorkflow', () => {
   it('preserves inherited defaults on undefined fields', () => {
     const schema: ResolvedSchema = {
       source: 'test/cycle.yaml',
-      phases: {
+      stages: {
         WORK: {
-          stages: [{ id: 'step1' }],
+          stages: { step1: {} },
         },
       },
       transitions: [],
-      phaseAssignments: [{ id: 'main', priority: 1, condition: 'true', result: 'WORK' }],
+      stageAssignments: [{ id: 'main', priority: 1, condition: 'true', result: 'WORK' }],
     };
 
     const { workflow, errors } = compileWorkflow(schema);
     expect(errors).toHaveLength(0);
-    expect(workflow.phases.WORK.loop).toBeNull();
-    expect(workflow.phases.WORK.dispatch).toBeNull();
-    expect(workflow.phases.WORK.retryBudget).toBeNull();
-    expect(workflow.phases.WORK.exitGuards).toEqual([]);
-    expect(workflow.phases.WORK.nodes[0].entryGuards).toEqual([]);
-    expect(workflow.phases.WORK.nodes[0].exitGuards).toEqual([]);
+    expect(workflow.stages.WORK.loop).toBeNull();
+    expect(workflow.stages.WORK.dispatch).toBeNull();
+    expect(workflow.stages.WORK.retryBudget).toBeNull();
+    expect(workflow.stages.WORK.exitGuards).toEqual([]);
+    expect(workflow.stages.WORK.nodes[0].entryGuards).toEqual([]);
+    expect(workflow.stages.WORK.nodes[0].exitGuards).toEqual([]);
   });
 
-  it('validates cross-references — unknown source phase', () => {
+  it('validates cross-references — unknown source stage', () => {
     const schema: ResolvedSchema = {
       source: 'test/cycle.yaml',
-      phases: { A: {} },
+      stages: { A: {} },
       transitions: [{ from: 'UNKNOWN', to: 'A', kind: 'auto' }],
-      phaseAssignments: [],
+      stageAssignments: [],
     };
 
     const { errors } = compileWorkflow(schema);
     expect(errors.length).toBeGreaterThan(0);
-    expect(errors.some((e) => e.message.includes('Unknown source phase'))).toBe(true);
+    expect(errors.some((e) => e.message.includes('Unknown source stage'))).toBe(true);
   });
 
-  it('validates cross-references — unknown target phase', () => {
+  it('validates cross-references — unknown target stage', () => {
     const schema: ResolvedSchema = {
       source: 'test/cycle.yaml',
-      phases: { A: {} },
+      stages: { A: {} },
       transitions: [{ from: 'A', to: 'UNKNOWN', kind: 'auto' }],
-      phaseAssignments: [],
+      stageAssignments: [],
     };
 
     const { errors } = compileWorkflow(schema);
-    expect(errors.some((e) => e.message.includes('Unknown target phase'))).toBe(true);
+    expect(errors.some((e) => e.message.includes('Unknown target stage'))).toBe(true);
   });
 
-  it('returns terminal phases for nodes without outgoing transitions', () => {
+  it('returns terminal stages for nodes without outgoing transitions', () => {
     const schema: ResolvedSchema = {
       source: 'test/cycle.yaml',
-      phases: { START: {}, FINISH: {} },
+      stages: { START: {}, FINISH: {} },
       transitions: [{ from: 'START', to: 'FINISH', kind: 'auto' }],
-      phaseAssignments: [{ id: 'main', priority: 1, condition: 'true', result: 'START' }],
+      stageAssignments: [{ id: 'main', priority: 1, condition: 'true', result: 'START' }],
     };
 
     const { workflow, errors } = compileWorkflow(schema);
     expect(errors).toHaveLength(0);
-    expect(workflow.terminalPhases).toContain('FINISH');
+    expect(workflow.terminalStages).toContain('FINISH');
   });
 
   it('normalises dispatch defaults', () => {
     const schema: ResolvedSchema = {
       source: 'test/cycle.yaml',
-      phases: {
+      stages: {
         EXEC: {
           dispatch: { strategy: 'parallel', maxConcurrent: 3 },
-          stages: [{ id: 'a' }, { id: 'b' }],
+          stages: { a: {}, b: {} },
         },
       },
       transitions: [],
-      phaseAssignments: [{ id: 'main', priority: 1, condition: 'true', result: 'EXEC' }],
+      stageAssignments: [{ id: 'main', priority: 1, condition: 'true', result: 'EXEC' }],
     };
 
     const { workflow, errors } = compileWorkflow(schema);
     expect(errors).toHaveLength(0);
-    expect(workflow.phases.EXEC.dispatch).toEqual({
+    expect(workflow.stages.EXEC.dispatch).toEqual({
       strategy: 'parallel',
       maxConcurrent: 3,
       overlapRoles: [],
@@ -120,38 +120,38 @@ describe('compileWorkflow', () => {
 
     const { workflow, errors } = compileWorkflow(schema);
     expect(errors).toHaveLength(0);
-    expect(workflow.phases).toEqual({});
+    expect(workflow.stages).toEqual({});
     expect(workflow.transitions).toEqual([]);
-    expect(workflow.phaseAssignments).toEqual([]);
-    expect(workflow.initialPhase).toBe('');
-    expect(workflow.terminalPhases).toEqual([]);
+    expect(workflow.stageAssignments).toEqual([]);
+    expect(workflow.initialStage).toBe('');
+    expect(workflow.terminalStages).toEqual([]);
   });
 
   it('detects session-wide DONE as terminal', () => {
     const schema: ResolvedSchema = {
       source: 'test/cycle.yaml',
-      phases: { PLANNING: {}, DONE: {} },
+      stages: { PLANNING: {}, DONE: {} },
       transitions: [{ from: 'PLANNING', to: 'DONE', kind: 'auto' }],
-      phaseAssignments: [{ id: 'main', priority: 1, condition: 'true', result: 'PLANNING' }],
+      stageAssignments: [{ id: 'main', priority: 1, condition: 'true', result: 'PLANNING' }],
     };
 
     const { workflow, errors } = compileWorkflow(schema);
     expect(errors).toHaveLength(0);
-    expect(workflow.terminalPhases).toContain('DONE');
-    expect(workflow.terminalPhases).not.toContain('PLANNING');
+    expect(workflow.terminalStages).toContain('DONE');
+    expect(workflow.terminalStages).not.toContain('PLANNING');
   });
 
   it('rejects unsupported declarations with diagnostic', () => {
     // Custom checks/executors that don't exist in the current profile-schema should still pass through
     const schema: ResolvedSchema = {
       source: 'test/custom.yaml',
-      phases: { MAIN: { stages: [{ id: 'step' }] } },
+      stages: { MAIN: { stages: { step: {} } } },
       transitions: [],
-      phaseAssignments: [{ id: 'main', priority: 1, condition: 'true', result: 'MAIN' }],
+      stageAssignments: [{ id: 'main', priority: 1, condition: 'true', result: 'MAIN' }],
     };
 
     const { workflow, errors } = compileWorkflow(schema);
     expect(errors).toHaveLength(0);
-    expect(workflow.phases.MAIN).toBeDefined();
+    expect(workflow.stages.MAIN).toBeDefined();
   });
 });

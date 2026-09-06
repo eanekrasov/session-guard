@@ -3,7 +3,7 @@ import { buildDashboardSchema } from '../../src/dashboard/dashboard-contract.ts'
 import type { DashboardInput } from '../../src/dashboard/dashboard-contract.ts';
 
 const defaultInput: DashboardInput = {
-  phases: ['PLANNING', 'EXECUTION', 'COMMIT', 'DONE'],
+  stages: ['PLANNING', 'EXECUTION', 'COMMIT', 'DONE'],
   transitions: [
     { from: 'PLANNING', to: 'EXECUTION' },
     { from: 'EXECUTION', to: 'COMMIT' },
@@ -68,9 +68,9 @@ describe('buildDashboardSchema', () => {
     expect(schema.profile).toEqual(defaultInput.profile);
   });
 
-  it('handles empty phases and transitions', () => {
+  it('handles empty stages and transitions', () => {
     const empty: DashboardInput = {
-      phases: [],
+      stages: [],
       transitions: [],
       gates: [],
       profile: defaultInput.profile,
@@ -86,7 +86,7 @@ describe('buildDashboardSchema', () => {
   it('handles single state', () => {
     const single: DashboardInput = {
       ...defaultInput,
-      phases: ['DONE'],
+      stages: ['DONE'],
     };
 
     const schema = buildDashboardSchema(single);

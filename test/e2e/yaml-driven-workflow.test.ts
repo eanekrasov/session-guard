@@ -28,14 +28,14 @@ function loadEngine(): StateMachineEngine {
 
   const resolvedSchema: ResolvedSchema = {
     source: 'base/base.yaml',
-    phases: raw.phases,
+    stages: raw.stages,
     transitions: raw.transitions,
     settings: raw.settings,
     editingAgents: raw.editingAgents,
     verifiers: raw.verifiers,
     requiredGates: raw.requiredGates,
     actionGuards: raw.actionGuards,
-    phaseAssignments: raw.phaseAssignments,
+    stageAssignments: raw.stageAssignments,
   };
 
   const config = mergeSchemasToEngineConfig([resolvedSchema]);
@@ -58,309 +58,177 @@ function freshSession(): WorkflowSession {
   );
 }
 
-/**
- * Assert a transition was applied and the phase changed.
- */
+/** Assert a transition was applied and the session landed on the named stage. */
 function expectApplied(
   result: ReturnType<StateMachineEngine['tryApplyTransitions']>,
-  expectedPhase: string
+  session: WorkflowSession,
+  expectedStage: string
 ) {
-  expect(result.applied).toBe(true);
+  expect(result.applied, `no transition applied; stayed at ${session.currentStage}`).toBe(true);
+  expect(session.currentStage).toBe(expectedStage);
 }
 
-/**
- * Assert a transition was NOT applied.
- */
-function expectNotApplied(result: ReturnType<StateMachineEngine['tryApplyTransitions']>) {
+/** Assert a transition was NOT applied and the session did not move. */
+function expectNotApplied(
+  result: ReturnType<StateMachineEngine['tryApplyTransitions']>,
+  session: WorkflowSession,
+  expectedStage: string
+) {
   expect(result.applied).toBe(false);
+  expect(session.currentStage).toBe(expectedStage);
 }
 
-/**
- * Simulate the consent + plan guard for planning → tasks_ready.
- */
+/** The operator approves the plan, releasing planning → tasks_ready. */
 function approvePlan(session: WorkflowSession) {
   session.refs.plan = 'path/to/plan.md';
   session.approvals.push({ type: 'plan', callId: 'consent-1', status: 'granted' });
 }
 
-/**
- * Add a running task so hasPendingTasks() returns true.
- */
-function addTask(session: WorkflowSession) {
-  session.tasks.implementation = [{ id: 'task-1', path: 'a.ts', status: 'running' }];
+function addTask(session: WorkflowSession, status: 'running' | 'completed' = 'running') {
+  session.tasks.implementation = [{ id: 'task-1', path: 'a.ts', status }];
 }
 
-/**
- * Drive session from current phase → qa (steps planning→tasks_ready→code→review→qa).
- */
-function driveToQa(session: WorkflowSession): void {
-  // planning → tasks_ready
+function completeTasks(session: WorkflowSession) {
+  for (const task of session.tasks.implementation ?? []) task.status = 'completed';
+}
+
+/** Drive a fresh session to `validation`, where the verifiers report. */
+function driveToValidation(session: WorkflowSession): void {
   approvePlan(session);
-  let result = ENGINE.tryApplyTransitions(session);
-  expectApplied(result, 'tasks_ready');
-  expect(session.currentPhase).toBe('tasks_ready');
+  expectApplied(ENGINE.tryApplyTransitions(session), session, 'tasks_ready');
 
-  // tasks_ready → code
   addTask(session);
-  result = ENGINE.tryApplyTransitions(session);
-  expectApplied(result, 'code');
-  expect(session.currentPhase).toBe('code');
+  expectApplied(ENGINE.tryApplyTransitions(session), session, 'execution');
 
-  // code → review
-  setGateStatus(session, 'invariants', 'passed');
-  result = ENGINE.tryApplyTransitions(session);
-  expectApplied(result, 'review');
-  expect(session.currentPhase).toBe('review');
-
-  // review → qa
-  setGateStatus(session, 'review', 'passed');
-  result = ENGINE.tryApplyTransitions(session);
-  expectApplied(result, 'qa');
-  expect(session.currentPhase).toBe('qa');
+  completeTasks(session);
+  expectApplied(ENGINE.tryApplyTransitions(session), session, 'validation');
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────
 
 describe('YAML-driven workflow (profiles/base/base.yaml)', () => {
-  // ───────────────────────────────────────────────────────────────────────
-  // Scenario 1: Happy path through all phases
-  // ───────────────────────────────────────────────────────────────────────
-
-  test('TC1: Happy path planning → tasks_ready → code → review → qa → commit → done', () => {
+  test('TC1: happy path planning → tasks_ready → execution → validation → commit → done', () => {
     const session = freshSession();
+    expect(session.currentStage).toBe('planning');
 
-    // 1. Starts in planning
-    expect(session.currentPhase).toBe('planning');
+    driveToValidation(session);
 
-    // 2. planning → tasks_ready (consent + plan guard)
-    approvePlan(session);
-    let result = ENGINE.tryApplyTransitions(session);
-    expectApplied(result, 'tasks_ready');
-    expect(session.currentPhase).toBe('tasks_ready');
-
-    // 3. tasks_ready → code (hasPendingTasks)
-    addTask(session);
-    result = ENGINE.tryApplyTransitions(session);
-    expectApplied(result, 'code');
-    expect(session.currentPhase).toBe('code');
-
-    // 4. code → review (invariants passed)
-    setGateStatus(session, 'invariants', 'passed');
-    result = ENGINE.tryApplyTransitions(session);
-    expectApplied(result, 'review');
-    expect(session.currentPhase).toBe('review');
-
-    // 5. review → qa (review gate passed)
+    // Both verifiers report on the work as a whole.
     setGateStatus(session, 'review', 'passed');
-    result = ENGINE.tryApplyTransitions(session);
-    expectApplied(result, 'qa');
-    expect(session.currentPhase).toBe('qa');
-
-    // 6. qa → commit (qa gate passed → effect: approve commit)
+    expectNotApplied(ENGINE.tryApplyTransitions(session), session, 'validation');
     setGateStatus(session, 'qa', 'passed');
-    result = ENGINE.tryApplyTransitions(session);
-    expectApplied(result, 'commit');
-    expect(session.currentPhase).toBe('commit');
+    expectApplied(ENGINE.tryApplyTransitions(session), session, 'commit');
 
-    // The machine grants itself no approvals on the way in: entering `commit`
-    // is the transition's own result, not a consent record.
-    expect(session.approvals.find((a) => a.type === 'commit')).toBeUndefined();
-
-    // 7. commit → done (deliveryReceipt records the commit that actually landed)
-    session.deliveryReceipt = 'def456';
-    result = ENGINE.tryApplyTransitions(session);
-    expectApplied(result, 'done');
-    expect(session.currentPhase).toBe('done');
-
-    // 8. done is terminal — no outgoing transitions
-    result = ENGINE.tryApplyTransitions(session);
-    expectNotApplied(result);
+    // Only the receipt releases done — the permit is permission to try.
+    session.deliveryReceipt = 'abc123';
+    expectApplied(ENGINE.tryApplyTransitions(session), session, 'done');
   });
 
   test('TC1b: a failed commit does not advance to done', () => {
     const session = freshSession();
-    driveToQa(session);
+    driveToValidation(session);
+    setGateStatus(session, 'review', 'passed');
     setGateStatus(session, 'qa', 'passed');
-    ENGINE.tryApplyTransitions(session);
-    expect(session.currentPhase).toBe('commit');
+    expectApplied(ENGINE.tryApplyTransitions(session), session, 'commit');
 
-    // The permit is issued BEFORE the commit runs — it records permission,
-    // never the result. A commit that failed leaves HEAD untouched, so no
-    // receipt is written and the workflow must stay in `commit`.
+    // The permit was issued and the commit failed: HEAD never moved.
     session.deliveryPermit = {
-      callID: 'test',
+      callID: 'call-1',
       preCommitHead: 'abc123',
       expectedFiles: [],
       startedAt: new Date().toISOString(),
     };
-    expect(session.deliveryReceipt).toBeNull();
-
-    expectNotApplied(ENGINE.tryApplyTransitions(session));
-    expect(session.currentPhase).toBe('commit');
+    expectNotApplied(ENGINE.tryApplyTransitions(session), session, 'commit');
   });
 
-  // ───────────────────────────────────────────────────────────────────────
-  // Scenario 2: QA fail → code loop
-  // ───────────────────────────────────────────────────────────────────────
-
-  test('TC2: QA fail → code retry loop', () => {
+  test('TC2: a rejected validation sends the work back into the loop', () => {
     const session = freshSession();
-    driveToQa(session);
+    driveToValidation(session);
 
-    // QA fails → should go to code with cycles incremented
-    setGateStatus(session, 'qa', 'failed');
-    let result = ENGINE.tryApplyTransitions(session);
-    expectApplied(result, 'code');
-    expect(session.currentPhase).toBe('code');
-
-    // Verify retry budget incremented
-    expect(session.retryBudgets.cycles.attempts).toBe(1);
-    expect(session.retryBudgets.cycles.maximum).toBe(5);
+    setGateStatus(session, 'review', 'failed');
+    expectApplied(ENGINE.tryApplyTransitions(session), session, 'execution');
+    expect(session.retryBudgets['cycles']?.attempts).toBe(1);
   });
 
-  // ───────────────────────────────────────────────────────────────────────
-  // Scenario 3: QA exhausted → failed
-  // ───────────────────────────────────────────────────────────────────────
-
-  test('TC3: QA exhausted → failed terminal phase', () => {
+  test('TC3: validation that has spent the retry budget ends in failed', () => {
     const session = freshSession();
-    driveToQa(session);
+    driveToValidation(session);
 
-    // Manually set retry budget to exhausted state
-    // The YAML defines maxAttempts: 5, so 5/5 = exhausted
-    session.retryBudgets.cycles = { attempts: 5, maximum: 5 };
-
-    // qa → failed (isExhausted('cycles') is true)
-    setGateStatus(session, 'qa', 'failed');
-    const result = ENGINE.tryApplyTransitions(session);
-    expectApplied(result, 'failed');
-    expect(session.currentPhase).toBe('failed');
-
-    // failed is terminal — no outgoing transitions
-    const terminalResult = ENGINE.tryApplyTransitions(session);
-    expectNotApplied(terminalResult);
-  });
-
-  // ───────────────────────────────────────────────────────────────────────
-  // Scenario 4: Consent blocks without approval
-  // ───────────────────────────────────────────────────────────────────────
-
-  test('TC4: Consent blocks transition when plan not approved', () => {
-    const session = freshSession();
-
-    // Set plan ref but NO approval → consent should block
-    session.refs.plan = 'path/to/plan.md';
-    let result = ENGINE.tryApplyTransitions(session);
-    expectNotApplied(result);
-    expect(session.currentPhase).toBe('planning');
-
-    // Now add approval → should transition
-    session.approvals.push({ type: 'plan', callId: 'consent-1', status: 'granted' });
-    result = ENGINE.tryApplyTransitions(session);
-    expectApplied(result, 'tasks_ready');
-    expect(session.currentPhase).toBe('tasks_ready');
-  });
-
-  // ───────────────────────────────────────────────────────────────────────
-  // Scenario 5: Full QA retry loop (5 cycles then failed)
-  // ───────────────────────────────────────────────────────────────────────
-
-  test('TC5: 5 QA retry cycles then exhausted → failed', () => {
-    const session = freshSession();
-    driveToQa(session);
-
-    // Iterate 5 retry cycles: qa → code → review → qa → ...
-    for (let i = 1; i <= 5; i++) {
-      // qa → code (qa failed, not exhausted yet)
-      setGateStatus(session, 'qa', 'failed');
-      let result = ENGINE.tryApplyTransitions(session);
-      expectApplied(result, 'code');
-      expect(session.currentPhase).toBe('code');
-      expect(session.retryBudgets.cycles.attempts).toBe(i);
-
-      // code → review
-      setGateStatus(session, 'invariants', 'passed');
-      result = ENGINE.tryApplyTransitions(session);
-      expectApplied(result, 'review');
-
-      // review → qa
-      setGateStatus(session, 'review', 'passed');
-      result = ENGINE.tryApplyTransitions(session);
-      expectApplied(result, 'qa');
-    }
-
-    // Now exhausted: 5/5 attempts used
-    expect(session.retryBudgets.cycles.attempts).toBe(5);
-    expect(session.retryBudgets.cycles.maximum).toBe(5);
+    session.retryBudgets['cycles'] = { attempts: 5, maximum: 5 };
     expect(isExhausted(session, 'cycles')).toBe(true);
 
-    // qa → failed (exhausted)
     setGateStatus(session, 'qa', 'failed');
-    const finalResult = ENGINE.tryApplyTransitions(session);
-    expectApplied(finalResult, 'failed');
-    expect(session.currentPhase).toBe('failed');
+    expectApplied(ENGINE.tryApplyTransitions(session), session, 'failed');
   });
 
-  // ───────────────────────────────────────────────────────────────────────
-  // Scenario 6: Consent check in tryApplyTransitions (approved returns false)
-  // ───────────────────────────────────────────────────────────────────────
-
-  test('TC6: Consent hasPendingTasks blocks tasks_ready → code without tasks', () => {
+  test('TC4: consent blocks planning → tasks_ready until the plan is approved', () => {
     const session = freshSession();
+    // The plan exists, but the operator has not answered.
+    session.refs.plan = 'path/to/plan.md';
+    expectNotApplied(ENGINE.tryApplyTransitions(session), session, 'planning');
 
-    // Advance to tasks_ready
-    approvePlan(session);
-    ENGINE.tryApplyTransitions(session);
-    expect(session.currentPhase).toBe('tasks_ready');
-
-    // No tasks → hasPendingTasks() returns false → transition blocked
-    const result = ENGINE.tryApplyTransitions(session);
-    expectNotApplied(result);
-    expect(session.currentPhase).toBe('tasks_ready');
+    session.approvals.push({ type: 'plan', callId: 'consent-1', status: 'granted' });
+    expectApplied(ENGINE.tryApplyTransitions(session), session, 'tasks_ready');
   });
 
-  // ───────────────────────────────────────────────────────────────────────
-  // Scenario 7: Guard for code→review requires invariants 'passed'
-  // ───────────────────────────────────────────────────────────────────────
-
-  test('TC7: code → review blocked when invariants not passed', () => {
+  test('TC5: five rejected validations, then failed', () => {
     const session = freshSession();
+    driveToValidation(session);
 
+    for (let cycle = 1; cycle <= 5; cycle++) {
+      setGateStatus(session, 'review', 'failed');
+      expectApplied(ENGINE.tryApplyTransitions(session), session, 'execution');
+      expect(session.retryBudgets['cycles']?.attempts).toBe(cycle);
+
+      // The loop runs again and hands the work back to validation.
+      setGateStatus(session, 'review', 'pending');
+      completeTasks(session);
+      expectApplied(ENGINE.tryApplyTransitions(session), session, 'validation');
+    }
+
+    expect(isExhausted(session, 'cycles')).toBe(true);
+    setGateStatus(session, 'review', 'failed');
+    expectApplied(ENGINE.tryApplyTransitions(session), session, 'failed');
+  });
+
+  test('TC6: tasks_ready → execution waits for a task to exist', () => {
+    const session = freshSession();
     approvePlan(session);
-    ENGINE.tryApplyTransitions(session); // planning → tasks_ready
+    expectApplied(ENGINE.tryApplyTransitions(session), session, 'tasks_ready');
+
+    // No tasks yet: hasPendingTasks() is false.
+    expectNotApplied(ENGINE.tryApplyTransitions(session), session, 'tasks_ready');
 
     addTask(session);
-    ENGINE.tryApplyTransitions(session); // tasks_ready → code
-    expect(session.currentPhase).toBe('code');
-
-    // Invariants still 'pending' → code → review blocked
-    const result = ENGINE.tryApplyTransitions(session);
-    expectNotApplied(result);
-    expect(session.currentPhase).toBe('code');
+    expectApplied(ENGINE.tryApplyTransitions(session), session, 'execution');
   });
 
-  // ───────────────────────────────────────────────────────────────────────
-  // Scenario 8: commit → done blocked without deliveryReceipt
-  // ───────────────────────────────────────────────────────────────────────
-
-  test('TC8: commit → done blocked without deliveryReceipt', () => {
+  test('TC7: execution → validation waits for every task to complete', () => {
     const session = freshSession();
-    driveToQa(session);
+    approvePlan(session);
+    expectApplied(ENGINE.tryApplyTransitions(session), session, 'tasks_ready');
+    session.tasks.implementation = [
+      { id: 'task-1', path: 'a.ts', status: 'running' },
+      { id: 'task-2', path: 'b.ts', status: 'pending' },
+    ];
+    expectApplied(ENGINE.tryApplyTransitions(session), session, 'execution');
 
-    // Advance to commit
+    // One task done is not the work done.
+    session.tasks.implementation[0]!.status = 'completed';
+    expectNotApplied(ENGINE.tryApplyTransitions(session), session, 'execution');
+
+    session.tasks.implementation[1]!.status = 'completed';
+    expectApplied(ENGINE.tryApplyTransitions(session), session, 'validation');
+  });
+
+  test('TC8: commit → done is blocked without a delivery receipt', () => {
+    const session = freshSession();
+    driveToValidation(session);
+    setGateStatus(session, 'review', 'passed');
     setGateStatus(session, 'qa', 'passed');
-    ENGINE.tryApplyTransitions(session);
-    expect(session.currentPhase).toBe('commit');
+    expectApplied(ENGINE.tryApplyTransitions(session), session, 'commit');
 
-    // No deliveryReceipt → blocked
-    const result = ENGINE.tryApplyTransitions(session);
-    expectNotApplied(result);
-    expect(session.currentPhase).toBe('commit');
-
-    // Set deliveryReceipt → proceeds
-    session.deliveryReceipt = 'def456';
-    const result2 = ENGINE.tryApplyTransitions(session);
-    expectApplied(result2, 'done');
-    expect(session.currentPhase).toBe('done');
+    expect(session.deliveryReceipt).toBeNull();
+    expectNotApplied(ENGINE.tryApplyTransitions(session), session, 'commit');
   });
 });

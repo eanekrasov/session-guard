@@ -27,7 +27,7 @@ import type { WorkflowSession } from '../../src/session/session-schema.ts';
 // ─── Config — mirrors profiles/base/state-machine.yaml behaviour ──────────
 
 const ENGINE_CONFIG: EngineConfig = {
-  phaseAssignments: [
+  stageAssignments: [
     { id: 'default', priority: 0, condition: 'true', result: 'PLANNING' },
     {
       id: 'hasPlanApproval',
@@ -153,13 +153,13 @@ describe('E2E: Full state machine flow', () => {
     const engine = new StateMachineEngine(ENGINE_CONFIG);
 
     // 1. PLANNING
-    expect(engine.derivePhase(session)).toBe('PLANNING');
+    expect(engine.deriveStage(session)).toBe('PLANNING');
 
     // 2. approve('plan') → TASKS_READY
     approve(session, 'plan', 'ev-1', 'call-1');
     session = await persistAndReload(session);
 
-    expect(engine.derivePhase(session)).toBe('TASKS_READY');
+    expect(engine.deriveStage(session)).toBe('TASKS_READY');
     expect(engine.checkTransition('PLANNING', 'TASKS_READY', session).allowed).toBe(true);
     expect(engine.canPerformAction(session, 'beginMutation').allowed).toBe(true);
 
@@ -167,7 +167,7 @@ describe('E2E: Full state machine flow', () => {
     addImplementationTask(session);
     session = await persistAndReload(session);
 
-    expect(engine.derivePhase(session)).toBe('EXECUTION');
+    expect(engine.deriveStage(session)).toBe('EXECUTION');
     expect(engine.checkTransition('TASKS_READY', 'EXECUTION', session).allowed).toBe(true);
 
     // 4. beginMutation → finishMutation → gates pass
@@ -186,7 +186,7 @@ describe('E2E: Full state machine flow', () => {
     approve(session, 'commit', 'ev-2', 'call-2');
     session = await persistAndReload(session);
 
-    expect(engine.derivePhase(session)).toBe('COMMIT');
+    expect(engine.deriveStage(session)).toBe('COMMIT');
     expect(engine.checkTransition('EXECUTION', 'COMMIT', session).allowed).toBe(true);
 
     // 6. set deliveryPermit → DONE
@@ -198,7 +198,7 @@ describe('E2E: Full state machine flow', () => {
     };
     session = await persistAndReload(session);
 
-    expect(engine.derivePhase(session)).toBe('DONE');
+    expect(engine.deriveStage(session)).toBe('DONE');
     expect(engine.checkTransition('COMMIT', 'DONE', session).allowed).toBe(true);
     expect(session.deliveryPermit?.preCommitHead).toBe('abc123');
   });
@@ -328,7 +328,7 @@ describe('E2E: Full state machine flow', () => {
 
     approve(session, 'plan', 'ev', 'c1');
     addImplementationTask(session);
-    expect(engine.derivePhase(session)).toBe('EXECUTION');
+    expect(engine.deriveStage(session)).toBe('EXECUTION');
 
     // First mutation fails → retry budget bumps
     beginMutation(session, 'm-1');
@@ -345,7 +345,7 @@ describe('E2E: Full state machine flow', () => {
     setGateStatus(session, 'qa', 'passed');
 
     approve(session, 'commit', 'ev', 'c2');
-    expect(engine.derivePhase(session)).toBe('COMMIT');
+    expect(engine.deriveStage(session)).toBe('COMMIT');
 
     session.deliveryPermit = {
       callID: 'test',
@@ -353,7 +353,7 @@ describe('E2E: Full state machine flow', () => {
       expectedFiles: [],
       startedAt: new Date().toISOString(),
     };
-    expect(engine.derivePhase(session)).toBe('DONE');
+    expect(engine.deriveStage(session)).toBe('DONE');
   });
 
   // ─── TC9: Dispatch functions ─────────────────────────────────────────────
@@ -400,16 +400,16 @@ describe('E2E: Full state machine flow', () => {
 
   // ─── TC11: Decline then re-approve ───────────────────────────────────────
 
-  test('TC11: clear approvals reverts phase to PLANNING', () => {
+  test('TC11: clear approvals reverts stage to PLANNING', () => {
     store = makeStore();
     const session = baseSession();
     const engine = new StateMachineEngine(ENGINE_CONFIG);
 
     approve(session, 'plan', 'ev', 'c1');
-    expect(engine.derivePhase(session)).toBe('TASKS_READY');
+    expect(engine.deriveStage(session)).toBe('TASKS_READY');
 
     session.approvals = [];
-    expect(engine.derivePhase(session)).toBe('PLANNING');
+    expect(engine.deriveStage(session)).toBe('PLANNING');
   });
 
   // ─── TC12: confirm/reject verifications ─────────────────────────────────────
@@ -433,15 +433,15 @@ describe('E2E: Full state machine flow', () => {
     expect(bugV2!.status).toBe('rejected');
   });
 
-  // ─── TC13: Engine tryApplyTransitions sets currentPhase ─────────────────
+  // ─── TC13: Engine tryApplyTransitions sets currentStage ─────────────────
 
-  test('TC13: tryApplyTransitions sets currentPhase on session', () => {
+  test('TC13: tryApplyTransitions sets currentStage on session', () => {
     store = makeStore();
     const session = baseSession();
     approve(session, 'plan', 'ev', 'c1');
 
     const config: EngineConfig = {
-      phaseAssignments: [{ id: 'always', priority: 0, condition: 'true', result: 'TASKS_READY' }],
+      stageAssignments: [{ id: 'always', priority: 0, condition: 'true', result: 'TASKS_READY' }],
       transitions: [{ from: 'TASKS_READY', to: 'EXECUTION', kind: 'auto' }],
       actionGuards: {},
       requiredGates: [],
@@ -450,8 +450,8 @@ describe('E2E: Full state machine flow', () => {
 
     const result = engine.tryApplyTransitions(session);
     expect(result.applied).toBe(true);
-    expect(session.currentPhase).toBe('EXECUTION');
-    expect(session.phaseOverride).toBeUndefined();
+    expect(session.currentStage).toBe('EXECUTION');
+    expect(session.stageOverride).toBeUndefined();
   });
 
   // ─── TC14: Illegal transition ────────────────────────────────────────────
@@ -463,7 +463,7 @@ describe('E2E: Full state machine flow', () => {
 
     const result = engine.checkTransition('PLANNING', 'DONE', session);
     expect(result.allowed).toBe(false);
-    expect(result.reason).toBe('Illegal phase transition: PLANNING → DONE');
+    expect(result.reason).toBe('Illegal stage transition: PLANNING → DONE');
   });
 
   // ─── TC15: Schema strip — old field names are silently dropped ────────────
@@ -923,7 +923,7 @@ describe('E2E: Full state machine flow', () => {
     approve(session, 'plan', 'ev', 'c1');
     // No tasks added — stays in TASKS_READY
 
-    expect(engine.derivePhase(session)).toBe('TASKS_READY');
+    expect(engine.deriveStage(session)).toBe('TASKS_READY');
     // checkTransition to EXECUTION fails
     const validation = engine.checkTransition('TASKS_READY', 'EXECUTION', session);
     expect(validation.allowed).toBe(false);
@@ -931,7 +931,7 @@ describe('E2E: Full state machine flow', () => {
 
   // ─── TC46: Session with all tasks completed goes to TASKS_READY, not EXECUTION ──
 
-  test('TC46: all tasks completed keeps phase in TASKS_READY', () => {
+  test('TC46: all tasks completed keeps stage in TASKS_READY', () => {
     store = makeStore();
     const session = baseSession();
     const engine = new StateMachineEngine(ENGINE_CONFIG);
@@ -940,20 +940,20 @@ describe('E2E: Full state machine flow', () => {
     addImplementationTask(session, 'completed');
 
     // All tasks completed → no "running" tasks → not EXECUTION
-    expect(engine.derivePhase(session)).toBe('TASKS_READY');
+    expect(engine.deriveStage(session)).toBe('TASKS_READY');
   });
 
-  // ─── TC47: approve('commit') with pending gates keeps phase not-COMMIT ───
+  // ─── TC47: approve('commit') with pending gates keeps stage not-COMMIT ───
 
-  test('TC47: approve(commit) without gates passed keeps phase at EXECUTION when derivePhase checks gates', () => {
+  test('TC47: approve(commit) without gates passed keeps stage at EXECUTION when deriveStage checks gates', () => {
     store = makeStore();
     const session = baseSession();
 
-    // Engine where derivePhase also checks gate status for commit
+    // Engine where deriveStage also checks gate status for commit
     const strictConfig: EngineConfig = {
       ...ENGINE_CONFIG,
-      phaseAssignments: [
-        ...ENGINE_CONFIG.phaseAssignments.filter((pa) => pa.id !== 'commitApproval'),
+      stageAssignments: [
+        ...ENGINE_CONFIG.stageAssignments.filter((pa) => pa.id !== 'commitApproval'),
         {
           id: 'commitApproval',
           priority: 90,
@@ -973,8 +973,8 @@ describe('E2E: Full state machine flow', () => {
     // gates NOT passed
     approve(session, 'commit', 'ev', 'c2');
 
-    // derivePhase also blocks because condition checks gates
-    expect(engine.derivePhase(session)).toBe('EXECUTION');
+    // deriveStage also blocks because condition checks gates
+    expect(engine.deriveStage(session)).toBe('EXECUTION');
   });
 
   // ─── TC48: engine with custom ActionId — unknown action is allowed ───────
@@ -999,20 +999,20 @@ describe('E2E: Full state machine flow', () => {
     approve(session, 'plan', 'ev', 'c1');
 
     // Verify through checkTransition that non-existent approval type blocks
-    expect(engine.derivePhase(session)).toBe('TASKS_READY');
+    expect(engine.deriveStage(session)).toBe('TASKS_READY');
     // If we remove plan approval, it reverts
     session.approvals = [];
-    expect(engine.derivePhase(session)).toBe('PLANNING');
+    expect(engine.deriveStage(session)).toBe('PLANNING');
   });
 
-  // ─── TC50: Phase derivation priority — higher wins ───────────────────────
+  // ─── TC50: Stage derivation priority — higher wins ───────────────────────
 
-  test('TC50: higher priority phase assignment wins over lower', () => {
+  test('TC50: higher priority stage assignment wins over lower', () => {
     store = makeStore();
     const session = baseSession();
 
     const priorityConfig: EngineConfig = {
-      phaseAssignments: [
+      stageAssignments: [
         { id: 'low', priority: 10, condition: 'true', result: 'LOW' },
         { id: 'high', priority: 100, condition: 'true', result: 'HIGH' },
       ],
@@ -1022,7 +1022,7 @@ describe('E2E: Full state machine flow', () => {
     };
     const engine = new StateMachineEngine(priorityConfig);
 
-    expect(engine.derivePhase(session)).toBe('HIGH');
+    expect(engine.deriveStage(session)).toBe('HIGH');
   });
 
   // ─── TC52: Concurrent save/load consistency ──────────────────────────────

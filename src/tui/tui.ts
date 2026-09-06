@@ -2,7 +2,7 @@
 // Без JSX: импортируется и плагином, и bun-тестами (scripts/tui.test.ts).
 // Контракт: specs/002-sidebar-state-display/contracts/runtime-state-read.md
 
-export const PHASES = [
+export const STAGES = [
   'planning',
   'tasks_ready',
   'code',
@@ -13,11 +13,11 @@ export const PHASES = [
   'failed',
 ] as const;
 
-export type Phase = string;
+export type Stage = string;
 
-export type DispatchPhase = 'EMPTY' | 'MUTATING' | 'BOTH_ACTIVE' | 'MUTATING_END';
+export type DispatchStage = 'EMPTY' | 'MUTATING' | 'BOTH_ACTIVE' | 'MUTATING_END';
 
-export const DISPATCH_PHASES = ['EMPTY', 'MUTATING', 'BOTH_ACTIVE', 'MUTATING_END'] as const;
+export const DISPATCH_STAGES = ['EMPTY', 'MUTATING', 'BOTH_ACTIVE', 'MUTATING_END'] as const;
 
 export type IdleReason =
   | 'no_session'
@@ -26,7 +26,7 @@ export type IdleReason =
   | 'invalid_structure'
   | 'unknown_schema'
   | 'missing_session_id'
-  | 'no_phase';
+  | 'no_stage';
 
 export const IDLE_REASONS: IdleReason[] = [
   'no_session',
@@ -35,7 +35,7 @@ export const IDLE_REASONS: IdleReason[] = [
   'invalid_structure',
   'unknown_schema',
   'missing_session_id',
-  'no_phase',
+  'no_stage',
 ] as const;
 
 export const IDLE_ICON: Record<IdleReason, string> = {
@@ -45,7 +45,7 @@ export const IDLE_ICON: Record<IdleReason, string> = {
   invalid_structure: '✗',
   unknown_schema: '?',
   missing_session_id: '✗',
-  no_phase: '⏳',
+  no_stage: '⏳',
 };
 
 export const IDLE_LABEL: Record<IdleReason, string> = {
@@ -55,7 +55,7 @@ export const IDLE_LABEL: Record<IdleReason, string> = {
   invalid_structure: 'struct',
   unknown_schema: 'schema',
   missing_session_id: 'sess id',
-  no_phase: 'sess',
+  no_stage: 'sess',
 };
 
 export interface GateInfo {
@@ -71,24 +71,34 @@ export interface RetryInfo {
 
 export type Tui = {
   rootSessionID: string;
-  phase: Phase;
-  prevPhase: Phase | null;
-  nextPhase: Phase | null;
-  dispatchPhase: DispatchPhase;
+  stage: Stage;
+  prevStage: Stage | null;
+  nextStage: Stage | null;
+  dispatchStage: DispatchStage;
   revision: number;
   completedTasks: number;
   totalTasks: number;
   activeMutation: { taskId: string; agent: string; outputReady: boolean } | null;
   gates: GateInfo[];
+  /** Gates of each task still in flight — a verdict belongs to the work it judged. */
+  taskGates: TaskGateInfo[];
   retryBudgets: RetryInfo[];
   raw: Record<string, unknown>;
 };
 
-function derivePhaseFromSession(record: Record<string, unknown>): string | null {
-  // WorkflowSession stores the authoritative phase in currentPhase. Profiles may
-  // define custom phase ids, so the TUI must not restrict this to built-in names.
-  const currentPhase = record.currentPhase;
-  if (typeof currentPhase === 'string' && currentPhase !== '') return currentPhase;
+/** One task's verdicts, as the operator needs to see them: whose, and where. */
+export type TaskGateInfo = {
+  taskId: string;
+  stage: string;
+  status: string;
+  gates: GateInfo[];
+};
+
+function deriveStageFromSession(record: Record<string, unknown>): string | null {
+  // WorkflowSession stores the authoritative stage in currentStage. Profiles may
+  // define custom stage ids, so the TUI must not restrict this to built-in names.
+  const currentStage = record.currentStage;
+  if (typeof currentStage === 'string' && currentStage !== '') return currentStage;
 
   // Старый формат: определяем по planApproved / planDeclined / bugVerified
   const hasPlanApproved = 'planApproved' in record;
@@ -114,7 +124,7 @@ function derivePhaseFromSession(record: Record<string, unknown>): string | null 
   return null;
 }
 
-function deriveDispatchPhase(record: Record<string, unknown>): DispatchPhase {
+function deriveDispatchStage(record: Record<string, unknown>): DispatchStage {
   const activeMutation = record.activeMutation as Record<string, unknown> | null;
   const verifierOps = record.verifierOperations as Record<string, unknown> | null;
   const hasVerifying =
@@ -160,11 +170,11 @@ export function parseRuntimeState(raw: string): ParseResult {
     return { ok: false, reason: 'missing_session_id' };
   }
   (record as Record<string, unknown>).sessionId = sid;
-  const finalPhase = derivePhaseFromSession(record);
-  if (finalPhase === null) {
-    return { ok: false, reason: 'no_phase' };
+  const finalStage = deriveStageFromSession(record);
+  if (finalStage === null) {
+    return { ok: false, reason: 'no_stage' };
   }
-  const dispatchPhase = deriveDispatchPhase(record);
+  const dispatchStage = deriveDispatchStage(record);
   const taskLists = Array.isArray(record.tasks)
     ? [record.tasks]
     : isRecord(record.tasks)
@@ -176,9 +186,9 @@ export function parseRuntimeState(raw: string): ParseResult {
   ).length;
 
   // Фазы в порядке графа
-  const phaseIndex = (PHASES as readonly string[]).indexOf(finalPhase);
-  const prevPhase: Phase | null = phaseIndex > 0 ? PHASES[phaseIndex - 1] : null;
-  const nextPhase: Phase | null = phaseIndex < PHASES.length - 1 ? PHASES[phaseIndex + 1] : null;
+  const stageIndex = (STAGES as readonly string[]).indexOf(finalStage);
+  const prevStage: Stage | null = stageIndex > 0 ? STAGES[stageIndex - 1] : null;
+  const nextStage: Stage | null = stageIndex < STAGES.length - 1 ? STAGES[stageIndex + 1] : null;
 
   // Gates из массива или объекта
   const rawGates = record.gates;
@@ -190,6 +200,25 @@ export function parseRuntimeState(raw: string): ParseResult {
     }));
   } else if (isRecord(rawGates)) {
     gates = Object.entries(rawGates).map(([id, status]) => ({ id, status: String(status) }));
+  }
+
+  // Task gates: inside a loop each task carries its own verdicts, so a session
+  // gate row would hide which task actually passed review.
+  const taskGates: TaskGateInfo[] = [];
+  const rawRuns = record.loopRuns;
+  if (isRecord(rawRuns)) {
+    for (const value of Object.values(rawRuns)) {
+      if (!isRecord(value)) continue;
+      const runGates = isRecord(value.gates)
+        ? Object.entries(value.gates).map(([id, status]) => ({ id, status: String(status) }))
+        : [];
+      taskGates.push({
+        taskId: String(value.taskId ?? ''),
+        stage: String(value.stage ?? ''),
+        status: String(value.status ?? ''),
+        gates: runGates,
+      });
+    }
   }
 
   // Retry budgets
@@ -212,15 +241,16 @@ export function parseRuntimeState(raw: string): ParseResult {
     ok: true as const,
     value: {
       rootSessionID: record.sessionId as string,
-      phase: finalPhase,
-      prevPhase,
-      nextPhase,
-      dispatchPhase,
+      stage: finalStage,
+      prevStage,
+      nextStage,
+      dispatchStage,
       revision: typeof record.revision === 'number' ? record.revision : 0,
       completedTasks: committedCount,
       totalTasks: tasks.length,
       activeMutation: parseActiveMutation(record.activeMutation),
       gates,
+      taskGates,
       retryBudgets,
       raw: record,
     },
@@ -257,10 +287,10 @@ export function formatSectionLines(view: Tui): string[] {
   const lines: string[] = [];
 
   // Верхняя строка: ▶               code               ✕
-  const phaseLabel = view.phase;
+  const stageLabel = view.stage;
   const leftCtrl = '▶';
   const rightCtrl = '✕';
-  const center = ` ${phaseLabel} `;
+  const center = ` ${stageLabel} `;
   const contentWidth = leftCtrl.length + center.length + rightCtrl.length;
   const padTotal = SIDEBAR_WIDTH - contentWidth;
   const padLeft = Math.floor(padTotal / 2);
@@ -270,15 +300,15 @@ export function formatSectionLines(view: Tui): string[] {
 
   // Строка графа фаз: ── planning ── ● code ▼ ── review → ──
   // Если не влезает в SIDEBAR_WIDTH, укорачиваем названия фаз до первых букв
-  const prevStr = view.prevPhase ?? '·';
-  const nextStr = view.nextPhase ?? '·';
-  const currentStr = `● ${view.phase}`;
+  const prevStr = view.prevStage ?? '·';
+  const nextStr = view.nextStage ?? '·';
+  const currentStr = `● ${view.stage}`;
 
   let graph = `── ${prevStr} ── ${currentStr} ▼ ── ${nextStr} → ──`;
   if (graph.length > SIDEBAR_WIDTH) {
     // Сокращаем граф: убираем пробелы вокруг стрелок, короткие названия — первую букву
     const shortPrev = prevStr.length > 1 ? prevStr[0]! : prevStr;
-    const shortCur = view.phase;
+    const shortCur = view.stage;
     const shortNext = nextStr.length > 1 ? nextStr[0]! : nextStr;
     graph = `──${shortPrev}─●${shortCur}▼──${shortNext}→──`;
   }
@@ -291,6 +321,18 @@ export function formatSectionLines(view: Tui): string[] {
 
   // Третья строка: gates/retry/status info
   const statusParts: string[] = [];
+
+  // Task verdicts come first: inside a loop they are what is moving, and the
+  // status line is narrow enough that whatever comes last is what gets cut.
+  // task-1@verify ✓review ⏳qa — a session row would say "review passed"
+  // while another task is still in code.
+  for (const task of view.taskGates) {
+    if (task.gates.length === 0) continue;
+    const verdicts = task.gates
+      .map((gate) => `${GATE_GLYPH[gate.status] ?? '?'}${gate.id}`)
+      .join('');
+    statusParts.push(`${task.taskId}@${task.stage} ${verdicts}`);
+  }
 
   // Gates: ⏳invariants  ✓test
   for (const gate of view.gates) {

@@ -333,7 +333,7 @@ describe('SessionQueue — writes survive nesting and overlap', () => {
     const queue = new SessionQueue(store);
 
     await queue.enqueue('sq-nested-write', async (outer) => {
-      outer!.currentPhase = 'code';
+      outer!.currentStage = 'code';
       await queue.enqueue('sq-nested-write', async (inner) => {
         inner!.tasks.implementation = [
           { id: 'task-0', path: 'src/a.ts', status: 'pending' },
@@ -343,7 +343,7 @@ describe('SessionQueue — writes survive nesting and overlap', () => {
 
     const persisted = await store.load('sq-nested-write');
     expect(persisted?.tasks.implementation).toHaveLength(1);
-    expect(persisted?.currentPhase).toBe('code');
+    expect(persisted?.currentStage).toBe('code');
   });
 
   it('a reentrant call sees the outer execution\'s session, not a reload', async () => {
@@ -390,7 +390,7 @@ describe('SessionQueue — writes survive nesting and overlap', () => {
       order.push('second:start');
       // Must observe the first execution's persisted write.
       expect(session!.tasks.implementation).toHaveLength(1);
-      session!.currentPhase = 'review';
+      session!.currentStage = 'review';
       order.push('second:end');
     });
 
@@ -399,7 +399,7 @@ describe('SessionQueue — writes survive nesting and overlap', () => {
 
     expect(order).toEqual(['first:start', 'first:end', 'second:start', 'second:end']);
     const persisted = await store.load('sq-overlap');
-    expect(persisted?.currentPhase).toBe('review');
+    expect(persisted?.currentStage).toBe('review');
     expect(persisted?.tasks.implementation).toHaveLength(1);
   });
 });

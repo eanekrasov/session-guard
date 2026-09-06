@@ -1,7 +1,7 @@
 # test/fixtures/presets/medium.yaml
 # State machine config for medium (review without QA).
 
-phases:
+stages:
   PLANNING: {}
 
   TASKS_READY: {}
@@ -10,14 +10,14 @@ phases:
     dispatch:
       strategy: serial
     stages:
-      - id: dev
+      dev:
         allowedAgents:
           - code
           - debug
         entryGuards: []
         exitGuards:
           - "session.gatePassed('invariants')"
-      - id: review
+      review:
         allowedAgents:
           - review
         entryGuards:
