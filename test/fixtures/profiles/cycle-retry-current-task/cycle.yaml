@@ -1,0 +1,8 @@
+extends: 'cycle-serial/cycle.yaml'
+# `loop: $currentTask.id` cycles over the task list named by the task being
+# moved, rather than a fixed one.
+stages:
+  execution:
+    loop: $currentTask.id
+    retryBudget:
+      maximum: 1

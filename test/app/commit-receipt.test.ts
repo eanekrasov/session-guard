@@ -44,7 +44,7 @@ function pluginInput(): PluginInput {
 /** Session holding a permit issued against the current HEAD. */
 async function sessionWithPermit(expectedFiles: string[]): Promise<WorkflowStore> {
   const store = new WorkflowStore(storeDirectory);
-  const session = createSession('s1', 'commit-cwd');
+  const session = createSession('s1', 'cycle-minimal');
   session.deliveryPermit = {
     callID: 'commit-call',
     preCommitHead: git(['rev-parse', 'HEAD']),

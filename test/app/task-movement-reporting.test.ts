@@ -132,7 +132,7 @@ describe('an unreachable movement on a pass is reported', () => {
     // stages — the only way `unreachable` happens on a pass. That is an
     // exhibit, not a natural flow: force it directly on the run after normal
     // admission, the way a corrupted or renamed stage would.
-    setMovementFixtureProfilesDir('task-control');
+    setMovementFixtureProfilesDir('cycle-minimal');
     const store = await seed();
     const hooks: Hooks = createRuntime(pluginInput());
 

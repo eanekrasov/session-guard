@@ -1,1 +1,1 @@
-{"id": "verify-approve-on-move", "schemas": ["cycle.yaml"]}
+{"id": "verify-approve-on-move", "name": "verify-approve-on-move", "extends": "verify-default", "schemas": ["cycle.yaml"]}

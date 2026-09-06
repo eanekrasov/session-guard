@@ -53,7 +53,7 @@ function toolContext(agent = 'orchestrator'): ToolContext {
   };
 }
 
-let taskRetryProfileId = 'task-retry-serial';
+let taskRetryProfileId = 'cycle-serial';
 
 /**
  * Point the runtime at the fixture profile this scenario needs.
@@ -67,10 +67,10 @@ function writeProfile(
   options: { maxConcurrent?: number; retryMaximum?: number; loop?: string } = {}
 ): void {
   setFixtureProfilesDir();
-  if (options.loop === '$currentTask.id') taskRetryProfileId = 'task-retry-current-task';
-  else if (strategy === 'parallel') taskRetryProfileId = 'task-retry-parallel-1';
-  else if (options.retryMaximum !== undefined) taskRetryProfileId = 'task-retry-serial-budget';
-  else taskRetryProfileId = 'task-retry-serial';
+  if (options.loop === '$currentTask.id') taskRetryProfileId = 'cycle-retry-current-task';
+  else if (strategy === 'parallel') taskRetryProfileId = 'cycle-retry-parallel-1';
+  else if (options.retryMaximum !== undefined) taskRetryProfileId = 'cycle-retry-serial';
+  else taskRetryProfileId = 'cycle-serial';
 }
 
 async function createWorkflowSession(

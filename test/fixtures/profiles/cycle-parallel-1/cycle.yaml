@@ -1,0 +1,6 @@
+extends: 'cycle-serial/cycle.yaml'
+stages:
+  execution:
+    dispatch:
+      strategy: parallel
+      maxConcurrent: 1

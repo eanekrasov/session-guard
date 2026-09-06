@@ -33,20 +33,20 @@ function pluginInput(): PluginInput {
   };
 }
 
-let taskAdmissionProfileId = 'task-admission-serial';
+let taskAdmissionProfileId = 'cycle-serial';
 
 function setTaskAdmissionFixtureProfilesDir(
   strategy: DispatchStrategy,
   options: { maxConcurrent?: number; allowedAgents?: string[] } = {}
 ): void {
   process.env.STATE_MACHINE_PROFILES_DIR = resolve(import.meta.dir, '../../test/fixtures/profiles');
-  if (strategy === 'serial_with_overlap') taskAdmissionProfileId = 'task-admission-overlap-2';
+  if (strategy === 'serial_with_overlap') taskAdmissionProfileId = 'cycle-overlap-2';
   else if (strategy === 'parallel' && options.maxConcurrent === 1)
-    taskAdmissionProfileId = 'task-admission-parallel-1';
-  else if (strategy === 'parallel') taskAdmissionProfileId = 'task-admission-parallel-2';
+    taskAdmissionProfileId = 'cycle-parallel-1';
+  else if (strategy === 'parallel') taskAdmissionProfileId = 'cycle-parallel-2';
   else if (options.allowedAgents?.includes('review'))
-    taskAdmissionProfileId = 'task-admission-serial-review';
-  else taskAdmissionProfileId = 'task-admission-serial';
+    taskAdmissionProfileId = 'cycle-serial-review';
+  else taskAdmissionProfileId = 'cycle-serial';
 }
 
 async function createWorkflowSession(

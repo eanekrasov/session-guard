@@ -76,16 +76,18 @@ describe('MutationOrchestrator.resolveEngine', () => {
     // The cache is keyed on the id, but the directory is read from the
     // environment on each call, so keying on the id alone hands back the first
     // directory's engine and the second fixture is never really loaded.
-    const good = fixtureProfilesDir('profiles/cache/good');
-    const broken = fixtureProfilesDir('profiles/cache/bad');
+    // Two roots holding the same profile id — which is what the cache key has
+    // to distinguish, and why these live outside `profiles/` rather than in it.
+    const good = fixtureProfilesDir('profile-roots/valid');
+    const broken = fixtureProfilesDir('profile-roots/undeclared-gate');
 
     const { orchestrator } = await makeOrchestrator();
 
     process.env.STATE_MACHINE_PROFILES_DIR = good;
-    await orchestrator.resolveEngine('bad');
+    await orchestrator.resolveEngine('cycle-probe');
 
     process.env.STATE_MACHINE_PROFILES_DIR = broken;
-    await expect(orchestrator.resolveEngine('bad')).rejects.toThrow(/Gate "security"/);
+    await expect(orchestrator.resolveEngine('cycle-probe')).rejects.toThrow(/Gate "security"/);
   });
 
   it('refuses a profile whose stage waits on a gate it does not declare', async () => {
@@ -94,9 +96,9 @@ describe('MutationOrchestrator.resolveEngine', () => {
     // It compiles from an explicit field list, so omitting `gates` there turns
     // the check off silently while the unit test over `compileWorkflow`, which
     // passes its own, stays green.
-    process.env.STATE_MACHINE_PROFILES_DIR = fixtureProfilesDir('profiles/cache/bad');
+    process.env.STATE_MACHINE_PROFILES_DIR = fixtureProfilesDir('profile-roots/undeclared-gate');
     const { orchestrator } = await makeOrchestrator();
-    await expect(orchestrator.resolveEngine('bad')).rejects.toThrow(/Gate "security"/);
+    await expect(orchestrator.resolveEngine('cycle-probe')).rejects.toThrow(/Gate "security"/);
   });
 });
 

@@ -13,7 +13,7 @@ let storeDirectory: string;
 let profilesDirectory: string;
 let previousStoreDirectory: string | undefined;
 let previousProfilesDirectory: string | undefined;
-let taskControlProfileId = 'task-control';
+let taskControlProfileId = 'cycle-minimal';
 
 function pluginInput(): PluginInput {
   return {
@@ -46,7 +46,7 @@ function toolContext(agent: string | undefined): ToolContext {
   };
 }
 
-function setFixtureProfilesDir(profileId = 'task-control'): void {
+function setFixtureProfilesDir(profileId = 'cycle-minimal'): void {
   process.env.STATE_MACHINE_PROFILES_DIR = resolve(import.meta.dir, '../../test/fixtures/profiles');
   taskControlProfileId = profileId;
 }
@@ -79,7 +79,7 @@ beforeEach(async () => {
   profilesDirectory = await mkdtemp(join(tmpdir(), 'task-control-profiles-'));
   process.env.STATE_MACHINE_STORE_DIR = storeDirectory;
   process.env.STATE_MACHINE_PROFILES_DIR = profilesDirectory;
-  taskControlProfileId = 'task-control';
+  taskControlProfileId = 'cycle-minimal';
 });
 
 afterEach(async () => {
@@ -108,7 +108,7 @@ describe('workflow task state is orchestrator-owned', () => {
     const store = await createWorkflowSession();
     const hooks = createRuntime(pluginInput());
 
-    const result = await setStatus(hooks, 'task-control/orchestrator');
+    const result = await setStatus(hooks, 'cycle-minimal/orchestrator');
 
     expect(result.output).toBe('Updated task-1 to completed');
     expect((await load(store)).tasks.implementation[0]!.status).toBe('completed');

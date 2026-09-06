@@ -1,20 +1,9 @@
-gates:
-  - id: review
-  - id: qa
-  - id: invariants
+extends: 'verify-default/cycle.yaml'
+# The full task cycle: verify goes on to commit when both verdicts pass, and
+# back to code when either fails, spending the task's own budget.
 stages:
   execution:
-    loop: implementation
-    dispatch:
-      strategy: serial
-    retryBudget:
-      maximum: 3
     stages:
-      code:
-        allowedAgents: ['code']
-      verify:
-        allowedAgents: ['review', 'qa']
-        gates: [review, qa]
       commit: {}
     transitions:
       - from: code
@@ -29,8 +18,3 @@ stages:
         guard: "task.gates.review == 'failed' || task.gates.qa == 'failed'"
         effects:
           - bumpRetry: task.id
-stageAssignments:
-  - id: execution
-    priority: 1
-    condition: 'true'
-    result: execution

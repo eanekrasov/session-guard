@@ -1,20 +1,8 @@
-gates:
-  - id: review
-  - id: qa
-  - id: invariants
+extends: 'verify-default/cycle.yaml'
+# A task may not reach the verifiers until the session's invariants gate is
+# green — the guard base.yaml uses on the same edge.
 stages:
   execution:
-    loop: implementation
-    dispatch:
-      strategy: serial
-    retryBudget:
-      maximum: 3
-    stages:
-      code:
-        allowedAgents: ['code']
-      verify:
-        allowedAgents: ['review', 'qa']
-        gates: [review, qa]
     transitions:
       - from: code
         to: verify
@@ -22,8 +10,3 @@ stages:
       - from: verify
         to: done
         guard: "task.gates.review == 'passed' && task.gates.qa == 'passed'"
-stageAssignments:
-  - id: execution
-    priority: 1
-    condition: 'true'
-    result: execution

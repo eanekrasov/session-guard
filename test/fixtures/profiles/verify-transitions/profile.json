@@ -1,1 +1,1 @@
-{"id": "verify-transitions", "schemas": ["cycle.yaml"]}
+{"id": "verify-transitions", "name": "verify-transitions", "extends": "verify-default", "schemas": ["cycle.yaml"]}

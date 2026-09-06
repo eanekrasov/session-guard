@@ -610,6 +610,35 @@ function writeProfile(strategy, options) {
 booleans, where a sixth scenario meant a sixth flag. A new combination now
 means a new fixture.
 
+**The corpus was then tidied.** `profiles/` holds one level — a directory per
+profile, nothing nested but a profile's own `agents/`. Two pairs were
+byte-identical and became one each: `cycle-serial` (the dev/review/qa loop,
+shared by the admission and retry tests) and `cycle-minimal` (a loop with a
+single stage, shared by the commit and task-control tests).
+
+What was left divided into two families that differed from a common shape by a
+line or two, so they now say so with `extends` rather than by repetition:
+
+- **`cycle-serial`** — `cycle-serial-review`, `cycle-parallel-1`,
+  `cycle-parallel-2`, `cycle-overlap-2`, `cycle-retry-serial`,
+  `cycle-retry-parallel-1`, `cycle-retry-current-task`. Each declares only its
+  dispatch strategy, its retry budget or its loop source. They are named for
+  the shape of the cycle rather than for the test that happens to use them,
+  because the shape is what is shared.
+- **`verify-default`** — `verify-transitions`, `verify-guard-invariants`,
+  `verify-self-loop`, `verify-consent-to-finish`, `verify-approve-on-move`.
+  Each declares only its `transitions`, which is the whole of what those
+  scenarios differ by.
+
+`verify-approve-done` is deliberately not among them: it is a *reduced*
+profile, without gates, dispatch, budget or a verify stage, so inheriting would
+hand back exactly what it is defined by not having.
+
+35 profiles and 657 lines of schema became 32 and 444, with the suite
+unchanged. Renaming is not free — `task-control/orchestrator` in a test is a
+profile-qualified agent name, and the profile id inside it had to move with the
+directory.
+
 **Constraints that still hold.** A deliberately-invalid fixture must be broken
 *semantically* — an undeclared gate, a transition to a stage that does not
 exist — never by shape: a wrong type throws at `ProfileSchemaSchema.parse`
@@ -619,8 +648,10 @@ before the compiler sees it, so the refusal under test never happens.
 **Precondition, already fixed.** The engine cache was keyed on `profileId`
 alone while `profilesDir` is read from the environment on every call, so a
 helper pointing one id at two fixture directories would have been served the
-first in silence (`9ba3d32`). `test/fixtures/profiles/cache/{good,bad}` is what
-covers it.
+first in silence (`9ba3d32`). `test/fixtures/profile-roots/{valid,undeclared-gate}` is what
+covers it, and it lives beside `profiles/` rather than inside it: the test
+needs one profile id under two roots, which is the one thing a flat directory
+cannot express.
 
 Reviewed afterwards, three things needed finishing. `test/fixtures/schemas/`
 was the last carrier of the old vocabulary — uppercase stages and a transition

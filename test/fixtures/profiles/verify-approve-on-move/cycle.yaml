@@ -1,20 +1,7 @@
-gates:
-  - id: review
-  - id: qa
-  - id: invariants
+extends: 'verify-default/cycle.yaml'
+# The approval is granted by an earlier edge and spent by a later one.
 stages:
   execution:
-    loop: implementation
-    dispatch:
-      strategy: serial
-    retryBudget:
-      maximum: 3
-    stages:
-      code:
-        allowedAgents: ['code']
-      verify:
-        allowedAgents: ['review', 'qa']
-        gates: [review, qa]
     transitions:
       - from: code
         to: verify
@@ -23,8 +10,3 @@ stages:
       - from: verify
         to: done
         consent: release
-stageAssignments:
-  - id: execution
-    priority: 1
-    condition: 'true'
-    result: execution

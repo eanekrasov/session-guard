@@ -1,0 +1,8 @@
+extends: 'cycle-serial/cycle.yaml'
+# The first stage also admits the reviewer, so a dispatch that would be refused
+# elsewhere is accepted here.
+stages:
+  execution:
+    stages:
+      dev:
+        allowedAgents: ['code', 'review']

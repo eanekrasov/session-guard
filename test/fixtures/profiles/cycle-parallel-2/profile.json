@@ -1,0 +1,1 @@
+{"id": "cycle-parallel-2", "name": "cycle-parallel-2", "extends": "cycle-serial", "schemas": ["cycle.yaml"]}

@@ -1,0 +1,7 @@
+extends: 'cycle-serial/cycle.yaml'
+# A budget of one: the first failure exhausts it, which is what the retry tests
+# need in order to reach the decision it raises.
+stages:
+  execution:
+    retryBudget:
+      maximum: 1
