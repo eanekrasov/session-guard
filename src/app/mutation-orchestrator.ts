@@ -265,6 +265,9 @@ export class MutationOrchestrator {
       stages: engineConfig.stages,
       transitions: engineConfig.transitions,
       stageAssignments: engineConfig.stageAssignments,
+      // Without this the compiler has no declaration to check a stage's
+      // `gates:` against, so the check turns itself off instead of failing.
+      gates: engineConfig.gates,
     });
     if (errors.length > 0) {
       await this.log('error', 'Profile schema failed to compile', {

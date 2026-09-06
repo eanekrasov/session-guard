@@ -73,6 +73,46 @@ function addExecutableTaskCycle(session: ReturnType<typeof createSession>): void
 
 // ─── Tests ─────────────────────────────────────────────────────────
 
+describe('MutationOrchestrator.resolveEngine', () => {
+  /** A profile whose stage waits on a gate the profile never declares. */
+  function writeUndeclaredGateProfile(): string {
+    const dir = mkdtempSync(join(tmpdir(), 'mo-gate-'));
+    mkdirSync(join(dir, 'bad'), { recursive: true });
+    writeFileSync(join(dir, 'bad', 'profile.json'), '{"id":"bad","schemas":["bad.yaml"]}', 'utf-8');
+    writeFileSync(
+      join(dir, 'bad', 'bad.yaml'),
+      [
+        'gates:',
+        '  - id: invariants',
+        'stages:',
+        '  execution:',
+        '    loop: implementation',
+        '    stages:',
+        '      verify:',
+        '        gates: [security]',
+        '    transitions:',
+        '      - from: verify',
+        '        to: done',
+        '  done: {}',
+      ].join('\n'),
+      'utf-8'
+    );
+    gitDirs.push(dir);
+    return dir;
+  }
+
+  it('refuses a profile whose stage waits on a gate it does not declare', async () => {
+    // The compiler checks a stage's `gates:` against the profile's own
+    // declaration, and `resolveEngine` is where that check reaches production.
+    // It compiles from an explicit field list, so omitting `gates` there turns
+    // the check off silently while the unit test over `compileWorkflow`, which
+    // passes its own, stays green.
+    process.env.STATE_MACHINE_PROFILES_DIR = writeUndeclaredGateProfile();
+    const { orchestrator } = await makeOrchestrator();
+    await expect(orchestrator.resolveEngine('bad')).rejects.toThrow(/Gate "security"/);
+  });
+});
+
 describe('MutationOrchestrator.beginMutation', () => {
   it('rejects when engine resolution fails (no profiles dir)', async () => {
     await store.save(createSession('mo-no-profiles', 'base'));
