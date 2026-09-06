@@ -839,3 +839,65 @@ Two constraints on the corpus:
 Keep the inline YAML in `test/schema/compile-validation.test.ts` where it is:
 those schemas are deliberately wrong, and they are the test's input rather than
 duplication.
+
+## Next: a profile holds several schemas, and a session runs one
+
+Decided 2026-09-07, not started.
+
+**The rule.** A profile may hold as many schemas as it likes, and they are
+independent workflows. Schemas combine **only** through `extends`. Schema names
+are unique within their profile, profiles are unique among themselves, and
+`workflow.create` is given `{profileId}/{schemaId}`.
+
+**Why it is not a new feature but an unfinished one.** `handleCreateWorkflow`
+(`src/app/runtime.ts:428`) already selects by schema: it turns `schemaId` into a
+filename and finds the profile whose `schemas` array contains it —
+
+```ts
+const matchingProfiles = profiles.filter((p) => p.schemas?.includes(schemaFile));
+const resolvedProfileId = matchingProfiles.length === 1 ? matchingProfiles[0]!.id : undefined;
+```
+
+The `=== 1` is the tell: the schema name is already treated as a unique key, and
+the profile is derived from it. Its error message says "Available schemas". Then
+the selection is discarded — `createSession(sessionID, resolvedProfileId)` keeps
+only the profile, and `resolveEngine(profileId)` merges every schema the profile
+has. Qualifying the id deletes that search entirely: a direct lookup replaces it.
+
+**What is broken today, and why it has not bitten.** Two schemas side by side in
+one profile do not stay two schemas. `EngineConfig` has no notion of a schema;
+`mergeSchemasToEngineConfig` folds the list flat and provenance is gone.
+Measured, with two independent schemas in one profile:
+
+| | Result |
+| --- | --- |
+| stages | both survive — the only place, and only because the keys differ |
+| `gates`, `requiredGates`, `taskControlAgents`, `editingAgents` | last schema wins, the other is silently dropped |
+| `actionGuards` | last wins per action |
+| transitions | last wins per `from→to` pair |
+
+For the real `verify` fixtures this would be fatal and silent: every variant
+declares `code → verify` and `verify → done`, so six of seven would vanish into
+the seventh. **No profile in the repository declares more than one schema
+today**, shipped or fixture, so nothing is currently wrong — the mine is laid
+but unarmed.
+
+**The work.**
+
+1. The session records the schema beside the profile. This needs a session
+   schema migration, which is the thing deferred until release — the only real
+   cost here.
+2. `resolveEngine` takes a schema, not a profile's whole list.
+   `mergeSchemasToEngineConfig` stops merging a list; inheritance stays where it
+   already is, in `resolveSingleSchema`'s `extends` resolution.
+3. `workflow.create` accepts `{profileId}/{schemaId}`. A bare id stays legal and
+   means "that profile, if it has exactly one schema"; a profile with several
+   and a bare id is refused with the choices named, in keeping with refusing
+   rather than guessing. Every current caller passes a bare id —
+   `scripts/create-workflow.ts`, nine host-smoke instructions,
+   `HARNESS_SCHEMA_ID` / `HARNESS_PROFILE` — and every one of them names a
+   profile whose single schema file shares its name, so none of them changes.
+
+`profileId` keeps its meaning everywhere else, so profile-qualified agent names
+like `android/code` are untouched. The qualified form also matches the
+convention already used for those names.
