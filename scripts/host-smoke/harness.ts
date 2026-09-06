@@ -80,7 +80,6 @@ export function packPlugin(): string {
   return line.startsWith('/') ? line : join(destination, line);
 }
 
-
 /** Strip `//` line comments so a .jsonc file parses as JSON. */
 function stripComments(text: string): string {
   return text.replace(/^\s*\/\/.*$/gm, '');
@@ -117,7 +116,8 @@ async function operatorProviders(): Promise<{
   disabled_providers?: unknown;
   model?: string;
 }> {
-  const configHome = process.env.HOST_SMOKE_OPERATOR_CONFIG ?? join(homedir(), '.config', 'opencode');
+  const configHome =
+    process.env.HOST_SMOKE_OPERATOR_CONFIG ?? join(homedir(), '.config', 'opencode');
   const merged: { provider?: unknown; disabled_providers?: unknown; model?: string } = {};
   for (const name of ['opencode.json', 'opencode.jsonc']) {
     const file = join(configHome, name);
@@ -177,9 +177,7 @@ export async function startHost(options: HostOptions): Promise<Host> {
         // config — the model has to be live. Their agents, plugins, MCP servers
         // and commands are deliberately left out of this run.
         ...(operator.provider ? { provider: operator.provider } : {}),
-        ...(operator.disabled_providers
-          ? { disabled_providers: operator.disabled_providers }
-          : {}),
+        ...(operator.disabled_providers ? { disabled_providers: operator.disabled_providers } : {}),
         // Consent runs through the host's `question` tool, which is denied by
         // default outside an interactive client.
         // The equivalent of `opencode run --auto` for a served session: nobody
@@ -291,12 +289,7 @@ export async function startHost(options: HostOptions): Promise<Host> {
   };
 }
 
-export async function api<T>(
-  host: Host,
-  method: string,
-  path: string,
-  body?: unknown
-): Promise<T> {
+export async function api<T>(host: Host, method: string, path: string, body?: unknown): Promise<T> {
   const response = await fetch(`${host.url}${path}`, {
     method,
     headers: { 'content-type': 'application/json' },

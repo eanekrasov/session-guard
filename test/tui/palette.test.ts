@@ -38,8 +38,6 @@ describe('themeColorToHex', () => {
     expect(themeColorToHex({ x: 1 }, '#abc')).toBe('#abc');
   });
 
-
-
   test('возвращает fallback для пустой строки', () => {
     expect(themeColorToHex('', '#xyz')).toBe('#xyz');
   });

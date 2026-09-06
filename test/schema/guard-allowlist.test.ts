@@ -36,9 +36,9 @@ describe('guard expressions people actually write', () => {
   });
 
   it('accepts multiple arrow parameters', () => {
-    expect(evaluate('session.tasks.implementation.some((t, i) => i == 1 && t.id == "task-1")')).toBe(
-      true
-    );
+    expect(
+      evaluate('session.tasks.implementation.some((t, i) => i == 1 && t.id == "task-1")')
+    ).toBe(true);
   });
 
   it('reads a dynamic key', () => {
@@ -63,12 +63,10 @@ describe('guard expressions people actually write', () => {
   });
 
   it('chains the allowed collection methods', () => {
-    expect(
-      evaluate('session.tasks.implementation.map(t => t.id).includes("task-1")')
-    ).toBe(true);
-    expect(
-      evaluate('session.tasks.implementation.filter(t => t.id == "task-0").length == 1')
-    ).toBe(true);
+    expect(evaluate('session.tasks.implementation.map(t => t.id).includes("task-1")')).toBe(true);
+    expect(evaluate('session.tasks.implementation.filter(t => t.id == "task-0").length == 1')).toBe(
+      true
+    );
   });
 });
 

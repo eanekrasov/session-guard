@@ -110,7 +110,9 @@ describe('consent tag round trip', () => {
     const session = await store.load('s1');
     expect(session?.refs.plan, 'the plan reference was never recorded').toBeTruthy();
     expect(
-      session?.approvals.some((approval) => approval.type === 'plan' && approval.status === 'granted'),
+      session?.approvals.some(
+        (approval) => approval.type === 'plan' && approval.status === 'granted'
+      ),
       'consent was not granted'
     ).toBe(true);
   });

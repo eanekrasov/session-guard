@@ -1,12 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import type { Hooks, PluginInput } from '@opencode-ai/plugin';
 
 import { createRuntime } from '../../src/app/runtime.ts';
 import { createSession, WorkflowStore } from '../../src/session/session-store.ts';
 import { createTasks } from '../support/task-factory.ts';
+import { setFixtureProfilesDir } from '../support/fixture-profiles.ts';
 
 /**
  * task-scope spec, CRITICAL-1 remediation: `scopeBefore` MUST enforce
@@ -41,13 +42,9 @@ function pluginInput(): PluginInput {
   };
 }
 
-function setParallelProfilesDir(): void {
-  process.env.STATE_MACHINE_PROFILES_DIR = resolve(import.meta.dir, '../../test/fixtures/profiles');
-}
-
 async function seedTwoRunningTasks(): Promise<WorkflowStore> {
   const store = new WorkflowStore(storeDirectory);
-  const session = createSession('s1', 'concurrent-scope');
+  const session = createSession('s1', 'parallel-scope');
   session.tasks.implementation = createTasks(
     { writeScope: ['src/auth/**'], readScope: ['src/auth/**'] },
     { writeScope: ['src/billing/**'], readScope: ['src/billing/**'] }
@@ -66,7 +63,7 @@ function dispatch(hooks: Hooks, callID: string, taskId: string): Promise<void> {
 beforeEach(() => {
   previousStore = process.env.STATE_MACHINE_STORE_DIR;
   previousProfiles = process.env.STATE_MACHINE_PROFILES_DIR;
-  storeDirectory = mkdtempSync(join(tmpdir(), 'concurrent-scope-store-'));
+  storeDirectory = mkdtempSync(join(tmpdir(), 'parallel-scope-store-'));
   process.env.STATE_MACHINE_STORE_DIR = storeDirectory;
 });
 
@@ -96,7 +93,7 @@ describe('scopeBefore under two concurrently running tasks', () => {
   // proving the union check admitted the path — it is that unrelated,
   // already-logged mutation-lifecycle failure instead.
   it("admits a write matching the first running task's writeScope (scopeBefore itself does not refuse it)", async () => {
-    setParallelProfilesDir();
+    setFixtureProfilesDir();
     await seedTwoRunningTasks();
     const hooks: Hooks = createRuntime(pluginInput());
     await dispatch(hooks, 'call-1', 'task-1');
@@ -111,7 +108,7 @@ describe('scopeBefore under two concurrently running tasks', () => {
   });
 
   it("admits a write matching the second running task's writeScope (scopeBefore itself does not refuse it)", async () => {
-    setParallelProfilesDir();
+    setFixtureProfilesDir();
     await seedTwoRunningTasks();
     const hooks: Hooks = createRuntime(pluginInput());
     await dispatch(hooks, 'call-1', 'task-1');
@@ -126,7 +123,7 @@ describe('scopeBefore under two concurrently running tasks', () => {
   });
 
   it("refuses a write matching neither running task's writeScope, and refuses it for that reason", async () => {
-    setParallelProfilesDir();
+    setFixtureProfilesDir();
     await seedTwoRunningTasks();
     const hooks: Hooks = createRuntime(pluginInput());
     await dispatch(hooks, 'call-1', 'task-1');
@@ -141,7 +138,7 @@ describe('scopeBefore under two concurrently running tasks', () => {
   });
 
   it("refuses a read matching neither running task's readScope", async () => {
-    setParallelProfilesDir();
+    setFixtureProfilesDir();
     await seedTwoRunningTasks();
     const hooks: Hooks = createRuntime(pluginInput());
     await dispatch(hooks, 'call-1', 'task-1');
@@ -156,7 +153,7 @@ describe('scopeBefore under two concurrently running tasks', () => {
   });
 
   it("admits a read matching the second running task's readScope", async () => {
-    setParallelProfilesDir();
+    setFixtureProfilesDir();
     await seedTwoRunningTasks();
     const hooks: Hooks = createRuntime(pluginInput());
     await dispatch(hooks, 'call-1', 'task-1');

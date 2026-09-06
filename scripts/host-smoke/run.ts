@@ -116,9 +116,7 @@ async function logExchange(
     ...(error ? [`⚠ error: ${error}`] : []),
     ...parts.map((p, i) => {
       const tool = p.tool ? ` [tool: ${p.tool}]` : '';
-      const state = p.state
-        ? ` [state: ${JSON.stringify(p.state).slice(0, 200)}]`
-        : '';
+      const state = p.state ? ` [state: ${JSON.stringify(p.state).slice(0, 200)}]` : '';
       return `  [${i}]${tool}${state} ${(p.text ?? '').slice(0, 400)}`;
     }),
   ];
@@ -417,9 +415,7 @@ const scenarios: Scenario[] = [
         expect: (s) => {
           const receipt = (s.state as { deliveryReceipt?: string | null } | null)?.deliveryReceipt;
           if (receipt) return 'a delivery receipt was written before the gates passed';
-          return (
-            /cannot commit|refus|not allowed/i.test(s.transcript) || 'no refusal surfaced'
-          );
+          return /cannot commit|refus|not allowed/i.test(s.transcript) || 'no refusal surfaced';
         },
       });
       return {
@@ -465,11 +461,11 @@ const scenarios: Scenario[] = [
     },
   },
   {
-    id: 'commit-receipt',
+    id: 'commit-cwd',
     title: 'A commit that matches the permit is receipted',
     env: { HARNESS_AUTO_APPROVE: 'true' },
     run: async (host, model) => {
-      const sessionId = await newSession(host, 'commit-receipt');
+      const sessionId = await newSession(host, 'commit-cwd');
       const prepared = await prepareCommittableSession(host, sessionId, model);
       if (!prepared.ok) return prepared;
 
@@ -653,8 +649,7 @@ const scenarios: Scenario[] = [
 
       for (const entry of [
         {
-          instruction:
-            'Call the tool `workflow.create` with schemaId "cicd". Do nothing else.',
+          instruction: 'Call the tool `workflow.create` with schemaId "cicd". Do nothing else.',
           expect: (s: Session) => s.state !== null || 'workflow.create did not run',
         },
         {
@@ -670,10 +665,13 @@ const scenarios: Scenario[] = [
             'and then finish with exactly ' +
             '<workflow-result>{"stage":"checkout_done","status":"pass","summary":"created source file","evidence":["src/ci-demo.ts"]}</workflow-result>',
           expect: (s: Session) => {
-            const gates = (s.state as { gates?: Array<{ id: string; status: string }> } | null)
-              ?.gates ?? [];
+            const gates =
+              (s.state as { gates?: Array<{ id: string; status: string }> } | null)?.gates ?? [];
             const checkout = gates.find((g) => g.id === 'checkout_done');
-            return checkout?.status === 'passed' || `checkout_done gate is ${checkout?.status ?? '(unset)'}`;
+            return (
+              checkout?.status === 'passed' ||
+              `checkout_done gate is ${checkout?.status ?? '(unset)'}`
+            );
           },
         },
         {
@@ -841,7 +839,11 @@ async function prepareCommittableSession(
   let attempts = 0;
   const files = Array.from({ length: fileCount }, (_, index) => `src/smoke-${index + 1}.ts`);
 
-  const stages: Array<{ instruction: string; agent?: string; expect: (s: Session) => boolean | string }> = [
+  const stages: Array<{
+    instruction: string;
+    agent?: string;
+    expect: (s: Session) => boolean | string;
+  }> = [
     {
       instruction: 'Call the tool `workflow.create` with schemaId "smoke". Do nothing else.',
       agent: ORCHESTRATOR,
@@ -912,7 +914,6 @@ function headOf(host: Host): string {
   });
   return (result.stdout ?? '').trim();
 }
-
 
 // ─── Runner ───────────────────────────────────────────────────────────────────
 

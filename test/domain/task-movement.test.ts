@@ -157,7 +157,9 @@ describe('a loop with transitions is moved by them', () => {
 
 describe('a loop that is not there', () => {
   it('moves nothing', () => {
-    expect(nextTaskStage(null, runAt('code'), true, evaluate)).toMatchObject({ kind: 'unreachable' });
+    expect(nextTaskStage(null, runAt('code'), true, evaluate)).toMatchObject({
+      kind: 'unreachable',
+    });
   });
 });
 
@@ -211,7 +213,10 @@ describe('what holds a task inside a stage', () => {
       transitions: [{ from: 'code', to: 'verify' }],
     };
     const run = runAt('code', { review: 'passed' });
-    expect(nextTaskStage(guarded, run, true, evaluate)).toMatchObject({ kind: 'move', to: 'verify' });
+    expect(nextTaskStage(guarded, run, true, evaluate)).toMatchObject({
+      kind: 'move',
+      to: 'verify',
+    });
   });
 
   it('applies the exit guard to completion too, not only to a move', () => {

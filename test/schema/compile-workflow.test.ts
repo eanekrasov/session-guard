@@ -11,7 +11,7 @@ describe('compileWorkflow', () => {
           stages: { dev: {}, review: {} },
         },
         DONE: {
-          stages: {  },
+          stages: {},
         },
       },
       transitions: [{ from: 'PLANNING', to: 'DONE', kind: 'auto' }],

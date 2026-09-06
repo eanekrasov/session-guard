@@ -52,7 +52,7 @@ describe('parseRuntimeState', () => {
   test('non-numeric schemaVersion returns unknown_schema', () => {
     const r = parseRuntimeState(makeV1Session({ schemaVersion: 'abc' }));
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.reason).toBe('unknown_schema');
+    if (r.ok === false) expect(r.reason).toBe('unknown_schema');
   });
 
   test('valid v1 session with currentStage returns Tui', () => {
@@ -83,7 +83,7 @@ describe('parseRuntimeState', () => {
       JSON.stringify({ schemaVersion: 1, sessionId: 's1', something: 'x' })
     );
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.reason).toBe('no_stage');
+    if (r.ok === false) expect(r.reason).toBe('no_stage');
   });
 
   // The fallback that read planApproved / commitPermit / deliveryReceipt is
@@ -106,7 +106,7 @@ describe('parseRuntimeState', () => {
     ]) {
       const r = parseRuntimeState(makeV1Session(legacy));
       expect(r.ok, JSON.stringify(legacy)).toBe(false);
-      if (!r.ok) expect(r.reason).toBe('no_stage');
+      if (r.ok === false) expect(r.reason).toBe('no_stage');
     }
   });
 
@@ -240,7 +240,7 @@ describe('parseRuntimeState', () => {
   test('empty sessionId returns missing_session_id', () => {
     const r = parseRuntimeState(makeV1Session({ sessionId: '' }));
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.reason).toBe('missing_session_id');
+    if (r.ok === false) expect(r.reason).toBe('missing_session_id');
   });
 });
 
@@ -264,7 +264,7 @@ describe('formatIdleLine', () => {
 describe('formatSectionLines', () => {
   function parse(overrides: Record<string, unknown> = {}) {
     const r = parseRuntimeState(makeV1Session({ currentStage: 'code', ...overrides }));
-    if (!r.ok) throw new Error(`parse failed: ${r.reason}`);
+    if (r.ok === false) throw new Error(`parse failed: ${r.reason}`);
     return r.value;
   }
 
@@ -381,7 +381,7 @@ describe('formatSectionLines', () => {
 describe('task gates in the status line', () => {
   function parse(overrides: Record<string, unknown> = {}) {
     const r = parseRuntimeState(makeV1Session({ currentStage: 'execution', ...overrides }));
-    if (!r.ok) throw new Error(`parse failed: ${r.reason}`);
+    if (r.ok === false) throw new Error(`parse failed: ${r.reason}`);
     return r.value;
   }
 

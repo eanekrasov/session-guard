@@ -2,12 +2,13 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import type { Hooks, PluginInput } from '@opencode-ai/plugin';
 
 import { createRuntime } from '../../src/app/runtime.ts';
 import { createSession, WorkflowStore } from '../../src/session/session-store.ts';
 import type { WorkflowSession } from '../../src/session/session-schema.ts';
+import { setFixtureProfilesDir } from '../support/fixture-profiles.ts';
 
 let storeDirectory: string;
 let profilesDirectory: string;
@@ -39,10 +40,6 @@ function pluginInput(): PluginInput {
     serverUrl: new URL('http://localhost:0'),
     $: {} as PluginInput['$'],
   };
-}
-
-function setFixtureProfilesDir(): void {
-  process.env.STATE_MACHINE_PROFILES_DIR = resolve(import.meta.dir, '../../test/fixtures/profiles');
 }
 
 async function sessionWithPermit(expectedFiles: string[]): Promise<WorkflowStore> {

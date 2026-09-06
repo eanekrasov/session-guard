@@ -1,12 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import type { Hooks, PluginInput } from '@opencode-ai/plugin';
 
 import { createRuntime } from '../../src/app/runtime.ts';
 import { createSession, WorkflowStore } from '../../src/session/session-store.ts';
 import { createTask } from '../support/task-factory.ts';
+import { setFixtureProfilesDir } from '../support/fixture-profiles.ts';
 
 /**
  * task-movement-reporting spec: `blocked` and `unreachable`-on-pass
@@ -40,7 +41,7 @@ function pluginInput(): PluginInput {
 let movementProfileId = 'movement-blocked';
 
 function setMovementFixtureProfilesDir(profileId: string): void {
-  process.env.STATE_MACHINE_PROFILES_DIR = resolve(import.meta.dir, '../../test/fixtures/profiles');
+  setFixtureProfilesDir();
   movementProfileId = profileId;
 }
 
@@ -131,7 +132,7 @@ describe('an unreachable movement on a pass is reported', () => {
     // stages — the only way `unreachable` happens on a pass. That is an
     // exhibit, not a natural flow: force it directly on the run after normal
     // admission, the way a corrupted or renamed stage would.
-    setMovementFixtureProfilesDir('movement-unreachable');
+    setMovementFixtureProfilesDir('task-control');
     const store = await seed();
     const hooks: Hooks = createRuntime(pluginInput());
 

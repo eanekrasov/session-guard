@@ -1,12 +1,13 @@
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
-import { resolve, join } from 'node:path';
+import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { rmSync } from 'node:fs';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { WorkflowStore, createSession } from '../../src/session/session-store.ts';
 import { approve } from '../../src/domain/approvals.ts';
 import { createTask } from '../support/task-factory.ts';
+import { fixtureProfilesDir, setFixtureProfilesDir } from '../support/fixture-profiles.ts';
 
 // ─── Helpers ──────────────────────────────────────────────────────
 
@@ -63,14 +64,6 @@ async function makeOrchestrator(projectDir?: string) {
   };
 }
 
-function fixtureProfilesDir(name = 'profiles'): string {
-  return resolve(import.meta.dir, '../../test/fixtures', name);
-}
-
-function setFixtureProfilesDir(): void {
-  process.env.STATE_MACHINE_PROFILES_DIR = fixtureProfilesDir();
-}
-
 function addExecutableTaskCycle(session: ReturnType<typeof createSession>): void {
   session.tasks.implementation = [createTask()];
 }
@@ -101,7 +94,7 @@ describe('MutationOrchestrator.resolveEngine', () => {
     // It compiles from an explicit field list, so omitting `gates` there turns
     // the check off silently while the unit test over `compileWorkflow`, which
     // passes its own, stays green.
-    process.env.STATE_MACHINE_PROFILES_DIR = fixtureProfilesDir('profiles/invalid/undeclared-gate');
+    process.env.STATE_MACHINE_PROFILES_DIR = fixtureProfilesDir('profiles/cache/bad');
     const { orchestrator } = await makeOrchestrator();
     await expect(orchestrator.resolveEngine('bad')).rejects.toThrow(/Gate "security"/);
   });

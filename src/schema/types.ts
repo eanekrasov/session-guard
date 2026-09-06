@@ -62,9 +62,9 @@ export function firstNestedStageId(
   return Object.keys(stage.stages ?? {})[0];
 }
 
-export function nestedStages(stage: { stages?: Record<string, StageDef> }): Array<
-  { id: string } & StageDef
-> {
+export function nestedStages(stage: {
+  stages?: Record<string, StageDef>;
+}): Array<{ id: string } & StageDef> {
   return Object.entries(stage.stages ?? {}).map(([id, def]) => ({ id, ...def }));
 }
 

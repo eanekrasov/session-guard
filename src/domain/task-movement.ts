@@ -108,9 +108,7 @@ export function nextTaskStage(
     // task, which is exactly where a release would be asked for.
     const consent = consentTypeOf(transition.consent);
     if (consent && !hasConsent(consent)) {
-      blockedReasons.push(
-        `${transition.from} → ${transition.to} (awaiting consent: ${consent})`
-      );
+      blockedReasons.push(`${transition.from} → ${transition.to} (awaiting consent: ${consent})`);
       continue;
     }
     // kind=pass requires all requiredGates to be 'passed' in the session.

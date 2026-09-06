@@ -108,7 +108,7 @@ function shellSegments(command: string): string[][] {
       continue;
     }
 
-    if (char === '\'' || char === '"') {
+    if (char === "'" || char === '"') {
       quote = char;
       // An empty quoted string is still a word: `git "" push` has three.
       started = true;

@@ -2,12 +2,13 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import type { Hooks, PluginInput } from '@opencode-ai/plugin';
 
 import { createRuntime } from '../../src/app/runtime.ts';
 import { createSession, WorkflowStore } from '../../src/session/session-store.ts';
 import type { WorkflowSession } from '../../src/session/session-schema.ts';
+import { setFixtureProfilesDir } from '../support/fixture-profiles.ts';
 
 let storeDirectory: string;
 let profilesDirectory: string;
@@ -40,14 +41,10 @@ function pluginInput(): PluginInput {
   };
 }
 
-function setFixtureProfilesDir(): void {
-  process.env.STATE_MACHINE_PROFILES_DIR = resolve(import.meta.dir, '../../test/fixtures/profiles');
-}
-
 /** Session holding a permit issued against the current HEAD. */
 async function sessionWithPermit(expectedFiles: string[]): Promise<WorkflowStore> {
   const store = new WorkflowStore(storeDirectory);
-  const session = createSession('s1', 'commit-receipt');
+  const session = createSession('s1', 'commit-cwd');
   session.deliveryPermit = {
     callID: 'commit-call',
     preCommitHead: git(['rev-parse', 'HEAD']),
@@ -90,9 +87,9 @@ beforeEach(async () => {
   previousCwd = process.cwd();
   previousStoreDirectory = process.env.STATE_MACHINE_STORE_DIR;
   previousProfilesDirectory = process.env.STATE_MACHINE_PROFILES_DIR;
-  storeDirectory = await mkdtemp(join(tmpdir(), 'commit-receipt-store-'));
-  profilesDirectory = await mkdtemp(join(tmpdir(), 'commit-receipt-profiles-'));
-  repoDirectory = await mkdtemp(join(tmpdir(), 'commit-receipt-repo-'));
+  storeDirectory = await mkdtemp(join(tmpdir(), 'commit-cwd-store-'));
+  profilesDirectory = await mkdtemp(join(tmpdir(), 'commit-cwd-profiles-'));
+  repoDirectory = await mkdtemp(join(tmpdir(), 'commit-cwd-repo-'));
   process.env.STATE_MACHINE_STORE_DIR = storeDirectory;
   process.env.STATE_MACHINE_PROFILES_DIR = profilesDirectory;
   git(['init', '-q']);

@@ -1,10 +1,5 @@
 import { nestedStages } from './types.ts';
-import type {
-  StageDef,
-  TransitionDef,
-  ResolvedSchema,
-  StageAssignmentRule,
-} from './types.ts';
+import type { StageDef, TransitionDef, ResolvedSchema, StageAssignmentRule } from './types.ts';
 
 // ─── Compiled Types ──────────────────────────────────────────────────────────
 

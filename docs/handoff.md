@@ -32,9 +32,9 @@ its profile is in progress. Report at `docs/host-smoke.md`.
 | verify-loop | PASS, 6 attempts — a prompt problem, not a finding, but six is worth looking at |
 | commit-mismatch | was ERROR `spawnSync is not defined` — **fixed** (`scripts/host-smoke/run.ts` used it at line 908 and never imported it); PASSes on re-run, 6 attempts |
 | comprehensive-full-cycle | FAIL — a real defect, item 0 below |
-| commit-receipt | FAIL, reproduced twice, cause not established — see below |
+| commit-cwd | FAIL, reproduced twice, cause not established — see below |
 
-**`commit-receipt` — what is known.** It fails with `commit-task: nothing
+**`commit-cwd` — what is known.** It fails with `commit-task: nothing
 staged to commit`, on every attempt, in two separate runs. `commit-task.ts`
 runs `git add -A` when it is given no paths (`scripts/commit-task.ts:52`), so
 that message means the working tree was clean at that moment — the failure is

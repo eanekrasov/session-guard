@@ -115,9 +115,8 @@ describe('extractBashCommand', () => {
   });
 
   it('detects forbidden git commands in the host argument shape', async () => {
-    const { extractBashCommand, hasForbiddenGitSubcommand } = await import(
-      '../../src/domain/session-queries.ts'
-    );
+    const { extractBashCommand, hasForbiddenGitSubcommand } =
+      await import('../../src/domain/session-queries.ts');
     // Regression: stringifying the whole object hid the command behind JSON
     // punctuation, so the anchored pattern never matched.
     expect(hasForbiddenGitSubcommand(extractBashCommand({ command: 'git commit -m "x"' }))).toBe(

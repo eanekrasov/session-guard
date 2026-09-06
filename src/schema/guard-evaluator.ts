@@ -141,13 +141,7 @@ export class GuardEvaluator {
    */
   evaluate(expression: string): boolean {
     try {
-      return astEvaluateGuard(
-        expression,
-        this.session,
-        this.builtins,
-        this.guards,
-        this.onError
-      );
+      return astEvaluateGuard(expression, this.session, this.builtins, this.guards, this.onError);
     } catch (error) {
       this.onError?.(error instanceof Error ? error : new Error(String(error)), expression);
       return false;

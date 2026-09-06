@@ -60,7 +60,7 @@ beforeEach(async () => {
       '  planning: {}',
       'actionGuards:',
       // Nothing may be edited before the operator has approved a plan.
-      "  beginMutation: \"session.approved('plan')\"",
+      '  beginMutation: "session.approved(\'plan\')"',
     ].join('\n'),
     'utf-8'
   );
@@ -97,9 +97,10 @@ describe('an unapproved plan blocks every tool that changes the repository', () 
   for (const tool of ['write', 'edit', 'apply_patch', 'bash']) {
     it(`refuses ${tool}`, async () => {
       const hooks = createRuntime(pluginInput());
-      expect(await attempt(hooks, tool), `${tool} edited a repository with no approved plan`).not.toBe(
-        ''
-      );
+      expect(
+        await attempt(hooks, tool),
+        `${tool} edited a repository with no approved plan`
+      ).not.toBe('');
     });
   }
 

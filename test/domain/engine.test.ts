@@ -488,4 +488,3 @@ describe('alternative transitions between the same two stages', () => {
     expect(session.approvals.map((approval) => approval.type)).toEqual(['right']);
   });
 });
-

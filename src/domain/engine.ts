@@ -92,7 +92,6 @@ function deriveDefaultEvaluateGuard(expr: string, facts: SessionFacts): boolean 
   return new GuardEvaluator(facts as unknown as Record<string, unknown>).evaluate(expr);
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 /**
  * The context every guard is evaluated against.
  *

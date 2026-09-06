@@ -124,9 +124,7 @@ describe('canCommit', () => {
         { id: 'review', status: 'passed' },
       ],
       tasks: {
-        stage1: [
-          { id: 'task-1', status: 'completed' } as never,
-        ],
+        stage1: [{ id: 'task-1', status: 'completed' } as never],
       },
     });
     expect(canCommit(session, ['invariants', 'review'])).toBe(true);
@@ -139,9 +137,7 @@ describe('canCommit', () => {
         { id: 'review', status: 'pending' },
       ],
       tasks: {
-        stage1: [
-          { id: 'task-1', status: 'completed' } as never,
-        ],
+        stage1: [{ id: 'task-1', status: 'completed' } as never],
       },
     });
     expect(canCommit(session, ['invariants', 'review'])).toBe(false);
@@ -157,9 +153,7 @@ describe('canCommit', () => {
 
   test('есть незавершённые задачи → false', () => {
     const session = makeSession({
-      gates: [
-        { id: 'invariants', status: 'passed' },
-      ],
+      gates: [{ id: 'invariants', status: 'passed' }],
       tasks: {
         stage1: [
           { id: 'task-1', status: 'completed' } as never,
@@ -174,9 +168,7 @@ describe('canCommit', () => {
     const session = makeSession({
       gates: [],
       tasks: {
-        stage1: [
-          { id: 'task-1', status: 'completed' } as never,
-        ],
+        stage1: [{ id: 'task-1', status: 'completed' } as never],
       },
     });
     expect(canCommit(session, [])).toBe(true);
@@ -229,4 +221,3 @@ describe('hasForbiddenGitSubcommand — обход через форму ком�
     });
   }
 });
-

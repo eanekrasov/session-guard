@@ -404,14 +404,13 @@ async function resolveStageNeighbors(
         const result = checkTransition(stage, id, transitions, facts);
         if (result.allowed) return { id, status: 'allowed' as const };
         const reason = result.reason ?? '';
-        const blockedBy =
-          reason.includes('approval')
-            ? 'consent'
-            : reason.includes('guard')
-              ? 'guard'
-              : reason.includes('gate')
-                ? 'gate'
-                : undefined;
+        const blockedBy = reason.includes('approval')
+          ? 'consent'
+          : reason.includes('guard')
+            ? 'guard'
+            : reason.includes('gate')
+              ? 'gate'
+              : undefined;
         return { id, status: 'blocked' as const, blockedBy };
       });
       return {

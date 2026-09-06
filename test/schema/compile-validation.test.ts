@@ -78,7 +78,7 @@ describe('a workflow that cannot run is refused when it is read', () => {
     );
   });
 
-  it('reports a nested stage\'s bad gate once, not once per level that can see it', () => {
+  it("reports a nested stage's bad gate once, not once per level that can see it", () => {
     // The parent's walk checked each nested stage's gates and then recursed
     // into that stage, which checked them again under the same path. Every
     // such error was reported twice; `toContain` cannot see a duplicate.
