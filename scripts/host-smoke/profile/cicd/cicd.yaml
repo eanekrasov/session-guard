@@ -1,0 +1,124 @@
+# CI/CD pipeline profile — a complete pipeline from init through deploy.
+#
+# Completely standalone — does NOT inherit base.yaml.
+# Tests: entryGuards, exitGuards, alternative transitions, consent on transitions,
+#        retry budget, gate-based task movement, verification recording.
+#
+# Pipeline:
+#   init ──guard + consent──→ checkout ──→ build ──→ test(suite) ──→ deploy ──→ smoke ──→ done
+#                                                     │   ↑                     │
+#                                                     │   │                     │
+#                               fail (retry up to 3)──┘   └── fail (rollback)───┘
+#
+# Stage types:
+#   init, checkout, build, deploy, smoke, done — flat stages
+#   test — loop over a suite of test tasks (unit, integration)
+
+stages:
+  init:
+    allowedAgents: [orchestrator]
+
+  checkout:
+    allowedAgents: [setup, orchestrator]
+    gates: [checkout_done]
+
+  build:
+    allowedAgents: [builder, orchestrator]
+    gates: [build_done]
+    # P2.1: entryGuards — не пускает в build, пока checkout gate не passed
+    entryGuards:
+      - "session.gates.checkout_done == 'passed'"
+
+  test:
+    loop: test_suite
+    dispatch:
+      strategy: serial
+    retryBudget:
+      maximum: 3
+    # P2.2: exitGuards на loop stage — не выпускает из test, пока все gates не установлены
+    exitGuards:
+      - "task.gates.unit != null && task.gates.integration != null"
+    stages:
+      unit:
+        allowedAgents: [tester, orchestrator]
+        gates: [unit]
+
+      integration:
+        allowedAgents: [tester, orchestrator]
+        gates: [integration]
+
+  deploy:
+    allowedAgents: [deployer, orchestrator]
+    gates: [deploy_done]
+    # P2.4: entryGuards — не пускает в deploy, пока тесты не пройдены
+    entryGuards:
+      - "task.gates.unit == 'passed' && task.gates.integration == 'passed'"
+
+  smoke:
+    allowedAgents: [smoke, orchestrator]
+    gates: [smoke]
+
+  done: {}
+
+transitions:
+  - from: init
+    to: checkout
+    guard: "session.refs.plan != null"
+    consent: plan
+
+  - from: checkout
+    to: build
+    guard: "session.gates.checkout_done == 'passed'"
+
+  # P3: альтернативные переходы build → test
+  # Оба ведут в test, с разными conditions
+  - from: build
+    to: test
+    guard: "session.gates.build_done == 'passed'"
+
+  - from: build
+    to: test
+    guard: "session.gates.build_done == 'failed'"
+
+  # P1.4: fail-переход с retry — тесты не пройдены, перезапуск
+  - from: test
+    to: build
+    guard: "(task.gates.unit == 'failed' || task.gates.integration == 'failed') && !isExhausted('cycles')"
+    effects:
+      - bumpRetry: cycles
+        maxAttempts: 3
+
+  - from: test
+    to: deploy
+    guard: "task.gates.unit == 'passed' && task.gates.integration == 'passed'"
+
+  # Consent на переходе deploy → smoke (P1.2)
+  - from: deploy
+    to: smoke
+    guard: "session.gates.deploy_done == 'passed'"
+    consent: deploy
+
+  # Rollback: если deploy не удался — возврат в build
+  - from: deploy
+    to: build
+    guard: "session.gates.deploy_done == 'failed'"
+
+  - from: smoke
+    to: done
+    guard: "task.gates.smoke == 'passed'"
+
+stageAssignments:
+  - id: init
+    priority: 1
+    condition: 'true'
+    result: init
+
+editingAgents:
+  - setup
+  - builder
+  - deployer
+  - orchestrator
+
+verifiers:
+  - tester
+  - smoke
