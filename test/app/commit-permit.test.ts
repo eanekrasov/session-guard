@@ -49,14 +49,13 @@ describe('hasForbiddenGitSubcommand', () => {
   });
 });
 
-describe('generic step lifecycle (replaces isCommitTaskCommand)', () => {
-  it('all steps use the same admission tool path', async () => {
-    // Both ordinary steps and commit-like steps go through the same lifecycle
-    const steps = ['change-first', 'save', 'change-second', 'save'];
-    // No step is detected as special commit
-    for (const step of steps) {
-      expect(step).toBeTruthy();
-    }
+describe('isCommitTaskCommand', () => {
+  it('detects commit-task.ts commands', async () => {
+    const { isCommitTaskCommand } = await import('../../src/domain/session-queries.ts');
+    expect(isCommitTaskCommand('bun run commit-task.ts')).toBe(true);
+    expect(isCommitTaskCommand('node /path/to/commit-task.ts --dry-run')).toBe(true);
+    expect(isCommitTaskCommand('git status')).toBe(false);
+    expect(isCommitTaskCommand('bun test')).toBe(false);
   });
 });
 

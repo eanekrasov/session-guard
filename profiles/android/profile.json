@@ -1,15 +1,23 @@
 {
   "id": "android",
   "description": "Android (Kotlin/Compose) development profile",
-
   "extends": "base",
-
-  "schemas": ["android.yaml"],
-
+  "schemas": [
+    "android.yaml"
+  ],
   "agentsDir": "agents",
   "skillsDir": "skills",
-
-  "agents": ["code", "architect", "review", "qa", "debug", "figma", "rag", "ask", "orchestrator"],
+  "agents": [
+    "code",
+    "architect",
+    "review",
+    "qa",
+    "debug",
+    "figma",
+    "rag",
+    "ask",
+    "orchestrator"
+  ],
   "skills": [
     "android-feature-implementation",
     "android-fix",
@@ -23,7 +31,6 @@
     "android-token-budget",
     "android-input-quality"
   ],
-
   "invariants": [
     "LF_ONLY",
     "KOTLIN_STACK",

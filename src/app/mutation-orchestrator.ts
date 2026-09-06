@@ -46,6 +46,7 @@ export function mergeSchemasToEngineConfig(schemas: ResolvedSchema[]): EngineCon
   const transitionsMap = new Map<string, NonNullable<ResolvedSchema['transitions']>[number]>();
   const actionGuardMap: Record<string, string> = {};
   let requiredGates: string[] | undefined;
+  let taskControlAgents: string[] | undefined;
 
   for (const schema of schemas) {
     // Merge transitions: full override by "from→to" key
@@ -65,6 +66,10 @@ export function mergeSchemasToEngineConfig(schemas: ResolvedSchema[]): EngineCon
     if (schema.requiredGates !== undefined) {
       requiredGates = [...schema.requiredGates];
     }
+
+    if (schema.taskControlAgents !== undefined) {
+      taskControlAgents = [...schema.taskControlAgents];
+    }
   }
 
   return {
@@ -73,6 +78,7 @@ export function mergeSchemasToEngineConfig(schemas: ResolvedSchema[]): EngineCon
     transitions: Array.from(transitionsMap.values()),
     actionGuards: Object.keys(actionGuardMap).length > 0 ? actionGuardMap : undefined,
     requiredGates,
+    taskControlAgents,
   };
 }
 
@@ -180,7 +186,6 @@ export class MutationOrchestrator {
   private logNoop: LogFn;
   private readonly projectDir: string;
   private readonly client?: SessionClient;
-  private readonly agentId: string;
 
   constructor(
     private readonly store: WorkflowStore,
@@ -195,7 +200,6 @@ export class MutationOrchestrator {
     this.projectDir = projectDir ?? (typeof client === 'string' ? client : '');
     this.client = typeof client === 'string' ? undefined : client;
     this.logNoop = log ?? (() => Promise.resolve());
-    this.agentId = process.env.OPENCODE_AGENT_ID ?? process.env.AGENT_ID ?? 'unknown';
   }
 
   private async log(
@@ -270,9 +274,7 @@ export class MutationOrchestrator {
       // No workflow session means the plugin does not govern this call.
       if (!session) return;
 
-      const canMutate = engine.canPerformAction(session, 'beginMutation', {
-        agentId: this.agentId,
-      });
+      const canMutate = engine.canPerformAction(session, 'beginMutation');
       if (!canMutate.allowed) {
         throw new WorkflowBlockedError(
           `Mutation blocked by engine: ${canMutate.reason ?? 'unknown'}`

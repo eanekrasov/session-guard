@@ -10,9 +10,11 @@
 #
 # Format: ProfileSchema (src/schema/profile-schema.ts).
 
+# Phase-level `allowedAgents` is deliberately absent. The engine matches it
+# against an agent id the host never supplies (see profiles/README.md), so any
+# value here blocks every mutation in that phase instead of restricting it.
 phases:
-  planning:
-    allowedAgents: ['architect']
+  planning: {}
   tasks_ready: {}
   code: {}
   review: {}

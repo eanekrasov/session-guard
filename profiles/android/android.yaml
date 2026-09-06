@@ -1,25 +1,13 @@
 # Android profile — delta over base/base.yaml.
 #
 # Only what differs from the base workflow is declared here; everything else
-# (transitions, guards) is inherited. Resolution order is parent-then-child,
-# so these values win.
+# (phases, transitions, guards) is inherited. Resolution order is
+# parent-then-child, so these values win.
 #
-# Android work is split across dedicated agents, so each phase names the roles
-# allowed to act in it.
-
-phases:
-  planning:
-    allowedAgents: ['architect', 'orchestrator']
-  tasks_ready: {}
-  code:
-    allowedAgents: ['code', 'debug', 'figma']
-  review:
-    allowedAgents: ['review']
-  qa:
-    allowedAgents: ['qa']
-  commit: {}
-  done: {}
-  failed: {}
+# NOTE: phase-level `allowedAgents` is deliberately NOT declared. The engine
+# compares it against an agent id the host never supplies, so any value there
+# blocks every mutation in that phase. Stage-level `allowedAgents` (see
+# task-cycles.yaml) uses the dispatched agent and does work.
 
 editingAgents:
   - code

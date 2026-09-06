@@ -37,11 +37,13 @@ function pluginInput(): PluginInput {
   };
 }
 
-function toolContext(): ToolContext {
+// Workflow task state is orchestrator-owned, so the retry decisions below are
+// made as the orchestrator — a worker agent is refused (see task-control.test.ts).
+function toolContext(agent = 'orchestrator'): ToolContext {
   return {
     sessionID: 's1',
     messageID: 'message-1',
-    agent: 'test',
+    agent,
     directory: '/tmp/test',
     worktree: '/tmp/test',
     abort: new AbortController().signal,

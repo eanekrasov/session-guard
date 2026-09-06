@@ -4,10 +4,12 @@ import { ProfileMetadataSchema } from '../schema/profile-metadata.ts';
 import type {
   ProfileMetadata,
   LoadedProfile,
+  PhaseDef,
   ResolvedSchema,
   ResolvedProfile,
 } from '../schema/types.ts';
 import { SchemaLoader } from '../schema/schema-loader.ts';
+import { qualifyAgentName } from './agent-names.ts';
 
 /**
  * ProfileResolver — resolves a profile's full configuration by:
@@ -255,12 +257,13 @@ export class ProfileResolver {
 
     return {
       source: `${chain[0].id}/${schemaFile}`,
-      phases: currentSchema.phases,
+      phases: qualifyPhaseAgents(chain[0].id, currentSchema.phases),
       transitions: currentSchema.transitions,
       settings: currentSchema.settings,
       editingAgents: currentSchema.editingAgents,
       verifiers: currentSchema.verifiers,
       requiredGates: currentSchema.requiredGates,
+      taskControlAgents: currentSchema.taskControlAgents,
       actionGuards: currentSchema.actionGuards,
       phaseAssignments: currentSchema.phaseAssignments,
     };
@@ -278,4 +281,42 @@ export class ProfileResolver {
     }
     return null;
   }
+}
+
+/**
+ * Qualify every `allowedAgents` entry with the owning profile id.
+ *
+ * Schemas are authored with bare agent names, but synced agents register under
+ * `<profileId>/<name>` (see agent-names.ts). Qualifying at resolution keeps the
+ * YAML readable while letting the runtime compare against the host's names.
+ */
+function qualifyPhaseAgents(
+  profileId: string,
+  phases: Record<string, PhaseDef> | undefined
+): Record<string, PhaseDef> | undefined {
+  if (!phases) return phases;
+  const result: Record<string, PhaseDef> = {};
+  for (const [phaseId, def] of Object.entries(phases)) {
+    result[phaseId] = {
+      ...def,
+      ...(def.allowedAgents
+        ? { allowedAgents: def.allowedAgents.map((a) => qualifyAgentName(profileId, a)) }
+        : {}),
+      ...(def.stages
+        ? {
+            stages: def.stages.map((stage) => ({
+              ...stage,
+              ...(stage.allowedAgents
+                ? {
+                    allowedAgents: stage.allowedAgents.map((a) =>
+                      qualifyAgentName(profileId, a)
+                    ),
+                  }
+                : {}),
+            })),
+          }
+        : {}),
+    };
+  }
+  return result;
 }

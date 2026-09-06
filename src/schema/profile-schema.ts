@@ -113,6 +113,12 @@ export const ProfileSchemaSchema = z
     gateMapping: z.record(z.array(z.string())).optional(),
     actionGuards: z.record(z.string()).optional(),
     editingAgents: z.array(z.string()).optional(),
+    /**
+     * Agents allowed to drive workflow task state (workflow.tasks-set,
+     * workflow.tasks-set-status, workflow.tasks-resolve-decision).
+     * Defaults to ['orchestrator'] — a worker must never close its own phase.
+     */
+    taskControlAgents: z.array(z.string()).optional(),
     verifiers: z.array(z.string()).optional(),
     requiredGates: z.array(z.string()).optional(),
     settings: z.record(z.unknown()).optional(),

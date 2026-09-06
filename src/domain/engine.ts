@@ -66,6 +66,8 @@ export interface EngineConfig {
   phaseLevelGuards?: Record<string, PhaseEntryExitGuards>;
   /** gate IDs that must pass for kind=pass transitions (schema-level, last wins) */
   requiredGates?: string[];
+  /** agents allowed to drive workflow task state (schema-level, last wins) */
+  taskControlAgents?: string[];
 }
 
 function consentType(consent: string | { type?: string }): string {
@@ -248,18 +250,9 @@ export class StateMachineEngine {
     const facts = toGuardContext(session);
     const phase = this.derivePhase(session, evaluationContext);
 
-    // Шаг 0: phase-level allowedAgents
-    const phaseConfig = Object.entries(this.config.phases ?? {}).find(([id]) => id === phase)?.[1];
-    const allowed = phaseConfig?.allowedAgents;
-    if (allowed && allowed.length > 0) {
-      const agentId = evaluationContext.agentId;
-      if (!agentId || !allowed.includes(agentId)) {
-        return {
-          allowed: false,
-          reason: `Agent "${agentId ?? 'unknown'}" is not allowed in phase "${phase}". Allowed: ${allowed.join(', ')}`,
-        };
-      }
-    }
+    // Agent identity is not checked here. `tool.execute.before` knows which
+    // agent a call belongs to only for `task` (via subagent_type), so
+    // `allowedAgents` is enforced during task admission, not on every mutation.
 
     // Шаг 1: phase-level entry/exit guards
     const phaseGuard = this.config.phaseLevelGuards?.[phase];
@@ -317,6 +310,17 @@ export class StateMachineEngine {
    */
   getRequiredGates(): string[] {
     return this.config.requiredGates ?? ['invariants'];
+  }
+
+  /**
+   * Agents allowed to drive workflow task state.
+   *
+   * Task status is what `allTasksCompleted()` and `hasPendingTasks()` read, so
+   * an agent that can set it can close its own phase. Control therefore sits
+   * with the orchestrator unless a schema says otherwise.
+   */
+  getTaskControlAgents(): string[] {
+    return this.config.taskControlAgents ?? ['orchestrator'];
   }
 
   /**

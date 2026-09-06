@@ -51,6 +51,7 @@ import { sessionsDir, profilesDir as getProfilesDir } from './paths.ts';
 import { OpenCodeRulesRuntime } from '../rules/runtime.ts';
 import { MatchedRulesStateStore } from '../rules/matched-rules-state.ts';
 import { syncProfileAgents } from './profile-agent-sync.ts';
+import { agentIsAllowed } from './agent-names.ts';
 import { WorkflowBlockedError } from './blocked-error.ts';
 
 export { mergeSchemasToEngineConfig };
@@ -154,10 +155,50 @@ class StateMachineRuntime {
     });
   }
 
+  /**
+   * Workflow task state is orchestrator-owned.
+   *
+   * Task status is exactly what `allTasksCompleted()` and `hasPendingTasks()`
+   * read, so an agent able to write it closes its own phase — evidence-free,
+   * the same hole the delivery permit closes on the commit side. The host
+   * reports the calling agent in `ToolContext.agent`; anything outside the
+   * schema's `taskControlAgents` (default `['orchestrator']`) is refused, and
+   * an unknown caller is refused too: identity we cannot read is not identity
+   * we can trust.
+   *
+   * Returns a refusal result, or `null` when the call may proceed.
+   */
+  private async refuseUnlessTaskController(
+    toolName: string,
+    ctx: { sessionID: string; agent?: string }
+  ): Promise<ToolResult | null> {
+    // No workflow session means the plugin does not apply at all.
+    const session = await this.store.load(ctx.sessionID);
+    if (!session) return null;
+
+    const engine = await this.mutationOrchestrator.resolveEngine(session.profileId);
+    const allowed = engine.getTaskControlAgents();
+    const agent = ctx.agent ?? '';
+    if (agent !== '' && agentIsAllowed(agent, allowed, session.profileId)) return null;
+
+    const reason =
+      `${toolName} is refused: workflow task state is controlled by ` +
+      `[${allowed.join(', ')}], not by '${agent || '(unknown agent)'}'. ` +
+      `Report the outcome of your work instead — the orchestrator records it.`;
+    void this.log('warn', `Refused ${toolName}`, {
+      sessionID: ctx.sessionID,
+      agent: agent || null,
+      allowed,
+    });
+    return { output: reason, metadata: { refused: true, tool: toolName, agent, allowed } };
+  }
+
   private async handleTasksSet(
     args: { tasks: Omit<SetTasksInput['tasks'][number], 'id'>[] | string },
-    ctx: { sessionID: string }
+    ctx: { sessionID: string; agent?: string }
   ): Promise<ToolResult> {
+    const refusal = await this.refuseUnlessTaskController('workflow.tasks-set', ctx);
+    if (refusal) return refusal;
     try {
       // Normalize tasks: if string, parse as JSON array
       let tasksInput: Omit<SetTasksInput['tasks'][number], 'id'>[];
@@ -232,8 +273,10 @@ class StateMachineRuntime {
 
   private async handleTasksSetStatus(
     args: { taskId: string; status: (typeof TASK_STATUS)[number] },
-    ctx: { sessionID: string }
+    ctx: { sessionID: string; agent?: string }
   ): Promise<ToolResult> {
+    const refusal = await this.refuseUnlessTaskController('workflow.tasks-set-status', ctx);
+    if (refusal) return refusal;
     try {
       const task = await this.taskApi.setTaskStatus(ctx.sessionID, args.taskId, args.status);
       return {
@@ -247,8 +290,10 @@ class StateMachineRuntime {
 
   private async handleTasksResolveDecision(
     args: { decision: 'increase' | 'failed' | 'cancelled'; maximum?: number; decisionId?: string },
-    ctx: { sessionID: string }
+    ctx: { sessionID: string; agent?: string }
   ): Promise<ToolResult> {
+    const refusal = await this.refuseUnlessTaskController('workflow.tasks-resolve-decision', ctx);
+    if (refusal) return refusal;
     try {
       let output = 'No pending retry decision found';
       await this.queue.enqueue(ctx.sessionID, async (session) => {
@@ -722,8 +767,14 @@ class StateMachineRuntime {
         this.blockTaskAdmission(`Stage ${stageId} is not declared by phase ${phaseId}`);
         return;
       }
-      if (stage.allowedAgents?.length && !stage.allowedAgents.includes(agent)) {
-        this.blockTaskAdmission(`Agent ${agent} is not allowed in stage ${stageId}`);
+      // A stage may narrow the phase's roster; when it declares none, the
+      // phase's own list applies. This is the only place agent identity is
+      // known, so it is the only place `allowedAgents` can be enforced.
+      const allowedAgents = stage.allowedAgents ?? phase.allowedAgents;
+      if (allowedAgents?.length && !agentIsAllowed(agent, allowedAgents, session.profileId)) {
+        this.blockTaskAdmission(
+          `Agent ${agent} is not allowed in stage ${stageId}. Allowed: ${allowedAgents.join(', ')}`
+        );
         return;
       }
       if (
@@ -931,7 +982,7 @@ class StateMachineRuntime {
 
     // 2. Commit Permit: verify HEAD changed after commit-task
     if (tool === 'bash') {
-      await this.handleCommitTaskAfter(input.sessionID, input.callID);
+      await this.handleCommitTaskAfter(input.sessionID, input.callID, output);
     }
 
     // 3. Question tool — consent request (approve/decline plan)
@@ -950,8 +1001,19 @@ class StateMachineRuntime {
 
   /**
    * P1-012: After commit-task runs, verify HEAD changed and record deliveryReceipt.
+   *
+   * The receipt is the only thing that releases `commit -> done`, so it is
+   * written only against evidence: HEAD moved AND the commit contains exactly
+   * the files the permit expected. Anything else — a commit of unrelated
+   * files, a partial commit, or a file list we cannot read — leaves the
+   * session without a receipt and drops the permit, so the workflow stays in
+   * `commit` and the agent must re-run the step under a fresh permit.
    */
-  private async handleCommitTaskAfter(sessionID: string, callID: string): Promise<void> {
+  private async handleCommitTaskAfter(
+    sessionID: string,
+    callID: string,
+    output: { output: string }
+  ): Promise<void> {
     const session = await this.store.load(sessionID);
     if (!session) return;
     if (!session.deliveryPermit) return;
@@ -963,8 +1025,9 @@ class StateMachineRuntime {
       return;
     }
 
-    // Получаем список закоммиченных файлов
-    let committed: string[] = [];
+    // Получаем список закоммиченных файлов. Пустой или нечитаемый список —
+    // это отсутствие доказательства, а не разрешение.
+    let committed: string[] | null = null;
     try {
       const result = spawnSync(
         'git',
@@ -981,14 +1044,31 @@ class StateMachineRuntime {
       void this.log('warn', 'handleCommitTaskAfter: git diff-tree failed', { sessionID });
     }
 
-    // Сверяем с expectedFiles
     const expected = [...(session.deliveryPermit.expectedFiles ?? [])].sort();
-    if (committed.length > 0 && JSON.stringify(committed) !== JSON.stringify(expected)) {
-      void this.log('warn', 'handleCommitTaskAfter: committed files mismatch', {
-        sessionID,
-        expected,
-        committed,
-      });
+    const reject = (reason: string, extra: Record<string, unknown>): void => {
+      session.deliveryPermit = null;
+      output.output += `\n\n[workflow-commit-rejected]\n${reason}\nThe commit ${currentHead} stands in git, but no delivery receipt was recorded: the workflow stays in \`commit\`. Reconcile the worktree and run the commit step again.`;
+      void this.log('warn', `handleCommitTaskAfter: ${reason}`, { sessionID, callID, ...extra });
+    };
+
+    if (committed === null || committed.length === 0) {
+      reject(
+        'Could not determine which files commit ' +
+          currentHead +
+          ' contains, so the commit cannot be verified against the permit.',
+        { expected }
+      );
+      await this.store.save(session);
+      return;
+    }
+
+    if (JSON.stringify(committed) !== JSON.stringify(expected)) {
+      reject(
+        `Committed files do not match the delivery permit.\nExpected: ${expected.join(', ') || '(none)'}\nCommitted: ${committed.join(', ')}`,
+        { expected, committed }
+      );
+      await this.store.save(session);
+      return;
     }
 
     session.deliveryReceipt = currentHead;

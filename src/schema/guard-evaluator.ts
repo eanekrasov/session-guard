@@ -14,7 +14,6 @@ import { evaluateGuard as astEvaluateGuard } from './guard-ast.ts';
 
 export interface GuardEvaluationContext {
   currentLoopListKey?: string;
-  agentId?: string;
 }
 
 export class GuardEvaluator {

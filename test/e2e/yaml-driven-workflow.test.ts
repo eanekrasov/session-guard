@@ -12,10 +12,13 @@ import type { WorkflowSession } from '../../src/session/session-schema.ts';
 
 // ─── Load YAML profile synchronously once ────────────────────────────────
 
-const PROFILES_DIR = '/Users/e.nekrasov/Projects/harness/session-guard/profiles';
+// Resolve from this file so the suite runs on any checkout, not just the
+// author's machine.
+const PROFILES_DIR = path.resolve(import.meta.dirname, '../../profiles');
 
 function loadEngine(): StateMachineEngine {
-  const filePath = path.join(PROFILES_DIR, 'state-machine.yaml');
+  // Exercise the schema that actually ships, not a sample copy.
+  const filePath = path.join(PROFILES_DIR, 'base', 'base.yaml');
   const content = fs.readFileSync(filePath, 'utf-8');
   const raw = YAML.parse(content) as ProfileSchema;
 
@@ -24,7 +27,7 @@ function loadEngine(): StateMachineEngine {
   }
 
   const resolvedSchema: ResolvedSchema = {
-    source: 'state-machine.yaml',
+    source: 'base/base.yaml',
     phases: raw.phases,
     transitions: raw.transitions,
     settings: raw.settings,
@@ -118,7 +121,7 @@ function driveToQa(session: WorkflowSession): void {
 
 // ─── Tests ────────────────────────────────────────────────────────────────
 
-describe('YAML-driven workflow (state-machine.yaml)', () => {
+describe('YAML-driven workflow (profiles/base/base.yaml)', () => {
   // ───────────────────────────────────────────────────────────────────────
   // Scenario 1: Happy path through all phases
   // ───────────────────────────────────────────────────────────────────────
@@ -159,18 +162,12 @@ describe('YAML-driven workflow (state-machine.yaml)', () => {
     expectApplied(result, 'commit');
     expect(session.currentPhase).toBe('commit');
 
-    // Verify the effect: commit was approved
-    const commitApproval = session.approvals.find((a) => a.type === 'commit');
-    expect(commitApproval).toBeDefined();
-    expect(commitApproval!.status).toBe('granted');
+    // The machine grants itself no approvals on the way in: entering `commit`
+    // is the transition's own result, not a consent record.
+    expect(session.approvals.find((a) => a.type === 'commit')).toBeUndefined();
 
-    // 7. commit → done (deliveryReceipt set)
-    session.deliveryPermit = {
-      callID: 'test',
-      preCommitHead: 'abc123',
-      expectedFiles: [],
-      startedAt: new Date().toISOString(),
-    };
+    // 7. commit → done (deliveryReceipt records the commit that actually landed)
+    session.deliveryReceipt = 'def456';
     result = ENGINE.tryApplyTransitions(session);
     expectApplied(result, 'done');
     expect(session.currentPhase).toBe('done');
@@ -178,6 +175,28 @@ describe('YAML-driven workflow (state-machine.yaml)', () => {
     // 8. done is terminal — no outgoing transitions
     result = ENGINE.tryApplyTransitions(session);
     expectNotApplied(result);
+  });
+
+  test('TC1b: a failed commit does not advance to done', () => {
+    const session = freshSession();
+    driveToQa(session);
+    setGateStatus(session, 'qa', 'passed');
+    ENGINE.tryApplyTransitions(session);
+    expect(session.currentPhase).toBe('commit');
+
+    // The permit is issued BEFORE the commit runs — it records permission,
+    // never the result. A commit that failed leaves HEAD untouched, so no
+    // receipt is written and the workflow must stay in `commit`.
+    session.deliveryPermit = {
+      callID: 'test',
+      preCommitHead: 'abc123',
+      expectedFiles: [],
+      startedAt: new Date().toISOString(),
+    };
+    expect(session.deliveryReceipt).toBeNull();
+
+    expectNotApplied(ENGINE.tryApplyTransitions(session));
+    expect(session.currentPhase).toBe('commit');
   });
 
   // ───────────────────────────────────────────────────────────────────────
@@ -339,12 +358,7 @@ describe('YAML-driven workflow (state-machine.yaml)', () => {
     expect(session.currentPhase).toBe('commit');
 
     // Set deliveryReceipt → proceeds
-    session.deliveryPermit = {
-      callID: 'test',
-      preCommitHead: 'abc123',
-      expectedFiles: [],
-      startedAt: new Date().toISOString(),
-    };
+    session.deliveryReceipt = 'def456';
     const result2 = ENGINE.tryApplyTransitions(session);
     expectApplied(result2, 'done');
     expect(session.currentPhase).toBe('done');

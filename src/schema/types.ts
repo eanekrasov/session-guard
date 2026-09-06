@@ -55,6 +55,7 @@ export interface ResolvedSchema {
   editingAgents?: string[];
   verifiers?: string[];
   requiredGates?: string[];
+  taskControlAgents?: string[];
   actionGuards?: Record<string, string>;
   phaseAssignments?: PhaseAssignmentRule[];
   [key: string]: unknown;
