@@ -622,10 +622,17 @@ helper pointing one id at two fixture directories would have been served the
 first in silence (`9ba3d32`). `test/fixtures/profiles/cache/{good,bad}` is what
 covers it.
 
-Left as it was: `test/fixtures/profiles/base` still carries
-`beginMutation: "session.approved('plan') || session.revision == 0"`. The
-`revision == 0` escape hatch is the one called wrong when it was found in the
-android profile, and a fixture should not teach it.
+Reviewed afterwards, three things needed finishing. `test/fixtures/schemas/`
+was the last carrier of the old vocabulary — uppercase stages and a transition
+to a stage it never declared — and is now current; its `extending.yaml` was
+read by nobody and is gone. Three migrated tests reached for the fixtures
+directory by hand instead of `test/support/fixture-profiles.ts`, which is the
+helper for it. The `revision == 0` escape hatch is gone from `base` — the
+corpus does not teach it anywhere.
+
+Everything that could have gone wrong in a refactor this size did not: **no
+`expect(` changed anywhere in the series.** The assertions are the same ones,
+against files instead of strings.
 
 ## How a broken profile actually behaves
 

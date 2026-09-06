@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import type { Hooks, PluginInput, ToolContext } from '@opencode-ai/plugin';
 
+import { setFixtureProfilesDir } from '../support/fixture-profiles.ts';
 import { createRuntime } from '../../src/app/runtime.ts';
 import { createSession, WorkflowStore } from '../../src/session/session-store.ts';
 import type { WorkflowSession } from '../../src/session/session-schema.ts';
@@ -65,7 +66,7 @@ function writeProfile(
   strategy: DispatchStrategy,
   options: { maxConcurrent?: number; retryMaximum?: number; loop?: string } = {}
 ): void {
-  process.env.STATE_MACHINE_PROFILES_DIR = resolve(import.meta.dir, '../../test/fixtures/profiles');
+  setFixtureProfilesDir();
   if (options.loop === '$currentTask.id') taskRetryProfileId = 'task-retry-current-task';
   else if (strategy === 'parallel') taskRetryProfileId = 'task-retry-parallel-1';
   else if (options.retryMaximum !== undefined) taskRetryProfileId = 'task-retry-serial-budget';

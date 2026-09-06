@@ -1,13 +1,16 @@
+# A schema loaded by path rather than through a profile — the one fixture for
+# `loadSchemaFromPath`. It carried PLANNING and EXECUTION in uppercase, and a
+# transition to a stage it never declared, long after the stage model renamed
+# and restructured both.
 stages:
-  PLANNING:
+  planning:
     dispatch:
       strategy: serial
+  execution: {}
 transitions:
-  - from: PLANNING
-    to: EXECUTION
+  - from: planning
+    to: execution
     guard: "session.approved('plan')"
-gateMapping:
-  review: ['invariants', 'review']
 settings:
   mutationTtlMs: 1800000
   retryMaxAttempts: 3

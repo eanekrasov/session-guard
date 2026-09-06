@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import type { Hooks, PluginInput } from '@opencode-ai/plugin';
 
+import { setFixtureProfilesDir } from '../support/fixture-profiles.ts';
 import { createRuntime } from '../../src/app/runtime.ts';
 import { createSession, WorkflowStore } from '../../src/session/session-store.ts';
 
@@ -47,7 +48,7 @@ beforeEach(async () => {
   process.env.STATE_MACHINE_PROFILES_DIR = profilesDirectory;
 
   // `mutation-guarded` admits nothing until a plan is approved.
-  process.env.STATE_MACHINE_PROFILES_DIR = resolve(import.meta.dir, '../../test/fixtures/profiles');
+  setFixtureProfilesDir();
 
   const store = new WorkflowStore(storeDirectory);
   const session = createSession('s1', 'mutation-guarded');

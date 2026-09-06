@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { resolve } from 'node:path';
 
+import { fixtureProfilesDir } from '../support/fixture-profiles.ts';
 import { resolveConfig } from '../../src/public-api.ts';
 import { mergeSchemasToEngineConfig } from '../../src/app/mutation-orchestrator.ts';
 
 // `extends-parent` and `extends-child` are a purpose-built pair under
 // test/fixtures/profiles: every value in them is a marker, so a merge that
 // resolves in the wrong order shows up as a parent marker surviving.
-const profilesDir = resolve(import.meta.dir, '../../test/fixtures/profiles');
+const profilesDir = fixtureProfilesDir('profiles');
 
 describe('extends resolution order', () => {
   it('resolves parent schemas before the extending profile', async () => {
