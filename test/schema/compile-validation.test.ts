@@ -78,6 +78,20 @@ describe('a workflow that cannot run is refused when it is read', () => {
     );
   });
 
+  it('reports a nested stage\'s bad gate once, not once per level that can see it', () => {
+    // The parent's walk checked each nested stage's gates and then recursed
+    // into that stage, which checked them again under the same path. Every
+    // such error was reported twice; `toContain` cannot see a duplicate.
+    const input = schema({
+      execution: {
+        loop: 'implementation',
+        stages: { verify: { gates: ['security'] } },
+      },
+    });
+    const gateErrors = messages(input).filter((message) => message.includes('Gate "security"'));
+    expect(gateErrors).toHaveLength(1);
+  });
+
   it('accepts any gate name when the profile declares none', () => {
     // No declaration is not an empty declaration: there is nothing to be wrong
     // about, so the compiler must not invent a list of its own to reject against.

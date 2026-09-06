@@ -194,15 +194,11 @@ function validateNestedStages(
     });
   }
 
+  // A nested stage's own gates are checked by its own call below, under the
+  // same path this loop would have produced — checking them here as well
+  // reported every one of them twice, which `toContain` in the tests could not
+  // see.
   for (const entry of nested) {
-    for (const gate of entry.gates ?? []) {
-      if (declaredGates && !declaredGates.has(gate)) {
-        errors.push({
-          path: `stages.${stageId}.stages.${entry.id}.gates`,
-          message: `Gate "${gate}" is not a gate this profile declares`,
-        });
-      }
-    }
     validateNestedStages(`${stageId}.stages.${entry.id}`, entry, declaredGates, errors);
   }
 

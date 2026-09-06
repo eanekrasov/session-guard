@@ -486,3 +486,35 @@ uppercase, which is what `presets.test.ts` asserts.
 **Also still stale:** `test/domain/derive-phase.test.ts` is named after
 `src/domain/derive-stage.ts`, which was inlined into `engine.ts`, and after
 "phase", which was renamed to "stage".
+
+## How a broken profile actually behaves
+
+Measured 2026-09-06, by loading one file per kind of breakage. This matters
+because a fixture corpus of deliberately-invalid profiles is only possible for
+the kinds that fail as data.
+
+| Breakage | What happens |
+| --- | --- |
+| Broken YAML syntax | **throws** `YAMLParseError` |
+| Wrong type for a field (`loop: 42`) | **throws** `ZodError` at `ProfileSchemaSchema.parse` |
+| An unknown key (`phases:`) | loads, no errors, silently ignored |
+| A gate the profile does not declare, a transition to a stage that does not exist | loads, reported as compile errors |
+| A guard expression that cannot parse | loads, **no compile error**, evaluates to `false` for ever |
+| No such file | `loadSchemaFromPath` returns `null` |
+
+Only the first two throw, so invalid fixtures must be broken *semantically* —
+`compileWorkflow`'s own errors — and not by shape.
+
+The two middle rows are worse than a throw. The unknown-key row is exactly how
+`android.yaml` carried a dead `phases:` block for months. And **the compiler
+does not check guard syntax at all**: `"session.gates.((("` compiles clean and
+then reads `false` for ever, so the transition simply never fires. The
+evaluator reports the parse failure through `onError` at runtime, but nothing
+refuses the profile at load. The compiler's own comment says it exists to turn
+silence into an error; guard syntax is a hole in that, of the same kind the
+gate declaration just closed.
+
+**Fixed while measuring:** `validateNestedStages` reported every nested stage's
+bad gate twice — the parent's walk checked `entry.gates` and then recursed into
+that stage, whose own call checked the same gates under the same path. The
+tests used `toContain`, which cannot see a duplicate; the new test counts.
