@@ -22,6 +22,15 @@ export const ApprovalSchema = z.object({
   grantedAt: z.string().optional(),
   evidence: z.string().optional(),
   feedback: z.string().optional(),
+  /**
+   * Every file the consent manifest named, in manifest order.
+   *
+   * A manifest may name several documents; only the first was hashed, so a
+   * second one edited between the question and the answer went unnoticed and
+   * the consent was accepted. The evidence now covers all of them, and this is
+   * the list the decision-time re-read walks.
+   */
+  files: z.array(z.string()).optional(),
 });
 
 export const GateSchema = z.object({

@@ -4,7 +4,7 @@ import { SessionQueue } from './session-queue.ts';
 import {
   parseConsentRequest,
   evidenceOf,
-  calculatePlanEvidence as calculateDocumentEvidence,
+  calculateDocumentSetEvidence,
   classifyConsentAnswer,
   questionTextOf,
 } from './consent.ts';
@@ -78,18 +78,32 @@ export class ConsentOrchestrator {
       summary: consentRequest.manifest.summary,
     });
 
-    // Resolve plan path and read plan file BEFORE enqueue
+    // Resolve and read every document the manifest names, BEFORE enqueue.
+    // Only the first was read and hashed, so a second document edited between
+    // the question and the answer was invisible and the consent went through.
+    const documentRefs = [...consentRequest.manifest.files];
+    if (documentRefs.length === 0) return;
+
+    const documents: Array<[string, string]> = [];
+    for (const ref of documentRefs) {
+      const content = readFile(resolve(this.projectDir, ref));
+      if (content === null) {
+        void this.log('warn', 'consentBefore: a document the manifest names is missing', {
+          sessionID,
+          callID,
+          ref,
+        });
+        return;
+      }
+      documents.push([ref, content]);
+    }
+
+    // The primary document is what `refs[REF_PLAN]` points at, for display and
+    // for sessions written before the list existed. The evidence is over all.
     const documentRef =
-      consentRequest.manifest.files.find((f) => f.includes('plan') && f.endsWith('plan.md')) ??
-      consentRequest.manifest.files[0];
-
-    if (!documentRef) return;
-
+      documentRefs.find((f) => f.includes('plan') && f.endsWith('plan.md')) ?? documentRefs[0]!;
     const documentPath = resolve(this.projectDir, documentRef);
-    const documentContent = readFile(documentPath);
-    if (documentContent === null) return;
-
-    const documentEvidence = calculateDocumentEvidence(documentContent);
+    const documentEvidence = calculateDocumentSetEvidence(documents);
 
     await this.queue.enqueue(sessionID, async (session) => {
       if (!session) return;
@@ -97,11 +111,22 @@ export class ConsentOrchestrator {
       // Dedup: already consented for this callID
       if (session.consentedCallIDs.includes(callID)) return;
 
+      // One record per type. `approve` and `decline` both upsert by type, so a
+      // second record left them updating the wrong one — and, worse, a
+      // standing `granted` from an earlier plan survived a decline of this
+      // one while `refs[REF_PLAN]` had already been repointed at the new
+      // document. Every `session.approved('plan')` guard then passed on
+      // authority nobody had given for the work in hand.
+      //
+      // Asking about a new plan withdraws the standing verdict, which is the
+      // honest reading: the document under discussion has changed.
+      session.approvals = session.approvals.filter((approval) => approval.type !== 'plan');
       session.approvals.push({
         type: 'plan',
         callId: callID,
         status: 'pending',
         evidence: documentEvidence,
+        files: documentRefs,
       });
       session.refs[REF_PLAN] = documentPath;
       session.consentedCallIDs = [...session.consentedCallIDs, callID];
@@ -139,8 +164,13 @@ export class ConsentOrchestrator {
     callID: string,
     sessionID?: string
   ): boolean {
-    const documentRef = session.refs?.[REF_PLAN];
     const pendingApproval = this.findOpenApproval(session.approvals ?? [], callID);
+    // Sessions written before the manifest list existed carry only the primary
+    // ref; re-reading that one is what they can support.
+    const documentRefs = pendingApproval?.files?.length
+      ? pendingApproval.files
+      : [session.refs?.[REF_PLAN]].filter((ref): ref is string => Boolean(ref));
+    const documentRef = documentRefs[0];
     if (!documentRef || !pendingApproval?.evidence) {
       void this.log('warn', `verifyPlanEvidenceAtDecision: missing ref or evidence`, {
         sessionID,
@@ -151,19 +181,24 @@ export class ConsentOrchestrator {
       return false;
     }
 
-    const documentPath = resolve(this.projectDir, documentRef);
-    const documentContent = readFile(documentPath);
-    if (documentContent === null) {
-      void this.log('warn', `verifyPlanEvidenceAtDecision: plan file not found`, {
-        sessionID,
-        callID,
-        documentRef,
-        resolvedPath: documentPath,
-      });
-      return false;
+    const documents: Array<[string, string]> = [];
+    for (const ref of documentRefs) {
+      const path = resolve(this.projectDir, ref);
+      const content = readFile(path);
+      if (content === null) {
+        void this.log('warn', `verifyPlanEvidenceAtDecision: a consented file is missing`, {
+          sessionID,
+          callID,
+          documentRef: ref,
+          resolvedPath: path,
+        });
+        return false;
+      }
+      documents.push([ref, content]);
     }
 
-    const currentEvidence = calculateDocumentEvidence(documentContent);
+    const documentPath = resolve(this.projectDir, documentRef);
+    const currentEvidence = calculateDocumentSetEvidence(documents);
     const match = currentEvidence === pendingApproval.evidence;
 
     if (!match) {

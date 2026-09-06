@@ -119,6 +119,20 @@ export function calculatePlanEvidence(planContent: string): string {
   return computeSha256(canonicalizePlan(planContent));
 }
 
+/**
+ * Evidence over every document the manifest named, in manifest order.
+ *
+ * A manifest may name several files and only the first was ever hashed, so a
+ * second document edited between the question and the answer changed nothing
+ * the check could see and the consent was accepted. Each file contributes its
+ * own canonical hash under its own ref, so a change to any of them — or a
+ * change of the list itself — moves the result.
+ */
+export function calculateDocumentSetEvidence(documents: Array<[string, string]>): string {
+  const parts = documents.map(([ref, content]) => `${ref}\u0000${calculatePlanEvidence(content)}`);
+  return computeSha256(parts.join('\u0001'));
+}
+
 export function classifyConsentAnswer(answer: string[], request: ConsentRequest): ConsentAnswer {
   const normalized = answer.map((a) => (typeof a === 'string' ? a.trim() : '')).filter(Boolean);
 

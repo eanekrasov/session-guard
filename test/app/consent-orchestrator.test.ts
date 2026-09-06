@@ -424,3 +424,111 @@ describe('ConsentOrchestrator.after', () => {
     });
   });
 });
+
+describe('consent covers every document it named, and only the plan in hand', () => {
+  async function ask(
+    sessionID: string,
+    callID: string,
+    storyId: string,
+    files: Record<string, string>
+  ): Promise<{ orchestrator: Awaited<ReturnType<typeof makeOrchestrator>>; questionText: string }> {
+    const { evidenceOf, CONSENT_EVIDENCE_SCHEMA } = await import('../../src/app/consent.ts');
+    const dir = join(directory, '.opencode/plan', storyId);
+    mkdirSync(dir, { recursive: true });
+    const refs: string[] = [];
+    for (const [name, content] of Object.entries(files)) {
+      writeFileSync(join(dir, name), content);
+      refs.push(`.opencode/plan/${storyId}/${name}`);
+    }
+    const manifest = {
+      schema: CONSENT_EVIDENCE_SCHEMA,
+      revision: 1,
+      summary: `Plan ${storyId}`,
+      files: refs,
+    } as const;
+    const evidence = evidenceOf(manifest as unknown as ConsentManifest);
+    const questionText = `<consent-request schema="harness.consent/v1" revision="1" evidence="${evidence}" grant="grant" decline="decline">${JSON.stringify(manifest)}</consent-request>`;
+    const orchestrator = await makeOrchestrator();
+    await orchestrator.before(sessionID, callID, questionText);
+    return { orchestrator, questionText };
+  }
+
+  it('refuses a grant when a second consented document changed since the question', async () => {
+    // The manifest may name several documents and only the first was ever
+    // hashed, so editing another between the question and the answer changed
+    // nothing the check could see: the consent was accepted and the workflow
+    // moved on.
+    const storyId = 'multi-file';
+    await store.save(createSession('co-multi', 'base', 'state-machine'));
+    const { orchestrator, questionText } = await ask('co-multi', 'call-multi', storyId, {
+      'plan.md': '# Plan\n',
+      'design.md': '# Design as reviewed\n',
+    });
+
+    writeFileSync(
+      join(directory, '.opencode/plan', storyId, 'design.md'),
+      '# Design, quietly rewritten\n'
+    );
+
+    await orchestrator.after(
+      'co-multi',
+      'call-multi',
+      {},
+      { title: 'Consent', output: questionText, metadata: { answers: ['grant'] } }
+    );
+
+    const session = await store.load('co-multi');
+    expect(session!.approvals.some((a) => a.type === 'plan' && a.status === 'granted')).toBe(false);
+  });
+
+  it('grants when every consented document is untouched', async () => {
+    await store.save(createSession('co-multi-ok', 'base', 'state-machine'));
+    const { orchestrator, questionText } = await ask('co-multi-ok', 'call-ok', 'multi-ok', {
+      'plan.md': '# Plan\n',
+      'design.md': '# Design\n',
+    });
+
+    await orchestrator.after(
+      'co-multi-ok',
+      'call-ok',
+      {},
+      { title: 'Consent', output: questionText, metadata: { answers: ['grant'] } }
+    );
+
+    const session = await store.load('co-multi-ok');
+    expect(session!.approvals.some((a) => a.type === 'plan' && a.status === 'granted')).toBe(true);
+  });
+
+  it('does not let a granted plan authorise the plan that replaced and was declined', async () => {
+    // `before` pushed a second record while the first stayed `granted`, and
+    // `refs[REF_PLAN]` was repointed at the new document straight away. A
+    // decline removed only the pending one, so `session.approved('plan')`
+    // stayed true — authority from a plan nobody was working on any more.
+    await store.save(createSession('co-supersede', 'base', 'state-machine'));
+
+    const first = await ask('co-supersede', 'call-first', 'plan-one', { 'plan.md': '# First\n' });
+    await first.orchestrator.after(
+      'co-supersede',
+      'call-first',
+      {},
+      { title: 'Consent', output: first.questionText, metadata: { answers: ['grant'] } }
+    );
+    expect(
+      (await store.load('co-supersede'))!.approvals.some(
+        (a) => a.type === 'plan' && a.status === 'granted'
+      )
+    ).toBe(true);
+
+    const second = await ask('co-supersede', 'call-second', 'plan-two', { 'plan.md': '# Second\n' });
+    await second.orchestrator.after(
+      'co-supersede',
+      'call-second',
+      {},
+      { title: 'Consent', output: second.questionText, metadata: { answers: ['decline'] } }
+    );
+
+    const session = await store.load('co-supersede');
+    expect(session!.approvals.filter((a) => a.type === 'plan')).toHaveLength(0);
+    expect(session!.refs.plan).toContain('plan-two');
+  });
+});
