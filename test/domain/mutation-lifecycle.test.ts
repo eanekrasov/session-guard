@@ -39,7 +39,7 @@ describe('finishMutation', () => {
   test('finishMutation с passed=true — activeOperation очищен, gate invariants = passed', () => {
     const session = createSession();
 
-    beginMutation(session, 'm1');
+    beginMutation(session, 'm1', 'unknown', () => 'code');
     finishMutation(session, true, 'm1');
 
     expect(session.activeOperations).toEqual({});
@@ -50,7 +50,7 @@ describe('finishMutation', () => {
   test('finishMutation с passed=false — gate invariants = failed, bumpRetry task', () => {
     const session = createSession();
 
-    beginMutation(session, 'm1');
+    beginMutation(session, 'm1', 'unknown', () => 'code');
     finishMutation(session, false, 'm1');
 
     expect(session.activeOperations).toEqual({});
@@ -63,7 +63,7 @@ describe('finishMutation', () => {
     const session = createSession();
     session.gates = session.gates.filter((g) => g.id !== 'invariants');
 
-    beginMutation(session, 'm1');
+    beginMutation(session, 'm1', 'unknown', () => 'code');
     expect(() => finishMutation(session, true, 'm1')).not.toThrow();
     expect(session.activeOperations).toEqual({});
   });

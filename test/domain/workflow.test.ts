@@ -94,7 +94,7 @@ describe('beginMutation', () => {
       ),
     });
 
-    beginMutation(session, 'mutation-1');
+    beginMutation(session, 'mutation-1', 'unknown', () => 'code');
 
     expect(session.activeOperations['mutation-1']).toBeDefined();
     expect(session.activeOperations['mutation-1'].status).toBe('running');
@@ -111,7 +111,7 @@ describe('beginMutation', () => {
       activeOperations: activeOperation('existing', new Date().toISOString()),
     });
 
-    expect(() => beginMutation(session, 'new-mutation')).toThrow(
+    expect(() => beginMutation(session, 'new-mutation', 'unknown', () => 'code')).toThrow(
       'Active operation already exists: existing'
     );
   });
@@ -124,7 +124,7 @@ describe('beginMutation', () => {
       activeOperations: activeOperation('stale', past),
     });
 
-    beginMutation(session, 'new-mutation');
+    beginMutation(session, 'new-mutation', 'unknown', () => 'code');
 
     expect(session.activeOperations['stale']).toBeUndefined();
     expect(session.activeOperations['new-mutation'].status).toBe('running');

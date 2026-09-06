@@ -176,6 +176,31 @@ describe('MutationOrchestrator.beginMutation', () => {
     expect(reloaded?.activeOperations['call-begin']?.taskId).toBe('task-1');
   });
 
+  it('parks a mutation-before-dispatch run in the loop\'s first stage, not a literal', async () => {
+    // A bash/write arriving before any `task` dispatch synthesises the run.
+    // Its stage used to be written as the literal 'mutation', which no profile
+    // declares, so every later dispatch for that task was refused for ever —
+    // admission looks the run's stage up among the loop's nested stages. The
+    // host smoke run caught it as "Stage mutation is not declared by stage
+    // execution".
+    setFixtureProfilesDir();
+    const session = createSession('mo-synth-stage', 'base', 'state-machine');
+    approve(session, 'plan', 'test-evidence', 'approve-call-id');
+    addExecutableTaskCycle(session);
+    await store.save(session);
+    const { orchestrator } = await makeOrchestrator();
+
+    await orchestrator.beginMutation(
+      { sessionID: 'mo-synth-stage', callID: 'call-synth' },
+      { args: 'echo hi' }
+    );
+
+    const reloaded = await store.load('mo-synth-stage');
+    const runs = Object.values(reloaded?.loopRuns ?? {});
+    expect(runs).toHaveLength(1);
+    expect(runs[0]?.stage).toBe('code');
+  });
+
   it('rejects mutation when guard fails (no plan approval, non-zero revision)', async () => {
     setFixtureProfilesDir();
     const session = createSession('mo-guarded', 'base', 'state-machine');

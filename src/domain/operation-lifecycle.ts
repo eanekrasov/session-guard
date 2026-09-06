@@ -13,7 +13,17 @@ function getActiveOperation(session: WorkflowSession, callId?: string): ActiveOp
   return operations.length === 1 ? operations[0] : null;
 }
 
-function resolveMutationRun(session: WorkflowSession): LoopRun | null {
+/**
+ * Where a synthesised run starts: the first nested stage of the loop that owns
+ * `listKey`. Given by the caller, because only the caller holds the compiled
+ * workflow.
+ */
+export type ResolveInitialStage = (listKey: string) => string | null;
+
+function resolveMutationRun(
+  session: WorkflowSession,
+  resolveInitialStage?: ResolveInitialStage
+): LoopRun | null {
   session.loopRuns ??= {};
   session.activeOperations ??= {};
   const openRuns = Object.values(session.loopRuns).filter((run) => isOpenLoopRun(run));
@@ -28,13 +38,26 @@ function resolveMutationRun(session: WorkflowSession): LoopRun | null {
   if (runnableTasks.length !== 1) return null;
 
   const [{ listKey, task }] = runnableTasks;
+
+  // A run has to start in a stage the profile declares. Writing a literal here
+  // — this used to say `stage: 'mutation'` — parks the task in a stage no
+  // workflow has, and every later dispatch for it is refused for ever, because
+  // admission looks the run's stage up among the loop's nested stages. Refuse
+  // now, with a reason, rather than poison the task silently.
+  const stage = resolveInitialStage?.(listKey);
+  if (!stage) {
+    throw new Error(
+      `Cannot start a mutation for ${task.id}: no first stage resolved for the loop over "${listKey}"`
+    );
+  }
+
   const runId = nextLoopRunId(session);
   const run: LoopRun = {
     id: runId,
     taskId: task.id,
     listKey,
     ancestry: [],
-    stage: 'mutation',
+    stage,
     status: 'running',
   };
   session.loopRuns[runId] = run;
@@ -55,7 +78,8 @@ function resolveMutationRun(session: WorkflowSession): LoopRun | null {
 export function beginMutation(
   session: WorkflowSession,
   callId: string,
-  agent: string = 'unknown'
+  agent: string = 'unknown',
+  resolveInitialStage?: ResolveInitialStage
 ): void {
   for (const operation of getActiveOperations(session)) {
     if (isExpiredMutation(session, operation.callId)) {
@@ -68,7 +92,7 @@ export function beginMutation(
     throw new Error(`Active operation already exists: ${existing.callId}`);
   }
 
-  const run = resolveMutationRun(session);
+  const run = resolveMutationRun(session, resolveInitialStage);
   if (!run) {
     throw new Error('Cannot resolve a single workflow task run for mutation');
   }

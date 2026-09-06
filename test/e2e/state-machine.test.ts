@@ -172,7 +172,7 @@ describe('E2E: Full state machine flow', () => {
     expect(engine.checkTransition('TASKS_READY', 'EXECUTION', session).allowed).toBe(true);
 
     // 4. beginMutation → finishMutation → gates pass
-    beginMutation(session, 'mutation-1');
+    beginMutation(session, 'mutation-1', 'unknown', () => 'code');
     session.changedFiles = ['a.ts'];
     finishMutation(session, true, 'mutation-1');
     setGateStatus(session, 'invariants', 'passed');
@@ -213,7 +213,7 @@ describe('E2E: Full state machine flow', () => {
 
     approve(session, 'plan', 'ev', 'c1');
     addImplementationTask(session);
-    beginMutation(session, 'm-1');
+    beginMutation(session, 'm-1', 'unknown', () => 'code');
     session.changedFiles = [];
     finishMutation(session, true, 'm-1');
     approve(session, 'commit', 'ev', 'c2');
@@ -234,7 +234,7 @@ describe('E2E: Full state machine flow', () => {
 
     approve(session, 'plan', 'ev', 'c1');
     addImplementationTask(session);
-    beginMutation(session, 'm-1');
+    beginMutation(session, 'm-1', 'unknown', () => 'code');
     session.changedFiles = [];
     finishMutation(session, true, 'm-1');
     setGateStatus(session, 'invariants', 'passed');
@@ -254,7 +254,7 @@ describe('E2E: Full state machine flow', () => {
 
     approve(session, 'plan', 'ev', 'c1');
     addImplementationTask(session);
-    beginMutation(session, 'm-1');
+    beginMutation(session, 'm-1', 'unknown', () => 'code');
     session.changedFiles = [];
     finishMutation(session, true, 'm-1');
     setGateStatus(session, 'invariants', 'passed');
@@ -276,7 +276,7 @@ describe('E2E: Full state machine flow', () => {
 
     approve(session, 'plan', 'ev', 'c1');
     addImplementationTask(session);
-    beginMutation(session, 'm-1');
+    beginMutation(session, 'm-1', 'unknown', () => 'code');
     session.changedFiles = [];
     finishMutation(session, true, 'm-1');
     setGateStatus(session, 'invariants', 'passed');
@@ -332,13 +332,13 @@ describe('E2E: Full state machine flow', () => {
     expect(engine.deriveStage(session)).toBe('EXECUTION');
 
     // First mutation fails → retry budget bumps
-    beginMutation(session, 'm-1');
+    beginMutation(session, 'm-1', 'unknown', () => 'code');
     session.changedFiles = [];
     finishMutation(session, false, 'm-1');
     expect(session.retryBudgets['task-1'].attempts).toBe(1);
 
     // Retry — passes
-    beginMutation(session, 'm-2');
+    beginMutation(session, 'm-2', 'unknown', () => 'code');
     session.changedFiles = [];
     finishMutation(session, true, 'm-2');
     setGateStatus(session, 'invariants', 'passed');
@@ -365,7 +365,7 @@ describe('E2E: Full state machine flow', () => {
 
     approve(session, 'plan', 'ev', 'c1');
     addImplementationTask(session);
-    beginMutation(session, 'm-1');
+    beginMutation(session, 'm-1', 'unknown', () => 'code');
 
     markOutputReady('m-1', session);
     expect(session.activeOperations['m-1']?.result).toBe('output_ready');
@@ -388,7 +388,7 @@ describe('E2E: Full state machine flow', () => {
 
     approve(session, 'plan', 'ev', 'c1');
     addImplementationTask(session);
-    beginMutation(session, 'm-1');
+    beginMutation(session, 'm-1', 'unknown', () => 'code');
 
     const facts = toSessionFacts(session);
 
@@ -545,8 +545,8 @@ describe('E2E: Full state machine flow', () => {
     approve(session, 'plan', 'ev', 'c1');
     addImplementationTask(session);
 
-    beginMutation(session, 'm-1');
-    expect(() => beginMutation(session, 'm-2')).toThrow('Active operation already exists');
+    beginMutation(session, 'm-1', 'unknown', () => 'code');
+    expect(() => beginMutation(session, 'm-2', 'unknown', () => 'code')).toThrow('Active operation already exists');
   });
 
   // ─── TC20: Two consecutive mutations (begin→finish→begin→finish) ──────────
@@ -559,13 +559,13 @@ describe('E2E: Full state machine flow', () => {
     approve(session, 'plan', 'ev', 'c1');
     addImplementationTask(session);
 
-    beginMutation(session, 'm-1');
+    beginMutation(session, 'm-1', 'unknown', () => 'code');
     session.changedFiles = ['a.ts'];
     finishMutation(session, true, 'm-1');
     expect(session.activeOperations).toEqual({});
     expect(session.changedFiles).toEqual(['a.ts']);
 
-    beginMutation(session, 'm-2');
+    beginMutation(session, 'm-2', 'unknown', () => 'code');
     expect(session.activeOperations['m-2']?.callId).toBe('m-2');
     session.changedFiles = ['b.ts'];
     finishMutation(session, true, 'm-2');
@@ -585,7 +585,7 @@ describe('E2E: Full state machine flow', () => {
 
     // 3 failures = retry budget exhausted
     for (let i = 1; i <= 3; i++) {
-      beginMutation(session, `m-${i}`);
+      beginMutation(session, `m-${i}`, 'unknown', () => 'code');
       session.changedFiles = [];
       finishMutation(session, false, `m-${i}`);
     }
@@ -644,7 +644,7 @@ describe('E2E: Full state machine flow', () => {
     await store.save(session);
 
     addImplementationTask(session);
-    beginMutation(session, 'm-1');
+    beginMutation(session, 'm-1', 'unknown', () => 'code');
     session.changedFiles = [];
     finishMutation(session, true, 'm-1');
     session = await persistAndReload(session);
@@ -684,7 +684,7 @@ describe('E2E: Full state machine flow', () => {
 
     approve(session, 'plan', 'ev', 'c1');
     addImplementationTask(session);
-    beginMutation(session, 'm-1');
+    beginMutation(session, 'm-1', 'unknown', () => 'code');
 
     expect(hasLiveVerifier(session, 'any-agent')).toBe(true);
   });
@@ -706,7 +706,7 @@ describe('E2E: Full state machine flow', () => {
 
     approve(session, 'plan', 'ev', 'c1');
     addImplementationTask(session);
-    beginMutation(session, 'm-1');
+    beginMutation(session, 'm-1', 'unknown', () => 'code');
 
     markOutputReady('wrong-id', session);
     expect(session.activeOperations['m-1']?.result).toBeUndefined();
@@ -739,7 +739,7 @@ describe('E2E: Full state machine flow', () => {
 
     approve(session, 'plan', 'ev', 'c1');
     addImplementationTask(session);
-    beginMutation(session, 'm-1');
+    beginMutation(session, 'm-1', 'unknown', () => 'code');
 
     expect(canExitExecution(session)).toBe(false);
   });
@@ -789,7 +789,7 @@ describe('E2E: Full state machine flow', () => {
 
     approve(session, 'plan', 'ev', 'c1');
     setImplementationTasks(session, [createTask()]);
-    beginMutation(session, 'm-1');
+    beginMutation(session, 'm-1', 'unknown', () => 'code');
     expect(session.verifications).toEqual([]);
   });
 
@@ -804,7 +804,7 @@ describe('E2E: Full state machine flow', () => {
 
     approve(session, 'plan', 'ev', 'c1');
     setImplementationTasks(session, [createTask()]);
-    beginMutation(session, 'm-1');
+    beginMutation(session, 'm-1', 'unknown', () => 'code');
     expect(session.gates.find((g) => g.id === 'invariants')?.status).toBe('pending');
   });
 
@@ -816,7 +816,7 @@ describe('E2E: Full state machine flow', () => {
 
     approve(session, 'plan', 'ev', 'c1');
     setImplementationTasks(session, [createTask()]);
-    beginMutation(session, 'm-1');
+    beginMutation(session, 'm-1', 'unknown', () => 'code');
     session.changedFiles = [];
     finishMutation(session, false, 'm-1');
 
@@ -863,7 +863,7 @@ describe('E2E: Full state machine flow', () => {
 
     approve(session, 'plan', 'ev', 'c1');
     addImplementationTask(session);
-    beginMutation(session, 'm-1');
+    beginMutation(session, 'm-1', 'unknown', () => 'code');
 
     expect(isExpiredMutation(session)).toBe(false);
   });
@@ -888,7 +888,7 @@ describe('E2E: Full state machine flow', () => {
 
     expect(isExpiredMutation(session)).toBe(true);
     // beginMutation should succeed — old mutation is expired
-    beginMutation(session, 'm-1');
+    beginMutation(session, 'm-1', 'unknown', () => 'code');
     expect(session.activeOperations['m-1']?.callId).toBe('m-1');
   });
 
@@ -968,7 +968,7 @@ describe('E2E: Full state machine flow', () => {
 
     approve(session, 'plan', 'ev', 'c1');
     addImplementationTask(session);
-    beginMutation(session, 'm-1');
+    beginMutation(session, 'm-1', 'unknown', () => 'code');
     session.changedFiles = [];
     finishMutation(session, true, 'm-1');
     // gates NOT passed

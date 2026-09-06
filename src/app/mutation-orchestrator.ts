@@ -5,7 +5,7 @@ import { StateMachineEngine, type EvaluateGuardFn, type EngineConfig } from '../
 import { resolveConfig } from '../public-api.ts';
 import { compileWorkflow } from '../schema/compile-workflow.ts';
 import { mergeStages } from '../schema/schema-loader.ts';
-import { ProfileConfigurationError } from '../schema/types.ts';
+import { ProfileConfigurationError, firstNestedStageId } from '../schema/types.ts';
 import { GuardEvaluator } from '../schema/guard-evaluator.ts';
 import type { ResolvedSchema } from '../schema/types.ts';
 import { SessionQueue } from './session-queue.ts';
@@ -385,7 +385,10 @@ export class MutationOrchestrator {
       this.releaseInterruptedLock(session, input.callID);
 
       try {
-        beginMutation(session, input.callID, 'state-machine');
+        beginMutation(session, input.callID, 'state-machine', (listKey) => {
+          const loopStage = engine.getLoopStage(listKey);
+          return loopStage ? (firstNestedStageId(loopStage) ?? null) : null;
+        });
       } catch (err) {
         await this.log('error', `beginMutation: domain mutation failed`, {
           callID: input.callID,
