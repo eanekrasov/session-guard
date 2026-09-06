@@ -1,16 +1,13 @@
+# A serial loop whose single stage is named `code`. Its own tests never dispatch
+# to it directly; it exists so the profiles that do can say what they add.
 stages:
   execution:
     loop: implementation
     dispatch:
-      strategy: serial_with_overlap
-      maxConcurrent: 1
+      strategy: serial
     stages:
-      dev:
+      code:
         allowedAgents: ['code']
-      review:
-        allowedAgents: ['review']
-      qa:
-        allowedAgents: ['qa']
 stageAssignments:
   - id: execution
     priority: 1

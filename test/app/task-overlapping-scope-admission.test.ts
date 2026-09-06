@@ -45,7 +45,7 @@ let overlapProfileId = 'cycle-overlap-2';
 
 function setOverlapFixtureProfilesDir(maxConcurrent = 2): void {
   setFixtureProfilesDir();
-  overlapProfileId = maxConcurrent === 1 ? 'overlap-scope-1' : 'cycle-overlap-2';
+  overlapProfileId = maxConcurrent === 1 ? 'cycle-overlap-1' : 'cycle-overlap-2';
 }
 
 async function seed(

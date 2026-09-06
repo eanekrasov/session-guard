@@ -1,8 +1,7 @@
+extends: 'cycle-code/cycle.yaml'
+# The task finishes only once its own invariants verdict is green.
 stages:
   execution:
-    loop: implementation
-    dispatch:
-      strategy: serial
     stages:
       code:
         allowedAgents: ['coder']
@@ -10,8 +9,3 @@ stages:
       - from: code
         to: done
         guard: "task.gates.invariants == 'passed'"
-stageAssignments:
-  - id: execution
-    priority: 1
-    condition: 'true'
-    result: execution

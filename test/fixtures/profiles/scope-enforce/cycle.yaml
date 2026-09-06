@@ -1,13 +1,7 @@
+extends: 'cycle-minimal/cycle.yaml'
+# The stage admits a second role, so a write from it is in scope.
 stages:
   execution:
-    loop: implementation
-    dispatch:
-      strategy: serial
     stages:
       dev:
         allowedAgents: ['code', 'reviewer']
-stageAssignments:
-  - id: execution
-    priority: 1
-    condition: 'true'
-    result: execution

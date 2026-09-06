@@ -1,13 +1,7 @@
+extends: 'cycle-minimal/cycle.yaml'
+# A roster naming agents the profile does not ship, for the name-resolution tests.
 stages:
   execution:
-    loop: implementation
-    dispatch:
-      strategy: serial
     stages:
       dev:
         allowedAgents: ['code', 'my-agent', 'fallback-agent']
-stageAssignments:
-  - id: execution
-    priority: 1
-    condition: 'true'
-    result: execution

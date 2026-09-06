@@ -1,1 +1,1 @@
-{"id": "movement-blocked", "name": "movement-blocked", "schemas": ["cycle.yaml"]}
+{"id": "movement-blocked", "name": "movement-blocked", "extends": "cycle-code", "schemas": ["cycle.yaml"]}

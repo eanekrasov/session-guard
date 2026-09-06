@@ -1,1 +1,1 @@
-{"id": "scope-enforce", "name": "scope-enforce", "schemas": ["cycle.yaml"]}
+{"id": "scope-enforce", "name": "scope-enforce", "extends": "cycle-minimal", "schemas": ["cycle.yaml"]}

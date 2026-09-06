@@ -1,1 +1,1 @@
-{"id": "nested-rollup", "name": "nested-rollup", "schemas": ["cycle.yaml"], "invariants": ["LF_ONLY"]}
+{"id": "nested-rollup", "name": "nested-rollup", "extends": "cycle-minimal", "schemas": ["cycle.yaml"], "invariants": ["LF_ONLY"]}

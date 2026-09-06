@@ -1,12 +1,3 @@
-stages:
-  execution:
-    loop: implementation
-    stages:
-      dev:
-        allowedAgents: ['code']
-stageAssignments:
-  - id: execution
-    priority: 1
-    condition: 'true'
-    result: execution
+extends: 'cycle-minimal/cycle.yaml'
+# Workflow task state is owned by `lead` here rather than the default orchestrator.
 taskControlAgents: ['lead']
