@@ -1,25 +1,49 @@
+gates:
+  - id: invariants
+  - id: review
+  - id: qa
 stages:
-  PLANNING:
+  planning:
     dispatch:
       strategy: serial
-  EXECUTION:
+  tasks_ready: {}
+  execution:
+    loop: implementation
     dispatch:
       strategy: serial_with_overlap
       maxConcurrent: 2
-  # Declared because the transitions below name them: a transition to a stage
-  # that does not exist is a compile error, not a runtime surprise.
-  TASKS_READY: {}
-  COMMIT: {}
-  DONE: {}
+    stages:
+      code:
+        allowedAgents: ['code']
+      verify:
+        allowedAgents: ['architect']
+        gates: ['invariants', 'review']
+    transitions:
+      - from: code
+        to: verify
+        kind: pass
+      - from: verify
+        to: done
+        kind: pass
+      - from: verify
+        to: code
+        kind: fail
+        effects:
+          - bumpRetry: task.id
+  commit: {}
+  done: {}
 transitions:
-  - from: PLANNING
-    to: EXECUTION
+  - from: planning
+    to: tasks_ready
     guard: "session.approved('plan')"
-  - from: EXECUTION
-    to: COMMIT
-    kind: pass
-  - from: COMMIT
-    to: DONE
+  - from: tasks_ready
+    to: execution
+    guard: 'hasPendingTasks()'
+  - from: execution
+    to: commit
+    guard: 'allTasksCompleted()'
+  - from: commit
+    to: done
     guard: "typeof session.deliveryReceipt == 'string' || typeof session.deliveryPermit == 'string'"
 gateMapping:
   review: ['invariants', 'review']
@@ -30,25 +54,25 @@ stageAssignments:
   - id: default
     priority: 0
     condition: 'true'
-    result: PLANNING
+    result: planning
   - id: hasPlanApproval
     priority: 60
     condition: "session.approved('plan')"
-    result: TASKS_READY
+    result: tasks_ready
   - id: uncommitted
     priority: 70
     condition: "session.approved('plan') && (session.taskLists.implementation ?? []).length > 0 && session.taskLists.implementation.some(t => t.status != 'completed')"
-    result: EXECUTION
+    result: execution
   - id: commitApproval
     priority: 90
     condition: "session.approved('commit')"
-    result: COMMIT
+    result: commit
   - id: deliveryReceipt
     priority: 100
     condition: "typeof session.deliveryReceipt == 'string' || typeof session.deliveryPermit == 'string'"
-    result: DONE
+    result: done
 actionGuards:
-  beginMutation: "session.approved('plan') || session.revision == 0"
+  beginMutation: "session.approved('plan')"
 requiredGates:
   - invariants
   - review

@@ -1,0 +1,19 @@
+stages:
+  execution:
+    loop: implementation
+    dispatch:
+      strategy: serial
+    retryBudget:
+      maximum: 3
+    stages:
+      code:
+        allowedAgents: ['code']
+    transitions:
+      - from: code
+        to: done
+        guard: "session.gates.review == 'passed'"
+stageAssignments:
+  - id: execution
+    priority: 1
+    condition: 'true'
+    result: execution

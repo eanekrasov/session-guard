@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import type { Hooks, PluginInput } from '@opencode-ai/plugin';
 
 import { createRuntime } from '../../src/app/runtime.ts';
@@ -33,47 +33,20 @@ function pluginInput(): PluginInput {
   };
 }
 
-async function writeProfile(
+let taskAdmissionProfileId = 'task-admission-serial';
+
+function setTaskAdmissionFixtureProfilesDir(
   strategy: DispatchStrategy,
   options: { maxConcurrent?: number; allowedAgents?: string[] } = {}
-): Promise<void> {
-  const profileDirectory = join(profilesDirectory, 'task-admission');
-  await mkdir(profileDirectory, { recursive: true });
-  await writeFile(
-    join(profileDirectory, 'profile.json'),
-    JSON.stringify({ id: 'task-admission', schemas: ['cycle.yaml'] }),
-    'utf-8'
-  );
-  const dispatch = [
-    `      strategy: ${strategy}`,
-    ...(options.maxConcurrent === undefined
-      ? []
-      : [`      maxConcurrent: ${options.maxConcurrent}`]),
-  ];
-  const allowedAgents = options.allowedAgents ?? ['code'];
-  await writeFile(
-    join(profileDirectory, 'cycle.yaml'),
-    [
-      'stages:',
-      '  EXECUTION:',
-      '    loop: implementation',
-      '    dispatch:',
-      ...dispatch,
-      '    stages:',
-      '      dev:',
-      `        allowedAgents: [${allowedAgents.map((agent) => `'${agent}'`).join(', ')}]`,
-      '      review:',
-      "        allowedAgents: ['review']",
-      '      qa:',
-      "        allowedAgents: ['qa']",
-      'stageAssignments:',
-      '  - id: execution',
-      '    priority: 1',
-      "    condition: 'true'",
-      '    result: EXECUTION',
-    ].join('\n'),
-    'utf-8'
-  );
+): void {
+  process.env.STATE_MACHINE_PROFILES_DIR = resolve(import.meta.dir, '../../test/fixtures/profiles');
+  if (strategy === 'serial_with_overlap') taskAdmissionProfileId = 'task-admission-overlap-2';
+  else if (strategy === 'parallel' && options.maxConcurrent === 1)
+    taskAdmissionProfileId = 'task-admission-parallel-1';
+  else if (strategy === 'parallel') taskAdmissionProfileId = 'task-admission-parallel-2';
+  else if (options.allowedAgents?.includes('review'))
+    taskAdmissionProfileId = 'task-admission-serial-review';
+  else taskAdmissionProfileId = 'task-admission-serial';
 }
 
 async function createWorkflowSession(
@@ -83,7 +56,7 @@ async function createWorkflowSession(
   ]
 ): Promise<WorkflowStore> {
   const store = new WorkflowStore(storeDirectory);
-  const session = createSession('s1', 'task-admission');
+  const session = createSession('s1', taskAdmissionProfileId);
   session.tasks.implementation = tasks.map((task) => ({
     id: task.id,
     path: `src/${task.id}.ts`,
@@ -163,7 +136,7 @@ afterEach(async () => {
 
 describe('task-cycle admission', () => {
   it('correlates an exact workflow prefix without changing native task arguments', async () => {
-    await writeProfile('serial');
+    setTaskAdmissionFixtureProfilesDir('serial');
     const store = await createWorkflowSession();
     const hooks = createRuntime(pluginInput());
 
@@ -202,7 +175,7 @@ describe('task-cycle admission', () => {
   ])(
     'passes without admission for missing or malformed workflow prefix: %s',
     async (description) => {
-      await writeProfile('serial');
+      setTaskAdmissionFixtureProfilesDir('serial');
       const store = await createWorkflowSession();
       const hooks = createRuntime(pluginInput());
 
@@ -218,7 +191,7 @@ describe('task-cycle admission', () => {
   );
 
   it('rejects a task outside the selected loop', async () => {
-    await writeProfile('parallel', { maxConcurrent: 2 });
+    setTaskAdmissionFixtureProfilesDir('parallel', { maxConcurrent: 2 });
     const store = await createWorkflowSession();
     const hooks = createRuntime(pluginInput());
 
@@ -233,7 +206,7 @@ describe('task-cycle admission', () => {
   });
 
   it('rejects an agent outside the current stage allowedAgents', async () => {
-    await writeProfile('serial', { allowedAgents: ['code'] });
+    setTaskAdmissionFixtureProfilesDir('serial', { allowedAgents: ['code'] });
     const store = await createWorkflowSession();
     const hooks = createRuntime(pluginInput());
 
@@ -249,7 +222,7 @@ describe('task-cycle admission', () => {
   });
 
   it('admits independent parallel calls up to maxConcurrent and rejects excess work', async () => {
-    await writeProfile('parallel', { maxConcurrent: 2 });
+    setTaskAdmissionFixtureProfilesDir('parallel', { maxConcurrent: 2 });
     const store = await createWorkflowSession([
       { id: 'task-1' },
       { id: 'task-2' },
@@ -271,7 +244,7 @@ describe('task-cycle admission', () => {
   });
 
   it('keeps a concurrency slot for the full loop run after its native call ends', async () => {
-    await writeProfile('parallel', { maxConcurrent: 1 });
+    setTaskAdmissionFixtureProfilesDir('parallel', { maxConcurrent: 1 });
     const store = await createWorkflowSession();
     const hooks = createRuntime(pluginInput());
 
@@ -285,7 +258,7 @@ describe('task-cycle admission', () => {
   });
 
   it('advances successful native calls through dev, review, qa, and completes the run', async () => {
-    await writeProfile('serial');
+    setTaskAdmissionFixtureProfilesDir('serial');
     const store = await createWorkflowSession();
     const hooks = createRuntime(pluginInput());
 
@@ -313,7 +286,7 @@ describe('task-cycle admission', () => {
   });
 
   it('releases the native call but does not advance on missing or malformed workflow results', async () => {
-    await writeProfile('serial');
+    setTaskAdmissionFixtureProfilesDir('serial');
     const store = await createWorkflowSession();
     const hooks = createRuntime(pluginInput());
 
@@ -337,7 +310,7 @@ describe('task-cycle admission', () => {
   });
 
   it('records a valid failed result as a retry and keeps the task cycle slot', async () => {
-    await writeProfile('parallel', { maxConcurrent: 1 });
+    setTaskAdmissionFixtureProfilesDir('parallel', { maxConcurrent: 1 });
     const store = await createWorkflowSession();
     const hooks = createRuntime(pluginInput());
 
@@ -355,7 +328,7 @@ describe('task-cycle admission', () => {
   });
 
   it('rejects reuse of a task that already has an active native call', async () => {
-    await writeProfile('parallel', { maxConcurrent: 2 });
+    setTaskAdmissionFixtureProfilesDir('parallel', { maxConcurrent: 2 });
     const store = await createWorkflowSession();
     const hooks = createRuntime(pluginInput());
 
@@ -367,7 +340,7 @@ describe('task-cycle admission', () => {
   });
 
   it('admits only the next unfinished task in serial mode', async () => {
-    await writeProfile('serial');
+    setTaskAdmissionFixtureProfilesDir('serial');
     const store = await createWorkflowSession();
     const hooks = createRuntime(pluginInput());
 
@@ -380,7 +353,7 @@ describe('task-cycle admission', () => {
   });
 
   it('allows serial_with_overlap next dev only after the prior run leaves dev', async () => {
-    await writeProfile('serial_with_overlap', { maxConcurrent: 2 });
+    setTaskAdmissionFixtureProfilesDir('serial_with_overlap', { maxConcurrent: 2 });
     const store = await createWorkflowSession();
     const hooks = createRuntime(pluginInput());
 

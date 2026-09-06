@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import type { Hooks, PluginInput } from '@opencode-ai/plugin';
 
 import { createRuntime } from '../../src/app/runtime.ts';
@@ -40,108 +40,27 @@ function pluginInput(): PluginInput {
   };
 }
 
-async function writeProfile(
+let verifyProfileId = 'verify-default';
+
+function setVerifyFixtureProfilesDir(
   transitions = false,
   guardInvariants = false,
   consentToFinish = false,
   selfLoop = false,
   approveOnMove = false
-): Promise<void> {
-  const profileDirectory = join(profilesDirectory, 'verify');
-  await mkdir(profileDirectory, { recursive: true });
-  await writeFile(
-    join(profileDirectory, 'profile.json'),
-    JSON.stringify({ id: 'verify', schemas: ['cycle.yaml'] }),
-    'utf-8'
-  );
-  await writeFile(
-    join(profileDirectory, 'cycle.yaml'),
-    [
-      'stages:',
-      '  EXECUTION:',
-      '    loop: implementation',
-      '    dispatch:',
-      '      strategy: serial',
-      '    retryBudget:',
-      '      maximum: 3',
-      '    stages:',
-      '      code:',
-      "        allowedAgents: ['code']",
-      '      verify:',
-      "        allowedAgents: ['review', 'qa']",
-      '        gates: [review, qa]',
-      ...(consentToFinish
-        ? ['    transitions:', '      - from: code', '        to: done', '        consent: release']
-        : []),
-      ...(approveOnMove
-        ? [
-            '    transitions:',
-            '      - from: code',
-            '        to: verify',
-            '        effects:',
-            '          - approve: release',
-            '      - from: verify',
-            '        to: done',
-            '        consent: release',
-          ]
-        : []),
-      ...(selfLoop
-        ? [
-            '    transitions:',
-            '      - from: code',
-            '        to: verify',
-            '      - from: verify',
-            '        to: verify',
-            "        guard: \"task.gates.review == 'failed' || task.gates.qa == 'failed'\"",
-            '        effects:',
-            '          - bumpRetry: task.id',
-            '      - from: verify',
-            '        to: done',
-            "        guard: \"task.gates.review == 'passed' && task.gates.qa == 'passed'\"",
-          ]
-        : []),
-      ...(guardInvariants
-        ? [
-            '    transitions:',
-            '      - from: code',
-            '        to: verify',
-            '        guard: "session.gates.invariants == \'passed\'"',
-            '      - from: verify',
-            '        to: done',
-            "        guard: \"task.gates.review == 'passed' && task.gates.qa == 'passed'\"",
-          ]
-        : []),
-      ...(transitions
-        ? [
-            '      commit: {}',
-            '    transitions:',
-            '      - from: code',
-            '        to: verify',
-            '      - from: commit',
-            '        to: done',
-            '      - from: verify',
-            '        to: commit',
-            "        guard: \"task.gates.review == 'passed' && task.gates.qa == 'passed'\"",
-            '      - from: verify',
-            '        to: code',
-            "        guard: \"task.gates.review == 'failed' || task.gates.qa == 'failed'\"",
-            '        effects:',
-            '          - bumpRetry: task.id',
-          ]
-        : []),
-      'stageAssignments:',
-      '  - id: execution',
-      '    priority: 1',
-      "    condition: 'true'",
-      '    result: EXECUTION',
-    ].join('\n'),
-    'utf-8'
-  );
+): void {
+  process.env.STATE_MACHINE_PROFILES_DIR = resolve(import.meta.dir, '../../test/fixtures/profiles');
+  if (transitions) verifyProfileId = 'verify-transitions';
+  else if (guardInvariants) verifyProfileId = 'verify-guard-invariants';
+  else if (consentToFinish) verifyProfileId = 'verify-consent-to-finish';
+  else if (selfLoop) verifyProfileId = 'verify-self-loop';
+  else if (approveOnMove) verifyProfileId = 'verify-approve-on-move';
+  else verifyProfileId = 'verify-default';
 }
 
 async function seed(): Promise<WorkflowStore> {
   const store = new WorkflowStore(storeDirectory);
-  const session = createSession('s1', 'verify');
+  const session = createSession('s1', verifyProfileId);
   session.tasks.implementation = [createTask()];
   await store.save(session);
   return store;
@@ -201,7 +120,7 @@ beforeEach(async () => {
   profilesDirectory = await mkdtemp(join(tmpdir(), 'verify-profiles-'));
   process.env.STATE_MACHINE_STORE_DIR = storeDirectory;
   process.env.STATE_MACHINE_PROFILES_DIR = profilesDirectory;
-  await writeProfile();
+  setVerifyFixtureProfilesDir();
 });
 
 afterEach(async () => {
@@ -322,7 +241,7 @@ describe('a loop moved by its own transitions', () => {
   }
 
   it('takes the branch its guard names, not the next stage in the list', async () => {
-    await writeProfile(true);
+    setVerifyFixtureProfilesDir(true);
     const store = await seed();
     const hooks = createRuntime(pluginInput());
     await reachVerify(hooks, store);
@@ -336,7 +255,7 @@ describe('a loop moved by its own transitions', () => {
   });
 
   it('sends a failed task back to code and spends its own retry budget', async () => {
-    await writeProfile(true);
+    setVerifyFixtureProfilesDir(true);
     const store = await seed();
     const hooks = createRuntime(pluginInput());
     await reachVerify(hooks, store);
@@ -351,7 +270,7 @@ describe('a loop moved by its own transitions', () => {
   });
 
   it('waits at verify while only one verifier has answered', async () => {
-    await writeProfile(true);
+    setVerifyFixtureProfilesDir(true);
     const store = await seed();
     const hooks = createRuntime(pluginInput());
     await reachVerify(hooks, store);
@@ -381,7 +300,7 @@ describe('two verifiers work the same task at once', () => {
   }
 
   it('admits review and qa together', async () => {
-    await writeProfile();
+    setVerifyFixtureProfilesDir();
     const store = await seed();
     const hooks = createRuntime(pluginInput());
     await reachVerify(hooks, store);
@@ -397,7 +316,7 @@ describe('two verifiers work the same task at once', () => {
   });
 
   it('refuses the same agent twice — one agent cannot judge the same work twice at once', async () => {
-    await writeProfile();
+    setVerifyFixtureProfilesDir();
     const store = await seed();
     const hooks = createRuntime(pluginInput());
     await reachVerify(hooks, store);
@@ -409,7 +328,7 @@ describe('two verifiers work the same task at once', () => {
   });
 
   it('keeps a stage without gates to one call at a time', async () => {
-    await writeProfile();
+    setVerifyFixtureProfilesDir();
     const store = await seed();
     const hooks = createRuntime(pluginInput());
     // `code` declares no gates, so it is one call at a time.
@@ -420,7 +339,7 @@ describe('two verifiers work the same task at once', () => {
 
 describe('an errored tool releases the task it was holding', () => {
   it('reads the part where the host actually puts it', async () => {
-    await writeProfile();
+    setVerifyFixtureProfilesDir();
     const store = await seed();
     const hooks = createRuntime(pluginInput());
     await dispatch(hooks, 'call-code', 'code');
@@ -452,7 +371,7 @@ describe('the retry budget path clears verdicts too', () => {
     // No transitions: the loop falls back to declaration order, and a failure
     // goes through the retry budget rather than an edge. That path used to
     // keep the failed verdict, so the task was judged on work it had not redone.
-    await writeProfile();
+    setVerifyFixtureProfilesDir();
     const store = await seed();
     const hooks = createRuntime(pluginInput());
     await dispatch(hooks, 'call-code', 'code');
@@ -474,7 +393,7 @@ describe('a guard inside a loop reads the session the same way one outside it do
     // gates are a map; inner ones got the raw session, where gates are an
     // array — so the same expression read a status outside the loop and
     // undefined inside it, and the task never left `code`.
-    await writeProfile(false, true);
+    setVerifyFixtureProfilesDir(false, true);
     const store = await seed();
     const hooks = createRuntime(pluginInput());
 
@@ -491,7 +410,7 @@ describe('a guard inside a loop reads the session the same way one outside it do
   });
 
   it('holds the task while that gate has not passed', async () => {
-    await writeProfile(false, true);
+    setVerifyFixtureProfilesDir(false, true);
     const store = await seed();
     const hooks = createRuntime(pluginInput());
 
@@ -507,7 +426,7 @@ describe('a verdict from a round that is over', () => {
     // Review and qa work `verify` together. Review fails, the task goes back to
     // `code` and pays one attempt. QA is still working, and its verdict — about
     // the code that was already judged — must not cost a second attempt.
-    await writeProfile();
+    setVerifyFixtureProfilesDir();
     const store = await seed();
     const hooks = createRuntime(pluginInput());
 
@@ -535,7 +454,7 @@ describe('a verdict from a round that is over', () => {
   });
 
   it('still accepts a verdict for the round the task is actually in', async () => {
-    await writeProfile();
+    setVerifyFixtureProfilesDir();
     const store = await seed();
     const hooks = createRuntime(pluginInput());
 
@@ -551,7 +470,7 @@ describe('a verdict from a round that is over', () => {
     // Saying `[workflow-result-stale]` and writing the gate anyway is worse
     // than not checking at all: the straggler's `qa: passed` survives into
     // the fresh round, and the next review closes the stage on its own.
-    await writeProfile(false, false, false, true);
+    setVerifyFixtureProfilesDir(false, false, false, true);
     const store = await seed();
     const hooks = createRuntime(pluginInput());
 
@@ -572,7 +491,7 @@ describe('a verdict from a round that is over', () => {
   });
 
   it('records no verification for a round that is over', async () => {
-    await writeProfile(false, false, false, true);
+    setVerifyFixtureProfilesDir(false, false, false, true);
     const store = await seed();
     const hooks = createRuntime(pluginInput());
 
@@ -594,7 +513,7 @@ describe('a verdict from a round that is over', () => {
   it('does not let the next round close on one verifier', async () => {
     // The whole point: after the straggler is ignored, the fresh round still
     // needs both gates. Review alone must not finish the stage.
-    await writeProfile(false, false, false, true);
+    setVerifyFixtureProfilesDir(false, false, false, true);
     const store = await seed();
     const hooks = createRuntime(pluginInput());
 
@@ -618,7 +537,7 @@ describe('a verdict from a round that is over', () => {
 
 describe('a loop transition that asks for consent', () => {
   it('does not finish the task until the operator has given it', async () => {
-    await writeProfile(false, false, true);
+    setVerifyFixtureProfilesDir(false, false, true);
     const store = await seed();
     const hooks = createRuntime(pluginInput());
 
@@ -647,7 +566,7 @@ describe('an effect on a transition inside a loop', () => {
     // `effects: [{ approve: release }]` on `code → verify`. Outer transitions
     // have always honoured it; nested ones ran only the retry branch, so a
     // schema the loader accepted quietly did nothing.
-    await writeProfile(false, false, false, false, true);
+    setVerifyFixtureProfilesDir(false, false, false, false, true);
     const store = await seed();
     const hooks = createRuntime(pluginInput());
 
@@ -665,7 +584,7 @@ describe('an effect on a transition inside a loop', () => {
   it('unblocks the consent a later edge asks for', async () => {
     // The point of granting it: `verify → done` waits on `release`, which the
     // earlier edge is supposed to have given.
-    await writeProfile(false, false, false, false, true);
+    setVerifyFixtureProfilesDir(false, false, false, false, true);
     const store = await seed();
     const hooks = createRuntime(pluginInput());
 
@@ -685,30 +604,11 @@ describe('an effect on a transition inside a loop', () => {
 
   it('grants an approval declared on the edge that ends the task', async () => {
     // `to: done` is a departure like any other, so it carries its effects too.
-    await writeProfile();
-    const profileDirectory = join(profilesDirectory, 'verify');
-    await writeFile(
-      join(profileDirectory, 'cycle.yaml'),
-      [
-        'stages:',
-        '  EXECUTION:',
-        '    loop: implementation',
-        '    stages:',
-        '      code:',
-        "        allowedAgents: ['code']",
-        '    transitions:',
-        '      - from: code',
-        '        to: done',
-        '        effects:',
-        '          - approve: release',
-        'stageAssignments:',
-        '  - id: execution',
-        '    priority: 1',
-        "    condition: 'true'",
-        '    result: EXECUTION',
-      ].join('\n'),
-      'utf-8'
+    process.env.STATE_MACHINE_PROFILES_DIR = resolve(
+      import.meta.dir,
+      '../../test/fixtures/profiles'
     );
+    verifyProfileId = 'verify-approve-done';
     const store = await seed();
     const hooks = createRuntime(pluginInput());
 

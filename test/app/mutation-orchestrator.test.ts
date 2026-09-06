@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { resolve, join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -63,8 +63,12 @@ async function makeOrchestrator(projectDir?: string) {
   };
 }
 
+function fixtureProfilesDir(name = 'profiles'): string {
+  return resolve(import.meta.dir, '../../test/fixtures', name);
+}
+
 function setFixtureProfilesDir(): void {
-  process.env.STATE_MACHINE_PROFILES_DIR = resolve(import.meta.dir, '../../test/fixtures/profiles');
+  process.env.STATE_MACHINE_PROFILES_DIR = fixtureProfilesDir();
 }
 
 function addExecutableTaskCycle(session: ReturnType<typeof createSession>): void {
@@ -74,50 +78,20 @@ function addExecutableTaskCycle(session: ReturnType<typeof createSession>): void
 // ─── Tests ─────────────────────────────────────────────────────────
 
 describe('MutationOrchestrator.resolveEngine', () => {
-  /** A profile whose stage waits on a gate the profile never declares. */
-  function writeUndeclaredGateProfile(): string {
-    const dir = mkdtempSync(join(tmpdir(), 'mo-gate-'));
-    mkdirSync(join(dir, 'bad'), { recursive: true });
-    writeFileSync(join(dir, 'bad', 'profile.json'), '{"id":"bad","schemas":["bad.yaml"]}', 'utf-8');
-    writeFileSync(
-      join(dir, 'bad', 'bad.yaml'),
-      [
-        'gates:',
-        '  - id: invariants',
-        'stages:',
-        '  execution:',
-        '    loop: implementation',
-        '    stages:',
-        '      verify:',
-        '        gates: [security]',
-        '    transitions:',
-        '      - from: verify',
-        '        to: done',
-        '  done: {}',
-      ].join('\n'),
-      'utf-8'
-    );
-    gitDirs.push(dir);
-    return dir;
-  }
-
-  it('does not serve one directory\'s engine for another', async () => {
+  it("does not serve one directory's engine for another", async () => {
     // A fixture corpus points the same profile id at different directories.
     // The cache is keyed on the id, but the directory is read from the
     // environment on each call, so keying on the id alone hands back the first
     // directory's engine and the second fixture is never really loaded.
-    const good = mkdtempSync(join(tmpdir(), 'mo-good-'));
-    mkdirSync(join(good, 'bad'), { recursive: true });
-    writeFileSync(join(good, 'bad', 'profile.json'), '{"id":"bad","schemas":["bad.yaml"]}', 'utf-8');
-    writeFileSync(join(good, 'bad', 'bad.yaml'), 'stages:\n  planning: {}\n', 'utf-8');
-    gitDirs.push(good);
+    const good = fixtureProfilesDir('profiles-cache-good');
+    const broken = fixtureProfilesDir('profiles-cache-bad');
 
     const { orchestrator } = await makeOrchestrator();
 
     process.env.STATE_MACHINE_PROFILES_DIR = good;
     await orchestrator.resolveEngine('bad');
 
-    process.env.STATE_MACHINE_PROFILES_DIR = writeUndeclaredGateProfile();
+    process.env.STATE_MACHINE_PROFILES_DIR = broken;
     await expect(orchestrator.resolveEngine('bad')).rejects.toThrow(/Gate "security"/);
   });
 
@@ -127,7 +101,7 @@ describe('MutationOrchestrator.resolveEngine', () => {
     // It compiles from an explicit field list, so omitting `gates` there turns
     // the check off silently while the unit test over `compileWorkflow`, which
     // passes its own, stays green.
-    process.env.STATE_MACHINE_PROFILES_DIR = writeUndeclaredGateProfile();
+    process.env.STATE_MACHINE_PROFILES_DIR = fixtureProfilesDir('profiles-invalid/undeclared-gate');
     const { orchestrator } = await makeOrchestrator();
     await expect(orchestrator.resolveEngine('bad')).rejects.toThrow(/Gate "security"/);
   });

@@ -22,3 +22,4 @@ scripts/check-spec-consistency.ts
 scripts/tmr-workflow-create.ts
 openspec/
 docs/plans
+.worktrees/

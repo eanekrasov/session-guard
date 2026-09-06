@@ -1,0 +1,29 @@
+gates:
+  - id: review
+  - id: qa
+  - id: invariants
+stages:
+  execution:
+    loop: implementation
+    dispatch:
+      strategy: serial
+    retryBudget:
+      maximum: 3
+    stages:
+      code:
+        allowedAgents: ['code']
+      verify:
+        allowedAgents: ['review', 'qa']
+        gates: [review, qa]
+    transitions:
+      - from: code
+        to: verify
+        guard: "session.gates.invariants == 'passed'"
+      - from: verify
+        to: done
+        guard: "task.gates.review == 'passed' && task.gates.qa == 'passed'"
+stageAssignments:
+  - id: execution
+    priority: 1
+    condition: 'true'
+    result: execution

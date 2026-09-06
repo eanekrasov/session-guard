@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import type { Hooks, PluginInput } from '@opencode-ai/plugin';
 
 import { createRuntime } from '../../src/app/runtime.ts';
@@ -40,38 +40,11 @@ function pluginInput(): PluginInput {
   };
 }
 
-async function writeOverlapProfile(maxConcurrent = 2): Promise<void> {
-  const profileDirectory = join(profilesDirectory, 'overlap-scope');
-  await mkdir(profileDirectory, { recursive: true });
-  await writeFile(
-    join(profileDirectory, 'profile.json'),
-    JSON.stringify({ id: 'overlap-scope', schemas: ['cycle.yaml'] }),
-    'utf-8'
-  );
-  await writeFile(
-    join(profileDirectory, 'cycle.yaml'),
-    [
-      'stages:',
-      '  EXECUTION:',
-      '    loop: implementation',
-      '    dispatch:',
-      '      strategy: serial_with_overlap',
-      `      maxConcurrent: ${maxConcurrent}`,
-      '    stages:',
-      '      dev:',
-      "        allowedAgents: ['code']",
-      '      review:',
-      "        allowedAgents: ['review']",
-      '      qa:',
-      "        allowedAgents: ['qa']",
-      'stageAssignments:',
-      '  - id: execution',
-      '    priority: 1',
-      "    condition: 'true'",
-      '    result: EXECUTION',
-    ].join('\n'),
-    'utf-8'
-  );
+let overlapProfileId = 'overlap-scope-2';
+
+function setOverlapFixtureProfilesDir(maxConcurrent = 2): void {
+  process.env.STATE_MACHINE_PROFILES_DIR = resolve(import.meta.dir, '../../test/fixtures/profiles');
+  overlapProfileId = maxConcurrent === 1 ? 'overlap-scope-1' : 'overlap-scope-2';
 }
 
 async function seed(
@@ -79,7 +52,7 @@ async function seed(
   taskB: Partial<MutationTask>
 ): Promise<WorkflowStore> {
   const store = new WorkflowStore(storeDirectory);
-  const session = createSession('s1', 'overlap-scope');
+  const session = createSession('s1', overlapProfileId);
   session.tasks.implementation = [createTask(taskA), createTask({ id: 'task-2', ...taskB })];
   await store.save(session);
   return store;
@@ -145,7 +118,7 @@ afterEach(async () => {
 
 describe('non-overlapping writeScope also applies to serial_with_overlap admission', () => {
   it('rejects the ordering-eligible next task when its writeScope overlaps the running task', async () => {
-    await writeOverlapProfile();
+    setOverlapFixtureProfilesDir();
     const store = await seed(
       { writeScope: ['src/auth/**'] },
       { writeScope: ['src/auth/login.ts'] }
@@ -169,7 +142,7 @@ describe('non-overlapping writeScope also applies to serial_with_overlap admissi
   });
 
   it('still admits the ordering-eligible next task when its writeScope is disjoint', async () => {
-    await writeOverlapProfile();
+    setOverlapFixtureProfilesDir();
     const store = await seed({ writeScope: ['src/auth/**'] }, { writeScope: ['src/billing/**'] });
     const hooks: Hooks = createRuntime(pluginInput());
 

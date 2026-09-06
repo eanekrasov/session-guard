@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import type { Hooks, PluginInput } from '@opencode-ai/plugin';
 
 import { createRuntime } from '../../src/app/runtime.ts';
@@ -37,35 +37,7 @@ function pluginInput(): PluginInput {
 }
 
 function setExecutableProfilesDir(): void {
-  const profilesDir = mkdtempSync(join(tmpdir(), 'scope-enforce-profiles-'));
-  cleanupDirs.push(profilesDir);
-  const profileDir = join(profilesDir, 'test-profile');
-  mkdirSync(profileDir, { recursive: true });
-  writeFileSync(
-    join(profileDir, 'profile.json'),
-    JSON.stringify({ id: 'test-profile', name: 'test-profile', schemas: ['state-machine.yaml'] }),
-    'utf-8'
-  );
-  writeFileSync(
-    join(profileDir, 'state-machine.yaml'),
-    [
-      'stages:',
-      '  EXECUTION:',
-      '    loop: implementation',
-      '    dispatch:',
-      '      strategy: serial',
-      '    stages:',
-      '      dev:',
-      "        allowedAgents: ['code', 'reviewer']",
-      'stageAssignments:',
-      '  - id: execution',
-      '    priority: 1',
-      "    condition: 'true'",
-      '    result: EXECUTION',
-    ].join('\n'),
-    'utf-8'
-  );
-  process.env.STATE_MACHINE_PROFILES_DIR = profilesDir;
+  process.env.STATE_MACHINE_PROFILES_DIR = resolve(import.meta.dir, '../../test/fixtures/profiles');
 }
 
 async function dispatchTask(
@@ -103,7 +75,7 @@ async function seedSession(
   taskOverrides: Partial<MutationTask> = {}
 ): Promise<WorkflowStore> {
   const store = new WorkflowStore(storeDirectory);
-  const session = createSession(sessionId, 'test-profile');
+  const session = createSession(sessionId, 'scope-enforce');
   session.tasks.implementation = [createTask(taskOverrides)];
   await store.save(session);
   return store;

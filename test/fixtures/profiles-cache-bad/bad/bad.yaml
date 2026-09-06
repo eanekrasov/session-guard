@@ -1,0 +1,12 @@
+gates:
+  - id: invariants
+stages:
+  execution:
+    loop: implementation
+    stages:
+      verify:
+        gates: ['security']
+    transitions:
+      - from: verify
+        to: done
+  done: {}

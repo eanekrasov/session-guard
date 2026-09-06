@@ -1,20 +1,13 @@
-extends: "base/state-machine.yaml"
+extends: 'base/state-machine.yaml'
 stages:
-  PLANNING:
-    dispatch:
-      strategy: serial
-      maxConcurrent: 1
-  EXECUTION:
-    dispatch:
-      strategy: serial_with_overlap
-      maxConcurrent: 2
+  execution:
     stages:
       build:
-        allowedAgents: ["code"]
+        allowedAgents: ['code']
         exitGuards:
           - "session.activeOperations.some(o => o.result == 'output_ready')"
           - "session.testStatus['build'] == 'pass'"
 actionGuards:
   beginMutation: "session.approved('plan')"
-editingAgents: ["code"]
-verifiers: ["architect"]
+editingAgents: ['code']
+verifiers: ['architect']
