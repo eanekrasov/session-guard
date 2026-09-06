@@ -9,11 +9,93 @@
 # blocks every mutation in that stage. Task-stage-level `allowedAgents` (see
 # task-cycles.yaml) uses the dispatched agent and does work.
 
+# profiles/state-machine.yaml — базовая конфигурация state-machine для плагина.
+#
+# Фазы: planning → tasks_ready → code → review → qa → commit → done.
+# Каждый переход: guard (JS-выражение) + опциональный consent или effects.
+# Guard-функции: approved(type), isExhausted(key), hasPendingTasks().
+# Эффекты: bumpRetry(key, maxAttempts), approve(type).
+# Consent: блокирует переход до одобрения пользователем.
+#
+# Формат: ProfileSchema (см. schema/types.ts, schema/profile-schema.ts)
+# Загружается через SchemaLoader → YAML.parse → ProfileSchemaSchema.parse
+
+# ─── Фазы ──────────────────────────────────────────────────────────────────────
+phases:
+  planning:
+    allowedAgents: ['architect']
+  tasks_ready: {}
+  code: {}
+  review: {}
+  qa: {}
+  commit: {}
+  done: {}
+  failed: {}
+
+# ─── Транзиции ─────────────────────────────────────────────────────────────────
+transitions:
+  - from: planning
+    to: tasks_ready
+    guard: "session.refs.plan != null"
+    consent: plan
+
+  - from: tasks_ready
+    to: code
+    guard: "hasPendingTasks()"
+
+  # code → review: invariants прошёл — на ревью
+  - from: code
+    to: review
+    guard: "session.gates.invariants == 'passed'"
+
+  # review → qa: ревью прошло
+  - from: review
+    to: qa
+    guard: "session.gates.review == 'passed'"
+
+  # qa → commit
+  - from: qa
+    to: commit
+    guard: "session.gates.qa == 'passed'"
+    effects:
+      - approve: commit
+
+  # qa → code: QA не прошёл — доработка
+  - from: qa
+    to: code
+    guard: "session.gates.qa == 'failed' && !isExhausted('cycles')"
+    effects:
+      - bumpRetry: cycles
+        maxAttempts: 5
+
+  # qa → failed: QA исчерпано
+  - from: qa
+    to: failed
+    guard: "isExhausted('cycles')"
+
+  # commit → done
+  - from: commit
+    to: done
+    guard: "session.deliveryPermit != null"
+
+
+
+# ─── Action Guards ─────────────────────────────────────────────────────────────
+actionGuards:
+  beginMutation: "session.approved('plan') || session.revision == 0"
+
+# ─── Редактирующие агенты ──────────────────────────────────────────────────────
 editingAgents:
   - code
   - debug
-  - figma
+  - architect
+  - harness
 
+# ─── Верификаторы ────────────────────────────────────────────────────────────
 verifiers:
   - review
   - qa
+
+# ─── Настройки ─────────────────────────────────────────────────────────────────
+settings:
+  enableDashboard: false

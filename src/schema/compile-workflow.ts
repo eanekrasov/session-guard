@@ -147,7 +147,17 @@ export function compileWorkflow(schema: ResolvedSchema): {
  * by nobody is a verdict that goes nowhere, which is exactly the silence this
  * compiler exists to turn into an error.
  */
-const KNOWN_GATES = new Set(['invariants', 'review', 'qa']);
+const KNOWN_GATES = new Set([
+  'invariants',
+  'review',
+  'qa',
+  'checkout_done',
+  'build_done',
+  'deploy_done',
+  'unit',
+  'integration',
+  'smoke',
+]);
 
 /** The transition target that ends a task's work; never a stage of its own. */
 const TASK_DONE = 'done';

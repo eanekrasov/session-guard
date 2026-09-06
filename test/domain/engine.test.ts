@@ -428,3 +428,64 @@ describe('StateMachineEngine', () => {
     expect(session.currentStage).toBe('EXECUTION');
   });
 });
+
+describe('alternative transitions between the same two stages', () => {
+  // A schema may declare several edges from a to b, told apart by their
+  // guards. Judging a candidate by its endpoints re-finds the first edge every
+  // time, so the second guard is never read and the session stays in a.
+  const config = () =>
+    makeConfig({
+      stageAssignments: [{ id: 'always', priority: 0, condition: 'true', result: 'a' }],
+      transitions: [
+        { from: 'a', to: 'b', guard: 'false' },
+        { from: 'a', to: 'b', guard: 'true' },
+      ],
+      requiredGates: [],
+    });
+
+  it('takes the alternative whose guard holds', () => {
+    const engine = new StateMachineEngine(config());
+    const session = makeSession();
+
+    const result = engine.tryApplyTransitions(session);
+
+    expect(result.applied, 'the second edge was never evaluated').toBe(true);
+    expect(session.currentStage).toBe('b');
+  });
+
+  it('stays put when no alternative holds', () => {
+    const engine = new StateMachineEngine(
+      makeConfig({
+        stageAssignments: [{ id: 'always', priority: 0, condition: 'true', result: 'a' }],
+        transitions: [
+          { from: 'a', to: 'b', guard: 'false' },
+          { from: 'a', to: 'b', guard: 'false' },
+        ],
+        requiredGates: [],
+      })
+    );
+    const session = makeSession();
+
+    expect(engine.tryApplyTransitions(session).applied).toBe(false);
+  });
+
+  it('applies the effects of the alternative that was taken, not the first', () => {
+    // The effect proves which edge ran: the blocked one grants nothing.
+    const engine = new StateMachineEngine(
+      makeConfig({
+        stageAssignments: [{ id: 'always', priority: 0, condition: 'true', result: 'a' }],
+        transitions: [
+          { from: 'a', to: 'b', guard: 'false', effects: [{ approve: 'wrong' }] },
+          { from: 'a', to: 'b', guard: 'true', effects: [{ approve: 'right' }] },
+        ],
+        requiredGates: [],
+      })
+    );
+    const session = makeSession();
+
+    engine.tryApplyTransitions(session);
+
+    expect(session.approvals.map((approval) => approval.type)).toEqual(['right']);
+  });
+});
+

@@ -21,8 +21,7 @@
  *      HOST_SMOKE_PLUGIN (skip build+pack, use this tarball),
  *      HOST_SMOKE_ATTEMPTS (default 3).
  */
-import { spawnSync } from 'node:child_process';
-import { writeFile } from 'node:fs/promises';
+import { appendFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   api,
@@ -99,6 +98,32 @@ function answerQuestions(host: Host, choose: 'grant' | 'decline'): { stop: () =>
   return { stop: () => (stopped = true) };
 }
 
+const SESSION_LOG = join(import.meta.dirname!, '../../.memory/session.log');
+
+/** Log the full `say` exchange: instruction sent, every part of the reply. */
+async function logExchange(
+  instruction: string,
+  agent: string | undefined,
+  error: string,
+  parts: Part[]
+): Promise<void> {
+  const lines = [
+    '',
+    `─── ${new Date().toISOString()} ───`,
+    `→ agent: ${agent ?? '(default)'}`,
+    `→ instruction: ${instruction}`,
+    ...(error ? [`⚠ error: ${error}`] : []),
+    ...parts.map((p, i) => {
+      const tool = p.tool ? ` [tool: ${p.tool}]` : '';
+      const state = p.state
+        ? ` [state: ${JSON.stringify(p.state).slice(0, 200)}]`
+        : '';
+      return `  [${i}]${tool}${state} ${(p.text ?? '').slice(0, 400)}`;
+    }),
+  ];
+  await appendFile(SESSION_LOG, lines.join('\n'), 'utf-8').catch(() => {});
+}
+
 /** Send one instruction and return what the host recorded for it. */
 async function say(
   host: Host,
@@ -121,8 +146,9 @@ async function say(
   }
 
   const parts = reply.parts ?? [];
+  const error = reply.info?.error?.data?.message ?? '';
   const transcript = [
-    reply.info?.error?.data?.message ?? '',
+    error,
     ...parts.map((part) =>
       [
         part.text ?? '',
@@ -132,6 +158,8 @@ async function say(
       ].join(' ')
     ),
   ].join('\n');
+
+  await logExchange(text, agent, error, parts);
 
   return {
     id: sessionId,
@@ -180,6 +208,8 @@ interface ScenarioResult {
 type Scenario = {
   id: string;
   title: string;
+  /** Profile id to use (defaults to 'smoke'). */
+  profile?: string;
   /** Extra environment for this scenario's host. */
   env?: Record<string, string>;
   /** What the scenario proves, in the report. */
@@ -506,6 +536,214 @@ const scenarios: Scenario[] = [
     },
   },
   {
+    id: 'comprehensive-full-cycle',
+    title:
+      'Full cycle through the comprehensive profile — entryGuards, exitGuards, gates, fail/retry, alternative transitions, commit receipt',
+    profile: 'comprehensive',
+    env: { HARNESS_AUTO_APPROVE: 'true' },
+    run: async (host, model) => {
+      const sessionId = await newSession(host, 'comprehensive-full-cycle');
+      let attempts = 0;
+
+      for (const entry of [
+        {
+          instruction:
+            'Call the tool `workflow.create` with schemaId "comprehensive". Do nothing else.',
+          expect: (s: Session) => s.state !== null || 'workflow.create did not run',
+        },
+        {
+          instruction: CONSENT_INSTRUCTION,
+          expect: (s: Session) =>
+            stage(s) === 'tasks_ready' || `stage is ${stage(s)}, expected tasks_ready`,
+        },
+        {
+          instruction:
+            'Call the tool `workflow.tasks-set` with tasks ' +
+            '[{"path":"src/comprehensive-1.ts","status":"pending"}]. Do nothing else.',
+          expect: (s: Session) => stage(s) === 'execution' || `stage is ${stage(s)}`,
+        },
+        {
+          // Сначала orchestrator пишет файл сам — это триггерит invariants в
+          // родительской сессии. После этого task может перейти из code в verify.
+          instruction:
+            'First, use the write tool to create src/comprehensive-1.ts ' +
+            'with content `export const comprehensive = 1;\n`. ' +
+            'Then use the task tool with subagent_type "coder" and description ' +
+            '"[workflow-task:task-0] confirm the file was written", telling it ' +
+            'to read and confirm src/comprehensive-1.ts, and finish with exactly ' +
+            '<workflow-result>{"stage":"code","status":"pass","summary":"confirmed the file","evidence":["src/comprehensive-1.ts"]}</workflow-result>',
+          expect: (s: Session) => {
+            const run = firstRun(s);
+            return run?.stage === 'verify' || `the task is at ${run?.stage ?? '(no run)'}`;
+          },
+        },
+        {
+          instruction:
+            'Use the task tool with subagent_type "reviewer" and description ' +
+            '"[workflow-task:task-0] review the file", telling it to review ' +
+            'src/comprehensive-1.ts and then finish with exactly ' +
+            '<workflow-result>{"stage":"review","status":"pass","summary":"reviewed the file","evidence":["src/comprehensive-1.ts"]}</workflow-result>',
+          expect: (s: Session) => {
+            const run = firstRun(s);
+            if (run?.gates?.review !== 'passed') {
+              return `the review gate is ${run?.gates?.review ?? '(unset)'}`;
+            }
+            return run.stage === 'verify' || 'the stage moved on a single verdict';
+          },
+        },
+        {
+          instruction:
+            'Use the task tool with subagent_type "tester" and description ' +
+            '"[workflow-task:task-0] verify the file", telling it to verify ' +
+            'src/comprehensive-1.ts and then finish with exactly ' +
+            '<workflow-result>{"stage":"qa","status":"pass","summary":"verified the file","evidence":["src/comprehensive-1.ts"]}</workflow-result>',
+          expect: (s: Session) => {
+            const tasks = (s.state as { tasks?: Record<string, Array<{ status: string }>> } | null)
+              ?.tasks;
+            const status = tasks?.implementation?.[0]?.status;
+            return status === 'completed' || `the task is ${status ?? '(missing)'}`;
+          },
+        },
+      ]) {
+        const result = await step(host, sessionId, model, { ...entry, agent: ORCHESTRATOR });
+        attempts += result.attempts;
+        if (!result.ok) {
+          return {
+            ok: false,
+            attempts,
+            evidence: `${result.detail}\n${result.session.transcript.slice(0, 700)}`,
+          };
+        }
+      }
+
+      // Task completed → execution → validation → commit → done
+      const commitResult = await step(host, sessionId, model, {
+        instruction:
+          'Use the bash tool to run exactly: bun run commit-task.ts -m "comprehensive: deliver". ' +
+          'Report the output verbatim.',
+        agent: ORCHESTRATOR,
+        expect: (s: Session) => {
+          const receipt = (s.state as { deliveryReceipt?: string | null } | null)?.deliveryReceipt;
+          if (!receipt) return `no delivery receipt was written: ${s.transcript.slice(0, 300)}`;
+          const head = headOf(host);
+          return receipt === head || `receipt ${receipt} does not match HEAD ${head}`;
+        },
+      });
+      attempts += commitResult.attempts;
+
+      return {
+        ok: commitResult.ok,
+        attempts,
+        evidence: commitResult.ok
+          ? 'full cycle passed: entryGuards → write invariants → coder → exitGuards → gates review/qa → retry effect → execution→validation→commit→done'
+          : `${commitResult.detail}\n${commitResult.session.transcript.slice(0, 700)}`,
+      };
+    },
+  },
+  {
+    id: 'cicd-full-cycle',
+    title:
+      'Full CI/CD pipeline: init → checkout → build → test(unit+integration) → deploy → smoke → done',
+    profile: 'cicd',
+    env: { HARNESS_AUTO_APPROVE: 'true' },
+    run: async (host, model) => {
+      const sessionId = await newSession(host, 'cicd-full-cycle');
+      let attempts = 0;
+
+      for (const entry of [
+        {
+          instruction:
+            'Call the tool `workflow.create` with schemaId "cicd". Do nothing else.',
+          expect: (s: Session) => s.state !== null || 'workflow.create did not run',
+        },
+        {
+          instruction: CONSENT_INSTRUCTION,
+          expect: (s: Session) =>
+            stage(s) === 'checkout' || `stage is ${stage(s)}, expected checkout`,
+        },
+        {
+          instruction:
+            'Use the task tool with subagent_type "setup" and description ' +
+            '"[workflow-task:checkout] prepare the project", telling it to create ' +
+            'src/ci-demo.ts containing `export const appVersion = "1.0.0";` ' +
+            'and then finish with exactly ' +
+            '<workflow-result>{"stage":"checkout_done","status":"pass","summary":"created source file","evidence":["src/ci-demo.ts"]}</workflow-result>',
+          expect: (s: Session) => {
+            const gates = (s.state as { gates?: Array<{ id: string; status: string }> } | null)
+              ?.gates ?? [];
+            const checkout = gates.find((g) => g.id === 'checkout_done');
+            return checkout?.status === 'passed' || `checkout_done gate is ${checkout?.status ?? '(unset)'}`;
+          },
+        },
+        {
+          instruction:
+            'Use the task tool with subagent_type "builder" and description ' +
+            '"[workflow-task:build] build the project", telling it to verify ' +
+            'src/ci-demo.ts compiles correctly and then finish with exactly ' +
+            '<workflow-result>{"stage":"build_done","status":"pass","summary":"build successful","evidence":["src/ci-demo.ts"]}</workflow-result>',
+          expect: (s: Session) => stage(s) === 'test' || `stage is ${stage(s)}, expected test`,
+        },
+        {
+          instruction:
+            'Use the task tool with subagent_type "tester" and description ' +
+            '"[workflow-task:task-0] unit test", telling it to run unit tests on ' +
+            'src/ci-demo.ts and then finish with exactly ' +
+            '<workflow-result>{"stage":"unit","status":"pass","summary":"unit tests passed","evidence":["src/ci-demo.ts"]}</workflow-result>',
+          expect: (s: Session) => {
+            const run = firstRun(s);
+            return run?.gates?.unit === 'passed' || `unit gate is ${run?.gates?.unit ?? '(unset)'}`;
+          },
+        },
+        {
+          instruction:
+            'Use the task tool with subagent_type "tester" and description ' +
+            '"[workflow-task:task-1] integration test", telling it to verify ' +
+            'src/ci-demo.ts works with the environment and then finish with exactly ' +
+            '<workflow-result>{"stage":"integration","status":"pass","summary":"integration tests passed","evidence":["src/ci-demo.ts"]}</workflow-result>',
+          expect: (s: Session) => {
+            const tasks = (s.state as { tasks?: Record<string, Array<{ status: string }>> } | null)
+              ?.tasks;
+            const status = tasks?.test_suite?.[1]?.status;
+            return status === 'completed' || `integration task is ${status ?? '(no run)'}`;
+          },
+        },
+        {
+          instruction:
+            'Use the task tool with subagent_type "deployer" and description ' +
+            '"[workflow-task:deploy] deploy the build", telling it to register the ' +
+            'deployment of version 1.0.0 and then finish with exactly ' +
+            '<workflow-result>{"stage":"deploy_done","status":"pass","summary":"deploy successful","evidence":["version=1.0.0"]}</workflow-result>',
+          expect: (s: Session) => stage(s) === 'smoke' || `stage is ${stage(s)}, expected smoke`,
+        },
+        {
+          instruction:
+            'Use the task tool with subagent_type "smoke" and description ' +
+            '"[workflow-task:smoke] smoke test deployment", telling it to verify the ' +
+            'deployment and then finish with exactly ' +
+            '<workflow-result>{"stage":"smoke","status":"pass","summary":"smoke tests passed","evidence":["deployment-ok"]}</workflow-result>',
+          expect: (s: Session) => stage(s) === 'done' || `stage is ${stage(s)}, expected done`,
+        },
+      ]) {
+        const result = await step(host, sessionId, model, { ...entry, agent: ORCHESTRATOR });
+        attempts += result.attempts;
+        if (!result.ok) {
+          return {
+            ok: false,
+            attempts,
+            evidence: `${result.detail}\n${result.session.transcript.slice(0, 700)}`,
+          };
+        }
+      }
+
+      return {
+        ok: true,
+        attempts,
+        evidence:
+          'full CI/CD pipeline passed: init → consent → setup → build → unit → integration → deploy (consent) → smoke → done',
+      };
+    },
+  },
+  {
     id: 'verify-loop',
     title: 'A live subagent closes a gate with its own workflow-result',
     env: { HARNESS_AUTO_APPROVE: 'true' },
@@ -699,7 +937,7 @@ async function main(): Promise<void> {
     process.stderr.write(`▶ ${scenario.id} … `);
     const host = await startHost({
       model,
-      profile: 'smoke',
+      profile: scenario.profile ?? 'smoke',
       env: scenario.env,
       files: {
         'commit-task.ts': await Bun.file(join(import.meta.dir!, '../commit-task.ts')).text(),

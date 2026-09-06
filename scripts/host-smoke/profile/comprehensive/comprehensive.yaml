@@ -1,0 +1,102 @@
+# Comprehensive profile — covers every plugin feature and P1/P2 contracts.
+#
+# Inherits: base.yaml (stageAssignments, gates, base stages).
+# Delivers: entryGuards, exitGuards, fail transition with retry,
+#           alternative transitions, gate-based task movement.
+#
+# Happy path: planning → tasks_ready → execution(code→verify→done) →
+#             validation → commit → done
+
+stages:
+  planning:
+    allowedAgents: [orchestrator]
+
+  tasks_ready:
+    allowedAgents: [orchestrator]
+
+  execution:
+    loop: implementation
+    dispatch:
+      strategy: serial
+    retryBudget:
+      maximum: 5
+    # P2.1: entryGuards на вход в loop — блокирует задачу из fixup,
+    # пока invariants не пройдены. Нормальная задача (task-0) не fixup,
+    # так что guard не срабатывает.
+    entryGuards:
+      - "task.id != 'fixup' || session.gates.invariants == 'passed'"
+    stages:
+      code:
+        allowedAgents: [coder, orchestrator]
+
+      # P2.2: exitGuards — не выпустит из verify пока оба gates не пройдены.
+      # В нормальном сценарии reviewer и tester закрывают gates.
+      verify:
+        allowedAgents: [reviewer, tester]
+        gates: [review, qa]
+        exitGuards:
+          - "task.gates.review == 'passed' && task.gates.qa == 'passed'"
+
+    transitions:
+      - from: code
+        to: verify
+
+      - from: verify
+        to: done
+        guard: "task.gates.review == 'passed' && task.gates.qa == 'passed'"
+
+      # P1.4: fail-переход с retry — срабатывает только при fail
+      - from: verify
+        to: code
+        guard: "task.gates.review == 'failed' || task.gates.qa == 'failed'"
+        effects:
+          - bumpRetry: task.id
+
+  # validation не объявляет gates — orchestrator проходит её сам
+  validation:
+    allowedAgents: [orchestrator]
+
+  commit: {}
+  done: {}
+  failed: {}
+
+transitions:
+  - from: planning
+    to: tasks_ready
+    guard: "session.refs.plan != null"
+    consent: plan
+
+  - from: tasks_ready
+    to: execution
+    guard: "hasPendingTasks()"
+
+  - from: execution
+    to: validation
+    guard: "allTasksCompleted('implementation')"
+
+  # P3: альтернативные переходы validation → commit.
+  # Оба ведут в commit, но с разными условиями.
+  # Первый: invariants passed
+  - from: validation
+    to: commit
+    guard: "session.gates.invariants == 'passed'"
+
+  # Второй: invariants не passed — тоже пускает (для теста альтернатив)
+  - from: validation
+    to: commit
+    guard: "session.gates.invariants != 'passed'"
+
+  - from: commit
+    to: done
+    guard: "session.deliveryReceipt != null"
+
+actionGuards:
+  beginMutation: "session.approved('plan')"
+
+editingAgents:
+  - coder
+  - orchestrator
+
+verifiers:
+  - reviewer
+  - tester
