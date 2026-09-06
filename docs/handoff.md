@@ -577,7 +577,10 @@ Two related gaps in what the compiler catches at all:
 
 ## A fixture corpus, and the pattern that earns it
 
-Agreed 2026-09-06, not started. `test/fixtures/presets/` is the ancestor of
+Agreed 2026-09-06, not started. **Full plan and the survey behind it:
+`docs/plans/fixture-corpus.md`** — including which assertions block the
+rewrite, which is the part that cost the effort. Tests come first: the fixtures
+cannot move until the assertions over them do. `test/fixtures/presets/` is the ancestor of
 `base.yaml`: `high`/`medium`/`low.yaml` are ProfileSchema files of the same
 format, from before the stage model — stages in uppercase, not a `loop:` among
 them — and `default.yaml` is one generation older still, a flat `stages:` list
