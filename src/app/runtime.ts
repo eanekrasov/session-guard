@@ -661,6 +661,7 @@ class StateMachineRuntime {
   private getPreCommitHead(): string {
     try {
       const result = spawnSync('git', ['rev-parse', 'HEAD'], {
+        cwd: this.projectDir,
         encoding: 'utf-8',
         timeout: 5000,
       });
@@ -1104,6 +1105,7 @@ class StateMachineRuntime {
         'git',
         ['diff-tree', '--no-commit-id', '--name-only', '-r', currentHead],
         {
+          cwd: this.projectDir,
           encoding: 'utf-8',
           timeout: 5000,
         }
