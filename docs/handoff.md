@@ -505,6 +505,26 @@ the kinds that fail as data.
 Only the first two throw, so invalid fixtures must be broken *semantically* —
 `compileWorkflow`'s own errors — and not by shape.
 
+**The table is about loading a file. In production the semantic row is fatal
+too:** `resolveEngine` (`src/app/mutation-orchestrator.ts:263`) compiles the
+merged workflow and throws `ProfileConfigurationError` when there is any error,
+so a gate nobody declares freezes the session with a readable reason, exactly
+like a bad type does. Nothing crashes in any of the six rows — measured by
+driving the real hooks against a profile with `loop: 42`:
+
+| Entry point | What the caller sees |
+| --- | --- |
+| `tool.execute.before` (`bash`, `task`) | caught, converted to `WorkflowBlockedError` with the reason |
+| `tool.execute.after` (`task`) | returns cleanly; its own catch at `runtime.ts:1794` logs a warning |
+| `workflow.tasks-get` | catches, returns the message as tool output |
+| `workflow.tasks-set`, `tasks-set-status` | **throw a raw `ProfileConfigurationError`** |
+
+The last row is the odd one and the cause is exact: `tasks-get` is open to any
+caller, while the others go through the task-control authority check, which
+resolves the engine at `runtime.ts:221` — before the handler's own `try`. Two
+neighbouring tools, one broken profile, two shapes of failure, and the agent
+sees a raw error instead of the plugin's structured refusal.
+
 The two middle rows are worse than a throw. The unknown-key row is exactly how
 `android.yaml` carried a dead `phases:` block for months. And **the compiler
 does not check guard syntax at all**: `"session.gates.((("` compiles clean and
@@ -518,3 +538,39 @@ gate declaration just closed.
 bad gate twice — the parent's walk checked `entry.gates` and then recursed into
 that stage, whose own call checked the same gates under the same path. The
 tests used `toContain`, which cannot see a duplicate; the new test counts.
+
+## Next: one funnel for every error the plugin reports
+
+Agreed 2026-09-06, not started. Every error should reach the operator as
+readable text, go to the log, and — with debug on — show as a toast.
+
+The pieces already exist and are used once each:
+
+- **Toast**: `client.post('/tui/show-toast', { body: { message, variant } })`,
+  at `src/app/runtime.ts:457`. One call site, for "no profiles found".
+- **Log**: `createLogFn` (`src/app/logger.ts`), thresholded by
+  `STATE_MACHINE_LOG_LEVEL`.
+- **Refusal**: `WorkflowBlockedError`, which the host renders as a failed tool
+  call carrying the message.
+
+What is missing is that they are not one path. The toast is gated on
+`DEBUG_TUI !== '0'` while the log is gated on `STATE_MACHINE_LOG_LEVEL` — two
+switches for one idea of "debug". And a `ProfileConfigurationError` escapes
+`workflow.tasks-set` unwrapped while the same error becomes tool output in
+`workflow.tasks-get`, so what the operator sees depends on which tool they
+happened to call.
+
+Two related gaps in what the compiler catches at all:
+
+1. **Unknown keys pass in silence.** `ProfileSchemaSchema` is `.passthrough()`
+   (`src/schema/profile-schema.ts:155`), which is why `android.yaml` carried a
+   dead `phases:` block for months. `.strict()` would throw at parse, but
+   `ResolvedSchema` carries an index signature and something may rely on the
+   extra keys — so report them as compile errors instead, where they join the
+   same funnel as an undeclared gate and can carry a path and a whitelist.
+2. **Guard syntax is never checked.** The compiler walks every transition and
+   every stage already; it does not parse the expressions. `guard-ast.ts` is
+   the parser, and the evaluator already reports failures through `onError` at
+   runtime — so this is collecting the expressions (transition guards, entry
+   and exit guards, `actionGuards`, stage-assignment conditions) and parsing
+   them at compile time. Bounded work, not hard.
