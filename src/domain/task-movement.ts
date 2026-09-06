@@ -9,12 +9,19 @@ import type { GateStatus, LoopRun } from '../session/session-schema.ts';
  * loop's own `transitions`. When a loop declares none, the nested stages run in
  * declaration order — the simple linear case stays simple, and a profile only
  * writes transitions when it needs a branch, a retry, or a skip.
+ *
+ * `blocked` — a route exists but a guard or consent blocks it. The caller
+ * must NOT fall through to a retry budget: a transition that is explicitly
+ * shut is a policy decision, not a missing route.
+ *
+ * `unreachable` — there is no applicable transition at all, so a retry
+ * budget (or operator decision) is the only way the task can move.
  */
 export type TaskMovement =
   | { kind: 'move'; to: string; effects: TransitionDef['effects'] }
   | { kind: 'complete'; effects: TransitionDef['effects'] }
-  /** Nothing applies: the task waits where it is, and `reason` says why. */
-  | { kind: 'stay'; reason: string };
+  | { kind: 'blocked'; reason: string }
+  | { kind: 'unreachable'; reason: string };
 
 /**
  * The transition target that ends a task's work inside a loop.
@@ -52,7 +59,9 @@ export function nextTaskStage(
   evaluateGuard: (_expression: string, _task: TaskFacts) => boolean,
   hasConsent: (_type: string) => boolean = () => true
 ): TaskMovement {
-  if (!loopStage) return { kind: 'stay', reason: 'no loop stage resolved' };
+  if (!loopStage) {
+    return { kind: 'unreachable', reason: 'no loop stage resolved' };
+  }
 
   const transitions = loopStage.transitions ?? [];
   const nested = nestedStages(loopStage);
@@ -64,16 +73,18 @@ export function nextTaskStage(
   const current = nested.find((entry) => entry.id === run.stage);
   const closed = (current?.exitGuards ?? []).find((guard) => !evaluateGuard(guard, facts));
   if (closed !== undefined) {
-    return { kind: 'stay', reason: `exit guard of ${run.stage} does not hold: ${closed}` };
+    return { kind: 'blocked', reason: `exit guard of ${run.stage} does not hold: ${closed}` };
   }
 
   if (transitions.length === 0) {
     // Declaration order: pass moves to the next stage, the last one completes
     // the task, and a failure is handled by the caller's retry budget.
-    if (!passed) return { kind: 'stay', reason: `stage ${run.stage} did not pass` };
+    if (!passed) {
+      return { kind: 'unreachable', reason: `stage ${run.stage} did not pass` };
+    }
     const current = nested.findIndex((entry) => entry.id === run.stage);
     if (current < 0) {
-      return { kind: 'stay', reason: `stage ${run.stage} is not one of this loop's stages` };
+      return { kind: 'unreachable', reason: `stage ${run.stage} is not one of this loop's stages` };
     }
     const next = nested[current + 1];
     return next
@@ -83,10 +94,10 @@ export function nextTaskStage(
 
   const outgoing = transitions.filter((transition) => transition.from === run.stage);
 
-  const blocked: string[] = [];
+  const blockedReasons: string[] = [];
   for (const transition of outgoing) {
     if (transition.guard && !evaluateGuard(transition.guard, facts)) {
-      blocked.push(`${transition.from} → ${transition.to} (${transition.guard})`);
+      blockedReasons.push(`${transition.from} → ${transition.to} (${transition.guard})`);
       continue;
     }
     // Consent is a decision by the operator, and it is required at either
@@ -95,7 +106,9 @@ export function nextTaskStage(
     // task, which is exactly where a release would be asked for.
     const consent = consentTypeOf(transition.consent);
     if (consent && !hasConsent(consent)) {
-      blocked.push(`${transition.from} → ${transition.to} (awaiting consent: ${consent})`);
+      blockedReasons.push(
+        `${transition.from} → ${transition.to} (awaiting consent: ${consent})`
+      );
       continue;
     }
     // The edge that ends a task carries its effects like any other: an
@@ -111,12 +124,14 @@ export function nextTaskStage(
   if (outgoing.length === 0) {
     return passed
       ? { kind: 'complete', effects: undefined }
-      : { kind: 'stay', reason: `stage ${run.stage} did not pass and leads nowhere` };
+      : { kind: 'unreachable', reason: `stage ${run.stage} did not pass and leads nowhere` };
   }
+  // All candidate transitions are blocked by guard/consent — this is a policy
+  // decision, not a missing route. The caller must NOT fall through to retry.
   return {
-    kind: 'stay',
-    reason: blocked.length
-      ? `no transition out of ${run.stage} applies: ${blocked.join('; ')}`
+    kind: 'blocked',
+    reason: blockedReasons.length
+      ? `no transition out of ${run.stage} applies: ${blockedReasons.join('; ')}`
       : `no transition out of ${run.stage} applies`,
   };
 }

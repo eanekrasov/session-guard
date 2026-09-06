@@ -844,9 +844,18 @@ class StateMachineRuntime {
         }
       }
 
+      // Используем нормализованный контекст с фактами выбранной задачи — как при
+      // проверке переходов. Сырой session имеет gates в виде массива Gate[], а
+      // toGuardContext проецирует в факты с Record<string, GateStatus>, и включает
+      // контекст задачи (task.id, task.status и т.д.) для guard-выражений.
+      const guardContext = toGuardContext(session, {
+        id: task.id,
+        status: task.status,
+        listKey,
+      });
       if (
         stage.entryGuards?.some(
-          (guard) => !engine.evaluateGuard(guard, session, { currentLoopListKey: listKey })
+          (guard) => !engine.evaluateGuard(guard, guardContext, { currentLoopListKey: listKey })
         )
       ) {
         this.blockTaskAdmission(`Entry guard rejected stage ${stageId}`);
@@ -1535,9 +1544,12 @@ class StateMachineRuntime {
                 run.status = 'running';
                 this.upsertActiveTaskContextFromSession(session, run.id, 'running');
               }
-            } else if (failed) {
-              // No transition took the failure, so the loop's own retry budget
-              // decides: back to the first stage, or a decision for the operator.
+            } else if (failed && movement.kind === 'unreachable') {
+              // No transition took the failure and there is no applicable route
+              // at all — the loop's own retry budget decides: back to the first
+              // stage, or a decision for the operator. When stayKind is
+              // 'blocked' the route exists but a guard or consent explicitly
+              // shut it — retry must NOT override that policy decision.
               this.recordTaskRetryFailure(session, run, task, loopStage);
             }
           }

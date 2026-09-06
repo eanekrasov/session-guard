@@ -396,16 +396,17 @@ async function resolveStageNeighbors(
                 ?.requiredGates ?? [],
           }
         : undefined;
-      const available = [
-        ...new Map(outgoing.map((transition) => [transition.to, transition])).entries(),
-      ].map(([id, transition]) => {
+      // Уникальные целевые стадии — если между from→to есть несколько переходов
+      // с разными guards, берём результат лучшего (первого разрешённого).
+      const uniqueTargets = [...new Set(outgoing.map((t) => t.to))];
+      const available = uniqueTargets.map((id) => {
         if (!facts) return { id, status: 'unknown' as const };
         const result = checkTransition(stage, id, transitions, facts);
         if (result.allowed) return { id, status: 'allowed' as const };
         const reason = result.reason ?? '';
         const blockedBy =
-          transition.consent && reason.includes('approval')
-            ? `consent:${typeof transition.consent === 'string' ? transition.consent : transition.consent.type}`
+          reason.includes('approval')
+            ? 'consent'
             : reason.includes('guard')
               ? 'guard'
               : reason.includes('gate')

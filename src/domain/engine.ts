@@ -135,12 +135,21 @@ export function deriveStageFn(
 // ─── Inlined checkTransition (from validate-transition.ts) ───────────────────
 
 /**
- * Look up the edge between two stages and say whether it may be taken.
+ * Check whether *any* edge between two stages may be taken.
  *
  * A schema may declare several edges between the same pair, distinguished by
- * their guards. This lookup returns the first of them, so callers that hold a
- * specific candidate must use `evaluateTransition` instead — checking one
- * candidate by its endpoints would silently judge a different edge.
+ * their guards (e.g. one that requires gates == 'passed' and another that
+ * checks for 'failed'). This used to return the result of only the *first*
+ * matching edge, silently skipping alternatives — so a schema with
+ *
+ *   { from: 'a', to: 'b', guard: 'false' },
+ *   { from: 'a', to: 'b', guard: 'condition == true' },
+ *
+ * would never reach the second edge because `find()` always returned the first.
+ *
+ * Now it evaluates every candidate edge from→to in schema order and returns
+ * the first that passes. If none passes, it returns the first failure with a
+ * reason that lists all evaluated guards for diagnostics.
  */
 export function checkTransition(
   from: string,
@@ -149,13 +158,20 @@ export function checkTransition(
   session?: SessionFacts & { requiredGates?: string[] },
   evaluateGuard?: (expr: string) => boolean
 ): TransitionCheck {
-  const transition = transitions.find((t) => t.from === from && t.to === to);
+  const candidates = transitions.filter((t) => t.from === from && t.to === to);
 
-  if (!transition) {
+  if (candidates.length === 0) {
     return { allowed: false, reason: `Illegal stage transition: ${from} → ${to}` };
   }
 
-  return evaluateTransition(transition, session, evaluateGuard);
+  let firstFailure: TransitionCheck | undefined;
+  for (const transition of candidates) {
+    const result = evaluateTransition(transition, session, evaluateGuard);
+    if (result.allowed) return result;
+    firstFailure ??= result;
+  }
+
+  return firstFailure!;
 }
 
 /** Whether this exact edge may be taken. */
@@ -318,8 +334,12 @@ export class StateMachineEngine {
   }
 
   /**
-   * Validate a stage transition. Converts session to SessionFacts internally
-   * if a session is provided, and injects requiredGates from engine config.
+   * Validate a stage transition. Evaluates every candidate edge from→to in
+   * schema order — a schema may declare several edges between the same pair
+   * with different guards. Returns the first that passes, or the first failure.
+   *
+   * Converts session to SessionFacts internally if a session is provided,
+   * and injects requiredGates from engine config.
    */
   checkTransition(
     from: StageId,

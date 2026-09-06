@@ -64,7 +64,9 @@ describe('a loop with no transitions runs its stages in order', () => {
   });
 
   it('leaves a failure to the loop retry budget', () => {
-    expect(nextTaskStage(linear, runAt('verify'), false, evaluate)).toMatchObject({ kind: 'stay' });
+    expect(nextTaskStage(linear, runAt('verify'), false, evaluate)).toMatchObject({
+      kind: 'unreachable',
+    });
   });
 });
 
@@ -90,10 +92,10 @@ describe('a loop with transitions is moved by them', () => {
   it('stays put when no guard holds — never moves by accident', () => {
     const run = runAt('verify', { review: 'pending' });
     const movement = nextTaskStage(branching, run, false, evaluate);
-    expect(movement.kind).toBe('stay');
+    expect(movement.kind).toBe('blocked');
     // The reason names the guards that held it, so a stalled task is a
     // question with an answer rather than a silence.
-    expect(movement.kind === 'stay' && movement.reason).toContain('verify → commit');
+    expect(movement.kind === 'blocked' && movement.reason).toContain('verify → commit');
   });
 
   it('completes on a stage nothing leads out of', () => {
@@ -114,7 +116,7 @@ describe('a loop with transitions is moved by them', () => {
       ],
     };
     const movement = nextTaskStage(onlyFailureEdge, run, true, evaluate);
-    expect(movement.kind, 'a blocked stage was mistaken for a finished one').toBe('stay');
+    expect(movement.kind, 'a blocked stage was mistaken for a finished one').toBe('blocked');
   });
 
   it('ends the task on an explicit `to: done`', () => {
@@ -140,7 +142,7 @@ describe('a loop with transitions is moved by them', () => {
 
   it('does not complete a terminal stage that has not passed', () => {
     expect(nextTaskStage(branching, runAt('commit'), false, evaluate)).toMatchObject({
-      kind: 'stay',
+      kind: 'unreachable',
     });
   });
 
@@ -155,7 +157,7 @@ describe('a loop with transitions is moved by them', () => {
 
 describe('a loop that is not there', () => {
   it('moves nothing', () => {
-    expect(nextTaskStage(null, runAt('code'), true, evaluate)).toMatchObject({ kind: 'stay' });
+    expect(nextTaskStage(null, runAt('code'), true, evaluate)).toMatchObject({ kind: 'unreachable' });
   });
 });
 
@@ -169,9 +171,9 @@ describe('what holds a task inside a stage', () => {
   it('will not end a task on a transition whose consent has not been given', () => {
     const movement = nextTaskStage(withConsent, runAt('code'), true, evaluate, () => false);
     expect(movement.kind, 'a task finished without the consent its transition asked for').toBe(
-      'stay'
+      'blocked'
     );
-    expect(movement.kind === 'stay' && movement.reason).toContain('awaiting consent: release');
+    expect(movement.kind === 'blocked' && movement.reason).toContain('awaiting consent: release');
   });
 
   it('ends it once the operator has consented', () => {
@@ -186,7 +188,9 @@ describe('what holds a task inside a stage', () => {
       stages: { code: {} },
       transitions: [{ from: 'code', to: 'done', consent: { type: 'release' } }],
     };
-    expect(nextTaskStage(objectForm, runAt('code'), true, evaluate, () => false).kind).toBe('stay');
+    expect(nextTaskStage(objectForm, runAt('code'), true, evaluate, () => false).kind).toBe(
+      'blocked'
+    );
   });
 
   it('keeps a stage shut while its own exit guard does not hold', () => {
@@ -196,8 +200,8 @@ describe('what holds a task inside a stage', () => {
       transitions: [{ from: 'code', to: 'verify' }],
     };
     const movement = nextTaskStage(guarded, runAt('code'), true, evaluate);
-    expect(movement.kind, 'the stage let the task out with its exit guard unmet').toBe('stay');
-    expect(movement.kind === 'stay' && movement.reason).toContain('exit guard');
+    expect(movement.kind, 'the stage let the task out with its exit guard unmet').toBe('blocked');
+    expect(movement.kind === 'blocked' && movement.reason).toContain('exit guard');
   });
 
   it('lets it out once the exit guard holds', () => {
@@ -217,6 +221,6 @@ describe('what holds a task inside a stage', () => {
       loop: 'implementation',
       stages: { code: {}, verify: { exitGuards: ["task.gates.qa == 'passed'"] } },
     };
-    expect(nextTaskStage(guarded, runAt('verify'), true, evaluate).kind).toBe('stay');
+    expect(nextTaskStage(guarded, runAt('verify'), true, evaluate).kind).toBe('blocked');
   });
 });
