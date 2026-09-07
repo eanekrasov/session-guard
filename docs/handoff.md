@@ -173,6 +173,7 @@ touched, and each fix has a test that fails without it.
 - **`parentCache` seeded before validation.** Real mechanism, wrong consequence: nothing in `src` writes `testStatus['parentID']`, so the entry was always `sessionId → sessionId` — not a child attached to somebody else's queue but a child declared its own root, which suppresses the host lookup. Fixed anyway, and `testStatus` deleted: the field had no writer at all.
 - **`MatchedRulesStateStore` swallows write failures.** By design, and now said so in the class doc: the only consumer is the TUI sidebar, no gate or transition reads it, and both writers are hook handlers with nothing to retry. What was actually wrong was the JSDoc (`@throws` implied other errors propagate) and that the warning was debug-gated, so a lost write left no trace at all. Both fixed.
 - **Two store instances lose a merge.** True, 20/20 — and 0/20 on one instance, which is what production builds. `src/rules/index.ts` is a test-only export. Recorded in the class doc rather than fixed; the cross-process lock lives in `WorkflowStore`, where a lost write costs workflow state.
+
 Two more came out of the work rather than the reports: a route id reaching the
 loader still percent-encoded (real, fixed, but unreachable while session ids
 are `ses_[A-Z0-9]+`), and SSE frames enqueued as strings, which only Bun's own
