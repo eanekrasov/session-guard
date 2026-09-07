@@ -52,6 +52,7 @@ describe('isReadOnlyBashCommand', () => {
       'source ./env.sh',
       'FOO=1 ls',
       'ls | xargs rm',
+      'sort -o output input',
       'ls; rm x',
       '',
       '   ',

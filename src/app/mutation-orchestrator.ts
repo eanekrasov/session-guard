@@ -1,6 +1,7 @@
 import { resolve, join } from 'node:path';
 import type { WorkflowSession } from '../session/session-schema.ts';
 import { WorkflowStore } from '../session/session-store.ts';
+import { findTask } from '../session/helpers.ts';
 import { StateMachineEngine, type EvaluateGuardFn, type EngineConfig } from '../domain/engine.ts';
 import { resolveConfig } from '../public-api.ts';
 import { compileWorkflow } from '../schema/compile-workflow.ts';
@@ -11,6 +12,7 @@ import type { ResolvedSchema } from '../schema/types.ts';
 import { SessionQueue } from './session-queue.ts';
 import { WorkflowBlockedError } from './blocked-error.ts';
 import { captureBaseline, computeChangeScope, type BaselineHashes } from './change-scope.ts';
+import { matchesScope } from './scope-match.ts';
 import { getAllProfileInvariants, validateFiles, SUPPORTED_EXTENSIONS } from './invariants.ts';
 import {
   beginMutation,
@@ -155,6 +157,25 @@ export async function processScopeAndInvariants(
   session.changedFiles = sorted;
 
   let finalPassed = !metadataFailed;
+
+  const operation = Object.values(session.activeOperations).find(
+    (candidate) => candidate.baseline === frame
+  );
+  const task = operation ? findTask(session, operation.taskId) : undefined;
+  const outOfScope = task?.writeScope?.length
+    ? sorted.filter((file) => !matchesScope(file, task.writeScope!))
+    : [];
+  if (outOfScope.length > 0) {
+    finalPassed = false;
+    await log('warn', 'finishMutation: task changed files outside writeScope', {
+      sessionId: session.sessionId,
+      taskId: task?.id,
+      files: outOfScope,
+    });
+    onDiagnostics?.(
+      `\n\n[workflow-scope-violation]\nChanged files outside writeScope: ${outOfScope.join(', ')}`
+    );
+  }
 
   if (scopeError !== null) {
     finalPassed = false;

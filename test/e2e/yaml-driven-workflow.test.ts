@@ -151,6 +151,18 @@ describe('YAML-driven workflow (profiles/base/base.yaml)', () => {
     expect(session.retryBudgets['cycles']?.attempts).toBe(1);
   });
 
+  test('TC2b: re-entering execution requires fresh task work', () => {
+    const session = freshSession();
+    driveToValidation(session);
+
+    setGateStatus(session, 'review', 'failed');
+    expectApplied(ENGINE.tryApplyTransitions(session), session, 'execution');
+
+    expectNotApplied(ENGINE.tryApplyTransitions(session), session, 'execution');
+    expect(session.retryBudgets['cycles']?.attempts).toBe(1);
+    expect(session.tasks.implementation[0]?.status).toBe('pending');
+  });
+
   test('TC3: validation that has spent the retry budget ends in failed', () => {
     const session = freshSession();
     driveToValidation(session);

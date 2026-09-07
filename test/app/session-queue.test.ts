@@ -184,6 +184,20 @@ describe('SessionQueue', () => {
     expect(result).toBe('sq-leaf');
   });
 
+  it('does not cache a failed parent lookup as a root', async () => {
+    const { SessionQueue } = await import('../../src/app/session-queue.ts');
+    let attempts = 0;
+    const queue = new SessionQueue(store, undefined, async () => {
+      attempts += 1;
+      if (attempts === 1) throw new Error('SDK unavailable');
+      return 'sq-parent-root';
+    });
+
+    expect(await queue.rootOf('sq-parent-child')).toBe('sq-parent-child');
+    expect(await queue.rootOf('sq-parent-child')).toBe('sq-parent-root');
+    expect(attempts).toBe(3);
+  });
+
   it('clear() stops future chaining but does not affect in-flight', async () => {
     await seedSession('sq-clear');
 

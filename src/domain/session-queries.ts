@@ -302,6 +302,15 @@ export function isReadOnlyBashCommand(command: string): boolean {
       return true;
     }
 
+    // `sort` is only read-only when it writes to stdout. `-o FILE` and its
+    // long forms replace the input file or create the requested output file.
+    if (
+      name === 'sort' &&
+      words.slice(1).some((word) => /^-o(?:$|[^-].*)/.test(word) || /^--output(?:=|$)/.test(word))
+    ) {
+      return false;
+    }
+
     return READ_ONLY_COMMANDS.has(name);
   });
 }

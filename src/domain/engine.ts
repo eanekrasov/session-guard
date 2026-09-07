@@ -470,6 +470,7 @@ export class StateMachineEngine {
           }
         }
         session.currentStage = transition.to;
+        this.resetLoopTasksOnEntry(session, transition.to);
         return { ...result, applied: true };
       }
     }
@@ -479,6 +480,21 @@ export class StateMachineEngine {
       applied: false,
       reason: 'No matching outgoing transition from ' + currentStage,
     };
+  }
+
+  /**
+   * A loop stage represents a new round of work when entered again. Without
+   * resetting its task list, a rejected outer validation re-enters execution
+   * with completed tasks; the next read immediately satisfies
+   * allTasksCompleted() and consumes another retry without doing any work.
+   */
+  private resetLoopTasksOnEntry(session: WorkflowSession, stageId: string): void {
+    const loop = this.getStages()[stageId]?.loop;
+    if (!loop || loop === '$currentTask.id') return;
+
+    for (const task of session.tasks[loop] ?? []) {
+      task.status = 'pending';
+    }
   }
 }
 

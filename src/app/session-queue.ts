@@ -154,7 +154,10 @@ export class SessionQueue {
           void this.log('debug', `SessionQueue: parent lookup failed for ${current}`, {
             error: err instanceof Error ? err.message : String(err),
           });
-          parentID = current;
+          // A transient host failure is not evidence that this session is a
+          // root. Do not memoise the fallback: the next request must retry the
+          // lookup so parent workflow restrictions can recover.
+          return sessionID;
         }
         this.store.parentCache.set(current, parentID);
       }
