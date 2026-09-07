@@ -7,7 +7,18 @@ export interface SetTasksInput {
   tasks: MutationTask[];
 }
 
-export type StaticTaskListResolver = (profileId: string) => Promise<readonly string[]>;
+/**
+ * The task lists the workflow a session runs declares, by its `loop:` sources.
+ *
+ * Takes the schema as well as the profile: a profile may hold several
+ * independent schemas, and only the one the session runs says which lists
+ * exist. Resolving over all of them accepts a list key belonging to a workflow
+ * nobody is running.
+ */
+export type StaticTaskListResolver = (
+  _profileId: string,
+  _schemaId?: string
+) => Promise<readonly string[]>;
 
 /**
  * Durable task-list boundary. It owns task-list validation and makes each
@@ -102,9 +113,13 @@ export class TaskApi {
       return;
     }
 
-    const staticListKeys = await this.resolveStaticListKeys(session.profileId);
+    const staticListKeys = await this.resolveStaticListKeys(session.profileId, session.schemaId);
     if (!staticListKeys.includes(listKey)) {
-      throw new Error(`Unknown task list: ${listKey}`);
+      throw new Error(
+        `Unknown task list: ${listKey}. ` +
+          `${session.profileId}/${session.schemaId} declares ` +
+          `${staticListKeys.length > 0 ? `[${staticListKeys.join(', ')}]` : 'no task list'}`
+      );
     }
   }
 

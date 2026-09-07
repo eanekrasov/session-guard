@@ -226,15 +226,7 @@ class StateMachineRuntime {
     );
     this.taskApi = new TaskApi(
       this.store,
-      async (profileId) => {
-        const profileRoot = this.profilesDir;
-        const profile = await resolveConfig(profileId, profileRoot);
-        return profile.schemas.flatMap((schema) =>
-          Object.values(schema.stages ?? {})
-            .map((stage) => stage.loop)
-            .filter((loop): loop is string => loop !== undefined && loop !== '$currentTask.id')
-        );
-      },
+      async (profileId, schemaId) => this.declaredTaskLists(profileId, schemaId),
       this.queue
     );
 
@@ -303,8 +295,23 @@ class StateMachineRuntime {
     return { output: reason, metadata: { refused: true, tool: toolName, agent, allowed } };
   }
 
+  /**
+   * The task lists the session's own workflow declares, by its `loop:` sources.
+   *
+   * This used to flatten every schema in the profile. A profile may hold
+   * several independent workflows and a session runs exactly one of them, so
+   * that accepted a list belonging to a workflow nobody is running.
+   */
+  private async declaredTaskLists(profileId: string, schemaId?: string): Promise<string[]> {
+    const profile = await resolveConfig(profileId, this.profilesDir);
+    const schema = selectSchema(profileId, profile.schemas, schemaId);
+    return Object.values(schema.stages ?? {})
+      .map((stage) => stage.loop)
+      .filter((loop): loop is string => loop !== undefined && loop !== '$currentTask.id');
+  }
+
   private async handleTasksSet(
-    args: { tasks: Omit<SetTasksInput['tasks'][number], 'id'>[] | string },
+    args: { tasks: Omit<SetTasksInput['tasks'][number], 'id'>[] | string; listKey?: string },
     ctx: { sessionID: string; agent?: string }
   ): Promise<ToolResult> {
     const refusal = await this.refuseUnlessTaskController('workflow.tasks-set', ctx);
@@ -330,11 +337,33 @@ class StateMachineRuntime {
           return { output: 'No workflow session found. Call workflow.create first.' } as ToolResult;
         }
 
-        // Determine listKey from active loop runs, fallback to 'implementation'
+        // Which list to fill. The fallback used to be the literal
+        // 'implementation' — the base profile's loop source written into the
+        // core — so a schema declaring `loop: jobs` was refused with "Unknown
+        // task list: implementation" and could never be started: no run exists
+        // until tasks are dispatched, and no tasks could be set without a run.
+        //
+        // The workflow itself says which lists it has. A caller may name one;
+        // otherwise the run in flight decides, and failing that the schema's
+        // single declared list. With several and none named, the choice is the
+        // caller's to make and guessing at it fills the wrong list.
         const activeRun = Object.values(session.loopRuns).find(
           (run) => run.status === 'running' || run.status === 'awaiting_decision'
         );
-        const listKey = activeRun?.listKey ?? 'implementation';
+        let listKey = args.listKey ?? activeRun?.listKey;
+        if (listKey === undefined) {
+          const declared = await this.declaredTaskLists(session.profileId, session.schemaId);
+          if (declared.length === 1) {
+            listKey = declared[0]!;
+          } else {
+            return {
+              output:
+                declared.length === 0
+                  ? `${session.profileId}/${session.schemaId} declares no task list to fill: no stage names a \`loop:\` source.`
+                  : `listKey is required: ${session.profileId}/${session.schemaId} declares [${declared.join(', ')}].`,
+            } as ToolResult;
+          }
+        }
 
         // Compute next available task ID across all existing lists
         const maxExisting = Object.values(session.tasks)
@@ -2630,9 +2659,12 @@ class StateMachineRuntime {
         }),
         'workflow.tasks-set': tool({
           description:
-            'Replace task list. listKey is auto-detected from active loop run or defaults to "implementation". ' +
+            'Replace a workflow task list. Without listKey the list is the one the run in ' +
+            'flight is cycling over, or the single list this workflow declares; a workflow ' +
+            'declaring several asks for the name. ' +
             'Cannot replace a list while work is in progress. IDs are auto-assigned.',
           args: {
+            listKey: z.string().min(1).optional(),
             // Derived from MutationTaskSchema rather than hand-duplicated, so
             // the agent-facing tool surface cannot silently diverge from the
             // domain type (task-scope spec: "argument schema derives from
@@ -2640,7 +2672,10 @@ class StateMachineRuntime {
             tasks: z.union([z.array(MutationTaskSchema.omit({ id: true })), z.string().min(1)]),
           },
           execute: async (
-            args: { tasks: Omit<SetTasksInput['tasks'][number], 'id'>[] | string },
+            args: {
+              tasks: Omit<SetTasksInput['tasks'][number], 'id'>[] | string;
+              listKey?: string;
+            },
             ctx: ToolContext
           ) => this.handleTasksSet(args, ctx),
         }),

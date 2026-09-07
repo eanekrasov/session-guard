@@ -1,0 +1,5 @@
+{
+  "id": "two-loops",
+  "description": "Two stages, two task lists — the caller must say which",
+  "schemas": ["flow.yaml"]
+}

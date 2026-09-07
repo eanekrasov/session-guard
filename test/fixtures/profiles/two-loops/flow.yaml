@@ -1,0 +1,25 @@
+# Two loops, so nothing can guess which list a caller means.
+stages:
+  planning: {}
+  build:
+    loop: jobs
+    stages:
+      compile: {}
+    transitions:
+      - from: compile
+        to: done
+  ship:
+    loop: deliveries
+    stages:
+      release: {}
+    transitions:
+      - from: release
+        to: done
+  done: {}
+transitions:
+  - from: planning
+    to: build
+  - from: build
+    to: ship
+  - from: ship
+    to: done

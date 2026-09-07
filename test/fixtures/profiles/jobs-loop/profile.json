@@ -1,0 +1,5 @@
+{
+  "id": "jobs-loop",
+  "description": "A workflow whose task list is not called implementation",
+  "schemas": ["flow.yaml"]
+}
