@@ -9,7 +9,6 @@ function makeFacts(overrides: Partial<SessionFacts> = {}): SessionFacts {
     approvals: [],
     tasks: [],
     activeOperations: [],
-    testStatus: {},
     verifications: [],
     verified(this: SessionFacts, stage: string, status: 'confirmed' | 'rejected') {
       return this.verifications.some((v) => v.stage === stage && v.status === status);

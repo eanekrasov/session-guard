@@ -395,7 +395,6 @@ describe('E2E: Full state machine flow', () => {
     expect(facts.profileId).toBe('test');
     expect(facts.gates.invariants).toBeDefined();
     expect(facts.verified('bug', 'confirmed')).toBe(false);
-    expect(facts.testStatus).toEqual({});
     expect(facts.activeOperations[0]?.callId).toBe('m-1');
   });
 
@@ -1094,7 +1093,6 @@ describe('E2E: Full state machine flow', () => {
     expect(facts.approvals).toEqual([]);
     expect(facts.tasks).toEqual([]);
     expect(facts.activeOperations).toEqual([]);
-    expect(facts.testStatus).toEqual({});
     expect(facts.verified('bug', 'confirmed')).toBe(false);
     expect(facts.gates).toBeDefined();
     expect(facts.profileId).toBe('test');

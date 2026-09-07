@@ -22,7 +22,6 @@ function createSession(): WorkflowSession {
     },
     activeOperations: {},
     loopRuns: {},
-    testStatus: {},
     deliveryPermit: null,
     retryBudgets: {},
     updatedAt: new Date().toISOString(),

@@ -432,7 +432,6 @@ interface SessionFacts {
   approvals: { type, status }[];
   tasks: { id, status }[];
   activeOperation: { id, startedAt, status, result? } | null;
-  testStatus: Record<string, string>;
   verifications: Verification[];
   gates: Record<string, GateStatus>;
   profileId: string;

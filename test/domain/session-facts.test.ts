@@ -17,7 +17,6 @@ function makeSession(overrides: Partial<WorkflowSession> = {}): WorkflowSession 
     tasks: {},
     activeOperations: {},
     loopRuns: {},
-    testStatus: {},
     deliveryReceipt: null,
     deliveryPermit: null,
     verifications: [],
@@ -54,7 +53,6 @@ describe('toSessionFacts', () => {
       tasks: {
         implementation: [createTask({ status: 'completed' })],
       },
-      testStatus: { 'test-1': 'pending' },
       verifications: [{ stage: 'bug', status: 'confirmed' }],
     });
 
@@ -78,7 +76,6 @@ describe('toSessionFacts', () => {
         status: 'running',
       },
     ]);
-    expect(facts.testStatus).toEqual({ 'test-1': 'pending' });
     expect(facts.verified('bug', 'confirmed')).toBe(true);
     expect(facts.gates).toEqual({ invariants: 'passed', review: 'pending' });
     expect(facts.profileId).toBe('android');

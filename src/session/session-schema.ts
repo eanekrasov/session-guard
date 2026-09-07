@@ -277,7 +277,6 @@ export const WorkflowSessionSchema = z
     activeOperations: ActiveOperationsSchema.default({}),
     activeTaskContexts: z.array(ActiveTaskContextSchema).default([]),
     loopRuns: LoopRunsSchema.default({}),
-    testStatus: z.record(z.string()).default({}),
     deliveryPermit: DeliveryPermitSchema.nullable().default(null),
     deliveryReceipt: z.string().nullable().default(null),
     retryBudgets: RetryBudgetsSchema.default({}),

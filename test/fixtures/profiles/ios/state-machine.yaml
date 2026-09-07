@@ -6,7 +6,7 @@ stages:
         allowedAgents: ['code']
         exitGuards:
           - "session.activeOperations.some(o => o.result == 'output_ready')"
-          - "session.testStatus['build'] == 'pass'"
+          - "session.gates.invariants == 'passed'"
 actionGuards:
   beginMutation: "session.approved('plan')"
 editingAgents: ['code']

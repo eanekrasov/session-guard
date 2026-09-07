@@ -43,7 +43,6 @@ export function createSession(
     activeOperations: {},
     activeTaskContexts: [],
     loopRuns: {},
-    testStatus: {},
     deliveryPermit: null,
     deliveryReceipt: null,
     retryBudgets: {},
@@ -75,7 +74,19 @@ export class WorkflowStore {
   private locks = new Map<string, Promise<void>>();
   private log: LogFn;
 
-  /** Cache: sessionID → parentID (or sessionID itself for root). Updated on save. */
+  /**
+   * Cache: sessionID → parentID (or sessionID itself for root).
+   *
+   * Filled only by `SessionQueue.resolveRoot` from what the host answered.
+   * `save()` used to seed it from `session.testStatus['parentID']` before the
+   * session had even been validated — a field no code ever wrote, and since
+   * removed, so the entry it produced was always `sessionId → sessionId`.
+   * That is the one answer that
+   * must never be guessed: it marks the session as its own root and stops the
+   * host from ever being asked, which is how a child would slip out of its
+   * parent's workflow. The parent chain belongs to the host; only its reply
+   * lands here.
+   */
   readonly parentCache = new Map<string, string>();
   readonly onSave = new Set<() => void>();
 
@@ -89,9 +100,6 @@ export class WorkflowStore {
     const revisionBefore = session.revision;
     const updatedAtBefore = session.updatedAt;
 
-    // Update parent cache on save
-    const parentID = session.testStatus?.['parentID'];
-    this.parentCache.set(session.sessionId, parentID ?? session.sessionId);
     session.revision++;
     session.updatedAt = new Date().toISOString();
 
@@ -155,6 +163,7 @@ export class WorkflowStore {
 
     this.locks.set(key, chain);
     await chain;
+
     for (const cb of this.onSave) cb();
     void this.log('info', `Session saved: ${session.sessionId}`, {
       revision: clean.revision,

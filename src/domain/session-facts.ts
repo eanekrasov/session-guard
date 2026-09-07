@@ -22,7 +22,6 @@ export interface SessionFacts {
   approvals: Array<{ type: string; status: string }>; // for approved(type) guard expressions
   tasks: { id: string; status: TaskStatus }[];
   activeOperations: ActiveOperation[];
-  testStatus: Record<string, string>; // full record for guard expressions like session.testStatus[taskId]
   /** Full verification records. Use `session.verified(stage, status)` in guard expressions. */
   verifications: Verification[];
   /** Guard-expression helper: `session.verified('bug', 'confirmed')` */
@@ -65,7 +64,6 @@ export function toSessionFacts(session: WorkflowSessionRead): SessionFacts {
       .flat()
       .map((task) => ({ id: task.id, status: task.status })),
     activeOperations: Object.values(activeOperations),
-    testStatus: session.testStatus,
     verifications: session.verifications.map((v) => ({ stage: v.stage, status: v.status })),
     verified(stage: string, status: 'confirmed' | 'rejected') {
       return this.verifications.some((v) => v.stage === stage && v.status === status);

@@ -19,7 +19,6 @@ describe('createSession', () => {
     expect(session.schemaVersion).toBe(2);
     expect(session.revision).toBe(0);
     expect(session.title).toBe('');
-    expect(session.testStatus).toEqual({});
     expect(session.deliveryPermit).toBeNull();
     expect(session.verifications).toEqual([]);
     expect(session.currentStage).toBe('planning');

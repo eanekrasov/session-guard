@@ -55,7 +55,7 @@ describe('ProfileSchemaSchema', () => {
               plan: {
                 exitGuards: [
                   'session.activeMutation?.outputReady == true',
-                  "session.testStatus['build'] == 'pass'",
+                  "session.gates.invariants == 'passed'",
                 ],
               },
             },
@@ -68,7 +68,7 @@ describe('ProfileSchemaSchema', () => {
 
       expect(nested.plan!.exitGuards).toEqual([
         'session.activeMutation?.outputReady == true',
-        "session.testStatus['build'] == 'pass'",
+        "session.gates.invariants == 'passed'",
       ]);
     });
   });

@@ -486,12 +486,6 @@ export function formatDetailsLines(rawText: string): string[] | null {
     );
   }
 
-  const testStatus = isRecord(data.testStatus) ? data.testStatus : {};
-  const testKeys = Object.keys(testStatus);
-  if (testKeys.length > 0) {
-    lines.push(`testStatus: ${testKeys.map((k) => `${k}=${testStatus[k]}`).join(', ')}`);
-  }
-
   if (Array.isArray(data.changedFiles)) {
     lines.push(...collectionLines('changedFiles', data.changedFiles));
   }
@@ -515,7 +509,6 @@ export function formatDetailsLines(rawText: string): string[] | null {
     'activeOperations',
     'tasks',
     'gates',
-    'testStatus',
     'changedFiles',
     'retryBudgets',
     'processedEventIds',

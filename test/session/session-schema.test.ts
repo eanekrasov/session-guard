@@ -40,7 +40,6 @@ describe('WorkflowSessionSchema', () => {
     expect(result.tasks).toEqual({});
     expect(result.activeOperations).toEqual({});
     expect(result.loopRuns).toEqual({});
-    expect(result.testStatus).toEqual({});
     expect(result.deliveryPermit).toBeNull();
     expect(result.verifications).toEqual([]);
     expect(result.refs).toEqual({});

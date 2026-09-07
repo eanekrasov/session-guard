@@ -19,7 +19,6 @@ function makeV1Session(overrides: Record<string, unknown> = {}): string {
     tasks: [],
     currentTaskIndex: null,
     activeMutation: null,
-    testStatus: {},
     gates: [
       { id: 'invariants', status: 'pending' },
       { id: 'review', status: 'pending' },

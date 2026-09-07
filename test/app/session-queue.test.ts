@@ -15,15 +15,8 @@ beforeEach(() => {
 });
 
 /** Seed a session into the store dir. */
-async function seedSession(
-  sessionId: string,
-  profileId = 'test',
-  parentId?: string
-): Promise<void> {
+async function seedSession(sessionId: string, profileId = 'test'): Promise<void> {
   const session = createSession(sessionId, profileId, 'cycle');
-  if (parentId) {
-    session.testStatus['parentID'] = parentId;
-  }
   await store.save(session);
 }
 
@@ -123,10 +116,13 @@ describe('SessionQueue', () => {
 
   it('chains by resolved root session ID (parent chain)', async () => {
     await seedSession('sq-parent-root');
-    await seedSession('sq-parent-child', 'test', 'sq-parent-root');
+    await seedSession('sq-parent-child');
 
     const { SessionQueue } = await import('../../src/app/session-queue.ts');
-    const queue = new SessionQueue(store);
+    // The chain is the host's; a session file never carries its parent.
+    const queue = new SessionQueue(store, undefined, async (id) =>
+      id === 'sq-parent-child' ? 'sq-parent-root' : null
+    );
 
     const order: string[] = [];
 
@@ -468,8 +464,9 @@ describe('SessionQueue root resolution through the host', () => {
     });
 
     expect(seen).toBe('sq-root');
-    // sq-root was seeded by its own save, so the cache already answers for it.
-    expect(asked).toEqual(['sq-child', 'sq-mid']);
+    // Every hop is the host's answer — including the root, which reports no
+    // parent of its own. A save seeds nothing into the cache.
+    expect(asked).toEqual(['sq-child', 'sq-mid', 'sq-root']);
 
     // Every node walked is memoised to the root: a second call asks nothing.
     asked.length = 0;

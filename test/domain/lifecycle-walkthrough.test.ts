@@ -48,7 +48,6 @@ function createSession(): WorkflowSession {
     refs: {},
     tasks: { implementation: [] },
     activeOperations: {},
-    testStatus: {},
     deliveryPermit: null,
     retryBudgets: {},
     updatedAt: new Date().toISOString(),

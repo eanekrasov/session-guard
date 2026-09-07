@@ -59,7 +59,6 @@ function createSession(overrides: Partial<WorkflowSession> = {}): WorkflowSessio
     refs: {},
     tasks: { implementation: [] },
     activeOperations: {},
-    testStatus: {},
     deliveryReceipt: null,
     deliveryPermit: null,
     retryBudgets: {},
