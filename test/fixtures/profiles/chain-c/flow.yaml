@@ -1,0 +1,5 @@
+# The grandparent's `beginMutation: 'false'` used to vanish here: only the
+# immediate parent was loaded, and it was loaded raw rather than resolved.
+extends: 'chain-b/flow.yaml'
+stages:
+  planning: {}

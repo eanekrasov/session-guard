@@ -1,0 +1,1 @@
+{ "id": "chain-a", "description": "The grandparent: it forbids mutation", "schemas": ["flow.yaml"] }

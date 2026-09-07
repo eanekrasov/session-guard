@@ -8,6 +8,7 @@ import type {
   ResolvedSchema,
   ResolvedProfile,
 } from '../schema/types.ts';
+import type { ProfileSchema } from '../schema/profile-schema.ts';
 import { SchemaLoader } from '../schema/schema-loader.ts';
 import { qualifyAgentName } from './agent-names.ts';
 
@@ -239,29 +240,20 @@ export class ProfileResolver {
     schemaFile: string,
     chain: LoadedProfile[]
   ): Promise<ResolvedSchema> {
-    let currentSchema = await this.loadSchemaFromChain(schemaFile, chain);
+    const owner = chain.find((profile) => profile.schemas?.includes(schemaFile));
+    const currentSchema = owner
+      ? await this.resolveInheritedSchema(owner.id, schemaFile, chain, new Set())
+      : null;
 
     if (!currentSchema) {
-      return { id: schemaId(schemaFile), source: `${chain[0].id}/${schemaFile}` };
-    }
-
-    if (currentSchema.extends) {
-      const slashIndex = currentSchema.extends.indexOf('/');
-      if (slashIndex !== -1) {
-        const extendedProfileId = currentSchema.extends.substring(0, slashIndex);
-        const extendedSchemaFile = currentSchema.extends.substring(slashIndex + 1);
-        const extendedProfile = chain.find((p) => p.id === extendedProfileId);
-
-        if (extendedProfile) {
-          const baseSchema = await this.schemaLoader.loadSchemaFile(
-            extendedProfileId,
-            extendedSchemaFile
-          );
-          if (baseSchema) {
-            currentSchema = this.schemaLoader.mergeSchemas(baseSchema, currentSchema);
-          }
-        }
-      }
+      // A schema a profile declares and does not have is a defect in the
+      // profile, not an empty workflow. Returning a stub here made
+      // `workflow.create` report success and persist a session with
+      // `currentStage: ''` — a session under a state machine with no states.
+      throw new Error(
+        `Profile "${chain[0].id}" declares schema "${schemaFile}", but no profile in its ` +
+          `extends chain [${chain.map((profile) => profile.id).join(' → ')}] has that file`
+      );
     }
 
     return {
@@ -283,14 +275,44 @@ export class ProfileResolver {
   /**
    * Load a schema from the first profile in the chain that has it.
    */
-  private async loadSchemaFromChain(schemaFile: string, chain: LoadedProfile[]) {
-    for (const profile of chain) {
-      if (profile.schemas?.includes(schemaFile)) {
-        const schema = await this.schemaLoader.loadSchemaFile(profile.id, schemaFile);
-        if (schema) return schema;
-      }
+  /**
+   * One schema with its whole `extends` chain folded in.
+   *
+   * The parent used to be loaded raw — `loadSchemaFile`, not resolved — so
+   * only one level of inheritance survived. In a chain C → B → A, B kept A's
+   * stages and actionGuards and C lost them: a `beginMutation: "false"` in the
+   * grandparent simply disappeared, and the workflow that inherited it could
+   * mutate freely. Resolving the parent the same way this resolves the child
+   * is what makes the chain a chain.
+   */
+  private async resolveInheritedSchema(
+    profileId: string,
+    schemaFile: string,
+    chain: LoadedProfile[],
+    seen: Set<string>
+  ): Promise<ProfileSchema | null> {
+    const key = `${profileId}/${schemaFile}`;
+    if (seen.has(key)) {
+      throw new Error(`Schema extends itself through ${[...seen, key].join(' → ')}`);
     }
-    return null;
+    seen.add(key);
+
+    const raw = await this.schemaLoader.loadSchemaFile(profileId, schemaFile);
+    if (!raw?.extends) return raw;
+
+    const slashIndex = raw.extends.indexOf('/');
+    if (slashIndex === -1) return raw;
+    const parentProfileId = raw.extends.substring(0, slashIndex);
+    const parentSchemaFile = raw.extends.substring(slashIndex + 1);
+    if (!chain.some((profile) => profile.id === parentProfileId)) return raw;
+
+    const parent = await this.resolveInheritedSchema(
+      parentProfileId,
+      parentSchemaFile,
+      chain,
+      seen
+    );
+    return parent ? this.schemaLoader.mergeSchemas(parent, raw) : raw;
   }
 }
 

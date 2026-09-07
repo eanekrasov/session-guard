@@ -1,0 +1,26 @@
+# Loops nest. `execution` cycles over `parents`; inside it, `subtasks` cycles
+# over `$currentTask.id` — the list named after the parent task being worked on.
+#
+# Admission consulted only the outer loop, so a child task was refused as "not
+# eligible in loopStage execution" by a workflow that had accepted the shape.
+stages:
+  planning: {}
+  execution:
+    loop: parents
+    stages:
+      subtasks:
+        loop: $currentTask.id
+        stages:
+          child: {}
+        transitions:
+          - from: child
+            to: done
+    transitions:
+      - from: subtasks
+        to: done
+  done: {}
+transitions:
+  - from: planning
+    to: execution
+  - from: execution
+    to: done

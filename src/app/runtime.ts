@@ -878,27 +878,43 @@ class StateMachineRuntime {
         return;
       }
 
-      const loopStageId = engine.deriveStage(session);
-      session.currentStage = loopStageId;
-      const loopStage = engine.getStages()[loopStageId];
-      if (!loopStage?.loop || nestedStages(loopStage).length === 0) {
+      const derivedStageId = engine.deriveStage(session);
+      session.currentStage = derivedStageId;
+      const derivedStage = engine.getStages()[derivedStageId];
+      if (!derivedStage?.loop || nestedStages(derivedStage).length === 0) {
+        this.blockTaskAdmission(`Stage ${derivedStageId} does not declare an executable task loop`);
+        return;
+      }
+
+      // The loop that owns this task's list, which is not always the stage the
+      // session is in: a loop stage may nest a loop of its own
+      // (`loop: $currentTask.id`), and that inner loop's tasks live in a list
+      // keyed by the parent task's id. Admission looked only in the outer
+      // loop's list, so a schema declaring a nested loop was accepted and its
+      // child tasks were then always "not eligible" — the shape could be
+      // written and never run.
+      const owner = this.resolveAdmissionLoop(session, derivedStageId, derivedStage, taskId);
+      if (!owner) {
+        this.blockTaskAdmission(
+          `Workflow task ${taskId} is not eligible in loopStage ${derivedStageId}`
+        );
+        return;
+      }
+      const { stageId: loopStageId, stage: loopStage, listKey } = owner;
+      if (nestedStages(loopStage).length === 0) {
         this.blockTaskAdmission(`Stage ${loopStageId} does not declare an executable task loop`);
         return;
       }
       // A loop that names no dispatch runs one task at a time. Requiring the
       // field made every profile repeat boilerplate, and forgetting it stopped
-      // the loop with a message about a loop that is plainly declared.
-      const dispatch = loopStage.dispatch ?? { strategy: 'serial' as const, maxConcurrent: 1 };
+      // the loop with a message about a loop that is plainly declared. The
+      // inner loop's own dispatch, roster and budget govern its tasks.
+      // `serial` carries no maxConcurrent — the schema's own union says so, and
+      // the check below short-circuits on the strategy before reading it.
+      const dispatch = loopStage.dispatch ?? { strategy: 'serial' as const };
 
-      const listKey = this.resolveAdmissionListKey(session, loopStage.loop, taskId);
-      const tasks = listKey ? session.tasks[listKey] : undefined;
-      const task = tasks?.find((candidate) => candidate.id === taskId);
-      if (!listKey || !tasks || !task) {
-        this.blockTaskAdmission(
-          `Workflow task ${taskId} is not eligible in loopStage ${loopStageId}`
-        );
-        return;
-      }
+      const tasks = session.tasks[listKey]!;
+      const task = tasks.find((candidate) => candidate.id === taskId)!;
 
       const nonterminalRuns = Object.values(session.loopRuns).filter(
         (run) => run.taskId === taskId && isOpenLoopRun(run)
@@ -1062,6 +1078,39 @@ class StateMachineRuntime {
 
   private blockTaskAdmission(reason: string): never {
     throw new WorkflowBlockedError(reason);
+  }
+
+  /**
+   * The loop stage that owns the list a task lives in, and that list's key.
+   *
+   * Loops nest: a stage cycling over `parents` may declare an inner stage
+   * cycling over `$currentTask.id`, whose tasks live in a list named after the
+   * parent task. Only the outer loop was ever consulted, so those children
+   * were refused as ineligible by a workflow that had accepted the shape.
+   *
+   * The outer loop wins when it owns the task, so nothing about an ordinary
+   * flat loop changes; otherwise exactly one nested loop must own it.
+   */
+  private resolveAdmissionLoop(
+    session: WorkflowSession,
+    outerStageId: string,
+    outerStage: StageDef,
+    taskId: string
+  ): { stageId: string; stage: StageDef; listKey: string } | null {
+    const owners: Array<{ stageId: string; stage: StageDef; listKey: string }> = [];
+    const walk = (stageId: string, stage: StageDef): void => {
+      if (stage.loop) {
+        const listKey = this.resolveAdmissionListKey(session, stage.loop, taskId);
+        if (listKey) owners.push({ stageId, stage, listKey });
+      }
+      for (const nested of nestedStages(stage)) walk(`${stageId}/${nested.id}`, nested);
+    };
+    walk(outerStageId, outerStage);
+
+    return (
+      owners.find((owner) => owner.stageId === outerStageId) ??
+      (owners.length === 1 ? owners[0]! : null)
+    );
   }
 
   private resolveAdmissionListKey(

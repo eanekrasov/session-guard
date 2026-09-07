@@ -1,6 +1,7 @@
 import type { MutationTask, TaskStatus, WorkflowSession } from '../session/session-schema.ts';
 import { WorkflowStore } from '../session/session-store.ts';
 import type { SessionQueue } from './session-queue.ts';
+import { isOpenLoopRun, removeActiveTaskContext } from '../session/helpers.ts';
 
 export interface SetTasksInput {
   listKey: string;
@@ -77,8 +78,31 @@ export class TaskApi {
       }
 
       task.status = status;
+      if (status === 'cancelled' || status === 'failed') this.closeExecution(session, task.id);
       return { ...task };
     });
+  }
+
+  /**
+   * End whatever is still running for a task the controller has just stopped.
+   *
+   * Cancelling only ever wrote the task's own status, so the run stayed open
+   * and the call stayed active: a late result from the worker found them,
+   * moved the task back to `running` and carried it on to `verify`. A task
+   * that was cancelled is not a task that is still being worked on.
+   *
+   * `completed` is deliberately not here — the task's own movement sets it,
+   * and closing the run from the side would race with that.
+   */
+  private closeExecution(session: WorkflowSession, taskId: string): void {
+    for (const run of Object.values(session.loopRuns)) {
+      if (run.taskId !== taskId || !isOpenLoopRun(run)) continue;
+      run.status = 'cancelled';
+      removeActiveTaskContext(session, run.id);
+      for (const operation of Object.values(session.activeOperations)) {
+        if (operation.runId === run.id) delete session.activeOperations[operation.callId];
+      }
+    }
   }
 
   /**

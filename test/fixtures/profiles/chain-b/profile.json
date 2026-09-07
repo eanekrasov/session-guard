@@ -1,0 +1,1 @@
+{ "id": "chain-b", "extends": "chain-a", "description": "The middle link", "schemas": ["flow.yaml"] }

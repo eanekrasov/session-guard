@@ -1,0 +1,3 @@
+extends: 'chain-a/flow.yaml'
+stages:
+  planning: {}

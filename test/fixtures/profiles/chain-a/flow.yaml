@@ -1,0 +1,8 @@
+stages:
+  planning: {}
+  done: {}
+transitions:
+  - from: planning
+    to: done
+actionGuards:
+  beginMutation: 'false'
