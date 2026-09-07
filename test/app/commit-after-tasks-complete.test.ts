@@ -133,3 +133,49 @@ describe('a bash call that only reads', () => {
     ).rejects.toThrow();
   });
 });
+
+describe('what a dispatched task changed reaches the delivery permit', () => {
+  it("records a task move's files, so the permit expects them", async () => {
+    // `changedFiles` was written in exactly one place — inside finishMutation,
+    // which runs only for bash/write/edit/apply_patch. A `task` dispatch never
+    // reaches it, so a workflow whose work is entirely delegated (which is
+    // what the shipped workflow does) arrived at `commit` with the list empty.
+    // The permit is built from it, so it expected nothing, and the commit
+    // carrying the work was refused: "Committed files do not match the
+    // delivery permit. Expected: (none)".
+    const { writeFile } = await import('node:fs/promises');
+    const { approve } = await import('../../src/domain/approvals.ts');
+    const store = new WorkflowStore(storeDirectory);
+    const session = createSession('delegated', 'base', 'state-machine', 'planning');
+    // The stage is derived from the facts, not from what we write here: the
+    // fixture's `uncommitted` rule needs an approved plan and an unfinished
+    // task before it puts the session in `execution`.
+    approve(session, 'plan', 'evidence', 'approve-call');
+    session.currentStage = 'execution';
+    session.tasks.implementation = [createTask({ status: 'pending' })];
+    await store.save(session);
+
+    const hooks = await createRuntime(pluginInput());
+
+    // The orchestrator dispatches the task; the plugin snapshots the tree.
+    await hooks['tool.execute.before']!(
+      { tool: 'task', sessionID: 'delegated', callID: 'call-task' },
+      { args: { subagent_type: 'code', description: '[workflow-task:task-1] build it' } }
+    );
+
+    // The subagent's work lands in the working tree.
+    await writeFile(join(repoDirectory, 'delivered.ts'), 'export const built = true;\n', 'utf-8');
+
+    await hooks['tool.execute.after']!(
+      {
+        tool: 'task',
+        sessionID: 'delegated',
+        callID: 'call-task',
+        args: { subagent_type: 'code' },
+      },
+      { title: 'task', output: 'done', metadata: {} }
+    );
+
+    expect((await store.load('delegated'))?.changedFiles).toContain('delivered.ts');
+  });
+});

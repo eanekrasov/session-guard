@@ -153,7 +153,11 @@ export async function processScopeAndInvariants(
     });
   }
 
-  const sorted = [...changedFiles].sort();
+  // Accumulated, not replaced. `changedFiles` is what the delivery permit
+  // expects the commit to carry, so it has to be everything the work produced —
+  // and a workflow produces it one move at a time. Replacing the list left the
+  // permit expecting only the last move's files.
+  const sorted = [...new Set([...(session.changedFiles ?? []), ...changedFiles])].sort();
   session.changedFiles = sorted;
 
   let finalPassed = !metadataFailed;

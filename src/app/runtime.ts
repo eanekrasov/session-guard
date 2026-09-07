@@ -1592,8 +1592,19 @@ class StateMachineRuntime {
     }
 
     await this.queue.enqueue(sessionID, async (s) => {
-      const op = s?.activeOperations[callID];
+      if (!s) return;
+      const op = s.activeOperations[callID];
       if (op) op.invariants = passed ? 'passed' : 'failed';
+
+      // What this move produced is part of what the workflow delivers. The
+      // list was computed above to run invariants over and then dropped, so a
+      // workflow whose work is entirely delegated — every task dispatched to a
+      // subagent, which is what the shipped workflow does — reached `commit`
+      // with `changedFiles` empty. The permit is built from that list, so it
+      // expected nothing, and the commit that carried the work was refused
+      // with 'Committed files do not match the delivery permit. Expected:
+      // (none)'.
+      s.changedFiles = [...new Set([...(s.changedFiles ?? []), ...changed])].sort();
     });
   }
 
