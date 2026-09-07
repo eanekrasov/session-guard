@@ -7,7 +7,7 @@ import { resolveConfig } from '../public-api.ts';
 import { compileWorkflow } from '../schema/compile-workflow.ts';
 import { mergeStages } from '../schema/schema-loader.ts';
 import { ProfileConfigurationError, firstNestedStageId } from '../schema/types.ts';
-import { GuardEvaluator } from '../schema/guard-evaluator.ts';
+import { GuardEvaluator, type GuardEvaluationContext } from '../schema/guard-evaluator.ts';
 import type { ResolvedSchema } from '../schema/types.ts';
 import { SessionQueue } from './session-queue.ts';
 import { WorkflowBlockedError } from './blocked-error.ts';
@@ -341,12 +341,18 @@ export class MutationOrchestrator {
     const evaluateGuardFn: EvaluateGuardFn = (
       expression: string,
       session: object,
-      guards: Record<string, (...args: unknown[]) => unknown>
+      guards: Record<string, (...args: unknown[]) => unknown>,
+      // Dropped on the floor before, replaced with `{}`. It carries
+      // `currentLoopListKey`, which is how `allTasksCompleted()` with no
+      // argument knows which list it is being asked about — so the same guard
+      // answered `true` evaluated directly and `false` through the engine, and
+      // transitions that should have fired did not.
+      evaluationContext?: GuardEvaluationContext
     ): boolean => {
       const evaluator = new GuardEvaluator(
         session as Record<string, unknown>,
         guards as Record<string, Function> | undefined,
-        {},
+        evaluationContext ?? {},
         (error, expression) => {
           // A guard that fails to evaluate still blocks the transition, but it
           // is a defect in the schema, not a decision — say so.

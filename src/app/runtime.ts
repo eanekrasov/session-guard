@@ -59,9 +59,9 @@ import { matchesScope, scopesIntersect } from './scope-match.ts';
 import { extractToolCallPaths } from '../rules/message-paths.ts';
 import { parsePatch } from '../rules/file-observation.ts';
 import { captureBaseline, changedAgainstHead, computeChangeScope } from './change-scope.ts';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
-import { join, resolve, isAbsolute, relative } from 'node:path';
+import { join, resolve, isAbsolute, relative, dirname, basename } from 'node:path';
 import { validateFilesForProfile, SUPPORTED_EXTENSIONS } from './invariants.ts';
 import { parseConsentRequest, evidenceOf, type ConsentManifest } from './consent.ts';
 import { canonicalizePlan, computeSha256 } from './sdd-artifacts.ts';
@@ -2373,10 +2373,44 @@ class StateMachineRuntime {
     return extractToolCallPaths(tool, args);
   }
 
-  /** A tool-call path, relative to the project root. `null` when unresolvable. */
+  /**
+   * A path with every symlink on it resolved.
+   *
+   * `resolve` is lexical: it knows nothing about the filesystem, so a symlink
+   * inside the project keeps a project-shaped path while pointing anywhere.
+   * The file itself may not exist yet — a write creating one — so this walks up
+   * to the deepest ancestor that does, resolves that, and puts the rest back.
+   */
+  private realPathOf(path: string): string {
+    const remainder: string[] = [];
+    let current = path;
+    for (;;) {
+      try {
+        return join(realpathSync(current), ...remainder);
+      } catch {
+        const parent = dirname(current);
+        if (parent === current) return path;
+        remainder.unshift(basename(current));
+        current = parent;
+      }
+    }
+  }
+
+  /**
+   * A tool-call path, relative to the project root. `null` when unresolvable.
+   *
+   * Both sides are resolved through the filesystem before they are compared.
+   * Checking the written path as a string let a symlink inside an allowed
+   * directory carry a write straight out of the project: `allowed/link.ts`
+   * matched `allowed/**`, the before-hook admitted it, the file outside was
+   * rewritten, and the after-hook recorded `invariants: passed` about work it
+   * had never seen. The project root is resolved too, or a symlinked root —
+   * `/tmp` on macOS is one — would make every path look external.
+   */
   private toProjectRelativePath(path: string): string | null {
-    const absolute = isAbsolute(path) ? path : resolve(this.projectDir, path);
-    const rel = relative(this.projectDir, absolute);
+    const root = this.realPathOf(this.projectDir);
+    const absolute = this.realPathOf(isAbsolute(path) ? path : resolve(this.projectDir, path));
+    const rel = relative(root, absolute);
     if (rel.startsWith('..') || isAbsolute(rel)) return null;
     return rel;
   }
@@ -2404,10 +2438,18 @@ class StateMachineRuntime {
 
     for (const rawPath of this.scopeTargetPaths(tool, args)) {
       const relPath = this.toProjectRelativePath(rawPath);
-      if (relPath === null) continue;
+      // `null` means the path resolves outside the project. That used to be
+      // skipped as none of this gate's business, which is what let a symlink
+      // inside an allowed directory carry a write straight out: a scope is a
+      // set of project paths, so a target outside the project matches none of
+      // them and is refused like any other out-of-scope write.
+      const named = relPath ?? `${rawPath} (outside the project)`;
 
       if (isWrite) {
-        const owner = activeTasks.find((task) => matchesScope(relPath, task.writeScope));
+        const owner =
+          relPath === null
+            ? undefined
+            : activeTasks.find((task) => matchesScope(relPath, task.writeScope));
         if (!owner) {
           const scopes = activeTasks
             .map((task) =>
@@ -2417,20 +2459,23 @@ class StateMachineRuntime {
             )
             .join('; ');
           throw new WorkflowBlockedError(
-            `${tool} refused: '${relPath}' is outside every active task's writeScope (${scopes})`
+            `${tool} refused: '${named}' is outside every active task's writeScope (${scopes})`
           );
         }
       }
       if (isRead) {
         const restricted = activeTasks.filter((task) => task.readScope?.length);
         if (restricted.length > 0) {
-          const owner = restricted.find((task) => matchesScope(relPath, task.readScope));
+          const owner =
+            relPath === null
+              ? undefined
+              : restricted.find((task) => matchesScope(relPath, task.readScope));
           if (!owner) {
             const scopes = restricted
               .map((task) => `${task.id}: [${task.readScope!.join(', ')}]`)
               .join('; ');
             throw new WorkflowBlockedError(
-              `${tool} refused: '${relPath}' is outside every active task's readScope (${scopes})`
+              `${tool} refused: '${named}' is outside every active task's readScope (${scopes})`
             );
           }
         }

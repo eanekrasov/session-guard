@@ -56,9 +56,14 @@ stages:
       verify:
         gates: [review, qa]
     transitions:
+      # The task's own verdict, not the session's. `session.gates.invariants`
+      # is whatever the last move anywhere left behind, so a task whose own
+      # invariants failed walked on to `verify` on somebody else's pass. The
+      # move's verdict is rolled into the run's gates and reaches a loop guard
+      # as `task.gates`.
       - from: code
         to: verify
-        guard: "session.gates.invariants == 'passed'"
+        guard: "task.gates.invariants == 'passed'"
       # Where a task's work ends. `done` is not a stage — it is the loop saying
       # this task is finished, and it is guarded like any other departure so a
       # task can never finish by having nowhere else to go.

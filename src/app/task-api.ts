@@ -47,12 +47,19 @@ export class TaskApi {
     });
   }
 
+  /**
+   * Read one list. Reading changes nothing, so nothing is written.
+   *
+   * This used to go through `runInQueue`, and both of that helper's paths save
+   * the session unconditionally — so a single `workflow.tasks-get` bumped the
+   * revision from 5 to 6 without a task having moved. Every read wrote a
+   * version nobody asked for, and with optimistic concurrency in place those
+   * are conflicts waiting for a second writer.
+   */
   async getTasks(sessionId: string, listKey: string): Promise<MutationTask[]> {
-    return this.runInQueue(sessionId, async (session) => {
-      if (!session) throw new Error(`Unknown workflow session: ${sessionId}`);
-      await this.assertKnownList(session, listKey);
-      return this.copyTasks(session.tasks[listKey] ?? []);
-    });
+    const session = await this.requireSession(sessionId);
+    await this.assertKnownList(session, listKey);
+    return this.copyTasks(session.tasks[listKey] ?? []);
   }
 
   async setTaskStatus(

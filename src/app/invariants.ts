@@ -143,7 +143,7 @@ export function validateFiles(
     if (!existsSync(filePath)) continue;
 
     const fileName = relative(rootDirectory, filePath).replace(/\\/g, '/');
-    if (!/\.(kt|ts|json|md)$/i.test(fileName)) continue;
+    if (!SUPPORTED_EXTENSIONS.test(fileName)) continue;
 
     let content: string;
     try {
@@ -195,4 +195,17 @@ export function validateFiles(
 }
 
 /** Расширения файлов, на которых запускаются инварианты. */
-export const SUPPORTED_EXTENSIONS = /\.(kt|ts|json|md)$/i;
+/**
+ * Which files an invariant is ever offered.
+ *
+ * The list existed twice — here and as a literal inside `validateFiles` — and
+ * both were narrow enough to hide real violations: identical CRLF raised
+ * LF_ONLY in a `.ts` file and reported `checked: 0, errors: []` for the same
+ * content in `.tsx`. A general rule about text has no business caring whether
+ * the text is JSX.
+ *
+ * This is a guard against reading a binary as UTF-8, not a policy about which
+ * files matter — that is each invariant's own `appliesTo`.
+ */
+export const SUPPORTED_EXTENSIONS =
+  /\.(kt|kts|java|ts|tsx|mts|cts|js|jsx|mjs|cjs|json|jsonc|md|mdx|ya?ml|toml|css|scss|html|sql|sh|swift|py|go|rs|rb|gradle|properties|txt)$/i;
