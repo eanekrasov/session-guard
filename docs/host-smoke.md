@@ -3,9 +3,8 @@
 | Model | `crpt/deepseek-ai/DeepSeek-V4-Flash-small` |
 |---|---|
 | Plugin | `dist` |
-| Result | 1/2 scenarios passed |
+| Result | 0/1 scenarios passed |
 
 | # | Scenario | Result | Attempts | Evidence |
 |---|---|---|---|---|
-| 1 | A commit that matches the permit is receipted | **FAIL** | 3 | no delivery receipt was written:      The command output is:  ``` commit-task: nothing staged to commit ```             The command output is:  ``` commit-task: nothing staged to commit ```        |
-| 2 | A commit that sweeps in an unrelated file is not receipted | **PASS** | 6 | HEAD moved but the commit carried unrelated.txt: no receipt, permit dropped, refusal surfaced |
+| 1 | The host loads the packed plugin and registers its tools | **FAIL** | 0 | harness error: POST /session/ses_f86108d60ffeUm6HihLp6Pb6z0/message → 500: {"name":"UnknownError","data":{"message":"Unexpected server error. Check server logs for details.","ref":"err_1b3327de"}} ase/agents" timestamp=2026-09-07T03:35:30.995Z level=ERROR run=db02b9de message="share subscriber faile |

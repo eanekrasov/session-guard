@@ -61,7 +61,12 @@ stageAssignments:
     result: tasks_ready
   - id: uncommitted
     priority: 70
-    condition: "session.approved('plan') && (session.taskLists.implementation ?? []).length > 0 && session.taskLists.implementation.some(t => t.status != 'completed')"
+    # `session.taskLists` is not a fact this project has — the list of task
+    # lists is `session.tasks`. The rule read it anyway and was therefore dead:
+    # the evaluator reported "Cannot read 'implementation' of undefined"
+    # through onError and the condition was false for ever, so this fixture
+    # never once derived `execution`.
+    condition: "session.approved('plan') && (session.tasks.implementation ?? []).length > 0 && session.tasks.implementation.some(t => t.status != 'completed')"
     result: execution
   - id: commitApproval
     priority: 90
