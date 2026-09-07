@@ -344,3 +344,55 @@ describe('syncProfileAgents', () => {
     expect(simpleContent).toContain('body content');
   });
 });
+
+describe('the synced directory is marked as generated', () => {
+  it('writes a .gitignore beside the agents it manages', async () => {
+    const root = await createFixtureLayout({
+      agentsContent: { 'coder.md': '# Coder\n' },
+    });
+
+    await syncProfileAgents('test-profile', root);
+
+    const ignorePath = path.join(root, '.opencode', 'agents', 'test-profile', '.gitignore');
+    expect(existsSync(ignorePath)).toBe(true);
+    expect(await readFile(ignorePath, 'utf-8')).toContain('*');
+  });
+
+  it('keeps git from staging them, so a commit carries only the work', async () => {
+    // These files are copies of profiles/<id>/agents/*.md, which is what is
+    // actually committed. Left untracked they were swept up by commit-task.ts,
+    // which stages everything when given no paths, and the commit then carried
+    // files no task had touched — the delivery permit expected none of them,
+    // so the receipt was refused and the workflow stopped in `commit`.
+    const { spawnSync } = await import('node:child_process');
+    const root = await createFixtureLayout({
+      agentsContent: { 'coder.md': '# Coder\n', 'reviewer.md': '# Reviewer\n' },
+    });
+    const git = (args: string[]): string =>
+      spawnSync('git', args, { cwd: root, encoding: 'utf-8' }).stdout ?? '';
+
+    git(['init', '-q']);
+    git(['config', 'user.email', 'test@example.com']);
+    git(['config', 'user.name', 'test']);
+
+    await syncProfileAgents('test-profile', root);
+    await writeFile(path.join(root, 'work.ts'), 'export const done = true;\n', 'utf-8');
+
+    git(['add', '-A']);
+    const staged = git(['diff', '--cached', '--name-only']).split('\n').filter(Boolean);
+
+    expect(staged).toContain('work.ts');
+    expect(staged.filter((file) => file.includes('.opencode/agents/test-profile/'))).toEqual([]);
+  });
+
+  it('leaves a .gitignore somebody else wrote alone', async () => {
+    const root = await createFixtureLayout({ agentsContent: { 'coder.md': '# Coder\n' } });
+    const target = path.join(root, '.opencode', 'agents', 'test-profile');
+    await mkdir(target, { recursive: true });
+    await writeFile(path.join(target, '.gitignore'), '# mine\n', 'utf-8');
+
+    await syncProfileAgents('test-profile', root);
+
+    expect(await readFile(path.join(target, '.gitignore'), 'utf-8')).toBe('# mine\n');
+  });
+});

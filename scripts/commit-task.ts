@@ -67,7 +67,10 @@ if (commit.status !== 0) {
 }
 
 const head = git(['rev-parse', 'HEAD']);
-const files = git(['diff-tree', '--no-commit-id', '--name-only', '-r', head.stdout]);
+// `--root` is what makes the repository's first commit answerable: diff-tree
+// compares against a parent, and the initial commit has none, so without it
+// this prints nothing and the commit looks empty.
+const files = git(['diff-tree', '--no-commit-id', '--name-only', '-r', '--root', head.stdout]);
 console.log(`commit-task: committed ${head.stdout}`);
 for (const file of files.stdout.split('\n').filter(Boolean)) {
   console.log(`  ${file}`);
