@@ -8,13 +8,14 @@ import { createEffect, createMemo, createSignal, For, Show } from 'solid-js';
 import type { KeyEvent } from '@opentui/core';
 import type { JSX } from '@opentui/solid';
 import type { TuiPlugin, TuiPluginApi } from '@opencode-ai/plugin/tui';
-import { listProfiles, resolveConfig } from '../public-api.ts';
+import { listProfiles, readSession, resolveConfig } from '../public-api.ts';
 import { opencodeStateDir, profilesDir as resolveProfilesDir, sessionsDir } from '../app/paths.ts';
 import { checkTransition } from '../domain/engine.ts';
 import { toSessionFacts } from '../domain/session-facts.ts';
 import type { ResolvedSchema } from '../schema/types.ts';
 import type { ProfileMetadata } from '../schema/types.ts';
 import { WorkflowSessionSchema } from '../session/session-schema.ts';
+import type { WorkflowSession } from '../session/session-schema.ts';
 import { formatDetailsLines, isRecord, parseRuntimeState, type Tui } from './tui.ts';
 import { buildPanelPalette, createPanelLayout, TuiPanel, TuiSection } from './tui-panel/index.ts';
 import { SidebarContent as RulesSidebarContent } from './slots/sidebar-content.tsx';
@@ -38,31 +39,22 @@ function profileDirs(baseDir: string): string[] {
   return [resolveProfilesDir(baseDir)];
 }
 
-function readRuntimeFile(sessionId: string, baseDir: string): string | null {
-  // Сначала STATE_MACHINE_STORE_DIR (основной канал), потом baseDir/sessions, потом opencodeStateDir/sessions
-  const candidates: string[] = [];
-  const env = process.env.STATE_MACHINE_STORE_DIR;
-  if (env) candidates.push(env);
-  candidates.push(sessionsDir(baseDir));
-  candidates.push(sessionsDir(opencodeStateDir()));
-  // Accept the store root as well as the current runtime/ subdirectory. This
-  // keeps the reader compatible with older installations that stored session
-  // files directly under ~/.local/share/opencode/session-guard/.
-  candidates.push(join(opencodeStateDir(), 'session-guard'));
-  // Уникализируем
-  const seen = new Set<string>();
-  for (const dir of candidates) {
-    if (seen.has(dir)) continue;
-    seen.add(dir);
-    try {
-      const names = [`${encodeURIComponent(sessionId)}.json`, `${sessionId}.json`];
-      for (const name of names) {
-        const path = join(dir, name);
-        if (existsSync(path)) return readFileSync(path, 'utf8');
-      }
-    } catch {
-      continue;
-    }
+/**
+ * The session, from whichever store directory holds it.
+ *
+ * The candidate list is about *where* the store lives — the override, the
+ * project, OpenCode's own state directory — not about what a session file is
+ * called. That rule lives in `session-files` now: this used to try a second,
+ * un-encoded name of its own, which is how the naming convention came to have
+ * three independent implementations.
+ */
+async function readRuntimeSession(
+  sessionId: string,
+  baseDir: string
+): Promise<WorkflowSession | null> {
+  for (const dir of [...new Set(runtimeDirs(baseDir))]) {
+    const session = await readSession(dir, sessionId);
+    if (session !== null) return session;
   }
   return null;
 }
@@ -425,20 +417,24 @@ async function resolveStageNeighbors(
   return { previous: null, next: null, available: [] };
 }
 
-function readSessionView(
+async function readSessionView(
   section: ReturnType<typeof createStateSection>,
   baseDir: string
-): Tui | null {
+): Promise<Tui | null> {
   const id = section.getActiveRoot();
   if (id === null) {
     section.setLastDetails(null);
     return null;
   }
-  const raw = readRuntimeFile(id, baseDir);
-  if (raw === null) {
+  const session = await readRuntimeSession(id, baseDir);
+  if (session === null) {
     section.setLastDetails(null);
     return null;
   }
+  // `parseRuntimeState` and `formatDetailsLines` build the view model from
+  // text. Handing them the session's own JSON keeps this change to the reading
+  // of it; taking the object directly is a separate cleanup of those two.
+  const raw = JSON.stringify(session);
   const parsed = parseRuntimeState(raw);
   if (!parsed.ok) {
     section.setLastDetails(null);
@@ -484,7 +480,8 @@ export function createSessionGuardCoordinator(options: {
     try {
       await options.section.onSession(sessionId);
       if (disposed || mine !== generation) return;
-      const view = readSessionView(options.section, options.baseDir);
+      const view = await readSessionView(options.section, options.baseDir);
+      if (disposed || mine !== generation) return;
       const profiles = await options.section.loadProfiles();
       if (disposed || mine !== generation) return;
       const profileId = typeof view?.raw.profileId === 'string' ? view.raw.profileId : null;

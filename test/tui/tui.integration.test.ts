@@ -11,11 +11,26 @@ import pluginModule, {
 
 const RUNTIME_SUBDIR = 'sessions';
 
+/**
+ * A session as the current schema defines one.
+ *
+ * This used to describe a shape the schema does not accept — `schemaVersion: 1`,
+ * gates as an object, no profile — and the TUI rendered it because its reader
+ * was more forgiving than the schema. The reader validates now: there is one
+ * session shape, and a fixture that is not it is testing nothing real.
+ */
 function stateJson(overrides: Record<string, unknown> = {}): string {
   return JSON.stringify({
-    schemaVersion: 1,
+    schemaVersion: 2,
     sessionId: 'ses_root',
-    gates: { invariants: 'pending', review: 'pending', qa: 'pending' },
+    profileId: 'test',
+    schemaId: 'cycle',
+    currentStage: 'planning',
+    gates: [
+      { id: 'invariants', status: 'pending' },
+      { id: 'review', status: 'pending' },
+      { id: 'qa', status: 'pending' },
+    ],
     ...overrides,
   });
 }

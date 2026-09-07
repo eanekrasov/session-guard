@@ -37,6 +37,25 @@ describe('the dashboard reads the plugin store', () => {
     expect(source).not.toContain('BASE_WORKFLOW_GATES');
   });
 
+  it('reads sessions through the shared reader rather than the directory', () => {
+    // The server used to list the directory itself. It stripped the extension
+    // by first match — the file `a.jsonb.json` reported the session `ab.json` —
+    // and decoded outside its own try, so one undecodable name threw URIError
+    // and hid every session. Both rules live in session-files now, which has
+    // its own behavioural tests; what this file can still check is that the
+    // server does not keep a second copy of them.
+    expect(source).toContain('readAllSessions, readSession');
+    expect(source).not.toContain('readdirSync');
+    expect(source).not.toContain('decodeURIComponent');
+  });
+
+  it('does not answer a broken session with a stale copy of itself', () => {
+    // `prevSessions` recorded only the first snapshot it ever saw and never
+    // updated it, so a corrupt file was answered with the session as it looked
+    // when the dashboard started.
+    expect(source).not.toContain('prevSessions');
+  });
+
   it('reads the stage the engine already derived, and compiles a real profile', () => {
     expect(source).toContain("const stage = session['currentStage'];");
     expect(source).toContain('compileWorkflow(');

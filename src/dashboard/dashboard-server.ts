@@ -21,11 +21,11 @@
 
 import { serve } from 'bun';
 import { join, resolve } from 'node:path';
-import { readFileSync, existsSync, readdirSync, statSync, watch } from 'node:fs';
+import { readFileSync, existsSync, statSync, watch } from 'node:fs';
 import { buildDashboardSchema } from './dashboard-contract.ts';
 import { getIssue, postComment } from './beads-bridge.ts';
 import { sessionsDir, opencodeStateDir, profilesDir } from '../app/paths.ts';
-import { resolveConfig } from '../public-api.ts';
+import { readAllSessions, readSession, resolveConfig } from '../public-api.ts';
 import { selectSchema, schemaToEngineConfig } from '../app/mutation-orchestrator.ts';
 import { compileWorkflow } from '../schema/compile-workflow.ts';
 
@@ -122,26 +122,19 @@ function corsHeaders(origin: string | null): Record<string, string> {
 
 // ─── Session loading ─────────────────────────────────────────────────────────
 
-const prevSessions: Map<string, unknown> = new Map();
-
-function loadAllSessions(): Record<string, unknown> {
-  const sessions: Record<string, unknown> = {};
-  if (!existsSync(SESSIONS_DIR)) return sessions;
-  for (const entry of readdirSync(SESSIONS_DIR)) {
-    if (!entry.endsWith('.json')) continue;
-    const id = decodeURIComponent(entry.replace('.json', ''));
-    try {
-      const raw = readFileSync(join(SESSIONS_DIR, entry), 'utf-8');
-      const parsed = JSON.parse(raw);
-      sessions[id] = parsed;
-      if (!prevSessions.has(id)) {
-        prevSessions.set(id, parsed);
-      }
-    } catch {
-      sessions[id] = prevSessions.get(id);
-    }
-  }
-  return sessions;
+/**
+ * Every session the store holds, keyed by id.
+ *
+ * This used to read the directory itself, falling back on a map of previously
+ * seen sessions when a file would not parse. The fallback was worse than the
+ * gap it filled: it recorded only the *first* snapshot it ever saw of a
+ * session and never updated it, so a corrupt file was answered with the
+ * session as it looked when the dashboard started. A monitor that hides a
+ * broken session behind a stale copy of itself is lying about the thing it
+ * exists to show.
+ */
+async function loadAllSessions(): Promise<Record<string, unknown>> {
+  return readAllSessions(SESSIONS_DIR);
 }
 
 /**
@@ -150,9 +143,9 @@ function loadAllSessions(): Record<string, unknown> {
  * The most recently updated session: whichever workflow is being worked on is
  * the one an operator opening the dashboard means.
  */
-function newestSessionProfile(): { profileId: string; schemaId?: string } | null {
+async function newestSessionProfile(): Promise<{ profileId: string; schemaId?: string } | null> {
   let newest: { updatedAt: string; profileId: string; schemaId?: string } | null = null;
-  for (const value of Object.values(loadAllSessions())) {
+  for (const value of Object.values(await loadAllSessions())) {
     const session = value as Record<string, unknown> | undefined;
     const profileId = session?.['profileId'];
     if (typeof profileId !== 'string' || profileId === '') continue;
@@ -182,7 +175,7 @@ async function describeWorkflow(wanted: {
 }): Promise<ReturnType<typeof buildDashboardSchema> | { failure: string } | null> {
   const target = wanted.profileId
     ? { profileId: wanted.profileId, schemaId: wanted.schemaId }
-    : (newestSessionProfile() ?? {
+    : ((await newestSessionProfile()) ?? {
         profileId: process.env['HARNESS_PROFILE'] ?? '',
         schemaId: wanted.schemaId,
       });
@@ -223,14 +216,8 @@ async function describeWorkflow(wanted: {
   }
 }
 
-function loadSession(id: string): unknown | null {
-  const filePath = join(SESSIONS_DIR, `${encodeURIComponent(id)}.json`);
-  if (!existsSync(filePath)) return null;
-  try {
-    return JSON.parse(readFileSync(filePath, 'utf-8'));
-  } catch {
-    return null;
-  }
+async function loadSession(id: string): Promise<unknown | null> {
+  return readSession(SESSIONS_DIR, id);
 }
 
 // ─── Session helpers ─────────────────────────────────────────────────────────
@@ -477,10 +464,10 @@ serve({
     if (url.pathname === '/events') {
       let controller: SSEClient;
       const stream = new ReadableStream({
-        start(c) {
+        async start(c) {
           controller = c;
           clients.add(controller);
-          controller.enqueue(`data: ${JSON.stringify({ snapshot: loadAllSessions() })}\n\n`);
+          controller.enqueue(`data: ${JSON.stringify({ snapshot: await loadAllSessions() })}\n\n`);
         },
         cancel() {
           clients.delete(controller!);
@@ -532,7 +519,7 @@ serve({
     const sessionMatch = url.pathname.match(/^\/api\/session\/([^/]+)$/);
     if (sessionMatch) {
       const id = sessionMatch[1];
-      const session = loadSession(id);
+      const session = await loadSession(id);
       if (!session) {
         return new Response(JSON.stringify({ error: 'Session not found' }), {
           status: 404,
@@ -557,7 +544,7 @@ serve({
 
     // GET /api/dump
     if (url.pathname === '/api/dump') {
-      return new Response(JSON.stringify(loadAllSessions(), null, 2), {
+      return new Response(JSON.stringify(await loadAllSessions(), null, 2), {
         headers: {
           'Content-Type': 'application/json',
           ...corsHeaders(req.headers.get('Origin')),
@@ -569,7 +556,7 @@ serve({
     const timelineMatch = url.pathname.match(/^\/api\/session\/([^/]+)\/timeline$/);
     if (timelineMatch) {
       const id = timelineMatch[1];
-      const session = loadSession(id);
+      const session = await loadSession(id);
       if (!session) {
         return new Response(JSON.stringify({ error: 'Session not found' }), {
           status: 404,
@@ -589,7 +576,7 @@ serve({
     const invariantsMatch = url.pathname.match(/^\/api\/session\/([^/]+)\/invariants$/);
     if (invariantsMatch) {
       const id = invariantsMatch[1];
-      const session = loadSession(id);
+      const session = await loadSession(id);
       if (!session) {
         return new Response(JSON.stringify({ error: 'Session not found' }), {
           status: 404,
@@ -704,29 +691,49 @@ console.log(`Dashboard: http://${BIND_HOST}:3456`);
 
 // ─── File watcher: incremental SSE updates ───────────────────────────────────
 
-let lastSnapshot = JSON.stringify(loadAllSessions());
+/**
+ * Publish what changed since the last look: the diff events, then the sessions.
+ *
+ * The watcher and the poller ran the same read-compare-write inline, which was
+ * safe only while the read was synchronous. Reading is async now, so two runs
+ * can overlap: both would compare against the same `lastSnapshot` and emit the
+ * same events twice. `publishing` makes a second run wait its turn rather than
+ * race the first.
+ *
+ * The snapshot is pushed alongside the events because an event alone does not
+ * update the page. The client keeps its session map from `snapshot` messages;
+ * a `transition` event says a stage changed but carries no session to put in
+ * the map.
+ */
+let lastSnapshot = '{}';
+let publishing = false;
+
+async function publishChanges(): Promise<void> {
+  if (publishing) return;
+  publishing = true;
+  try {
+    const newSessions = await loadAllSessions();
+    const current = JSON.stringify(newSessions);
+    if (current === lastSnapshot) return;
+
+    const oldSessions = JSON.parse(lastSnapshot) as Record<string, unknown>;
+    const ts = Math.floor(Date.now() / 1000);
+    for (const event of diffSessions(oldSessions, newSessions, ts)) {
+      pushEventToAll(event);
+    }
+    lastSnapshot = current;
+    pushToAll({ snapshot: newSessions });
+  } finally {
+    publishing = false;
+  }
+}
 
 try {
   // `watch` throws on a directory that does not exist yet — no session has
   // ever been written on this machine — and that is not a reason to take the
   // dashboard down with it. The catch below already reports it.
   watch(SESSIONS_DIR, (_event, filename) => {
-    if (filename && filename.endsWith('.json')) {
-      const current = JSON.stringify(loadAllSessions());
-      if (current !== lastSnapshot) {
-        const oldSessions = JSON.parse(lastSnapshot) as Record<string, unknown>;
-        const newSessions = JSON.parse(current) as Record<string, unknown>;
-        const ts = Math.floor(Date.now() / 1000);
-        const events = diffSessions(oldSessions, newSessions, ts);
-
-        if (events.length > 0) {
-          for (const event of events) {
-            pushEventToAll(event);
-          }
-        }
-        lastSnapshot = current;
-      }
-    }
+    if (filename && filename.endsWith('.json')) void publishChanges();
   });
   console.log('File watcher active (fs.watch)');
 } catch {
@@ -734,22 +741,7 @@ try {
 }
 
 // Polling every 500ms
-setInterval(() => {
-  const current = JSON.stringify(loadAllSessions());
-  if (current !== lastSnapshot) {
-    const oldSessions = JSON.parse(lastSnapshot) as Record<string, unknown>;
-    const newSessions = JSON.parse(current) as Record<string, unknown>;
-    const ts = Math.floor(Date.now() / 1000);
-    const events = diffSessions(oldSessions, newSessions, ts);
-
-    if (events.length > 0) {
-      for (const event of events) {
-        pushEventToAll(event);
-      }
-    }
-    lastSnapshot = current;
-  }
-}, 500);
+setInterval(() => void publishChanges(), 500);
 
 console.log('Polling every 500ms');
 

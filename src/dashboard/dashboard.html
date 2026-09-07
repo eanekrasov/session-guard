@@ -221,7 +221,7 @@ function pickBestSession() {
   const ids = Object.keys(allSessions);
   if (ids.length === 0) return null;
   // Сначала ищем не-DONE сессии
-  const active = ids.filter(id => (allSessions[id].stage || allSessions[id].state) !== "DONE");
+  const active = ids.filter(id => allSessions[id].stage !== "DONE");
   if (active.length > 0) {
     return active.sort((a, b) => (allSessions[b].updatedAt || "").localeCompare(allSessions[a].updatedAt || ""))[0];
   }
@@ -236,7 +236,7 @@ function renderSessionChips() {
   container.textContent = "";
   for (const id of ids) {
     const s = allSessions[id];
-    const st = s.stage || s.state || "—";
+    const st = s.stage || "—";
     const time = (s.updatedAt || "").slice(11, 19) || "";
     const displayName = (s.title && s.title.length > 0) ? s.title : (id.length > 20 ? id.slice(0, 18) + "…" : id);
     const chip = document.createElement("div");
@@ -286,7 +286,7 @@ evtSource.onmessage = (e) => {
       } else {
         // Обновить данные выбранной сессии
         const updated = allSessions[selectedSessionId];
-        if (updated && (updated.stage || updated.state) !== currentState) {
+        if (updated && updated.stage !== currentState) {
           updateUI(updated);
         }
       }
@@ -296,18 +296,19 @@ evtSource.onmessage = (e) => {
       }
       return;
     }
-    if (data.rootSessionID) {
-      allSessions[data.rootSessionID] = data;
-      if (data.rootSessionID === selectedSessionId) updateUI(data);
-      renderSessionChips();
-    }
-    if (data.event) addTimelineEvent(data.event);
+    // Diff events arrive bare: {type, sessionId, ...}. This used to look for
+    // `data.rootSessionID` and for a `data.event` wrapper, neither of which the
+    // server has ever sent — so nothing reached the timeline and the session
+    // map was never updated. The session map now follows the snapshot the
+    // server pushes alongside each batch of events; an event is a line in the
+    // timeline, not a session.
+    if (data.type) addTimelineEvent(describeEvent(data));
   } catch {}
 };
 
 function updateUI(session) {
   if (!session) return;
-  const st = session.stage || session.state || "—";
+  const st = session.stage || "—";
   currentState = st;
   const badge = document.getElementById("state-badge");
   badge.textContent = "";
@@ -316,7 +317,7 @@ function updateUI(session) {
   span.textContent = st;
   badge.appendChild(span);
   const detail = document.getElementById("state-detail");
-  detail.textContent = "id: " + (session.rootSessionID || "").slice(0,30) + " | revision: " + (session.revision ?? "—") + " | updated: " + ((session.updatedAt || "").slice(11,19) || "—");
+  detail.textContent = "id: " + (session.sessionId || "").slice(0,30) + " | revision: " + (session.revision ?? "—") + " | updated: " + ((session.updatedAt || "").slice(11,19) || "—");
   const fc = Object.values(session.retryBudgets || {}).reduce((total, budget) => total + (budget?.attempts ?? 0), 0);
   const cycleEl = document.getElementById("cycle-counter");
   const cycleLabel = document.getElementById("cycle-label");
@@ -353,6 +354,19 @@ function updateUI(session) {
     addTimelineEvent({ ts: new Date().toISOString(), type: "transition", detail: "Состояние → " + st, color: "green" });
   }
   renderGraph(st);
+}
+
+function describeEvent(ev) {
+  const ts = new Date((ev.ts || 0) * 1000).toISOString();
+  if (ev.type === "transition") {
+    return { ts, color: "blue", detail: ev.sessionId + ": " + ev.from + " → " + ev.to };
+  }
+  if (ev.type === "gate") {
+    const color = ev.status === "passed" ? "green" : ev.status === "failed" ? "red" : "yellow";
+    return { ts, color, detail: ev.sessionId + ": gate " + ev.gate + " = " + ev.status };
+  }
+  if (ev.type === "metric") return { ts, color: "purple", detail: "metrics updated" };
+  return { ts, color: "blue", detail: String(ev.type) };
 }
 
 function addTimelineEvent(ev) {

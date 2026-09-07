@@ -19,3 +19,18 @@ export async function listProfiles(profilesDir: string): Promise<ProfileMetadata
   const resolver = new ProfileResolver(profilesDir);
   return resolver.listProfiles();
 }
+
+/**
+ * Reading sessions off disk, for the TUI and the dashboard.
+ *
+ * Both used to read the store directory themselves and both knew the file
+ * naming rule independently — which is how they drifted apart from the store
+ * and from each other. This is the one door.
+ */
+export {
+  listSessionIds,
+  readAllSessions,
+  readSession,
+  sessionFileName,
+  sessionIdFromFileName,
+} from './session/session-files.ts';

@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { WorkflowSessionSchema } from './session-schema.ts';
+import { sessionFileName, sessionIdFromFileName } from './session-files.ts';
 import type { WorkflowSession } from './session-schema.ts';
 import type { LogFn } from '../app/logger.ts';
 
@@ -348,29 +349,19 @@ export class WorkflowStore {
     }
     const ids: string[] = [];
     for (const entry of entries) {
-      if (entry.isFile() && entry.name.endsWith('.json')) {
-        // Every name this store writes is `encodeURIComponent`d, so a name
-        // that will not decode was not written by us. It used to throw
-        // `URIError` out of the loop, and one stray file made every session
-        // invisible — a listing that skips what it cannot read is worth more
-        // than one that refuses to answer at all.
-        let decoded: string;
-        try {
-          decoded = decodeURIComponent(entry.name.slice(0, -5));
-        } catch {
-          void this.log('warn', 'list: skipping a file whose name is not a session id', {
-            name: entry.name,
-          });
-          continue;
-        }
-        ids.push(decoded);
-      }
+      if (!entry.isFile()) continue;
+      // A name that will not decode was not written by this store. It used to
+      // throw `URIError` out of the loop, and one stray file made every
+      // session invisible.
+      const decoded = sessionIdFromFileName(entry.name);
+      if (decoded === null) continue;
+      ids.push(decoded);
     }
     void this.log('info', `Listed sessions: ${ids.length} found`);
     return ids.sort();
   }
 
   private sessionPath(sessionId: string): string {
-    return path.join(this.directory, `${encodeURIComponent(sessionId)}.json`);
+    return path.join(this.directory, sessionFileName(sessionId));
   }
 }
