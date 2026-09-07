@@ -153,12 +153,18 @@ export async function processScopeAndInvariants(
     });
   }
 
-  // Accumulated, not replaced. `changedFiles` is what the delivery permit
-  // expects the commit to carry, so it has to be everything the work produced —
-  // and a workflow produces it one move at a time. Replacing the list left the
-  // permit expecting only the last move's files.
-  const sorted = [...new Set([...(session.changedFiles ?? []), ...changedFiles])].sort();
-  session.changedFiles = sorted;
+  // Two different lists, and conflating them is a defect in either direction.
+  //
+  // `sorted` is THIS move's scope. Every verdict below is about this move —
+  // whether it wrote outside its task's writeScope, and whether the files it
+  // touched satisfy the invariants — so judging it against anything wider
+  // convicts a move of what an earlier one did.
+  //
+  // `session.changedFiles` is what the delivery permit expects the commit to
+  // carry, which is everything the work produced, one move at a time. It
+  // accumulates.
+  const sorted = [...changedFiles].sort();
+  session.changedFiles = [...new Set([...(session.changedFiles ?? []), ...sorted])].sort();
 
   let finalPassed = !metadataFailed;
 
