@@ -186,6 +186,11 @@ function shellSegments(command: string): string[][] {
       endSegment();
       continue;
     }
+    if (char === '#' && !started) {
+      while (index < command.length && command[index] !== '\n') index += 1;
+      endWord();
+      continue;
+    }
     if (/\s/.test(char)) {
       endWord();
       continue;
@@ -254,7 +259,9 @@ export function hasForbiddenGitSubcommand(command: string): boolean {
  * Check if a command is a commit task (commit-task.ts).
  */
 export function isCommitTaskCommand(command: string): boolean {
-  return /commit-task\.ts\b/.test(command.trim());
+  return shellSegments(command).some((words) =>
+    words.some((word) => executableName(word) === 'commit-task.ts')
+  );
 }
 
 /** Shell syntax that writes, or that hides what actually runs. */

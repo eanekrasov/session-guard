@@ -262,6 +262,23 @@ describe('StateMachineEngine', () => {
     expect(result.allowed).toBe(true);
   });
 
+  it('tryApplyTransitions enforces external stage exit and entry guards', () => {
+    const engine = new StateMachineEngine(
+      makeConfig({
+        stageAssignments: [{ id: 'always', priority: 0, condition: 'true', result: 'a' }],
+        stages: {
+          a: { exitGuards: ['false'] },
+          b: { entryGuards: ['false'] },
+        },
+        transitions: [{ from: 'a', to: 'b' }],
+      })
+    );
+    const session = makeSession({ currentStage: 'a' });
+
+    expect(engine.tryApplyTransitions(session)).toMatchObject({ allowed: false, applied: false });
+    expect(session.currentStage).toBe('a');
+  });
+
   it('checkTransition blocks illegal transition through engine', () => {
     const config = makeConfig({
       transitions: [{ from: 'PLANNING', to: 'EXECUTION' }],

@@ -447,8 +447,23 @@ export class StateMachineEngine {
 
     const gates = this.config.requiredGates ?? ['invariants'];
     const factsWithGates = { ...facts, requiredGates: gates };
+    const currentStageDef = this.getStages()[currentStage];
 
     for (const transition of outgoing) {
+      const targetStageDef = this.getStages()[transition.to];
+      const blockedExitGuard = (currentStageDef?.exitGuards ?? []).find(
+        (guard) => !this.evaluateGuard(guard, factsWithGates, evaluationContext)
+      );
+      if (blockedExitGuard !== undefined) {
+        continue;
+      }
+      const blockedEntryGuard = (targetStageDef?.entryGuards ?? []).find(
+        (guard) => !this.evaluateGuard(guard, factsWithGates, evaluationContext)
+      );
+      if (blockedEntryGuard !== undefined) {
+        continue;
+      }
+
       // The candidate in hand, not one looked up again by its endpoints: a
       // schema may declare several edges between the same two stages, and
       // re-finding by `from`/`to` judges the first of them every time — so an

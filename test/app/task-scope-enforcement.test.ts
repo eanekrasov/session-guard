@@ -169,13 +169,13 @@ describe('readScope is enforced for reading tools', () => {
   });
 });
 
-describe('editingAgents is enforced', () => {
-  it('refuses dispatch to an agent not listed in editingAgents', async () => {
+describe('editingAgents is enforced for mutating stages', () => {
+  it('does not block a verifier merely because it is not listed in editingAgents', async () => {
     setExecutableProfilesDir();
     await seedSession('s1', { editingAgents: ['code'] });
     const hooks: Hooks = createRuntime(pluginInput());
 
-    await expect(dispatchTask(hooks, 's1', 'call-1', 'reviewer')).rejects.toThrow();
+    await expect(dispatchTask(hooks, 's1', 'call-1', 'reviewer')).resolves.toBeUndefined();
   });
 
   it('admits dispatch to an agent listed in editingAgents', async () => {

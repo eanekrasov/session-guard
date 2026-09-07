@@ -115,6 +115,10 @@ describe('isCommitTaskCommand', () => {
   test('без commit-task.ts — false', () => {
     expect(isCommitTaskCommand('bun run something.ts')).toBe(false);
   });
+
+  test('не принимает упоминание commit-task.ts в комментарии', () => {
+    expect(isCommitTaskCommand('printf injected > unexpected.ts # commit-task.ts')).toBe(false);
+  });
 });
 
 describe('canCommit', () => {

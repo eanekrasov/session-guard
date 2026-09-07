@@ -285,6 +285,27 @@ describe('task-cycle admission', () => {
     expect(next.args).toEqual(expect.objectContaining({ description: expect.any(String) }));
   });
 
+  it('does not apply editingAgents to non-mutating verification stages', async () => {
+    setTaskAdmissionFixtureProfilesDir('serial');
+    const store = await createWorkflowSession();
+    const session = await load(store);
+    session.tasks.implementation[0].editingAgents = ['code'];
+    await store.save(session);
+    const hooks = createRuntime(pluginInput());
+
+    await beforeTask(hooks, 'call-dev', '[workflow-task:task-1] Develop');
+    await afterTask(hooks, 'call-dev', workflowResult('review', 'pass'));
+
+    const review = await beforeTask(
+      hooks,
+      'call-review',
+      '[workflow-task:task-1] Review',
+      'review'
+    );
+
+    expect(review.blockedReason).toBeUndefined();
+  });
+
   it('releases the native call but does not advance on missing or malformed workflow results', async () => {
     setTaskAdmissionFixtureProfilesDir('serial');
     const store = await createWorkflowSession();

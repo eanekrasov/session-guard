@@ -145,11 +145,11 @@ export function classifyConsentAnswer(answer: string[], request: ConsentRequest)
   }
 
   const single = normalized[0]!;
-  if (single.startsWith(request.grant)) {
-    return { kind: 'grant' };
-  }
   if (single.startsWith(request.decline)) {
     return { kind: 'decline' };
+  }
+  if (single.startsWith(request.grant)) {
+    return { kind: 'grant' };
   }
   return { kind: 'unrecognized', raw: answer };
 }

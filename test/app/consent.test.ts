@@ -180,6 +180,17 @@ describe('classifyConsentAnswer', () => {
     expect(classifyConsentAnswer(['no'], custom)).toEqual({ kind: 'decline' });
   });
 
+  test('checks decline before a grant prefix', () => {
+    const overlapping: ConsentRequest = {
+      ...request,
+      grant: 'Approve',
+      decline: 'Approve after changes',
+    };
+    expect(classifyConsentAnswer(['Approve after changes'], overlapping)).toEqual({
+      kind: 'decline',
+    });
+  });
+
   test('multi-select is unrecognized', () => {
     expect(classifyConsentAnswer(['grant', 'decline'], request)).toEqual({
       kind: 'unrecognized',

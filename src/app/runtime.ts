@@ -900,6 +900,7 @@ class StateMachineRuntime {
       // native tool.execute.before hook carries no agent — so this is
       // enforced here, refusing the dispatch itself rather than each write.
       if (
+        stage.gates?.length === 0 &&
         task.editingAgents?.length &&
         !agentIsAllowed(agent, task.editingAgents, session.profileId)
       ) {
@@ -1618,16 +1619,6 @@ class StateMachineRuntime {
       const run = operation ? session.loopRuns[operation.runId] : undefined;
       const task = operation ? findTask(session, operation.taskId) : undefined;
 
-      // Roll the move's invariants verdict (written by invariantsAfter, step
-      // 1a) into the task's own run.gates.invariants — strictly before the
-      // `failed || passed` block below computes movement (D3): toGuardContext
-      // (nextTaskStage's guard evaluation) reads run.gates, so a loop edge
-      // guarded on `task.gates.invariants == 'passed'` must see this roll-up
-      // to actually gate the movement it precedes.
-      if (run && operation?.invariants) {
-        run.gates.invariants = operation.invariants;
-      }
-
       if (
         operation &&
         run &&
@@ -1654,6 +1645,14 @@ class StateMachineRuntime {
         });
         delete session.activeOperations[callID];
         return;
+      }
+
+      // Roll the move's invariants verdict (written by invariantsAfter, step
+      // 1a) into the task's own run.gates.invariants — strictly after the
+      // stale-round check. An old operation must not alter the current round's
+      // gate even temporarily.
+      if (run && operation?.invariants) {
+        run.gates.invariants = operation.invariants;
       }
 
       if (operation) {
