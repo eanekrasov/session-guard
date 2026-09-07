@@ -698,7 +698,7 @@ class StateMachineRuntime {
       return;
     }
 
-    const stage = session.currentStage ?? 'planning';
+    const stage = session.currentStage;
     const activeGates = session.gates
       .filter((g) => g.status !== 'pending')
       .map((g) => `${g.id}=${g.status}`);
@@ -1339,9 +1339,12 @@ class StateMachineRuntime {
     lines.push(`[workflow session: ${session.sessionId}]`);
     lines.push(`[workflow profile: ${session.profileId}]`);
 
-    // Read stage directly from session — currentStage is set by tryApplyTransitions.
-    // Falls back to 'planning' if not yet set (new sessions).
-    const stage = session.currentStage ?? 'planning';
+    // Read the stage from the session. `currentStage` is written by
+    // tryApplyTransitions, and by workflow.create before that from the
+    // compiled workflow's own first stage — so it is always set, and the
+    // `?? 'planning'` that stood here was a fallback to the base profile's
+    // first stage that could never fire and would have been wrong if it did.
+    const stage = session.currentStage;
     lines.push(`[workflow stage: ${stage}]`);
 
     const gateLines = session.gates

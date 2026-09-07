@@ -425,8 +425,11 @@ export class MutationOrchestrator {
       const operation = session.activeOperations[input.callID];
       if (operation) operation.baseline = frame;
 
-      // Save stage BEFORE mutation for post-mutation transition validation
-      const stageBefore = session.currentStage ?? 'planning';
+      // Save stage BEFORE mutation for post-mutation transition validation.
+      // `currentStage` is always set — `workflow.create` writes the compiled
+      // workflow's own first stage — so there is nothing to fall back to, and
+      // the base profile's `planning` would have been the wrong thing anyway.
+      const stageBefore = session.currentStage;
       this.liveMutations.set(input.callID, { rootSessionId: input.sessionID, stageBefore });
     });
   }
@@ -495,7 +498,7 @@ export class MutationOrchestrator {
       if (mutationInfo) {
         try {
           const engine = await this.resolveEngine(session.profileId, session.schemaId);
-          const stageAfter = session.currentStage ?? 'planning';
+          const stageAfter = session.currentStage;
 
           if (stageAfter !== mutationInfo.stageBefore) {
             const validation = engine.checkTransition(
