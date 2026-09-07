@@ -46,6 +46,3 @@ editingAgents:
   - coder
   - orchestrator
 
-verifiers:
-  - reviewer
-  - tester

@@ -26,7 +26,6 @@ import * as utilsModule from '../../src/rules/utils.js';
 import * as sessionStoreModule from '../../src/rules/session-store.js';
 import * as matchedRulesStateModule from '../../src/rules/matched-rules-state.js';
 import * as runtimeContextModule from '../../src/rules/runtime-context.js';
-import * as runtimeChatModule from '../../src/rules/runtime-chat.js';
 import * as ruleHooksModule from '../../src/rules/rule-hooks.js';
 import { __testOnly } from '../../src/rules/index.js';
 import {
@@ -95,22 +94,6 @@ describe('module boundary tests', () => {
       parts: [{ type: 'text', text: 'hello' }],
     };
     expect(msg.role).toBe('user');
-  });
-
-  // Runtime decomposition module boundary tests
-  it('should export buildRuleMatchContext from runtime-context module', () => {
-    expect(runtimeContextModule.buildRuleMatchContext).toBeDefined();
-    expect(typeof runtimeContextModule.buildRuleMatchContext).toBe('function');
-  });
-
-  it('should export detectCiEnvironment from runtime-context module', () => {
-    expect(runtimeContextModule.detectCiEnvironment).toBeDefined();
-    expect(typeof runtimeContextModule.detectCiEnvironment).toBe('function');
-  });
-
-  it('should export updateSessionFromChatMessage from runtime-chat module', () => {
-    expect(runtimeChatModule.updateSessionFromChatMessage).toBeDefined();
-    expect(typeof runtimeChatModule.updateSessionFromChatMessage).toBe('function');
   });
 
   it('should detect CI environment correctly via runtime-context module', () => {

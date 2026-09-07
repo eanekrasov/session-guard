@@ -10,4 +10,3 @@ stages:
 actionGuards:
   beginMutation: "session.approved('plan')"
 editingAgents: ['code']
-verifiers: ['architect']

@@ -104,11 +104,19 @@ describe('hasForbiddenGitSubcommand', () => {
   test('commit в середине слова не срабатывает', () => {
     expect(hasForbiddenGitSubcommand('echo gitcommitted')).toBe(false);
   });
+
+  test('упоминание в комментарии не срабатывает', () => {
+    expect(hasForbiddenGitSubcommand('# git commit planning')).toBe(false);
+  });
 });
 
 describe('isCommitTaskCommand', () => {
   test('содержит commit-task.ts', () => {
     expect(isCommitTaskCommand('bun run commit-task.ts')).toBe(true);
+  });
+
+  test('распознаёт запуск по абсолютному пути с флагами', () => {
+    expect(isCommitTaskCommand('node /path/to/commit-task.ts --dry-run')).toBe(true);
   });
 
   test('без commit-task.ts — false', () => {

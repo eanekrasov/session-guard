@@ -6,19 +6,24 @@ summarised the first's open list as "items 3, 6, 20-24" and silently dropped
 14-19 and the dead e2e test. Every item below was re-checked against the code
 on 2026-09-06, not carried over on trust.
 
-Last updated 2026-09-07.
+Last updated 2026-09-07, evening.
 
 ## Where things stand
 
 | | |
 | --- | --- |
 | Branch | `main` |
-| Last commits | `75b1b5e` the correctness list and the error funnel, `e60f70a` a profile holds several schemas |
-| `bun test` | 1606 pass / 0 fail |
+| Last commit | `0c4e9ce`; the evening's work is **uncommitted in the working tree** |
+| `mise run test` | 1682 pass / 0 fail |
 | `tsc --noEmit`, `mise run build` | clean |
-| `mise run lint` | **clean** — the 47 pre-existing formatting errors are gone (`75b1b5e`) |
+| `mise run lint` | clean — it had regressed on `scripts/host-smoke/harness.ts` and is formatted again |
 | `openspec validate` | valid |
-| `bun run smoke` | 8/11 — see below; `cicd-full-cycle` not run, that profile is still being written |
+| `bun run smoke` | not re-run this evening; last known 8/11, see below |
+
+**Read `mise run test`, not `npx vitest run`.** The suite is bun's. Under
+vitest, 156 tests fail for reasons that have nothing to do with the code, and
+at least one file (`test/app/mutation-orchestrator.test.ts`) imports `bun:test`
+and cannot be collected at all. A count taken with the wrong runner is noise.
 
 ### Host smoke, 2026-09-06
 
@@ -141,7 +146,125 @@ operator's decision.
 - **Item 7 of the lower-priority list went with it**: the raw tool arguments
   dumped on every call moved from `info` to `debug`.
 
+## Done 2026-09-07, evening: reported defects, the shared readers, the schema
+
+Ten reports came in over the evening, most asked as «это дефект?». Three
+turned out not to be, at the severity claimed, and saying so is part of the
+record: every one described a real mechanism, and the work was separating that
+from a real consequence. Everything below was reproduced before it was
+touched, and each fix has a test that fails without it.
+
+### Confirmed and fixed
+
+| | |
+| --- | --- |
+| **A parent blocked its own child.** `serial` admission counted every open run in the session, so a running parent in `parents` refused its child in `task-1` with «Serial task cycle admits only the next unfinished task» — and then waited for a child that could not start. `taskAdmissionRejection` now splits two scopes: `cycleRuns` (same `listKey`) drives `serial`, `maxConcurrent` and the `serial_with_overlap` order checks; session-wide `activeRuns` still drives `writeScope` overlap, because the diff is split by path, not by list. | `src/app/runtime.ts` |
+| **A circular `extends` chain resolved half-assembled.** `break` kept the walk finite and told nobody. It throws now, naming the cycle. The missing-parent branch two lines below had always thrown — same authoring mistake, same answer. | `src/app/profile-resolver.ts` |
+| **A deleted session came back.** `WorkflowStore.delete()` took neither the in-process chain nor the file lock, so a `save()` already holding its payload renamed the file back afterwards. 20/20 before, 0/20 after. | `src/session/session-store.ts` |
+| **One stray file hid every session.** `list()` threw `URIError` out of the loop on an undecodable name. | `src/session/session-store.ts` |
+| **The dashboard was doubly stale.** It stripped `.json` by first match (`a.jsonb.json` → session `ab.json`), decoded outside its own `try`, and its live update had never worked: the client keyed on `data.rootSessionID` and a `data.event` wrapper, neither of which the server has ever sent. | `src/dashboard/*` |
+| **`onFailure: retry` did nothing.** Implemented as what it always meant — the edge closes on `isExhausted(from)`, and taking it spends an attempt against the stage's own `retryBudget`. `terminal` needed no code: once the retry edge closes, the next open edge out of the stage is the terminal one. | `src/domain/engine.ts` |
+| **An invariant failure spent a retry attempt.** Recording a verdict is not retrying. The runtime already spends one on the move that retries (`spendOnFailure`, `recordTaskRetryFailure`), so this was a second, independent source — a task could exhaust its retries without a single retry having been taken. | `src/domain/operation-lifecycle.ts` |
+| **A stage typo was invisible.** `validateKnownKeys` in the compiler already refuses unknown keys with a good message, but zod stripped stage keys before it could see them: `allowedAgent` for `allowedAgents` gave a stage with no agent restriction, silently. `StageDefSchema` is `.passthrough()` now, like the root. | `src/schema/profile-schema.ts` |
+| **`verifiers` deleted.** Carried by loader, resolver and the compiler's key list; read by nothing. Removed from the schema, the type, three shipped profiles, three smoke profiles, two fixtures and the README. | everywhere |
+
+### Reported, reproduced, and not defects at the severity claimed
+
+- **`parentCache` seeded before validation.** Real mechanism, wrong consequence: nothing in `src` writes `testStatus['parentID']`, so the entry was always `sessionId → sessionId` — not a child attached to somebody else's queue but a child declared its own root, which suppresses the host lookup. Fixed anyway, and `testStatus` deleted: the field had no writer at all.
+- **`MatchedRulesStateStore` swallows write failures.** By design, and now said so in the class doc: the only consumer is the TUI sidebar, no gate or transition reads it, and both writers are hook handlers with nothing to retry. What was actually wrong was the JSDoc (`@throws` implied other errors propagate) and that the warning was debug-gated, so a lost write left no trace at all. Both fixed.
+- **Two store instances lose a merge.** True, 20/20 — and 0/20 on one instance, which is what production builds. `src/rules/index.ts` is a test-only export. Recorded in the class doc rather than fixed; the cross-process lock lives in `WorkflowStore`, where a lost write costs workflow state.
+Two more came out of the work rather than the reports: a route id reaching the
+loader still percent-encoded (real, fixed, but unreachable while session ids
+are `ses_[A-Z0-9]+`), and SSE frames enqueued as strings, which only Bun's own
+server tolerates.
+
+### The shared readers
+
+Three places knew independently how a session id becomes a file name — the
+store, the dashboard and the TUI — and had already drifted. `src/session/session-files.ts`
+is the one owner now (`sessionFileName`, `sessionIdFromFileName`,
+`listSessionIds`, `readSession`, `readAllSessions`), re-exported from
+`src/public-api.ts`, which is the internal door for the TUI and the dashboard.
+Readers return a schema-validated `WorkflowSession`; absent, unparseable and
+off-schema are one answer, `null`. Legacy shapes are deliberately not carried:
+one current schema, migrations out of scope by decision.
+
+**The dashboard is testable now.** `dashboard-server.ts` was 770 lines with
+zero exports that started a server, a watcher and two timers at import and
+computed eight paths from `import.meta.dir` at load. It is 71 lines of
+environment and socket; everything else is `createDashboard(config)` in
+`dashboard-app.ts`, every directory an argument. The old assertions matched
+against the file's own source and broke three times on comments that merely
+mentioned the wrong word; they are 17 behavioural tests driving real
+`Request`/`Response` objects.
+
+**`/api/agents/:id/prompt` answers.** It read `<repo>/agent/<agent>.md`, a flat
+directory this project does not have — the layout of the *previous* project,
+where `../harness/agent/` still exists. The sync writes
+`<harness>/agents/<profileId>/<agent>.md`, so the endpoint now takes the
+profile from the newest session, and `/api/agents/:profileId/:agentId/prompt`
+names it explicitly.
+
+### Profiles
+
+`profiles/base/agents/` and `profiles/harness/agents/` exist. Both profiles
+declared agents and shipped no prompt files at all; only `android` had any, and
+they are Android-specific down to «Ты — Senior Android Architect». The six base
+prompts were rewritten neutral — no Kotlin, no Jira, Confluence, Figma,
+Proxyman, Mobile MCP, `ast-index`, detekt or `TMR-` keys — keeping what belongs
+to the harness itself: stage names matching `base.yaml`, session facts, the
+consent-request block, the `<workflow-result>` marker, visibility restrictions,
+the delegation rule and the git-safety classification. Stack specifics are
+*requested* from the profile rather than described.
+
+The agent roster rule changed with them: a declared `agents` list in
+`profile.json` is the source of truth, and when a profile declares none the
+default is the `*.md` in its own agents directory (`listProfileAgents`). The
+sync obeys the same roster. And `ProfileResolver` now **accumulates** agents
+down the `extends` chain, deduped, child first — it used to take the nearest
+ancestor that declared any, so a child naming one agent of its own silently
+lost every agent its parent shipped.
+
 ## Open — verified, in the order I would take them
+
+### Waiting on the operator, raised 2026-09-07 evening
+
+1. **What `failed` should mean — and `done` with it.** Neither is enforced.
+   `terminalStages` is computed in `src/schema/compile-workflow.ts:466` from a
+   hardcoded `TERMINAL_STAGES` set and **read by nobody**, so a stage is
+   terminal only in the sense that no edge leaves it. Reproduced on a live
+   runtime: a session in `done` still admits dispatch. Between «finished»,
+   «failed» and «stuck» there is no behavioural difference at all — the
+   workflow stops moving, the session does not stop working.
+
+   Four options were put to the operator: (1) leave it and delete the unread
+   `terminalStages`; (2) make terminality observable — the dashboard and TUI
+   stop showing the session active; (3) make it binding — a terminal stage
+   refuses dispatch, mutation and commit, and an edge out of one becomes a
+   compile error; (4) give `failed` content — require the entry to record which
+   gate failed or which budget ran out, so «why did we stop» is readable from
+   the session. **Recommended: 3**, because 2 alone would honestly report
+   «finished» while work continues in that same session. Undecided.
+
+2. **`settings` is read by nothing.** Carried by the resolver
+   (`src/app/profile-resolver.ts:285`) and that is all — declaring a setting
+   changes no behaviour. The fourth such key found this evening, after
+   `onFailure` (implemented), `verifiers` (deleted) and `terminalStages`
+   (item 1). Asked whether to delete it; unanswered.
+
+3. **A cross-process lock for `MatchedRulesStateStore`.** Offered, not done.
+   Two instances over one state directory lose a merge every time. It does not
+   bite today (one store per runtime, and the state is a sidebar hint), so the
+   limitation is written into the class doc instead. `withFileLock` in
+   `WorkflowStore` is the pattern, and it is private — extracting it touches
+   the session store, which is why this was not done unasked.
+
+4. **`parseRuntimeState` carries unreachable tolerance.** It accepts `gates`
+   as an array *or* an object, `tasks` as either, and a missing `sessionId`
+   standing in as `rootSessionID` (`src/tui/tui.ts:158-260`). The TUI reads
+   schema-validated sessions now, so those branches cannot be entered. Left in
+   place deliberately: clearing them is its own change, not a rider on this
+   one.
 
 ### Schema machinery — status corrected
 
@@ -151,10 +274,10 @@ The morning handoff listed 14-19 as open. Re-checked:
 | --- | --- | --- |
 | 14 | `compileWorkflow` never called from `src` | **closed** — `src/app/mutation-orchestrator.ts:263` |
 | 15 | `exitGuards` unread, `stageLevelGuards` unpopulated | **half** — the array form is read (`src/domain/task-movement.ts:76`); `stageLevelGuards` is still never populated, `schemaToEngineConfig` does not return it |
-| 16 | `onFailure` has no consumer | **open** — compiled into `CompiledTransition`, read by nobody |
+| 16 | `onFailure` has no consumer | **closed** — `retry` implemented, `terminal` needs nothing; see below |
 | 17 | no profile uses `kind: pass\|fail` | **open** — it appears only in `profiles/android/task-cycles.yaml`, which declares itself unregistered |
 | 18 | `deriveStageFn` falls back to `'PLANNING'` | **open** — see the stage-name audit below |
-| 19 | `editingAgents` / `verifiers` are declarative only | **half** — `task.editingAgents` is enforced at `src/app/runtime.ts:843`; the schema-level `editingAgents` and `verifiers` are carried through resolution and read by nobody |
+| 19 | `editingAgents` / `verifiers` are declarative only | **closed** — schema-level `editingAgents` is read by `engine.getEditingAgents()` (`src/app/runtime.ts:967`) to classify whether a stage edits; `verifiers` was read by nothing and has been deleted |
 
 ### Testing
 
@@ -316,6 +439,26 @@ Recommendation on record: **A**. It costs more edits and does not blur what a
 task is; B fixes one stage by breaking a guard that works today.
 
 ## Facts that cost effort — do not re-derive
+
+**`stageAssignments` wins over `currentStage`.** It reads like legacy and is
+not: `deriveStageFn` (`src/domain/engine.ts:152-160`) consults the rules first,
+highest priority first, and the persisted `currentStage` is only the fallback
+when no rule matches or none is declared. A schema that declares
+`stageAssignments` has handed the stage decision to an expression.
+
+**A gate's `failed` is born before any budget is consulted.** Two places, and
+they are not symmetric: `finishMutation(passed = false)`
+(`src/domain/operation-lifecycle.ts`) sets the `invariants` gate, and
+`src/app/runtime.ts:2077` records an agent's `<workflow-result>` verdict on the
+gate it names. The budget is spent later, by the move that retries — that
+asymmetry is why the bump was removed from `finishMutation` this evening.
+
+**The state directory is global and keyed by session id alone.**
+`~/.opencode/state/opencode-rules` for matched rules, and `sessionsDir` for
+sessions. Two runtimes for different projects cannot collide because a session
+belongs to one project — but nothing about the path says so.
+
+
 
 **Hook ordering is load-bearing.** `handleWorkflowResult` (the `runtime.ts`
 after-chain, step 1b) computes movement and deletes the operation. Anything

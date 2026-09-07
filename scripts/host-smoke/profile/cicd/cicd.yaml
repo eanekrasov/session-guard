@@ -119,6 +119,3 @@ editingAgents:
   - deployer
   - orchestrator
 
-verifiers:
-  - tester
-  - smoke

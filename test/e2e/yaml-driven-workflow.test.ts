@@ -33,7 +33,6 @@ function loadEngine(): StateMachineEngine {
     transitions: raw.transitions,
     settings: raw.settings,
     editingAgents: raw.editingAgents,
-    verifiers: raw.verifiers,
     requiredGates: raw.requiredGates,
     actionGuards: raw.actionGuards,
     stageAssignments: raw.stageAssignments,

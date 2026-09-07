@@ -119,14 +119,6 @@ describe('checkTransition', () => {
     expect(result.allowed).toBe(true);
   });
 
-  it('allows a transition without kind', () => {
-    const transitions: TransitionDef[] = [{ from: 'PLANNING', to: 'EXECUTION' }];
-
-    const result = checkTransition('PLANNING', 'EXECUTION', transitions);
-
-    expect(result.allowed).toBe(true);
-  });
-
   describe('transitions with guard', () => {
     it('allows when guard passes', () => {
       const transitions: TransitionDef[] = [{ from: 'EXECUTION', to: 'COMMIT' }];

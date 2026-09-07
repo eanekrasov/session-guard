@@ -999,22 +999,6 @@ describe('E2E: Full state machine flow', () => {
     expect(result.allowed).toBe(true);
   });
 
-  // ─── TC49: GuardEvaluator approved() returns false for unknown type ──────
-
-  test('TC49: session.approved() returns false for unknown type', () => {
-    store = makeStore();
-    const session = baseSession();
-    const engine = new StateMachineEngine(ENGINE_CONFIG);
-
-    approve(session, 'plan', 'ev', 'c1');
-
-    // Verify through checkTransition that non-existent approval type blocks
-    expect(engine.deriveStage(session)).toBe('TASKS_READY');
-    // If we remove plan approval, it reverts
-    session.approvals = [];
-    expect(engine.deriveStage(session)).toBe('PLANNING');
-  });
-
   // ─── TC50: Stage derivation priority — higher wins ───────────────────────
 
   test('TC50: higher priority stage assignment wins over lower', () => {

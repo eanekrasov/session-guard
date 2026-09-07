@@ -80,7 +80,6 @@ export interface ResolvedSchema {
   transitions?: TransitionDef[];
   settings?: Record<string, unknown>;
   editingAgents?: string[];
-  verifiers?: string[];
   requiredGates?: string[];
   /**
    * The gates this workflow declares.

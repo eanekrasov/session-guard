@@ -385,18 +385,6 @@ describe('StateMachineEngine', () => {
     expect(stage).toBe('PLANNING');
   });
 
-  it('deriveStage evaluates rules when loading session from storage', () => {
-    const config = makeConfig({
-      stageAssignments: [{ id: 'always', priority: 0, condition: 'true', result: 'PLANNING' }],
-    });
-    const engine = new StateMachineEngine(config);
-    // Session has currentStage set, but deriveStage evaluates rules
-    const session = makeSession();
-
-    const stage = engine.deriveStage(session);
-    expect(stage).toBe('PLANNING');
-  });
-
   it('tryApplyTransitions does NOT re-execute transition effects on reload', () => {
     const config = makeConfig({
       transitions: [

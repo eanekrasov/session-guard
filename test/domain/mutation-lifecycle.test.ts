@@ -34,31 +34,9 @@ function createSession(): WorkflowSession {
   };
 }
 
+// Основные passed/failed сценарии — в test/domain/workflow.test.ts.
+// Здесь остаются только lifecycle-специфичные краевые случаи.
 describe('finishMutation', () => {
-  test('finishMutation с passed=true — activeOperation очищен, gate invariants = passed', () => {
-    const session = createSession();
-
-    beginMutation(session, 'm1', 'unknown', () => 'code');
-    finishMutation(session, true, 'm1');
-
-    expect(session.activeOperations).toEqual({});
-    const gate = session.gates.find((g) => g.id === 'invariants');
-    expect(gate?.status).toBe('passed');
-  });
-
-  test('finishMutation с passed=false — gate invariants = failed, бюджет не тратится', () => {
-    const session = createSession();
-
-    beginMutation(session, 'm1', 'unknown', () => 'code');
-    finishMutation(session, false, 'm1');
-
-    expect(session.activeOperations).toEqual({});
-    const gate = session.gates.find((g) => g.id === 'invariants');
-    expect(gate?.status).toBe('failed');
-    // Запись вердикта — не повтор. Попытку тратит ход, который повторяет.
-    expect(session.retryBudgets['task-1']).toBeUndefined();
-  });
-
   test('finishMutation с passed=true и отсутствующим gate invariants — не падает, activeOperation очищен', () => {
     const session = createSession();
     session.gates = session.gates.filter((g) => g.id !== 'invariants');

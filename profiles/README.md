@@ -78,8 +78,11 @@ authored with bare names; the resolver qualifies them (`src/app/agent-names.ts`)
 and a dispatch matching either form is accepted. A name qualified by a different
 profile never matches.
 
-**`editingAgents` and `verifiers` are declarative only.** They are carried
-through the loader and resolver but no check reads them.
+**`editingAgents` says which agents edit.** A stage whose `allowedAgents`
+admits one of them is a stage where work happens, which is what lets a task's
+own `editingAgents` be enforced. There was a `verifiers` key beside it that
+nothing ever read — declaring a verifier restricted nothing and routed nothing
+— and it has been removed rather than left looking like a control.
 
 ## Committing
 

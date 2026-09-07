@@ -191,7 +191,6 @@ const SCHEMA_KEYS = new Set([
   'actionGuards',
   'editingAgents',
   'taskControlAgents',
-  'verifiers',
   'requiredGates',
   'settings',
 ]);

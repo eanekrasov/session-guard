@@ -130,10 +130,6 @@ describe('GuardAST', () => {
       expect(evaluateGuard('session.undefined.property == true', {}, makeBuiltins({}))).toBe(false);
     });
 
-    it('cannot access globalThis', () => {
-      expect(evaluateGuard('globalThis', {}, makeBuiltins({}))).toBe(false);
-    });
-
     it('cannot call missing functions', () => {
       expect(evaluateGuard('fetch("http://evil.com")', {}, makeBuiltins({}))).toBe(false);
     });

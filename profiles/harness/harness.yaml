@@ -21,5 +21,3 @@ taskControlAgents:
 editingAgents:
   - harness
 
-verifiers:
-  - harness

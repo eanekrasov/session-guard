@@ -284,7 +284,6 @@ export class ProfileResolver {
       transitions: currentSchema.transitions,
       settings: currentSchema.settings,
       editingAgents: currentSchema.editingAgents,
-      verifiers: currentSchema.verifiers,
       requiredGates: currentSchema.requiredGates,
       gates: currentSchema.gates,
       taskControlAgents: currentSchema.taskControlAgents,

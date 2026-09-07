@@ -45,6 +45,31 @@ describe('ProfileSchemaSchema', () => {
     });
   });
 
+  describe('unknown keys', () => {
+    it('keeps a stage key it does not know, for the compiler to refuse', async () => {
+      // zod used to strip it, which deleted the evidence before
+      // `validateKnownKeys` could see it: `allowedAgent` for `allowedAgents`
+      // produced a stage with no agent restriction at all, silently, while the
+      // check written to catch exactly that saw nothing.
+      const parsed = ProfileSchemaSchema.parse({
+        stages: { dev: { allowedAgent: ['code'] } },
+      });
+
+      expect((parsed.stages!.dev as Record<string, unknown>)['allowedAgent']).toEqual(['code']);
+    });
+
+    it('is refused by the compiler, at any depth', async () => {
+      const { compileWorkflow } = await import('../../src/schema/compile-workflow.ts');
+      const parsed = ProfileSchemaSchema.parse({
+        stages: { outer: { stages: { inner: { allowdAgents: ['code'] } } } },
+      });
+
+      const { errors } = compileWorkflow({ id: 's', source: 's.yaml', ...parsed });
+
+      expect(errors.map((error) => error.path)).toContain('stages.outer.stages.inner.allowdAgents');
+    });
+  });
+
   describe('exitGuards', () => {
     it('accepts multiple exitGuards with logical operators', () => {
       const input = {
@@ -261,18 +286,16 @@ describe('ProfileSchemaSchema', () => {
     });
   });
 
-  describe('editingAgents, verifiers, requiredGates', () => {
-    it('accepts editingAgents, verifiers, requiredGates as string arrays', () => {
+  describe('editingAgents, requiredGates', () => {
+    it('accepts editingAgents and requiredGates as string arrays', () => {
       const input = {
         editingAgents: ['code'],
-        verifiers: ['architect'],
         requiredGates: ['invariants'],
       };
 
       const result = ProfileSchemaSchema.parse(input);
 
       expect(result.editingAgents).toEqual(['code']);
-      expect(result.verifiers).toEqual(['architect']);
       expect(result.requiredGates).toEqual(['invariants']);
     });
   });

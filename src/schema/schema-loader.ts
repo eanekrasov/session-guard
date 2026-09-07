@@ -166,7 +166,6 @@ export class SchemaLoader {
       transitions: mergeTransitions(base.transitions, extension.transitions),
       settings: this.deepMerge(base.settings ?? {}, extension.settings ?? {}),
       editingAgents: extension.editingAgents ?? base.editingAgents,
-      verifiers: extension.verifiers ?? base.verifiers,
       requiredGates: extension.requiredGates ?? base.requiredGates,
       gates: extension.gates ?? base.gates,
       taskControlAgents: extension.taskControlAgents ?? base.taskControlAgents,

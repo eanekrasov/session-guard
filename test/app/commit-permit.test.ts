@@ -1,63 +1,8 @@
 import { describe, it, expect } from 'vitest';
 
-// ─── Pure function tests (no runtime needed) ──────────────────────────────────
-
-describe('hasForbiddenGitSubcommand', () => {
-  it('detects bare git commit', async () => {
-    const { hasForbiddenGitSubcommand } = await import('../../src/domain/session-queries.ts');
-    expect(hasForbiddenGitSubcommand('git commit -m "feat: x"')).toBe(true);
-    expect(hasForbiddenGitSubcommand('git commit -a --amend')).toBe(true);
-  });
-
-  it('detects bare git push', async () => {
-    const { hasForbiddenGitSubcommand } = await import('../../src/domain/session-queries.ts');
-    expect(hasForbiddenGitSubcommand('git push origin main')).toBe(true);
-    expect(hasForbiddenGitSubcommand('git push --force')).toBe(true);
-  });
-
-  it('allows non-forbidden git commands', async () => {
-    const { hasForbiddenGitSubcommand } = await import('../../src/domain/session-queries.ts');
-    expect(hasForbiddenGitSubcommand('git status')).toBe(false);
-    expect(hasForbiddenGitSubcommand('git diff')).toBe(false);
-    expect(hasForbiddenGitSubcommand('git add .')).toBe(false);
-    expect(hasForbiddenGitSubcommand('git log --oneline')).toBe(false);
-    expect(hasForbiddenGitSubcommand('git branch')).toBe(false);
-  });
-
-  it('detects git commit/push after &&', async () => {
-    const { hasForbiddenGitSubcommand } = await import('../../src/domain/session-queries.ts');
-    expect(hasForbiddenGitSubcommand('git add . && git commit -m "x"')).toBe(true);
-    expect(hasForbiddenGitSubcommand('npm test && git push')).toBe(true);
-  });
-
-  it('detects git commit/push after ||', async () => {
-    const { hasForbiddenGitSubcommand } = await import('../../src/domain/session-queries.ts');
-    expect(hasForbiddenGitSubcommand('false || git commit -m "fix"')).toBe(true);
-  });
-
-  it('ignores case in git command', async () => {
-    const { hasForbiddenGitSubcommand } = await import('../../src/domain/session-queries.ts');
-    expect(hasForbiddenGitSubcommand('GIT COMMIT -m "x"')).toBe(true);
-    expect(hasForbiddenGitSubcommand('Git Push origin main')).toBe(true);
-  });
-
-  it('allows non-git commands that mention commit', async () => {
-    const { hasForbiddenGitSubcommand } = await import('../../src/domain/session-queries.ts');
-    expect(hasForbiddenGitSubcommand('bun run commit-task.ts')).toBe(false);
-    expect(hasForbiddenGitSubcommand('echo "git commit"')).toBe(false);
-    expect(hasForbiddenGitSubcommand('# git commit planning')).toBe(false);
-  });
-});
-
-describe('isCommitTaskCommand', () => {
-  it('detects commit-task.ts commands', async () => {
-    const { isCommitTaskCommand } = await import('../../src/domain/session-queries.ts');
-    expect(isCommitTaskCommand('bun run commit-task.ts')).toBe(true);
-    expect(isCommitTaskCommand('node /path/to/commit-task.ts --dry-run')).toBe(true);
-    expect(isCommitTaskCommand('git status')).toBe(false);
-    expect(isCommitTaskCommand('bun test')).toBe(false);
-  });
-});
+// Pure helper behaviour lives in test/domain/session-queries.test.ts.
+// This file covers the delivery-permit schema and the host argument shape
+// that reaches the guard at runtime.
 
 describe('DeliveryPermit schema', () => {
   it('parses a valid deliveryPermit', async () => {
@@ -94,26 +39,7 @@ describe('DeliveryPermit schema', () => {
   });
 });
 
-// ─── extractBashCommand ───────────────────────────────────────────────────────
-
-describe('extractBashCommand', () => {
-  it('unwraps the host bash argument object', async () => {
-    const { extractBashCommand } = await import('../../src/domain/session-queries.ts');
-    expect(extractBashCommand({ command: 'git commit -m "x"' })).toBe('git commit -m "x"');
-    expect(extractBashCommand({ command: 'npm test', description: 'run tests' })).toBe('npm test');
-  });
-
-  it('passes a bare string through unchanged', async () => {
-    const { extractBashCommand } = await import('../../src/domain/session-queries.ts');
-    expect(extractBashCommand('git push origin main')).toBe('git push origin main');
-  });
-
-  it('falls back to the serialised form for unrecognised shapes', async () => {
-    const { extractBashCommand } = await import('../../src/domain/session-queries.ts');
-    expect(extractBashCommand({ cmd: 'git push' })).toBe('{"cmd":"git push"}');
-    expect(extractBashCommand(undefined)).toBe('""');
-  });
-
+describe('host bash argument shape', () => {
   it('detects forbidden git commands in the host argument shape', async () => {
     const { extractBashCommand, hasForbiddenGitSubcommand } =
       await import('../../src/domain/session-queries.ts');
@@ -126,5 +52,6 @@ describe('extractBashCommand', () => {
       true
     );
     expect(hasForbiddenGitSubcommand(extractBashCommand({ command: 'git status' }))).toBe(false);
+    expect(extractBashCommand({ command: 'npm test', description: 'run tests' })).toBe('npm test');
   });
 });

@@ -41,50 +41,66 @@ const RetryBudgetSchema = z.object({
 export type RetryBudget = z.infer<typeof RetryBudgetSchema>;
 
 /**
- * A stage — the one unit of workflow state.
+ * Стадия — единственная единица состояния workflow.
  *
- * A stage that names a `loop` runs its own `stages` once per task in that
- * list, moved by its own `transitions`. Nesting is the only difference between
- * an inner stage and an outer one: `allowedAgents`, `gates`, `transitions`,
- * guards, effects and retry budgets mean the same at either level, so a reader
- * learns one set of rules rather than two. See docs/stage-model.md.
+ * Стадия, объявившая `loop`, прогоняет свои `stages` по одному разу на каждую
+ * задачу из этого списка, двигаясь по собственным `transitions`. Вложенность —
+ * единственное отличие внутренней стадии от внешней: `allowedAgents`, `gates`,
+ * `transitions`, guard-ы, эффекты и бюджеты ретраев означают на обоих уровнях
+ * одно и то же, поэтому читателю нужен один набор правил, а не два.
+ * См. docs/stage-model.md.
  */
 export interface StageDef {
-  /** Task list this stage cycles over. Its `stages` then run once per task. */
+  /** Список задач, по которому стадия ходит циклом. Её `stages` выполняются на каждую задачу. */
   loop?: LoopSource;
   dispatch?: DispatchDef;
   retryBudget?: RetryBudget;
-  /** Agents allowed to act while this stage is current. */
+  /** Агенты, которым разрешено действовать, пока эта стадия текущая. */
   allowedAgents?: string[];
   /**
-   * Gates this stage closes.
+   * Гейты, которые закрывает эта стадия.
    *
-   * Declaring it makes the stage a verifier: its agent must finish with a
-   * `<workflow-result>` tag whose `stage` equals this stage's id, `pass` sets
-   * these gates to `passed` and `fail` sets them to `failed`. A gate named
-   * here that no session carries is a schema load error, not runtime silence.
+   * Объявление этого поля делает стадию проверяющей: её агент обязан
+   * завершиться тегом `<workflow-result>`, у которого `stage` равен id этой
+   * стадии; `pass` переводит перечисленные гейты в `passed`, `fail` — в
+   * `failed`. Гейт, названный здесь, но не объявленный в схеме, — ошибка
+   * загрузки схемы, а не молчаливое поведение в рантайме.
    */
   gates?: string[];
   entryGuards?: string[];
   exitGuards?: string[];
-  /** Stages run per task, when this stage declares a `loop`. */
+  /** Стадии, выполняемые на каждую задачу, когда эта стадия объявляет `loop`. */
   stages?: Record<string, StageDef>;
-  /** Transitions between this stage's own `stages`. */
+  /** Переходы между собственными `stages` этой стадии. */
   transitions?: TransitionDef[];
 }
 
+/**
+ * Стадия сохраняет ключи, с которыми была написана, — так же, как корневой объект.
+ *
+ * Не потому, что их кто-то читает: неизвестный ключ отвергает
+ * `validateKnownKeys` в компиляторе — он и знает, какие ключи может нести
+ * стадия, и объясняет, почему нечитаемый ключ стоит отвергнуть. Обрезка здесь
+ * удаляла улику раньше, чем проверка успевала её увидеть: `allowedAgent`
+ * вместо `allowedAgents` молча давал стадию вообще без ограничения агентов,
+ * а проверка, написанная ровно для этого случая, стояла шагом ниже и не видела
+ * ничего. Корень по той же причине всегда был `.passthrough()`; стадия ничем
+ * не отличается.
+ */
 const StageDefSchema: z.ZodType<StageDef> = z.lazy(() =>
-  z.object({
-    loop: LoopSourceSchema.optional(),
-    dispatch: DispatchSchema.optional(),
-    retryBudget: RetryBudgetSchema.optional(),
-    allowedAgents: z.array(z.string()).optional(),
-    gates: z.array(z.string()).optional(),
-    entryGuards: z.array(z.string()).optional(),
-    exitGuards: z.array(z.string()).optional(),
-    stages: z.record(StageDefSchema).optional(),
-    transitions: z.array(TransitionDefSchema).optional(),
-  })
+  z
+    .object({
+      loop: LoopSourceSchema.optional(),
+      dispatch: DispatchSchema.optional(),
+      retryBudget: RetryBudgetSchema.optional(),
+      allowedAgents: z.array(z.string()).optional(),
+      gates: z.array(z.string()).optional(),
+      entryGuards: z.array(z.string()).optional(),
+      exitGuards: z.array(z.string()).optional(),
+      stages: z.record(StageDefSchema).optional(),
+      transitions: z.array(TransitionDefSchema).optional(),
+    })
+    .passthrough()
 );
 
 const TransitionEffectSchema = z.object({
@@ -131,25 +147,109 @@ export type ToolItem = z.infer<typeof ToolItemSchema>;
 
 export type DispatchDef = z.infer<typeof DispatchSchema>;
 
+/**
+ * Один workflow в том виде, в каком его объявляет профиль.
+ *
+ * Неизвестные ключи сохраняются, а не срезаются: отвергать их — работа
+ * `validateKnownKeys` в компиляторе, у него список того, что может нести схема
+ * и стадия, и там же объяснено, почему ключ, который никто не читает, стоит
+ * отвергнуть. Отбрасывание здесь уничтожило бы улику раньше срока.
+ */
 export const ProfileSchemaSchema = z
   .object({
-    extends: z.string().optional(),
-    stages: z.record(StageDefSchema).optional(),
-    stageAssignments: z.array(StageAssignmentRuleSchema).optional(),
-    transitions: z.array(TransitionDefSchema).optional(),
-    gates: z.array(GateItemSchema).optional(),
-    tools: z.array(ToolItemSchema).optional(),
-    gateMapping: z.record(z.array(z.string())).optional(),
-    actionGuards: z.record(z.string()).optional(),
-    editingAgents: z.array(z.string()).optional(),
     /**
-     * Agents allowed to drive workflow task state (workflow.tasks-set,
-     * workflow.tasks-set-status, workflow.tasks-resolve-decision).
-     * Defaults to ['orchestrator'] — a worker must never close its own stage.
+     * Схема, дельтой к которой является эта, в виде `<profile>/<file>.yaml`.
+     *
+     * Стадии и переходы сливаются поэлементно, а не целыми полями: потомок,
+     * трогающий одну стадию, не должен молча потерять остальные родительские.
+     */
+    extends: z.string().optional(),
+
+    /**
+     * Стадии workflow, по id.
+     *
+     * Стадия может быть вложенной: `loop:` называет список задач, по которому
+     * она ходит циклом, а стадии внутри — тот цикл, который проходит каждая
+     * задача.
+     */
+    stages: z.record(StageDefSchema).optional(),
+
+    /**
+     * Стадия, выводимая из условия, а не из графа.
+     *
+     * Спрашивается раньше сохранённого `currentStage` и выигрывает у него:
+     * стадию называет правило с наибольшим приоритетом, чьё условие истинно, и
+     * только если не сработало ни одно правило — или их не объявлено вовсе —
+     * остаётся стадия, записанная последним переходом.
+     */
+    stageAssignments: z.array(StageAssignmentRuleSchema).optional(),
+
+    /**
+     * Рёбра workflow: какая стадия может следовать за какой и при каком условии.
+     *
+     * `guard` — выражение над фактами сессии; `kind: pass | fail` читает
+     * `requiredGates`; `consent` ждёт оператора; `effects` — то, что делает сам
+     * переход по ребру, а `onFailure: retry` тратит бюджет ретраев.
+     */
+    transitions: z.array(TransitionDefSchema).optional(),
+
+    /**
+     * Вердикты, которых ждёт этот workflow; объявлены, чтобы `gates:` стадии
+     * было с чем сверять.
+     *
+     * Своего списка гейтов сессия не несёт — гейт появляется в ней в тот
+     * момент, когда кто-то впервые о нём высказался.
+     */
+    gates: z.array(GateItemSchema).optional(),
+
+    /** Инструменты, которыми управляет workflow: когда каждый допускается и молча ли. */
+    tools: z.array(ToolItemSchema).optional(),
+
+    /** id стадии → id гейтов, за которые эта стадия отвечает. */
+    gateMapping: z.record(z.array(z.string())).optional(),
+
+    /**
+     * id действия → guard, который должен быть истинным, чтобы действие допустили.
+     *
+     * Несущий случай — `beginMutation: "session.approved('plan')"`: никаких
+     * правок, пока оператор не утвердил план.
+     */
+    actionGuards: z.record(z.string()).optional(),
+
+    /**
+     * Агенты, которые правят код, в масштабе всего workflow.
+     *
+     * Стадия, чей `allowedAgents` пускает кого-то из них, — это стадия, где
+     * идёт работа; именно это делает собственный `editingAgents` задачи
+     * проверяемым.
+     */
+    editingAgents: z.array(z.string()).optional(),
+
+    /**
+     * Агенты, которым разрешено управлять состоянием задач workflow
+     * (workflow.tasks-set, workflow.tasks-set-status,
+     * workflow.tasks-resolve-decision).
+     * По умолчанию ['orchestrator'] — исполнитель не должен закрывать
+     * собственную стадию.
      */
     taskControlAgents: z.array(z.string()).optional(),
-    verifiers: z.array(z.string()).optional(),
+
+    /**
+     * Гейты, которые должны быть `passed`, чтобы разрешить коммит, и те же
+     * гейты проверяет ребро `kind: pass` (а `kind: fail` требует, чтобы хотя бы
+     * один из них был `failed`).
+     *
+     * Если поле не объявлено, движок подставляет захардкоженный `['invariants']`
+     * (src/domain/engine.ts).
+     */
     requiredGates: z.array(z.string()).optional(),
+
+    /**
+     * Произвольные настройки профиля.
+     *
+     * Проносятся через резолвер и не читаются ничем: объявление настройки
+     * здесь не меняет никакого поведения.
+     */
     settings: z.record(z.unknown()).optional(),
   })
   .passthrough()
