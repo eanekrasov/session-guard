@@ -76,6 +76,10 @@ describe('the move being judged and the work being delivered are different lists
     session.tasks.implementation = [createTask({ id: 'task-1', writeScope: ['docs/**'] })];
 
     // An earlier move left a file outside what the current task may write.
+    // It has to exist and be dirty: the list is pruned to what still differs
+    // from HEAD, so a path nobody ever wrote would simply drop out.
+    await mkdir(join(repo, 'src'), { recursive: true });
+    await writeFile(join(repo, 'src/from-an-earlier-task.md'), 'earlier\n', 'utf-8');
     session.changedFiles = ['src/from-an-earlier-task.md'];
 
     session.activeOperations = {};
@@ -88,5 +92,35 @@ describe('the move being judged and the work being delivered are different lists
     expect(result.finalPassed).toBe(true);
     expect(session.changedFiles).toContain('src/from-an-earlier-task.md');
     expect(session.changedFiles).toContain('docs/note.md');
+  });
+});
+
+describe('a change that was undone is not part of the delivery', () => {
+  it('drops a file put back to HEAD, and keeps the one that stayed changed', async () => {
+    // changedFiles accumulated every path the work ever touched. Edit a.ts,
+    // put it back, edit b.ts, and the permit still expected both — so a
+    // correct commit carrying only b.ts was refused, deliveryReceipt stayed
+    // null and the workflow sat in `commit`.
+    const session = createSession('undone', 'base', 'state-machine', 'planning');
+    await mkdir(join(repo, 'src'), { recursive: true });
+    await writeFile(join(repo, 'src/a.ts'), 'export const a = 1;\n', 'utf-8');
+    await writeFile(join(repo, 'src/b.ts'), 'export const b = 1;\n', 'utf-8');
+    git(['add', '-A']);
+    git(['commit', '-q', '-m', 'both files']);
+
+    // Move one: change a.ts.
+    let frame = await captureBaseline(repo);
+    await writeFile(join(repo, 'src/a.ts'), 'export const a = 2;\n', 'utf-8');
+    await run(session, frame);
+    expect(session.changedFiles).toEqual(['src/a.ts']);
+
+    // Move two: put a.ts back and change b.ts instead.
+    frame = await captureBaseline(repo);
+    await writeFile(join(repo, 'src/a.ts'), 'export const a = 1;\n', 'utf-8');
+    await writeFile(join(repo, 'src/b.ts'), 'export const b = 2;\n', 'utf-8');
+    await run(session, frame);
+
+    // What the work changed is b.ts. a.ts is exactly what it was.
+    expect(session.changedFiles).toEqual(['src/b.ts']);
   });
 });

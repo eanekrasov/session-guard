@@ -58,7 +58,7 @@ import {
 import { matchesScope, scopesIntersect } from './scope-match.ts';
 import { extractToolCallPaths } from '../rules/message-paths.ts';
 import { parsePatch } from '../rules/file-observation.ts';
-import { captureBaseline, computeChangeScope } from './change-scope.ts';
+import { captureBaseline, changedAgainstHead, computeChangeScope } from './change-scope.ts';
 import { existsSync, readFileSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { join, resolve, isAbsolute, relative } from 'node:path';
@@ -1205,7 +1205,13 @@ class StateMachineRuntime {
     session.deliveryPermit = {
       callID,
       preCommitHead,
-      expectedFiles: [...session.changedFiles],
+      // Pruned again here, not just trusted: a move may have put a file back
+      // and then nothing else ran, so the list was last pruned before the
+      // revert. The permit is the one place this is load-bearing, and it is
+      // issued at the moment the commit is about to happen.
+      expectedFiles: changedAgainstHead(this.projectDir).filter((file) =>
+        session.changedFiles.includes(file)
+      ),
       startedAt: new Date().toISOString(),
     };
     await this.store.save(session);
@@ -1633,7 +1639,10 @@ class StateMachineRuntime {
       // expected nothing, and the commit that carried the work was refused
       // with 'Committed files do not match the delivery permit. Expected:
       // (none)'.
-      s.changedFiles = [...new Set([...(s.changedFiles ?? []), ...changed])].sort();
+      const accumulated = new Set([...(s.changedFiles ?? []), ...changed]);
+      s.changedFiles = changedAgainstHead(this.projectDir)
+        .filter((file) => accumulated.has(file))
+        .sort();
     });
   }
 

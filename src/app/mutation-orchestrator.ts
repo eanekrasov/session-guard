@@ -11,7 +11,12 @@ import { GuardEvaluator } from '../schema/guard-evaluator.ts';
 import type { ResolvedSchema } from '../schema/types.ts';
 import { SessionQueue } from './session-queue.ts';
 import { WorkflowBlockedError } from './blocked-error.ts';
-import { captureBaseline, computeChangeScope, type BaselineHashes } from './change-scope.ts';
+import {
+  captureBaseline,
+  changedAgainstHead,
+  computeChangeScope,
+  type BaselineHashes,
+} from './change-scope.ts';
 import { matchesScope } from './scope-match.ts';
 import { getAllProfileInvariants, validateFiles, SUPPORTED_EXTENSIONS } from './invariants.ts';
 import {
@@ -161,10 +166,18 @@ export async function processScopeAndInvariants(
   // convicts a move of what an earlier one did.
   //
   // `session.changedFiles` is what the delivery permit expects the commit to
-  // carry, which is everything the work produced, one move at a time. It
-  // accumulates.
+  // carry: what the work produced, gathered one move at a time. It accumulates
+  // — and is then pruned to what still differs from HEAD, because a file
+  // edited by one move and put back by the next has not been changed by the
+  // work at all. Left on the list it made the permit expect a file the commit
+  // could not contain, and a correct commit was refused.
   const sorted = [...changedFiles].sort();
-  session.changedFiles = [...new Set([...(session.changedFiles ?? []), ...sorted])].sort();
+  const accumulated = new Set([...(session.changedFiles ?? []), ...sorted]);
+  session.changedFiles = scopeRoot
+    ? changedAgainstHead(scopeRoot)
+        .filter((file) => accumulated.has(file))
+        .sort()
+    : [...accumulated].sort();
 
   let finalPassed = !metadataFailed;
 

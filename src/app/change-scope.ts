@@ -50,6 +50,19 @@ async function hash(cwd: string, path: string): Promise<string | null> {
     .digest('hex');
 }
 
+/**
+ * What differs from `HEAD` right now — the net change set, not a history.
+ *
+ * `session.changedFiles` accumulates one move at a time, so a file edited and
+ * then put back stayed on the list. The delivery permit is built from that
+ * list, so it expected a file the commit could not contain, and a correct
+ * commit was refused. Intersecting with this is what turns the record of
+ * everything touched into the set of what actually changed.
+ */
+export function changedAgainstHead(cwd: string, moduleRoot = ''): string[] {
+  return dirtyPaths(cwd, moduleRoot);
+}
+
 export async function captureBaseline(cwd: string, moduleRoot = ''): Promise<BaselineHashes> {
   return Object.fromEntries(
     await Promise.all(

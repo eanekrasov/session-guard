@@ -179,3 +179,60 @@ describe('what a dispatched task changed reaches the delivery permit', () => {
     expect((await store.load('delegated'))?.changedFiles).toContain('delivered.ts');
   });
 });
+
+describe('a commit after an intermediate change was undone', () => {
+  it('is receipted: the permit expects the net change, not everything touched', async () => {
+    // changedFiles accumulated every path the work ever touched. Edit a.ts,
+    // put it back, edit b.ts, commit only b.ts — and the permit still expected
+    // both, so a correct commit was refused, deliveryReceipt stayed null and
+    // the workflow sat in `commit`.
+    const { writeFile, mkdir } = await import('node:fs/promises');
+    const store = new WorkflowStore(storeDirectory);
+    const session = createSession('undone', 'base', 'state-machine', 'planning');
+    session.currentStage = 'commit';
+    session.tasks.implementation = [createTask({ status: 'completed' })];
+    for (const gate of ['invariants', 'review', 'qa']) setGateStatus(session, gate, 'passed');
+
+    await mkdir(join(repoDirectory, 'src'), { recursive: true });
+    await writeFile(join(repoDirectory, 'src/a.ts'), 'export const a = 1;\n', 'utf-8');
+    await writeFile(join(repoDirectory, 'src/b.ts'), 'export const b = 1;\n', 'utf-8');
+    git(repoDirectory, ['add', '-A']);
+    git(repoDirectory, ['commit', '-q', '-m', 'both files']);
+
+    // The work touched a.ts, then put it back, and changed b.ts.
+    session.changedFiles = ['src/a.ts', 'src/b.ts'];
+    await store.save(session);
+    await writeFile(join(repoDirectory, 'src/b.ts'), 'export const b = 2;\n', 'utf-8');
+
+    const hooks = await createRuntime(pluginInput());
+    await hooks['tool.execute.before']!(
+      { tool: 'bash', sessionID: 'undone', callID: 'commit-call' },
+      { args: { command: 'bun run commit-task.ts -m "feat: b"' } }
+    );
+
+    // The permit expects what the tree actually differs by.
+    expect((await store.load('undone'))?.deliveryPermit?.expectedFiles).toEqual(['src/b.ts']);
+
+    git(repoDirectory, ['add', '-A']);
+    git(repoDirectory, ['commit', '-q', '-m', 'feat: b']);
+    // The local `git` helper returns void, so read HEAD directly.
+    const head = (
+      spawnSync('git', ['rev-parse', 'HEAD'], { cwd: repoDirectory, encoding: 'utf-8' }).stdout ??
+      ''
+    ).trim();
+
+    const output = { title: 'commit-task', output: 'commit-task: committed', metadata: {} };
+    await hooks['tool.execute.after']!(
+      {
+        tool: 'bash',
+        sessionID: 'undone',
+        callID: 'commit-call',
+        args: { command: 'bun run commit-task.ts -m "feat: b"' },
+      },
+      output
+    );
+
+    expect(output.output).not.toContain('[workflow-commit-rejected]');
+    expect((await store.load('undone'))?.deliveryReceipt).toBe(head);
+  });
+});
