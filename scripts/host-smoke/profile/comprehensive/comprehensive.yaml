@@ -6,6 +6,15 @@
 #
 # Happy path: planning → tasks_ready → execution(code→verify→done) →
 #             validation → commit → done
+#
+# The header above has always claimed this inheritance; the `extends` below is
+# what performs it. A profile's schemas became its own — combining is
+# schema-level only — and this delta was left behind, so it resolved to itself
+# alone: no stageAssignments, and no `gates:` declaration, which turns the
+# compiler's check of a stage's gate names off rather than failing it. It
+# compiled clean by declaring nothing to be wrong about.
+
+extends: 'base/base.yaml'
 
 stages:
   planning:
