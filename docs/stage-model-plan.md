@@ -204,6 +204,14 @@ Until that is fixed, a profile whose `code` stage is worked by a subagent has
 to move on the agent's own result rather than on the invariants gate. The host
 smoke profile does exactly that, and says why in a comment.
 
+> **Resolved, 2026-09-07.** The chain is read from the host, not from a session
+> file: `Runtime.resolveHostParent` asks `client.session.get().parentID` and is
+> wired into `SessionQueue`, which memoises every hop into `parentCache`.
+> `testStatus` itself has been deleted — nothing ever wrote it, and the seed
+> `save()` took from it was always `sessionId → sessionId`, an entry that
+> silently declared a child its own root and stopped the host from being asked.
+> `save()` no longer touches the cache at all.
+
 This is item 2 of `docs/handoff.md` — parent/child session linkage — reproduced end to end.
 
 ## Defects fixed in the loop, after the model landed

@@ -293,13 +293,42 @@ export class WorkflowStore {
     return data;
   }
 
+  /**
+   * Remove a session, ordered against every write to it.
+   *
+   * A bare `unlink` took neither the in-process chain nor the file lock, so a
+   * `save()` already holding its payload finished afterwards and renamed the
+   * session back into place — the delete reported success and the file was
+   * there. Sharing both locks makes the two operations ordered rather than
+   * racing: whichever is queued last is the one that decides.
+   *
+   * A previous write that failed does not stop a delete, so this chains on
+   * `prev.catch()` where `save()` chains on `prev` — a session nobody could
+   * write must still be removable.
+   */
   async delete(sessionId: string): Promise<void> {
     this.parentCache.delete(sessionId);
     const filePath = this.sessionPath(sessionId);
-    if (existsSync(filePath)) {
-      await unlink(filePath);
-      void this.log('info', `Session deleted: ${sessionId}`);
-    }
+
+    const key = sessionId;
+    const prev = this.locks.get(key) ?? Promise.resolve();
+    let removed = false;
+    const chain: Promise<void> = prev
+      .catch(() => {})
+      .then(() =>
+        this.withFileLock(sessionId, async () => {
+          if (!existsSync(filePath)) return;
+          await unlink(filePath);
+          removed = true;
+        })
+      )
+      .finally(() => {
+        if (this.locks.get(key) === chain) this.locks.delete(key);
+      });
+
+    this.locks.set(key, chain);
+    await chain;
+    if (removed) void this.log('info', `Session deleted: ${sessionId}`);
   }
 
   async list(): Promise<string[]> {
@@ -320,7 +349,20 @@ export class WorkflowStore {
     const ids: string[] = [];
     for (const entry of entries) {
       if (entry.isFile() && entry.name.endsWith('.json')) {
-        const decoded = decodeURIComponent(entry.name.slice(0, -5));
+        // Every name this store writes is `encodeURIComponent`d, so a name
+        // that will not decode was not written by us. It used to throw
+        // `URIError` out of the loop, and one stray file made every session
+        // invisible — a listing that skips what it cannot read is worth more
+        // than one that refuses to answer at all.
+        let decoded: string;
+        try {
+          decoded = decodeURIComponent(entry.name.slice(0, -5));
+        } catch {
+          void this.log('warn', 'list: skipping a file whose name is not a session id', {
+            name: entry.name,
+          });
+          continue;
+        }
         ids.push(decoded);
       }
     }

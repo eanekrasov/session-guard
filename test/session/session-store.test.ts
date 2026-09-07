@@ -194,6 +194,32 @@ describe('WorkflowStore', () => {
       expect(ids).toHaveLength(2);
     });
 
+    it('stays deleted when a save was already in flight', async () => {
+      const session = createSession('racing-delete', 'android', 'state-machine');
+      // A payload big enough that the write is still in progress when the
+      // delete is issued.
+      session.changedFiles = Array.from({ length: 20_000 }, (_, i) => `file-${i}.ts`);
+      await store.save(session);
+
+      const saving = store.save(session);
+      await store.delete('racing-delete');
+      await saving;
+
+      // The delete used to run outside both locks: the save's rename landed
+      // afterwards and put the file back.
+      expect(await store.load('racing-delete')).toBeNull();
+    });
+
+    it('skips a file whose name is not a decodable session id', async () => {
+      await store.save(createSession('list-valid', 'android', 'state-machine'));
+      // `%ZZ` is not a valid escape sequence — decodeURIComponent throws on it.
+      await writeFile(path.join(TEST_DIR, '%ZZ.json'), '{}');
+
+      const ids = await store.list();
+
+      expect(ids).toEqual(['list-valid']);
+    });
+
     it('returns empty list when store directory does not exist (ENOENT)', async () => {
       await rm(TEST_DIR, { recursive: true, force: true });
 
