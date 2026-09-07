@@ -117,21 +117,37 @@ export function toGuardContext(
   });
 }
 
+/**
+ * Which stage a session is in, by its workflow's own assignment rules.
+ *
+ * Both fallbacks used to be the literal `'PLANNING'`. Stage ids are lowercase
+ * everywhere a profile writes them, so that value matched no stage in any
+ * workflow: `getStages()['PLANNING']` is `undefined`, task admission refused
+ * with "does not declare an executable task loop", and `checkTransition`
+ * reported an illegal transition naming a stage that does not exist. It failed
+ * closed, but every message about it was a lie.
+ *
+ * A stage nobody selected has not been left. When no rule applies — because
+ * there are none, or because none matched — the answer is the stage the
+ * session is already in, which is the only stage we know the workflow has.
+ */
 export function deriveStageFn(
   facts: SessionFacts,
   rules: StageAssignmentRule[],
   evaluateGuard?: (expr: string) => boolean
 ): string {
-  if (rules.length === 0) {
-    const currentStage = facts.currentStage;
-    return currentStage ?? 'PLANNING';
-  }
+  // `SessionFacts` types this optional, but every real session carries it —
+  // `currentStage` is a required string on the session and is written by
+  // `workflow.create` from the compiled workflow's own first stage.
+  const currentStage = facts.currentStage ?? '';
+  if (rules.length === 0) return currentStage;
+
   const sorted = [...rules].sort((a, b) => b.priority - a.priority);
   const guardFn = evaluateGuard ?? ((expr: string) => deriveDefaultEvaluateGuard(expr, facts));
   for (const rule of sorted) {
     if (guardFn(rule.condition)) return rule.result;
   }
-  return 'PLANNING';
+  return currentStage;
 }
 
 // ─── Inlined checkTransition (from validate-transition.ts) ───────────────────

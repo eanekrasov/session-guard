@@ -64,7 +64,13 @@ describe('deriveStage', () => {
     expect(result).toBe('PLANNING');
   });
 
-  it('returns PLANNING when no rule matches and no fallback', () => {
+  it('leaves the session where it is when no rule matches', () => {
+    // Both fallbacks used to be the literal 'PLANNING'. Stage ids are
+    // lowercase everywhere a profile writes them, so that value matched no
+    // stage in any workflow — task admission then refused with "does not
+    // declare an executable task loop" and checkTransition reported an illegal
+    // transition naming a stage that does not exist. A stage nobody selected
+    // has not been left.
     const rules: StageAssignmentRule[] = [
       {
         id: 'r1',
@@ -73,20 +79,22 @@ describe('deriveStage', () => {
         result: 'VERIFY',
       },
     ];
-    const facts = makeFacts({ verifications: [] });
+    const facts = makeFacts({ verifications: [], currentStage: 'execution' });
 
-    const result = deriveStage(facts, rules);
-
-    expect(result).toBe('PLANNING');
+    expect(deriveStage(facts, rules)).toBe('execution');
   });
 
-  it('returns PLANNING for empty rules array', () => {
-    const rules: StageAssignmentRule[] = [];
-    const facts = makeFacts();
+  it('leaves the session where it is for an empty rules array', () => {
+    const facts = makeFacts({ currentStage: 'execution' });
 
-    const result = deriveStage(facts, rules);
+    expect(deriveStage(facts, [])).toBe('execution');
+  });
 
-    expect(result).toBe('PLANNING');
+  it('answers with no stage when there is none to keep', () => {
+    // Only synthetic facts reach this: a real session always carries
+    // `currentStage`, written by `workflow.create` from the compiled
+    // workflow's own first stage.
+    expect(deriveStage(makeFacts(), [])).toBe('');
   });
 
   it('skips a rule with a broken expression (safe-fail) and matches next', () => {
