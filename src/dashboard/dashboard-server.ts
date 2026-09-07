@@ -23,23 +23,24 @@ import { serve } from 'bun';
 import { join, resolve } from 'node:path';
 import { readFileSync, existsSync, readdirSync, statSync, watch } from 'node:fs';
 import { buildDashboardSchema } from './dashboard-contract.ts';
-import type { WorkflowSession } from '../session/session-schema.ts';
-import { StateMachineEngine } from '../domain/engine.ts';
-import type { EngineConfig } from '../domain/engine.ts';
 import { getIssue, postComment } from './beads-bridge.ts';
-import { sessionsDir, opencodeStateDir } from '../app/paths.ts';
+import { sessionsDir, opencodeStateDir, profilesDir } from '../app/paths.ts';
+import { resolveConfig } from '../public-api.ts';
+import { selectSchema, schemaToEngineConfig } from '../app/mutation-orchestrator.ts';
+import { compileWorkflow } from '../schema/compile-workflow.ts';
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
+const PROJECT_ROOT = resolve(join(import.meta.dir, '..', '..'));
+
 /**
- * The gates the base workflow declares, for the static `/api/schema` reply.
- *
- * That endpoint describes a workflow, not a session, and it already hardcodes
- * its stages and transitions rather than loading the running profile. This is
- * the same placeholder at the same fidelity — sessions themselves now carry no
- * gate list to read.
+ * Where profiles live, by the same rule the plugin uses:
+ * `STATE_MACHINE_PROFILES_DIR` when the operator sets it, otherwise the
+ * project's own `.opencode/profiles`. This repository keeps its shipped
+ * profiles in `profiles/` and is not itself a governed project, so running the
+ * dashboard here wants the override.
  */
-const BASE_WORKFLOW_GATES = ['invariants', 'review', 'qa'] as const;
+const PROFILES_DIR = profilesDir(PROJECT_ROOT);
 
 /**
  * The store the plugin actually writes to.
@@ -143,6 +144,85 @@ function loadAllSessions(): Record<string, unknown> {
   return sessions;
 }
 
+/**
+ * The profile and schema to describe when the caller names neither.
+ *
+ * The most recently updated session: whichever workflow is being worked on is
+ * the one an operator opening the dashboard means.
+ */
+function newestSessionProfile(): { profileId: string; schemaId?: string } | null {
+  let newest: { updatedAt: string; profileId: string; schemaId?: string } | null = null;
+  for (const value of Object.values(loadAllSessions())) {
+    const session = value as Record<string, unknown> | undefined;
+    const profileId = session?.['profileId'];
+    if (typeof profileId !== 'string' || profileId === '') continue;
+    const updatedAt = typeof session?.['updatedAt'] === 'string' ? session['updatedAt'] : '';
+    const schemaId = typeof session?.['schemaId'] === 'string' ? session['schemaId'] : undefined;
+    if (!newest || updatedAt > newest.updatedAt) newest = { updatedAt, profileId, schemaId };
+  }
+  return newest ? { profileId: newest.profileId, schemaId: newest.schemaId } : null;
+}
+
+/**
+ * Describe a real, compiled workflow.
+ *
+ * This endpoint used to answer from a list of stages and edges written into
+ * this file, and `stageOf` used to measure every session against a *second*,
+ * different hardcoded copy a few lines above it. The two disagreed with each
+ * other — one had a `validation` stage, the other did not — and both had
+ * drifted from `profiles/base/base.yaml`. Neither failed when it drifted,
+ * because nothing compared them to anything.
+ *
+ * Now the profile is resolved and compiled exactly as the plugin resolves it,
+ * so the answer is the workflow a session is running or it is an honest 404.
+ */
+async function describeWorkflow(wanted: {
+  profileId?: string;
+  schemaId?: string;
+}): Promise<ReturnType<typeof buildDashboardSchema> | { failure: string } | null> {
+  const target = wanted.profileId
+    ? { profileId: wanted.profileId, schemaId: wanted.schemaId }
+    : (newestSessionProfile() ?? {
+        profileId: process.env['HARNESS_PROFILE'] ?? '',
+        schemaId: wanted.schemaId,
+      });
+  if (!target.profileId) return null;
+
+  try {
+    const resolved = await resolveConfig(target.profileId, PROFILES_DIR);
+    const selected = selectSchema(target.profileId, resolved.schemas, target.schemaId);
+    const { workflow } = compileWorkflow({
+      id: selected.id,
+      source: selected.source,
+      ...schemaToEngineConfig(selected),
+    });
+
+    return buildDashboardSchema({
+      stages: Object.keys(workflow.stages),
+      transitions: workflow.transitions.map((t) => ({ from: t.from, to: t.to })),
+      gates: (selected.gates ?? []).map((gate) => ({ id: gate.id })),
+      profile: {
+        id: resolved.metadata.id,
+        // A profile carries no version of its own; the schema it runs names it.
+        version: selected.id,
+        description: resolved.metadata.description ?? '',
+        invariants: resolved.metadata.invariants ?? [],
+        // What the workflow waits on before it may deliver.
+        mandatoryStages: selected.requiredGates ?? [],
+        agents: resolved.metadata.agents ?? [],
+        skills: resolved.metadata.skills ?? [],
+      },
+    });
+  } catch (error) {
+    // Why it could not be described is the useful half of the answer. A bare
+    // 404 here reads as "no such thing" when the truth may be a profile
+    // directory that does not exist or a schema that does not compile.
+    return {
+      failure: `Could not describe ${target.profileId}${target.schemaId ? `/${target.schemaId}` : ''} from ${PROFILES_DIR}: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+}
+
 function loadSession(id: string): unknown | null {
   const filePath = join(SESSIONS_DIR, `${encodeURIComponent(id)}.json`);
   if (!existsSync(filePath)) return null;
@@ -153,59 +233,6 @@ function loadSession(id: string): unknown | null {
   }
 }
 
-// ─── Engine (default config for deriveStage) ────────────────────────────────
-
-const DEFAULT_ENGINE_CONFIG: EngineConfig = {
-  stageAssignments: [
-    { id: 'default', priority: 0, condition: 'true', result: 'planning' },
-    {
-      id: 'hasPlanApproval',
-      priority: 60,
-      condition: "session.approved('plan')",
-      result: 'tasks_ready',
-    },
-    {
-      id: 'uncommitted',
-      priority: 70,
-      condition:
-        "session.approved('plan') && (session.tasks.implementation ?? []).length > 0 && session.tasks.implementation.some(t => t.status != 'completed')",
-      result: 'execution',
-    },
-    {
-      id: 'commitApproval',
-      priority: 90,
-      condition: "session.approved('commit')",
-      result: 'commit',
-    },
-    {
-      id: 'deliveryReceipt',
-      priority: 100,
-      condition:
-        "typeof session.deliveryReceipt == 'string' || typeof session.deliveryPermit == 'string'",
-      result: 'done',
-    },
-  ],
-  transitions: [
-    { from: 'planning', to: 'tasks_ready', guard: "session.approved('plan')" },
-    {
-      from: 'tasks_ready',
-      to: 'execution',
-      guard:
-        "(session.tasks.implementation ?? []).length > 0 && session.tasks.implementation.some(t => t.status != 'completed')",
-    },
-    { from: 'execution', to: 'execution', kind: 'auto' },
-    { from: 'execution', to: 'commit', kind: 'pass' },
-    { from: 'execution', to: 'planning', guard: "!session.approved('plan')" },
-    { from: 'commit', to: 'done', guard: "typeof session.deliveryReceipt == 'string'" },
-  ],
-  actionGuards: {
-    beginMutation: "session.approved('plan') || session.revision == 0",
-  },
-  requiredGates: ['invariants', 'review', 'qa'],
-};
-
-const _engine = new StateMachineEngine(DEFAULT_ENGINE_CONFIG);
-
 // ─── Session helpers ─────────────────────────────────────────────────────────
 
 interface EnrichedSession {
@@ -213,12 +240,22 @@ interface EnrichedSession {
   [key: string]: unknown;
 }
 
+/**
+ * The stage the session is in — read, not re-derived.
+ *
+ * This used to run `deriveStage` over a hardcoded copy of the base workflow
+ * kept in this file, which had drifted: no `validation` stage, an
+ * `execution → planning` edge no profile declares, and the `revision == 0`
+ * escape hatch the profile corpus deliberately removed. Every session of every
+ * other profile was measured against it.
+ *
+ * The engine already derived the stage and the runtime persisted the answer to
+ * `currentStage`. Reading that field is seeing the engine's answer; anything
+ * else here is a second opinion from a workflow nobody is running.
+ */
 function stageOf(session: Record<string, unknown>): string {
-  try {
-    return _engine.deriveStage(session as unknown as WorkflowSession);
-  } catch {
-    return 'UNKNOWN';
-  }
+  const stage = session['currentStage'];
+  return typeof stage === 'string' && stage !== '' ? stage : 'UNKNOWN';
 }
 
 function gatesOf(session: Record<string, unknown>): Record<string, string> {
@@ -459,30 +496,30 @@ serve({
       });
     }
 
-    // GET /api/schema
+    // GET /api/schema — the workflow a session is actually running.
     if (url.pathname === '/api/schema') {
-      const schema = buildDashboardSchema({
-        stages: ['planning', 'tasks_ready', 'execution', 'validation', 'commit', 'done', 'failed'],
-        transitions: [
-          { from: 'planning', to: 'tasks_ready' },
-          { from: 'tasks_ready', to: 'execution' },
-          { from: 'execution', to: 'validation' },
-          { from: 'validation', to: 'commit' },
-          { from: 'validation', to: 'execution' },
-          { from: 'validation', to: 'failed' },
-          { from: 'commit', to: 'done' },
-        ],
-        gates: BASE_WORKFLOW_GATES.map((id) => ({ id })),
-        profile: {
-          id: process.env['HARNESS_PROFILE'] ?? 'base',
-          version: '1.0',
-          description: 'State machine workflow',
-          invariants: [],
-          mandatoryStages: [...BASE_WORKFLOW_GATES],
-          agents: [],
-          skills: [],
-        },
-      });
+      const wanted = {
+        profileId: url.searchParams.get('profile') ?? undefined,
+        schemaId: url.searchParams.get('schema') ?? undefined,
+      };
+      const schema = await describeWorkflow(wanted);
+      if (!schema || 'failure' in schema) {
+        return new Response(
+          JSON.stringify({
+            error:
+              schema && 'failure' in schema
+                ? schema.failure
+                : 'No workflow to describe. Name one with ?profile=<id>&schema=<id>, or create a session.',
+          }),
+          {
+            status: 404,
+            headers: {
+              'Content-Type': 'application/json',
+              ...corsHeaders(req.headers.get('Origin')),
+            },
+          }
+        );
+      }
       return new Response(JSON.stringify(schema, null, 2), {
         headers: {
           'Content-Type': 'application/json',

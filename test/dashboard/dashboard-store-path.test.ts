@@ -25,6 +25,24 @@ describe('the dashboard reads the plugin store', () => {
     expect(source).not.toContain("'.opencode', 'state-machine', 'sessions'");
   });
 
+  it('keeps no copy of a workflow in the server file', () => {
+    // Two hardcoded copies of the base workflow lived here: DEFAULT_ENGINE_CONFIG,
+    // which `stageOf` measured every session of every profile against, and a
+    // second, different list of stages and edges answering /api/schema. They
+    // disagreed with each other — one had a `validation` stage, the other did
+    // not — and both had drifted from profiles/base/base.yaml. Neither failed
+    // when it drifted, because nothing compared them to anything.
+    expect(source).not.toContain('DEFAULT_ENGINE_CONFIG');
+    expect(source).not.toContain("{ from: 'planning', to: 'tasks_ready' }");
+    expect(source).not.toContain('BASE_WORKFLOW_GATES');
+  });
+
+  it('reads the stage the engine already derived, and compiles a real profile', () => {
+    expect(source).toContain("const stage = session['currentStage'];");
+    expect(source).toContain('compileWorkflow(');
+    expect(source).toContain('resolveConfig(target.profileId, PROFILES_DIR)');
+  });
+
   it('uses the same rule as the plugin runtime', async () => {
     const { sessionsDir, opencodeStateDir } = await import('../../src/app/paths.ts');
     const previous = process.env.STATE_MACHINE_STORE_DIR;
