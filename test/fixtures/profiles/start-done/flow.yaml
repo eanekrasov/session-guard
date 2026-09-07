@@ -1,0 +1,11 @@
+# The smallest workflow that does not begin in `planning`.
+#
+# `createSession` wrote that literal — the base profile's first stage, hardcoded
+# into the core — so a session for this schema started in a stage it does not
+# declare: no outgoing edge, no admission, and nothing said so.
+stages:
+  start: {}
+  done: {}
+transitions:
+  - from: start
+    to: done

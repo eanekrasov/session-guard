@@ -19,7 +19,7 @@ import {
 } from '../schema/types.ts';
 import { nextTaskStage, TASK_DONE } from '../domain/task-movement.ts';
 import { approve } from '../domain/approvals.ts';
-import { toGuardContext } from '../domain/engine.ts';
+import { toGuardContext, type StateMachineEngine } from '../domain/engine.ts';
 import { SessionQueue } from './session-queue.ts';
 import { sanitizeToolOutput, validateUserInput } from './guardrails.ts';
 import { listProfiles } from '../public-api.ts';
@@ -536,10 +536,11 @@ class StateMachineRuntime {
     }
 
     let resolvedSchemaId: string;
+    let engine: StateMachineEngine;
     try {
       const resolved = await resolveConfig(resolvedProfileId, this.profilesDir);
       resolvedSchemaId = selectSchema(resolvedProfileId, resolved.schemas, requestedSchemaId).id;
-      await this.mutationOrchestrator.resolveEngine(resolvedProfileId, resolvedSchemaId);
+      engine = await this.mutationOrchestrator.resolveEngine(resolvedProfileId, resolvedSchemaId);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const prefix =
@@ -549,7 +550,15 @@ class StateMachineRuntime {
       return { output: `${prefix}: ${message}` };
     }
 
-    const session = createSession(ctx.sessionID, resolvedProfileId, resolvedSchemaId);
+    // The stage this workflow starts in, not the base profile's. The compiler
+    // has always worked it out; nothing read it, so every session began in
+    // `planning` whether the schema declared that stage or not.
+    const session = createSession(
+      ctx.sessionID,
+      resolvedProfileId,
+      resolvedSchemaId,
+      engine.getInitialStage()
+    );
     await this.store.save(session);
 
     void this.log('info', `Workflow session created`, {

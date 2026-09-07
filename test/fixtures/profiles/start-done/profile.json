@@ -1,0 +1,5 @@
+{
+  "id": "start-done",
+  "description": "A workflow whose first stage is not named 'planning'",
+  "schemas": ["flow.yaml"]
+}

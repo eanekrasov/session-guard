@@ -8,10 +8,22 @@ import type { LogFn } from '../app/logger.ts';
 
 // ─── Factory ──────────────────────────────────────────────────────────────────
 
+/**
+ * A new session, parked in the stage its own workflow starts in.
+ *
+ * `initialStage` used to be the literal `'planning'`, which is the base
+ * profile's first stage written into the core. A schema declaring
+ * `start → done` produced a session in a stage it does not have: no outgoing
+ * edge, no admission, and nothing said so. Production passes the compiled
+ * initial stage (`StateMachineEngine.getInitialStage`); the default is a
+ * convenience for fixtures whose first stage is `planning`, and a caller that
+ * relies on it for anything else gets the same defect back.
+ */
 export function createSession(
   sessionId: string,
   profileId: string,
-  schemaId: string
+  schemaId: string,
+  initialStage: string = 'planning'
 ): WorkflowSession {
   return {
     schemaVersion: 2,
@@ -39,7 +51,7 @@ export function createSession(
     updatedAt: new Date().toISOString(),
     verifications: [],
     changedFiles: [],
-    currentStage: 'planning',
+    currentStage: initialStage,
     invariantViolations: [],
     consentedCallIDs: [],
   };

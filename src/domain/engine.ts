@@ -5,6 +5,7 @@ import type { SessionFacts } from './session-facts.ts';
 import { toSessionFacts } from './session-facts.ts';
 import { bumpRetry } from '../session/helpers.ts';
 import { approve } from './approvals.ts';
+import { initialStageOf } from '../schema/compile-workflow.ts';
 
 // ─── Domain-specific type aliases ──────────────────────────────────────────────
 
@@ -405,6 +406,19 @@ export class StateMachineEngine {
    */
   getStages(): Record<string, StageDef> {
     return this.config.stages ?? {};
+  }
+
+  /**
+   * The stage a session starts in — the first one the workflow declares.
+   *
+   * `compileWorkflow` computed this and nobody read it, so session creation
+   * wrote the literal `'planning'`. A schema declaring `start → done` then
+   * produced a session parked in a stage it does not declare: no outgoing
+   * edge, no admission, and no error to say why. `deriveStage` answers the
+   * different question of where an existing session is now.
+   */
+  getInitialStage(): string {
+    return initialStageOf(this.config.stages);
   }
 
   /** The stage that cycles over the named task list, if any. */

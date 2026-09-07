@@ -69,6 +69,23 @@ export interface CompileError {
   message: string;
 }
 
+/**
+ * The stage a session starts in: the first one the schema declares.
+ *
+ * This used to read the highest-priority stage assignment's result, which is
+ * the opposite of an initial stage. Assignments derive where a session *is*
+ * from what is true about it, and the most specific rule wins — in the base
+ * workflow that is `deliveryReceipt → done`, so the "initial" stage compiled
+ * to `done`. Nothing read the value, so nothing said so.
+ *
+ * Declaration order is what a profile author means by the first stage, and it
+ * needs no session to evaluate against — which is the whole point, since there
+ * is no session yet when this is asked.
+ */
+export function initialStageOf(stages: Record<string, StageDef> | undefined): string {
+  return Object.keys(stages ?? {})[0] ?? '';
+}
+
 // ─── Compiler ────────────────────────────────────────────────────────────────
 
 const TERMINAL_STAGES = new Set(['done', 'terminal', 'completed', 'failed', 'cancelled']);
@@ -127,13 +144,7 @@ export function compileWorkflow(schema: ResolvedSchema): {
   // Build compiled stage assignments
   const compiledAssignments = compileAssignments(schema.stageAssignments ?? [], errors);
 
-  // Determine initial stage (first stage assignment result, or first stage)
-  let initialStage = '';
-  if (compiledAssignments.length > 0) {
-    initialStage = compiledAssignments[0].result;
-  } else if (stageIds.size > 0) {
-    initialStage = stageIds.values().next().value as string;
-  }
+  const initialStage = initialStageOf(schema.stages);
 
   // Determine terminal stages (stages whose transitions lead to none, or explicitly named)
   const terminalStages = findTerminalStages(stageIds, compiledTransitions);
