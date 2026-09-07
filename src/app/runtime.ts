@@ -1035,7 +1035,8 @@ class StateMachineRuntime {
           taskId,
           activeRuns,
           firstNestedStageId(loopStage)!,
-          session
+          session,
+          listKey
         );
         if (rejection) {
           this.blockTaskAdmission(rejection);
@@ -1148,15 +1149,33 @@ class StateMachineRuntime {
     return matches.length === 1 ? matches[0] : null;
   }
 
+  /**
+   * Two scopes meet here, and telling them apart is the whole job.
+   *
+   * A `dispatch:` strategy governs one cycle: `serial` means one task of *that
+   * list* at a time, and `maxConcurrent` counts *that list's* runs. These read
+   * `cycleRuns`. Counting every open run in the session instead made a parent
+   * refuse its own child — the parent occupies `parents`, the child's cycle
+   * owns `task-1`, and the parent's run turned the child away with «Serial task
+   * cycle admits only the next unfinished task». The parent then waited for a
+   * child that was not allowed to start.
+   *
+   * `writeScope` overlap is the other scope and stays session-wide: two tasks
+   * writing the same paths break invariant attribution whether or not they
+   * belong to the same cycle, because the diff is split by path, not by list.
+   */
   private taskAdmissionRejection(
     dispatch: NonNullable<StageDef['dispatch']>,
     tasks: MutationTask[],
     taskId: string,
     activeRuns: LoopRun[],
     firstStageId: string,
-    session: WorkflowSession
+    session: WorkflowSession,
+    listKey: string
   ): string | null {
-    if (dispatch.strategy !== 'serial' && activeRuns.length >= dispatch.maxConcurrent) {
+    const cycleRuns = activeRuns.filter((run) => run.listKey === listKey);
+
+    if (dispatch.strategy !== 'serial' && cycleRuns.length >= dispatch.maxConcurrent) {
       return `Task cycle concurrency limit ${dispatch.maxConcurrent} is exhausted`;
     }
 
@@ -1165,7 +1184,7 @@ class StateMachineRuntime {
       (task) => task.status === 'pending' || task.status === 'running'
     );
     if (dispatch.strategy === 'serial') {
-      if (taskIndex !== firstUnfinishedIndex || activeRuns.length > 0) {
+      if (taskIndex !== firstUnfinishedIndex || cycleRuns.length > 0) {
         return `Serial task cycle admits only the next unfinished task`;
       }
       return null;
@@ -1208,9 +1227,9 @@ class StateMachineRuntime {
 
     if (dispatch.strategy === 'parallel') return null;
 
-    if (taskIndex === 0) return activeRuns.length === 0 ? null : 'First task is already active';
+    if (taskIndex === 0) return cycleRuns.length === 0 ? null : 'First task is already active';
     const priorTask = tasks[taskIndex - 1];
-    const priorRun = activeRuns.find((run) => run.taskId === priorTask.id);
+    const priorRun = cycleRuns.find((run) => run.taskId === priorTask.id);
     const priorIsTerminal = ['completed', 'failed', 'cancelled'].includes(priorTask.status);
     if (!priorIsTerminal && (!priorRun || priorRun.stage === firstStageId)) {
       return `Overlapping task cycle waits for ${priorTask.id} to leave ${firstStageId}`;

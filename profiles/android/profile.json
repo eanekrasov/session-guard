@@ -16,7 +16,8 @@
     "figma",
     "rag",
     "ask",
-    "orchestrator"
+    "orchestrator",
+    "harness"
   ],
   "skills": [
     "android-feature-implementation",

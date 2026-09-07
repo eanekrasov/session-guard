@@ -1,0 +1,5 @@
+{
+  "id": "cycle-self",
+  "extends": "cycle-self",
+  "schemas": []
+}

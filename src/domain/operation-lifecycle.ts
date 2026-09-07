@@ -133,12 +133,15 @@ export function finishMutation(session: WorkflowSession, passed: boolean, callId
     return;
   }
 
-  setGateStatus(
-    session,
-    'invariants',
-    'failed',
-    operation ? { bumpRetry: operation.taskId } : undefined
-  );
+  // Recording a verdict is not spending an attempt.
+  //
+  // This used to bump the task's retry budget here, so a failed invariant cost
+  // an attempt whether or not anything was retried — and the same counter was
+  // also spent by the edge that actually goes round again (`bumpRetry` as a
+  // transition effect, and now `onFailure: retry`). One budget, two unrelated
+  // meanings: a task could exhaust its retries without a single retry having
+  // been taken. An attempt belongs to the move that takes it.
+  setGateStatus(session, 'invariants', 'failed');
 }
 
 /** True when the active operation has been running longer than MUTATION_TTL_MS. */

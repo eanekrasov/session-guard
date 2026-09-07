@@ -224,6 +224,7 @@ export function evaluateTransition(
   if (transition.kind === 'pass' || transition.kind === 'fail') {
     conditions.push(`kind=${transition.kind}`);
   }
+  if (transition.onFailure === 'retry') conditions.push('onFailure=retry');
   if (conditions.length > 0 && !session) {
     return {
       allowed: false,
@@ -280,6 +281,22 @@ export function evaluateTransition(
         guard,
       };
     }
+  }
+
+  // `onFailure: retry` is the pair of clauses `base.yaml` writes by hand —
+  // `!isExhausted(key)` on the edge that goes round again, and a `bumpRetry`
+  // effect on it — said once. The budget is the stage being retried, so the
+  // key is `from`; spending an attempt happens where the edge is taken.
+  //
+  // The `terminal` half needs nothing: once the retry edge closes, the first
+  // still-open edge out of the stage is the one that leads away from it.
+  if (transition.onFailure === 'retry' && session?.isExhausted(from)) {
+    return {
+      allowed: false,
+      kind: transition.kind,
+      reason: `Transition ${from} → ${to} (onFailure=retry) has spent the retry budget for ${from}`,
+      guard,
+    };
   }
 
   return { allowed: true, kind: transition.kind, to: transition.to, guard };
@@ -537,6 +554,11 @@ export class StateMachineEngine {
       );
 
       if (result.allowed) {
+        if (transition.onFailure === 'retry') {
+          bumpRetry(session, currentStage);
+          const maximum = currentStageDef?.retryBudget?.maximum;
+          if (maximum !== undefined) session.retryBudgets[currentStage]!.maximum = maximum;
+        }
         for (const effect of transition.effects ?? []) {
           if (effect.bumpRetry) {
             bumpRetry(session, effect.bumpRetry);

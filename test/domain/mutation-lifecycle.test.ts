@@ -46,7 +46,7 @@ describe('finishMutation', () => {
     expect(gate?.status).toBe('passed');
   });
 
-  test('finishMutation с passed=false — gate invariants = failed, bumpRetry task', () => {
+  test('finishMutation с passed=false — gate invariants = failed, бюджет не тратится', () => {
     const session = createSession();
 
     beginMutation(session, 'm1', 'unknown', () => 'code');
@@ -55,7 +55,8 @@ describe('finishMutation', () => {
     expect(session.activeOperations).toEqual({});
     const gate = session.gates.find((g) => g.id === 'invariants');
     expect(gate?.status).toBe('failed');
-    expect(session.retryBudgets['task-1']?.attempts).toBe(1);
+    // Запись вердикта — не повтор. Попытку тратит ход, который повторяет.
+    expect(session.retryBudgets['task-1']).toBeUndefined();
   });
 
   test('finishMutation с passed=true и отсутствующим gate invariants — не падает, activeOperation очищен', () => {

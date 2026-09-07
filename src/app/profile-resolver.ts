@@ -1,6 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { ProfileMetadataSchema } from '../schema/profile-metadata.ts';
+import { listProfileAgents } from './profile-agent-sync.ts';
 import type {
   ProfileMetadata,
   LoadedProfile,
@@ -57,19 +58,31 @@ export class ProfileResolver {
     }
     const allSchemas = new Set<string>(schemaFiles ?? []);
 
-    let agents = primary.agents;
     let skills = primary.skills;
     let invariants = primary.invariants;
 
-    if (agents === undefined) {
-      for (let i = 1; i < chain.length; i++) {
-        if (chain[i].agents) {
-          agents = chain[i].agents;
-          break;
-        }
+    /**
+     * Agents accumulate down the chain; they are not inherited whole.
+     *
+     * This used to take the nearest ancestor that declared any, so a child
+     * naming one agent of its own silently lost every agent its parent
+     * shipped, and a child naming none inherited the parent's list rather than
+     * its own files. Both readings were surprising in the same direction: a
+     * profile could not add to what it extends.
+     *
+     * Each link contributes what it ships — its declared `agents`, or the
+     * prompts in its own agents directory when it declares none. The child
+     * comes first, so a name both of them carry resolves to the child's.
+     */
+    const agents: string[] = [];
+    for (const link of chain) {
+      const id = link.id;
+      if (id === undefined) continue;
+      for (const agent of await listProfileAgents(id, this.profilesDir)) {
+        if (!agents.includes(agent)) agents.push(agent);
       }
-      agents = agents ?? [];
     }
+
     if (skills === undefined) {
       for (let i = 1; i < chain.length; i++) {
         if (chain[i].skills) {
@@ -177,8 +190,13 @@ export class ProfileResolver {
   }
 
   /**
-   * Resolve a profile's extends chain.
-   * Returns [extending, ...extended] with cycle detection.
+   * Resolve a profile's extends chain: [extending, ...extended].
+   *
+   * A cycle is a configuration error and is reported as one. It used to end
+   * the walk with a bare `break`, which kept the loop finite and told nobody:
+   * `a extends b` and `b extends a` resolved to a half-assembled profile that
+   * then ran. The missing-parent case two lines below has always thrown — a
+   * cycle is the same mistake by the same author and deserves the same answer.
    */
   private async resolveProfileExtends(profileId: string): Promise<LoadedProfile[]> {
     const profiles = await this.loadAll();
@@ -198,7 +216,10 @@ export class ProfileResolver {
 
     let currentExtends = profile.extends;
     while (currentExtends) {
-      if (visited.has(currentExtends)) break;
+      if (visited.has(currentExtends)) {
+        const cycle = [...visited, currentExtends].join(' → ');
+        throw new Error(`Profile "${profileId}" has a circular extends chain: ${cycle}`);
+      }
 
       visited.add(currentExtends);
       const extended = profiles.find((p) => p.id === currentExtends);

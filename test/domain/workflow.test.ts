@@ -310,7 +310,7 @@ describe('finishMutation', () => {
     expect(invGate?.status).toBe('passed');
   });
 
-  it('sets invariants failed and bumps retry on failure', () => {
+  it('sets invariants failed and leaves the retry budget alone', () => {
     const session = makeSession({
       tasks: taskList('running'),
       loopRuns: loopRun(),
@@ -323,7 +323,8 @@ describe('finishMutation', () => {
 
     const invGate = session.gates.find((g) => g.id === 'invariants');
     expect(invGate?.status).toBe('failed');
-    expect(session.retryBudgets['task-1'].attempts).toBe(1);
+    // An attempt belongs to the move that takes it, not to the verdict.
+    expect(session.retryBudgets['task-1'].attempts).toBe(0);
     expect(session.activeOperations).toEqual({});
   });
 });

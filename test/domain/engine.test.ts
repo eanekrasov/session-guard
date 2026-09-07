@@ -451,6 +451,81 @@ describe('StateMachineEngine', () => {
   });
 });
 
+describe('onFailure: retry', () => {
+  // Two `kind: fail` edges leave the same stage: one goes round again, one
+  // gives up. `onFailure` is what tells them apart — the field was accepted,
+  // compiled and read by nobody, so both profiles declaring it described
+  // behaviour that did not exist.
+  function retryingEngine(maximum?: number): StateMachineEngine {
+    return new StateMachineEngine({
+      stages: {
+        execution: maximum === undefined ? {} : { retryBudget: { maximum } },
+        failed: {},
+      },
+      stageAssignments: [],
+      requiredGates: ['review'],
+      transitions: [
+        { from: 'execution', to: 'execution', kind: 'fail', onFailure: 'retry' },
+        { from: 'execution', to: 'failed', kind: 'fail', onFailure: 'terminal' },
+      ],
+    } as EngineConfig);
+  }
+
+  function failingSession(): WorkflowSession {
+    return makeSession({
+      currentStage: 'execution',
+      gates: [{ id: 'review', status: 'failed' }],
+    });
+  }
+
+  it('spends one attempt of the stage’s budget each time it is taken', () => {
+    const engine = retryingEngine(3);
+    const session = failingSession();
+
+    engine.tryApplyTransitions(session);
+
+    expect(session.currentStage).toBe('execution');
+    expect(session.retryBudgets['execution']).toEqual({ attempts: 1, maximum: 3 });
+  });
+
+  it('closes once the budget is spent, and the stage is left by the other edge', () => {
+    const engine = retryingEngine(2);
+    const session = failingSession();
+
+    engine.tryApplyTransitions(session); // attempt 1
+    engine.tryApplyTransitions(session); // attempt 2 — budget now spent
+    expect(session.currentStage).toBe('execution');
+
+    engine.tryApplyTransitions(session);
+
+    // `terminal` needs no rule of its own: the retry edge simply stops being
+    // eligible, and the next open edge out of the stage is taken.
+    expect(session.currentStage).toBe('failed');
+    expect(session.retryBudgets['execution']?.attempts).toBe(2);
+  });
+
+  it('says which budget closed the edge', () => {
+    const engine = retryingEngine(1);
+    const session = failingSession();
+    engine.tryApplyTransitions(session);
+    session.currentStage = 'execution';
+
+    const check = engine.checkTransition('execution', 'execution', session);
+
+    expect(check.allowed).toBe(false);
+    expect(check.reason).toContain('spent the retry budget for execution');
+  });
+
+  it('falls back to the default budget when the stage declares none', () => {
+    const engine = retryingEngine();
+    const session = failingSession();
+
+    engine.tryApplyTransitions(session);
+
+    expect(session.retryBudgets['execution']).toEqual({ attempts: 1, maximum: 3 });
+  });
+});
+
 describe('alternative transitions between the same two stages', () => {
   // A schema may declare several edges from a to b, told apart by their
   // guards. Judging a candidate by its endpoints re-finds the first edge every

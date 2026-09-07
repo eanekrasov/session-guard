@@ -312,7 +312,9 @@ describe('MutationOrchestrator.finishMutation', () => {
     expect(reloaded?.activeOperations).toEqual({});
     const invGate = reloaded?.gates.find((g) => g.id === 'invariants');
     expect(invGate?.status).toBe('failed');
-    expect(reloaded?.retryBudgets['task-1']?.attempts).toBe(1);
+    // Recording the verdict is not spending an attempt: the move that retries
+    // is what costs one. Bumping here spent the same counter a second time.
+    expect(reloaded?.retryBudgets['task-1']).toBeUndefined();
   });
 
   it('fails gate closed when computeChangeScope throws (no git repo)', async () => {
@@ -357,7 +359,7 @@ describe('MutationOrchestrator.finishMutation', () => {
     expect(reloaded?.activeOperations).toEqual({});
   });
 
-  it('bumpRetry is called exactly once per finishMutation call (no double bump)', async () => {
+  it('spends no retry attempt: a verdict is not a retry', async () => {
     setFixtureProfilesDir();
     const gitDir = makeGitDir();
     const session = createSession('mo-retry-once', 'base', 'state-machine');
@@ -378,7 +380,12 @@ describe('MutationOrchestrator.finishMutation', () => {
     });
 
     const reloaded = await store.load('mo-retry-once');
-    expect(reloaded?.retryBudgets['task-1']?.attempts).toBe(1);
+    // The task's budget belongs to the moves that retry it — the runtime
+    // spends one when a failing stage is left, and an edge may declare
+    // `bumpRetry` or `onFailure: retry`. Recording an invariant failure used
+    // to spend it too, so a task could exhaust its retries without a single
+    // retry having been taken.
+    expect(reloaded?.retryBudgets['task-1']).toBeUndefined();
   });
 });
 

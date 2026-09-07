@@ -44,6 +44,18 @@ export function logWarning(
   logger.warn(`[opencode-rules] Warning: ${context}: ${formatError(error)}`);
 }
 
+/**
+ * Warn whether or not debugging is on.
+ *
+ * `logWarning` above is for noise a reader opts into. Some failures are not
+ * noise: work that was asked for and did not happen, reported to nobody. Those
+ * belong here, or the only trace of them is their absence.
+ */
+export function logWarningAlways(context: string, error: unknown, log?: DebugLogger): void {
+  const logger = log ?? console;
+  logger.warn(`[opencode-rules] Warning: ${context}: ${formatError(error)}`);
+}
+
 /** Log an error with the standard opencode-rules prefix. */
 export function logError(
   context: string,

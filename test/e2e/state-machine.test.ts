@@ -331,11 +331,13 @@ describe('E2E: Full state machine flow', () => {
     addImplementationTask(session);
     expect(engine.deriveStage(session)).toBe('EXECUTION');
 
-    // First mutation fails → retry budget bumps
+    // First mutation fails. The verdict is recorded; the attempt is not spent
+    // here — the move that retries the task is what costs one.
     beginMutation(session, 'm-1', 'unknown', () => 'code');
     session.changedFiles = [];
     finishMutation(session, false, 'm-1');
-    expect(session.retryBudgets['task-1'].attempts).toBe(1);
+    expect(session.gates.find((g) => g.id === 'invariants')?.status).toBe('failed');
+    expect(session.retryBudgets['task-1']).toBeUndefined();
 
     // Retry — passes
     beginMutation(session, 'm-2', 'unknown', () => 'code');
@@ -576,7 +578,7 @@ describe('E2E: Full state machine flow', () => {
 
   // ─── TC21: Retry budget exhausts after max attempts ──────────────────────
 
-  test('TC21: retry budget exhausts after 3 failed mutations', () => {
+  test('TC21: a budget exhausts on the attempts that are spent, not on verdicts', () => {
     store = makeStore();
     const session = baseSession();
     const engine = new StateMachineEngine(ENGINE_CONFIG);
@@ -584,12 +586,18 @@ describe('E2E: Full state machine flow', () => {
     approve(session, 'plan', 'ev', 'c1');
     addImplementationTask(session);
 
-    // 3 failures = retry budget exhausted
+    // Three failed mutations record three verdicts and spend nothing: a task
+    // used to exhaust its retries without a single retry having been taken.
     for (let i = 1; i <= 3; i++) {
       beginMutation(session, `m-${i}`, 'unknown', () => 'code');
       session.changedFiles = [];
       finishMutation(session, false, `m-${i}`);
     }
+    expect(session.retryBudgets['task-1']).toBeUndefined();
+    expect(isExhausted(session, 'task-1')).toBe(false);
+
+    // The attempts the retrying moves spend are what exhausts it.
+    for (let i = 1; i <= 3; i++) bumpRetry(session, 'task-1');
 
     expect(session.retryBudgets['task-1'].attempts).toBe(3);
     expect(isExhausted(session, 'task-1')).toBe(true);

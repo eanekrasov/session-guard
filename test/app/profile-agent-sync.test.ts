@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
 
-import { syncProfileAgents } from '../../src/app/profile-agent-sync.ts';
+import { listProfileAgents, syncProfileAgents } from '../../src/app/profile-agent-sync.ts';
 
 const temporaryDirectories: string[] = [];
 
@@ -23,6 +23,7 @@ function createFixture(): string {
 async function createFixtureLayout(opts: {
   agentsContent?: Record<string, string>;
   agentsDir?: string;
+  agents?: string[];
 }): Promise<string> {
   const root = await mkdtemp(path.join(tmpdir(), 'profile-agent-sync-'));
   temporaryDirectories.push(root);
@@ -40,6 +41,7 @@ async function createFixtureLayout(opts: {
       id: 'test-profile',
       agentsDir: agentsFolder,
       schemas: [],
+      ...(opts.agents ? { agents: opts.agents } : {}),
     })
   );
 
@@ -59,7 +61,62 @@ async function createFixtureLayout(opts: {
   return root;
 }
 
+describe('listProfileAgents', () => {
+  it('answers with the roster the profile declares', async () => {
+    const root = await createFixtureLayout({
+      agents: ['code', 'architect'],
+      agentsContent: { 'code.md': '# code', 'architect.md': '# architect', 'stray.md': '# stray' },
+    });
+
+    const agents = await listProfileAgents(
+      'test-profile',
+      path.join(root, '.opencode', 'profiles')
+    );
+
+    // The author's order is kept; a declaration is a list, not a set.
+    expect(agents).toEqual(['code', 'architect']);
+  });
+
+  it('falls back to the files on disk when the profile declares no roster', async () => {
+    const root = await createFixtureLayout({
+      agentsContent: { 'code.md': '# code', 'harness.md': '# harness' },
+    });
+
+    const agents = await listProfileAgents(
+      'test-profile',
+      path.join(root, '.opencode', 'profiles')
+    );
+
+    expect(agents).toEqual(['code', 'harness']);
+  });
+
+  it('answers with nothing when the profile ships no agents at all', async () => {
+    const root = await createFixtureLayout({});
+
+    const agents = await listProfileAgents(
+      'test-profile',
+      path.join(root, '.opencode', 'profiles')
+    );
+
+    expect(agents).toEqual([]);
+  });
+});
+
 describe('syncProfileAgents', () => {
+  it('copies only what the declared roster names', async () => {
+    const root = await createFixtureLayout({
+      agents: ['code'],
+      agentsContent: { 'code.md': '# code', 'undeclared.md': '# undeclared' },
+    });
+
+    await syncProfileAgents('test-profile', root);
+
+    const synced = path.join(root, '.opencode', 'agents', 'test-profile');
+    expect(existsSync(path.join(synced, 'code.md'))).toBe(true);
+    // A file the profile does not list is not this profile's to register.
+    expect(existsSync(path.join(synced, 'undeclared.md'))).toBe(false);
+  });
+
   it('copies agent files from profile to .opencode/agents/<profileId>/', async () => {
     const root = await createFixtureLayout({
       agentsContent: {

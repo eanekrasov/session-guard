@@ -234,6 +234,40 @@ describe('matched-rules-state', () => {
     });
   });
 
+  describe('when the state cannot be written', () => {
+    it('resolves anyway, and warns without waiting to be asked', async () => {
+      // A regular file where the state directory should be: mkdir fails, and
+      // with it the write. The caller cannot see that — the promise resolves —
+      // so the warning is the only trace, and it must not be debug-gated.
+      const parent = await fs.mkdtemp(path.join(os.tmpdir(), 'matched-rules-broken-'));
+      const blocked = path.join(parent, 'state');
+      await fs.writeFile(blocked, 'not a directory');
+      const debugWasOn = process.env.OPENCODE_RULES_DEBUG;
+      delete process.env.OPENCODE_RULES_DEBUG;
+
+      const warnings: string[] = [];
+      const originalWarn = console.warn;
+      console.warn = (...args: unknown[]): void => {
+        warnings.push(args.map(String).join(' '));
+      };
+
+      try {
+        const blockedStore = new MatchedRulesStateStore({ stateDir: blocked });
+
+        await blockedStore.write('s1', ['rules/a.md']);
+
+        expect(await readMatchedRulesState('s1', { stateDir: blocked })).toBeNull();
+        expect(warnings.some((line) => line.includes('Failed to write matched rules state'))).toBe(
+          true
+        );
+      } finally {
+        console.warn = originalWarn;
+        if (debugWasOn !== undefined) process.env.OPENCODE_RULES_DEBUG = debugWasOn;
+        await fs.rm(parent, { recursive: true, force: true });
+      }
+    });
+  });
+
   describe('merge', () => {
     it('atomically merges admitted paths with existing state', async () => {
       await store.write('ses_merge', ['/rules/always.md']);

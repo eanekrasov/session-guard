@@ -157,6 +157,38 @@ describe('a nested loop can actually run', () => {
   });
 });
 
+describe('a parent does not block its own child', () => {
+  it('admits the child of a running parent task', async () => {
+    // The parent occupies `parents`; the child's cycle owns `task-1`. Serial
+    // admission counted every open run in the session, so the parent's own run
+    // refused the child — and the parent waits for a child that may not start.
+    const store = new WorkflowStore(storeDirectory);
+    const session = createSession('nested-parent', 'nested-loop', 'flow', 'planning');
+    session.currentStage = 'execution';
+    session.tasks.parents = [createTask({ id: 'task-1' })];
+    session.tasks['task-1'] = [createTask({ id: 'task-2' })];
+    await store.save(session);
+
+    const hooks: Hooks = createRuntime(pluginInput());
+
+    await hooks['tool.execute.before']!(
+      { tool: 'task', sessionID: 'nested-parent', callID: 'call-parent' },
+      { args: { subagent_type: 'code', description: '[workflow-task:task-1] parent work' } }
+    );
+
+    await expect(
+      hooks['tool.execute.before']!(
+        { tool: 'task', sessionID: 'nested-parent', callID: 'call-child' },
+        { args: { subagent_type: 'code', description: '[workflow-task:task-2] child work' } }
+      )
+    ).resolves.toBeUndefined();
+
+    const after = await store.load('nested-parent');
+    const child = Object.values(after!.loopRuns).find((entry) => entry.taskId === 'task-2');
+    expect(child?.listKey).toBe('task-1');
+  });
+});
+
 describe('a task says who may edit it, and the stage is asked whether it edits', () => {
   it('refuses an agent the task does not list, on a stage with no `gates:` field', async () => {
     // `stage.gates?.length === 0` is false when a stage declares no `gates:`

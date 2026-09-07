@@ -69,6 +69,51 @@ function injectManagedMarker(content: string): string {
  * The marker is placed **after** YAML frontmatter when present, or at the
  * beginning of the file when no frontmatter exists.
  */
+/**
+ * The agents a profile ships.
+ *
+ * `profile.json`'s `agents` is the source of truth when the profile declares
+ * one. When it does not, the default is what the agents directory holds — the
+ * profile ships what it ships, and there is no second list to keep in step.
+ *
+ * Only the profile's own declaration counts here, never an inherited one:
+ * these names have to match files under this profile's own directory, and an
+ * ancestor's roster describes the ancestor's.
+ *
+ * Names come back bare (`code`); `qualifyAgentName` makes them `android/code`.
+ */
+export async function listProfileAgents(
+  profileId: string,
+  profilesDirectory: string
+): Promise<string[]> {
+  let agentsSubdir = 'agents';
+  let declared: string[] | undefined;
+  try {
+    const meta = JSON.parse(
+      await readFile(path.join(profilesDirectory, profileId, 'profile.json'), 'utf-8')
+    ) as { agentsDir?: string; agents?: string[] };
+    agentsSubdir = meta.agentsDir ?? 'agents';
+    if (Array.isArray(meta.agents)) declared = meta.agents;
+  } catch {
+    // No profile.json, or unreadable: the default subdirectory is still worth a look.
+  }
+  // A declared roster keeps the order its author wrote; only the directory
+  // listing is sorted, because a directory has no order of its own.
+  if (declared !== undefined) return [...new Set(declared)];
+
+  try {
+    const entries = await readdir(path.join(profilesDirectory, profileId, agentsSubdir), {
+      withFileTypes: true,
+    });
+    return entries
+      .filter((entry) => entry.isFile() && entry.name.endsWith('.md'))
+      .map((entry) => entry.name.slice(0, -'.md'.length))
+      .sort();
+  } catch {
+    return [];
+  }
+}
+
 export async function syncProfileAgents(
   profileId: string,
   projectDir: string,
@@ -100,7 +145,10 @@ export async function syncProfileAgents(
   const sourceAgentsDir = path.join(pDir, profileId, profileMeta.agentsDir ?? 'agents');
   const targetAgentsDir = path.join(opencodeAgentsDir, profileId);
 
-  // Collect source files (*.md only)
+  // Collect source files (*.md only), keeping to the profile's roster: a
+  // declared `agents` list is the source of truth, and what it leaves out is
+  // not this profile's to register.
+  const roster = new Set(await listProfileAgents(profileId, pDir));
   let sourceFiles: string[];
   if (!existsSync(sourceAgentsDir)) {
     logMsg(`[profile-agent-sync] Source agents dir does not exist: ${sourceAgentsDir}`);
@@ -110,7 +158,12 @@ export async function syncProfileAgents(
       const entries = await readdir(sourceAgentsDir, { withFileTypes: true });
       sourceFiles = entries
         .filter((entry) => entry.isFile() && entry.name.endsWith('.md'))
-        .map((entry) => entry.name);
+        .map((entry) => entry.name)
+        .filter((name) => {
+          if (roster.has(name.slice(0, -'.md'.length))) return true;
+          logMsg(`[profile-agent-sync] "${name}" is not on ${profileId}'s agents list; skipped`);
+          return false;
+        });
     } catch (err) {
       logMsg(
         `[profile-agent-sync] Error reading ${sourceAgentsDir}: ${err instanceof Error ? err.message : String(err)}`

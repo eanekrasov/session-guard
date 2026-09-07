@@ -34,3 +34,14 @@ export {
   sessionFileName,
   sessionIdFromFileName,
 } from './session/session-files.ts';
+
+/**
+ * The agents a profile ships. The profile is the source; nobody keeps a list.
+ *
+ * The dashboard used to guard its prompt endpoint with a literal array of ten
+ * names. It matched `profiles/android/agents` exactly — android being the only
+ * profile that ships agents — so the copy could not visibly drift, and a second
+ * profile's agent would have been refused with a 400 while its prompt sat on
+ * disk.
+ */
+export { listProfileAgents } from './app/profile-agent-sync.ts';

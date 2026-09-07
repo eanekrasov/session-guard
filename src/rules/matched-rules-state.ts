@@ -2,7 +2,7 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as crypto from 'node:crypto';
-import { createDebugLog, logWarning } from './debug.js';
+import { createDebugLog, logWarningAlways } from './debug.js';
 
 const debugLog = createDebugLog();
 
@@ -34,6 +34,31 @@ function buildStateFilePath(sessionID: string, stateDir: string): string {
   return path.join(stateDir, `${sessionID}.json`);
 }
 
+/**
+ * Which rules matched in a session, remembered for the sidebar.
+ *
+ * **Writing is best-effort and says so here rather than in its return type.**
+ * A filesystem failure is warned about and then dropped: the caller gets a
+ * resolved promise and cannot tell the write did not happen. That is deliberate
+ * — both writers are hook handlers with nothing to retry and nobody to tell,
+ * and the reader already treats missing state as normal, because a session that
+ * has not been evaluated yet has none.
+ *
+ * The same goes for concurrency. `writeQueues` serialises writes within one
+ * instance, and that is all it does: two instances sharing a state directory
+ * both read the old state, both add their own paths and both rename their own
+ * file over it, so one merge is lost every time. The atomic rename protects
+ * the file from being torn, never the read-modify-write around it. Production
+ * builds one store per runtime, so nothing reaches this today — `WorkflowStore`
+ * is where a cross-process lock lives, because losing one of its writes loses
+ * workflow state.
+ *
+ * What follows from all of it: this is a hint, not a source of truth. Nothing
+ * that decides anything may depend on it. If something ever needs to know
+ * whether the state survived, this class has to start reporting failure and
+ * holding a lock across processes, and both callers have to grow somewhere to
+ * report to.
+ */
 export class MatchedRulesStateStore {
   private readonly stateDir: string;
   private readonly writeQueues = new Map<string, Promise<void>>();
@@ -42,8 +67,14 @@ export class MatchedRulesStateStore {
     this.stateDir = opts.stateDir ?? resolveStateDir();
   }
 
-  /** Replace semantics for full durable turns.
-   * @throws {Error} If sessionID fails validation. */
+  /**
+   * Replace semantics for full durable turns.
+   *
+   * Best-effort: a filesystem failure resolves like a success (see the class
+   * doc). Only an invalid sessionID rejects.
+   *
+   * @throws {Error} If sessionID fails validation.
+   */
   write(sessionID: string, matchedPaths: readonly string[]): Promise<void> {
     this.assertValidSessionID(sessionID);
     return this.enqueue(sessionID, async () => ({
@@ -53,9 +84,15 @@ export class MatchedRulesStateStore {
     }));
   }
 
-  /** Union semantics for mid-session admissions: atomically merges the new
+  /**
+   * Union semantics for mid-session admissions: atomically merges the new
    * paths with the persisted state so existing matched rules survive.
-   * @throws {Error} If sessionID fails validation. */
+   *
+   * Best-effort: a filesystem failure resolves like a success (see the class
+   * doc). Only an invalid sessionID rejects.
+   *
+   * @throws {Error} If sessionID fails validation.
+   */
   merge(sessionID: string, matchedPaths: readonly string[]): Promise<void> {
     this.assertValidSessionID(sessionID);
     return this.enqueue(sessionID, async () => {
@@ -104,7 +141,10 @@ export class MatchedRulesStateStore {
       await fs.writeFile(tempPath, content, 'utf-8');
       await fs.rename(tempPath, finalPath);
     } catch (error) {
-      logWarning(`Failed to write matched rules state for session ${sessionID}`, error);
+      // Warned unconditionally: this write is not observable by its caller,
+      // so a debug-gated message would make a lost write leave no trace at all
+      // unless somebody had already suspected one.
+      logWarningAlways(`Failed to write matched rules state for session ${sessionID}`, error);
 
       try {
         await fs.unlink(tempPath);

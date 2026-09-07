@@ -104,15 +104,26 @@ function parseJsonc<T = unknown>(text: string): T {
         // single-line comment
         while (i < text.length && text[i] !== '\n') i++;
         col = 0;
-        if (i < text.length) { out.push('\n'); line++; i++; }
+        if (i < text.length) {
+          out.push('\n');
+          line++;
+          i++;
+        }
         continue;
       }
       if (next === '*') {
         // multi-line comment
         i += 2;
         while (i < text.length) {
-          if (text[i] === '*' && text[i + 1] === '/') { i += 2; break; }
-          if (text[i] === '\n') { out.push('\n'); line++; col = 0; }
+          if (text[i] === '*' && text[i + 1] === '/') {
+            i += 2;
+            break;
+          }
+          if (text[i] === '\n') {
+            out.push('\n');
+            line++;
+            col = 0;
+          }
           i++;
         }
         continue;
@@ -128,10 +139,17 @@ function parseJsonc<T = unknown>(text: string): T {
         if (c === '\\') {
           out.push(c);
           i++;
-          if (i < text.length) { out.push(text[i]); i++; }
+          if (i < text.length) {
+            out.push(text[i]);
+            i++;
+          }
           continue;
         }
-        if (c === quote) { out.push('"'); i++; break; }
+        if (c === quote) {
+          out.push('"');
+          i++;
+          break;
+        }
         if (c === '\n') err('newline in string literal');
         out.push(c);
         i++;
@@ -142,10 +160,16 @@ function parseJsonc<T = unknown>(text: string): T {
     if (ch === ',') {
       // skip trailing comma before } or ]
       const after = text.slice(i + 1).trimStart();
-      if (after[0] === '}' || after[0] === ']') { i++; continue; }
+      if (after[0] === '}' || after[0] === ']') {
+        i++;
+        continue;
+      }
     }
 
-    if (ch === '\n') { line++; col = 0; }
+    if (ch === '\n') {
+      line++;
+      col = 0;
+    }
     out.push(ch);
     i++;
   }

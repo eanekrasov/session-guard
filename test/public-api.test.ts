@@ -40,6 +40,46 @@ describe('resolveConfig', () => {
   });
 });
 
+describe('a circular extends chain', () => {
+  it('is reported, not quietly truncated', async () => {
+    // The walk used to `break` on a repeat, which kept it finite and told
+    // nobody: the profile resolved half-assembled and then ran. A missing
+    // parent has always thrown; a cycle is the same authoring mistake.
+    await expect(resolveConfig('cycle-pair-a', FIXTURES_DIR)).rejects.toThrow(
+      /circular extends chain: cycle-pair-a → cycle-pair-b → cycle-pair-a/
+    );
+  });
+
+  it('is reported when a profile extends itself', async () => {
+    await expect(resolveConfig('cycle-self', FIXTURES_DIR)).rejects.toThrow(
+      /circular extends chain/
+    );
+  });
+});
+
+describe('agents along an extends chain', () => {
+  it("adds the child's own agents to what its parent ships", async () => {
+    // Inheritance used to stop at the nearest ancestor that declared any, so a
+    // child naming one agent of its own silently lost every agent its parent
+    // shipped — a profile could not add to what it extends.
+    const profile = await resolveConfig('extends-child', FIXTURES_DIR);
+
+    // The merged roster is a set of names: what it holds matters, the order it
+    // holds them in does not.
+    expect(profile.metadata.agents?.slice().sort()).toEqual(['architect', 'code', 'figma']);
+  });
+
+  it("keeps a name both of them carry once, and resolves it to the child's", async () => {
+    const parent = await resolveConfig('extends-parent', FIXTURES_DIR);
+    const child = await resolveConfig('extends-child', FIXTURES_DIR);
+
+    expect(parent.metadata.agents).toEqual(['code', 'architect']);
+    // `code` is declared by the parent only here; were both to declare it, the
+    // child's entry comes first and the duplicate is dropped.
+    expect(child.metadata.agents?.filter((a) => a === 'code')).toHaveLength(1);
+  });
+});
+
 describe('listProfiles', () => {
   it('lists all available profiles', async () => {
     const profiles = await listProfiles(FIXTURES_DIR);
