@@ -1263,9 +1263,14 @@ class StateMachineRuntime {
     // это отсутствие доказательства, а не разрешение.
     let committed: string[] | null = null;
     try {
+      // `--root` is what makes the repository's first commit answerable.
+      // Without it diff-tree compares against a parent, and the initial commit
+      // has none — so it printed nothing, the empty list was read as "cannot
+      // determine which files this commit contains", and a correct first
+      // commit was rejected with the workflow stuck in `commit`.
       const result = spawnSync(
         'git',
-        ['diff-tree', '--no-commit-id', '--name-only', '-r', currentHead],
+        ['diff-tree', '--no-commit-id', '--name-only', '-r', '--root', currentHead],
         {
           cwd: this.projectDir,
           encoding: 'utf-8',
