@@ -71,6 +71,7 @@ export function schemaToEngineConfig(schema: ResolvedSchema): EngineConfig {
     requiredGates: schema.requiredGates ? [...schema.requiredGates] : undefined,
     gates: schema.gates?.map((gate) => ({ ...gate })),
     taskControlAgents: schema.taskControlAgents ? [...schema.taskControlAgents] : undefined,
+    editingAgents: schema.editingAgents ? [...schema.editingAgents] : undefined,
   };
 }
 

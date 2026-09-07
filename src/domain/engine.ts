@@ -1,6 +1,7 @@
 import { type GuardEvaluationContext, GuardEvaluator } from '../schema/guard-evaluator.ts';
 import type { TaskStatus, WorkflowSession } from '../session/session-schema.ts';
 import type { GateItem, StageAssignmentRule, StageDef, TransitionDef } from '../schema/types.ts';
+import { nestedStages } from '../schema/types.ts';
 import type { SessionFacts } from './session-facts.ts';
 import { toSessionFacts } from './session-facts.ts';
 import { bumpRetry } from '../session/helpers.ts';
@@ -71,6 +72,15 @@ export interface EngineConfig {
   gates?: GateItem[];
   /** agents allowed to drive workflow task state (schema-level, last wins) */
   taskControlAgents?: string[];
+  /**
+   * The agents this workflow considers editors.
+   *
+   * Carried through resolution and read by nobody until now, which is why a
+   * stage could not say whether it mutates. A stage whose roster admits an
+   * editor is a stage where work happens; one whose roster admits none is a
+   * verification stage.
+   */
+  editingAgents?: string[];
 }
 
 function consentType(consent: string | { type?: string }): string {
@@ -437,16 +447,40 @@ export class StateMachineEngine {
     return initialStageOf(this.config.stages);
   }
 
-  /** The stage that cycles over the named task list, if any. */
+  /**
+   * The stage that cycles over the named task list, if any.
+   *
+   * Loops nest, and this searched only the top level — so admission could
+   * start a nested loop's task while the result handler, asking the same
+   * question here, got nothing: the task reported success and stayed
+   * `running` behind `no loop stage resolved`.
+   *
+   * `$currentTask.id` also used to match any key at all. It names the list of
+   * the task being worked on, whose key is that task's id, so it matches one.
+   */
   getLoopStage(listKey: string): StageDef | null {
-    for (const stage of Object.values(this.getStages())) {
-      if (stage.loop === listKey || stage.loop === '$currentTask.id') return stage;
-    }
-    return null;
+    const owns = (stage: StageDef): boolean =>
+      stage.loop === listKey || (stage.loop === '$currentTask.id' && /^task-[0-9]+$/.test(listKey));
+
+    const search = (stages: StageDef[]): StageDef | null => {
+      for (const stage of stages) {
+        if (owns(stage)) return stage;
+        const nested = search(nestedStages(stage));
+        if (nested) return nested;
+      }
+      return null;
+    };
+
+    return search(Object.values(this.getStages()));
   }
 
   getTaskControlAgents(): string[] {
     return this.config.taskControlAgents ?? ['orchestrator'];
+  }
+
+  /** The agents this workflow declares as editors. */
+  getEditingAgents(): string[] {
+    return this.config.editingAgents ?? [];
   }
 
   /**

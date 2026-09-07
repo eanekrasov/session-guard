@@ -156,3 +156,105 @@ describe('a nested loop can actually run', () => {
     expect(run?.listKey).toBe('task-1');
   });
 });
+
+describe('a task says who may edit it, and the stage is asked whether it edits', () => {
+  it('refuses an agent the task does not list, on a stage with no `gates:` field', async () => {
+    // `stage.gates?.length === 0` is false when a stage declares no `gates:`
+    // at all — which is most stages — so the check was skipped for exactly the
+    // case it was written for. The shipped base profile is one: its stages
+    // deliberately declare no roster, so every agent may run there, editors
+    // included, and the stage is one where work happens.
+    const store = new WorkflowStore(storeDirectory);
+    const session = createSession('editors', 'editors', 'flow', 'planning');
+    session.currentStage = 'execution';
+    session.tasks.implementation = [createTask({ editingAgents: ['different-editor'] })];
+    await store.save(session);
+
+    const hooks: Hooks = createRuntime(pluginInput());
+
+    await expect(
+      hooks['tool.execute.before']!(
+        { tool: 'task', sessionID: 'editors', callID: 'call-1' },
+        { args: { subagent_type: 'code', description: '[workflow-task:task-1] work' } }
+      )
+    ).rejects.toThrow(/may not edit task-1/);
+  });
+
+  it('admits the agent the task does list', async () => {
+    const store = new WorkflowStore(storeDirectory);
+    const session = createSession('editors-ok', 'editors', 'flow', 'planning');
+    session.currentStage = 'execution';
+    session.tasks.implementation = [createTask({ editingAgents: ['code'] })];
+    await store.save(session);
+
+    const hooks: Hooks = createRuntime(pluginInput());
+
+    await expect(
+      hooks['tool.execute.before']!(
+        { tool: 'task', sessionID: 'editors-ok', callID: 'call-1' },
+        { args: { subagent_type: 'code', description: '[workflow-task:task-1] work' } }
+      )
+    ).resolves.toBeUndefined();
+  });
+});
+
+describe('a nested task finishes, not only starts', () => {
+  it('resolves its own loop when the result comes back', async () => {
+    // Admission was taught to find a nested loop; the result handler asks the
+    // same question through getLoopStage, which searched only the top level.
+    // The task reported success and stayed `running` behind
+    // `workflow-task-unreachable: no loop stage resolved`.
+    const store = new WorkflowStore(storeDirectory);
+    const session = createSession('finish', 'nested-loop', 'flow', 'planning');
+    session.currentStage = 'execution';
+    session.tasks.parents = [createTask({ id: 'task-1' })];
+    session.tasks['task-1'] = [createTask({ id: 'task-2' })];
+    await store.save(session);
+
+    const hooks: Hooks = createRuntime(pluginInput());
+    await hooks['tool.execute.before']!(
+      { tool: 'task', sessionID: 'finish', callID: 'call-child' },
+      { args: { subagent_type: 'code', description: '[workflow-task:task-2] child work' } }
+    );
+
+    const output = {
+      title: 'task',
+      output:
+        '<workflow-result>{"stage":"child","status":"pass","summary":"ok","evidence":["ok"]}</workflow-result>',
+      metadata: {},
+    };
+    await hooks['tool.execute.after']!(
+      { tool: 'task', sessionID: 'finish', callID: 'call-child', args: { subagent_type: 'code' } },
+      output
+    );
+
+    expect(output.output).not.toContain('no loop stage resolved');
+    const after = await store.load('finish');
+    expect(after?.tasks['task-1']?.[0]?.status).toBe('completed');
+  });
+});
+
+describe('reading a task list from a dispatched subagent', () => {
+  it('resolves the root session instead of refusing', async () => {
+    // Taking the write out of the read took the queue's root resolution with
+    // it: a read from a child session answered `Unknown workflow session:
+    // child` though the host knew its parent.
+    const { TaskApi } = await import('../../src/app/task-api.ts');
+    const { SessionQueue } = await import('../../src/app/session-queue.ts');
+
+    const store = new WorkflowStore(storeDirectory);
+    const session = createSession('root', 'base', 'state-machine', 'planning');
+    session.tasks.implementation = [createTask()];
+    await store.save(session);
+
+    const chain: Record<string, string> = { child: 'root' };
+    const queue = new SessionQueue(store, undefined, async (id) => chain[id] ?? null);
+    const api = new TaskApi(store, async () => ['implementation'], queue);
+
+    const fromChild = await api.getTasks('child', 'implementation');
+    expect(fromChild).toHaveLength(1);
+
+    // And it still writes nothing.
+    expect((await store.load('root'))?.revision).toBe(1);
+  });
+});

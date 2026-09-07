@@ -1,0 +1,27 @@
+# The shape the shipped base profile has: the workflow says who edits, and its
+# stages declare no roster at all — so anyone may run there, editors included,
+# and the stage is one where work happens.
+#
+# The old test for that was `stage.gates?.length === 0`, which is false when a
+# stage declares no `gates:` — most stages — so a task naming its own editors
+# admitted anyone.
+stages:
+  execution:
+    loop: implementation
+    stages:
+      code: {}
+    transitions:
+      - from: code
+        to: done
+  done: {}
+transitions:
+  - from: execution
+    to: done
+stageAssignments:
+  - id: execution
+    priority: 1
+    condition: 'true'
+    result: execution
+editingAgents:
+  - code
+  - debug

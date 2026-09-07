@@ -58,7 +58,14 @@ export class TaskApi {
    * are conflicts waiting for a second writer.
    */
   async getTasks(sessionId: string, listKey: string): Promise<MutationTask[]> {
-    const session = await this.requireSession(sessionId);
+    // The queue was doing two things at once, and taking the write out took
+    // the root resolution with it: read from a dispatched subagent's own
+    // session and the answer became `Unknown workflow session: child`, though
+    // the host knew its parent perfectly well. Resolve the root, load it, and
+    // still write nothing.
+    const session = await this.requireSession(
+      this.queue ? await this.queue.rootOf(sessionId) : sessionId
+    );
     await this.assertKnownList(session, listKey);
     return this.copyTasks(session.tasks[listKey] ?? []);
   }

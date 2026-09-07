@@ -953,8 +953,26 @@ class StateMachineRuntime {
       // calls at all. Agent identity is only known at dispatch time — a
       // native tool.execute.before hook carries no agent — so this is
       // enforced here, refusing the dispatch itself rather than each write.
+      //
+      // Whether this stage is one where work happens is asked of its roster,
+      // not of its `gates`. `stage.gates?.length === 0` was the old test, and
+      // it is false when a stage declares no `gates:` at all — which is most
+      // stages — so the check was skipped for exactly the case it was written
+      // for and a task naming its own editors admitted anyone.
+      //
+      // A stage whose roster admits an editor is a stage where work happens.
+      // No roster means anyone may run there, editors included. A workflow
+      // that declares no editors at all cannot classify its stages, and this
+      // stays silent rather than guess — every shipped profile declares them.
+      const editors = engine.getEditingAgents();
+      const roster = stage.allowedAgents ?? loopStage.allowedAgents;
+      const stageMayEdit =
+        editors.length > 0 &&
+        (roster === undefined ||
+          roster.some((candidate) => agentIsAllowed(candidate, editors, session.profileId)));
+
       if (
-        stage.gates?.length === 0 &&
+        stageMayEdit &&
         task.editingAgents?.length &&
         !agentIsAllowed(agent, task.editingAgents, session.profileId)
       ) {
