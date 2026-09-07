@@ -80,9 +80,77 @@ export function packPlugin(): string {
   return line.startsWith('/') ? line : join(destination, line);
 }
 
-/** Strip `//` line comments so a .jsonc file parses as JSON. */
-function stripComments(text: string): string {
-  return text.replace(/^\s*\/\/.*$/gm, '');
+/**
+ * Parse a .jsonc string as JSON, stripping // and /* * / comments, trailing
+ * commas, and extra whitespace so JSON.parse works.
+ */
+function parseJsonc<T = unknown>(text: string): T {
+  const out: string[] = [];
+  let i = 0;
+  let line = 1;
+  let col = 0;
+
+  function err(msg: string): never {
+    throw new SyntaxError(`JSONC parse error at ${line}:${col}: ${msg}`);
+  }
+
+  while (i < text.length) {
+    const ch = text[i];
+    col++;
+
+    if (ch === '/') {
+      const next = text[i + 1];
+      if (next === '/') {
+        // single-line comment
+        while (i < text.length && text[i] !== '\n') i++;
+        col = 0;
+        if (i < text.length) { out.push('\n'); line++; i++; }
+        continue;
+      }
+      if (next === '*') {
+        // multi-line comment
+        i += 2;
+        while (i < text.length) {
+          if (text[i] === '*' && text[i + 1] === '/') { i += 2; break; }
+          if (text[i] === '\n') { out.push('\n'); line++; col = 0; }
+          i++;
+        }
+        continue;
+      }
+    }
+
+    if (ch === '"' || ch === "'") {
+      const quote = ch;
+      out.push('"');
+      i++;
+      while (i < text.length) {
+        const c = text[i];
+        if (c === '\\') {
+          out.push(c);
+          i++;
+          if (i < text.length) { out.push(text[i]); i++; }
+          continue;
+        }
+        if (c === quote) { out.push('"'); i++; break; }
+        if (c === '\n') err('newline in string literal');
+        out.push(c);
+        i++;
+      }
+      continue;
+    }
+
+    if (ch === ',') {
+      // skip trailing comma before } or ]
+      const after = text.slice(i + 1).trimStart();
+      if (after[0] === '}' || after[0] === ']') { i++; continue; }
+    }
+
+    if (ch === '\n') { line++; col = 0; }
+    out.push(ch);
+    i++;
+  }
+
+  return JSON.parse(out.join('')) as T;
 }
 
 /**
@@ -123,10 +191,7 @@ async function operatorProviders(): Promise<{
     const file = join(configHome, name);
     if (!existsSync(file)) continue;
     try {
-      const parsed = JSON.parse(stripComments(await readFile(file, 'utf-8'))) as Record<
-        string,
-        unknown
-      >;
+      const parsed = parseJsonc<Record<string, unknown>>(await readFile(file, 'utf-8'));
       if (parsed.provider) merged.provider = resolveProviderKeys(parsed.provider);
       if (parsed.disabled_providers) merged.disabled_providers = parsed.disabled_providers;
       if (typeof parsed.model === 'string') merged.model = parsed.model;
