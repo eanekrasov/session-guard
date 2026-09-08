@@ -37,14 +37,10 @@ function deferred<T = void>(): {
 
 describe('SessionQueue', () => {
   it('executes a single enqueued action', async () => {
-    await seedSession('sq-single');
-
     const { SessionQueue } = await import('../../src/app/session-queue.ts');
-    const queue = new SessionQueue(store);
+    const queue = new SessionQueue();
 
-    const result = await queue.enqueue('sq-single', async (session) => {
-      expect(session).not.toBeNull();
-      expect(session!.sessionId).toBe('sq-single');
+    const result = await queue.enqueue('sq-single', async () => {
       return 'done';
     });
 
@@ -52,10 +48,8 @@ describe('SessionQueue', () => {
   });
 
   it('chains two enqueues for the same root session (per-root serialization)', async () => {
-    await seedSession('sq-chain');
-
     const { SessionQueue } = await import('../../src/app/session-queue.ts');
-    const queue = new SessionQueue(store);
+    const queue = new SessionQueue();
 
     const order: string[] = [];
 
@@ -79,15 +73,11 @@ describe('SessionQueue', () => {
   });
 
   it('isolates concurrent enqueues on different roots', async () => {
-    await seedSession('sq-root-a');
-    await seedSession('sq-root-b');
-
     const { SessionQueue } = await import('../../src/app/session-queue.ts');
-    const queue = new SessionQueue(store);
+    const queue = new SessionQueue();
 
     const order: string[] = [];
     const gate = deferred();
-    // Синхронизатор: A подтверждает что сел на gate, B ждёт этого сигнала
     const aSeated = deferred();
 
     const aPromise = queue.enqueue('sq-root-a', async () => {
@@ -98,7 +88,6 @@ describe('SessionQueue', () => {
       return 'A';
     });
 
-    // Ждём пока A сядет на gate, только потом запускаем B
     await aSeated.promise;
 
     const bPromise = queue.enqueue('sq-root-b', async () => {
@@ -115,12 +104,8 @@ describe('SessionQueue', () => {
   });
 
   it('chains by resolved root session ID (parent chain)', async () => {
-    await seedSession('sq-parent-root');
-    await seedSession('sq-parent-child');
-
     const { SessionQueue } = await import('../../src/app/session-queue.ts');
-    // The chain is the host's; a session file never carries its parent.
-    const queue = new SessionQueue(store, undefined, async (id) =>
+    const queue = new SessionQueue(undefined, async (id) =>
       id === 'sq-parent-child' ? 'sq-parent-root' : null
     );
 
@@ -146,10 +131,8 @@ describe('SessionQueue', () => {
   });
 
   it('propagates errors from action without breaking the chain', async () => {
-    await seedSession('sq-error');
-
     const { SessionQueue } = await import('../../src/app/session-queue.ts');
-    const queue = new SessionQueue(store);
+    const queue = new SessionQueue();
 
     const first = queue.enqueue('sq-error', async () => {
       throw new Error('boom');
@@ -157,9 +140,7 @@ describe('SessionQueue', () => {
 
     await expect(first).rejects.toThrow('boom');
 
-    const second = queue.enqueue('sq-error', async (session) => {
-      expect(session).not.toBeNull();
-      expect(session!.sessionId).toBe('sq-error');
+    const second = queue.enqueue('sq-error', async () => {
       return 'recovered';
     });
 
@@ -167,23 +148,18 @@ describe('SessionQueue', () => {
   });
 
   it('resolves root to the session itself when it has no parent', async () => {
-    await seedSession('sq-leaf');
-
     const { SessionQueue } = await import('../../src/app/session-queue.ts');
-    const queue = new SessionQueue(store);
+    const queue = new SessionQueue();
 
-    const result = await queue.enqueue('sq-leaf', async (session, rootId) => {
-      expect(rootId).toBe('sq-leaf');
-      return rootId;
-    });
-
-    expect(result).toBe('sq-leaf');
+    // Use rootOf to verify resolution directly
+    const root = await queue.rootOf('sq-leaf');
+    expect(root).toBe('sq-leaf');
   });
 
   it('does not cache a failed parent lookup as a root', async () => {
     const { SessionQueue } = await import('../../src/app/session-queue.ts');
     let attempts = 0;
-    const queue = new SessionQueue(store, undefined, async () => {
+    const queue = new SessionQueue(undefined, async () => {
       attempts += 1;
       if (attempts === 1) throw new Error('SDK unavailable');
       return 'sq-parent-root';
@@ -195,10 +171,8 @@ describe('SessionQueue', () => {
   });
 
   it('clear() stops future chaining but does not affect in-flight', async () => {
-    await seedSession('sq-clear');
-
     const { SessionQueue } = await import('../../src/app/session-queue.ts');
-    const queue = new SessionQueue(store);
+    const queue = new SessionQueue();
 
     const gate = deferred();
 
@@ -221,14 +195,12 @@ describe('SessionQueue', () => {
 
 describe('reentrant SessionQueue', () => {
   it('enqueue from inside enqueue callback does NOT deadlock', async () => {
-    await seedSession('sq-reenter');
-
     const { SessionQueue } = await import('../../src/app/session-queue.ts');
-    const queue = new SessionQueue(store);
+    const queue = new SessionQueue();
 
     const order: number[] = [];
 
-    const result = await queue.enqueue('sq-reenter', async (session, rootId) => {
+    const result = await queue.enqueue('sq-reenter', async () => {
       order.push(1);
 
       // Nested enqueue from inside the callback
@@ -246,10 +218,8 @@ describe('reentrant SessionQueue', () => {
   });
 
   it('reentrant calls are serialized correctly with multiple levels', async () => {
-    await seedSession('sq-reenter-deep');
-
     const { SessionQueue } = await import('../../src/app/session-queue.ts');
-    const queue = new SessionQueue(store);
+    const queue = new SessionQueue();
 
     const order: number[] = [];
     const counter = { value: 0 };
@@ -258,12 +228,10 @@ describe('reentrant SessionQueue', () => {
       order.push(1);
       counter.value++;
 
-      // Level 2
       const l2 = await queue.enqueue('sq-reenter-deep', async () => {
         order.push(2);
         counter.value++;
 
-        // Level 3
         const l3 = await queue.enqueue('sq-reenter-deep', async () => {
           order.push(3);
           counter.value++;
@@ -281,10 +249,8 @@ describe('reentrant SessionQueue', () => {
   });
 
   it('nested enqueue returns the correct result', async () => {
-    await seedSession('sq-reenter-result');
-
     const { SessionQueue } = await import('../../src/app/session-queue.ts');
-    const queue = new SessionQueue(store);
+    const queue = new SessionQueue();
 
     const outerResult = await queue.enqueue('sq-reenter-result', async () => {
       const inner = await queue.enqueue('sq-reenter-result', async () => {
@@ -297,31 +263,20 @@ describe('reentrant SessionQueue', () => {
   });
 
   it('reentrant enqueue does not create separate promise chain', async () => {
-    await seedSession('sq-reenter-chain');
-
     const { SessionQueue } = await import('../../src/app/session-queue.ts');
-    const queue = new SessionQueue(store);
-
-    let enqueueCount = 0;
-    const originalEnqueue = queue.enqueue.bind(queue);
-    // We can't easily spy on internal chain creation.
-    // Instead verify that reentrant calls don't deadlock and execute in order.
+    const queue = new SessionQueue();
 
     const order: number[] = [];
 
-    // A non-reentrant enqueue followed by a reentrant one
     const p1 = queue.enqueue('sq-reenter-chain', async () => {
       order.push(1);
       await new Promise((r) => setTimeout(r, 5));
       order.push(2);
     });
 
-    // This enqueue will wait for p1 in the chain
-    // But inside, it's reentrant
     const p2 = queue.enqueue('sq-reenter-chain', async () => {
       order.push(3);
 
-      // Reentrant — should execute inline, not create a new chain link
       await queue.enqueue('sq-reenter-chain', async () => {
         order.push(4);
       });
@@ -334,157 +289,48 @@ describe('reentrant SessionQueue', () => {
   });
 });
 
-describe('SessionQueue — writes survive nesting and overlap', () => {
-  it('a reentrant write is not overwritten by the outer save', async () => {
-    // Reproduces the production failure the host smoke run surfaced: a tool
-    // reported "Stored 1 task(s)" while the persisted session held none.
-    await seedSession('sq-nested-write');
-
-    const { SessionQueue } = await import('../../src/app/session-queue.ts');
-    const queue = new SessionQueue(store);
-
-    await queue.enqueue('sq-nested-write', async (outer) => {
-      outer!.currentStage = 'code';
-      await queue.enqueue('sq-nested-write', async (inner) => {
-        inner!.tasks.implementation = [createTask({ id: 'task-0', status: 'pending' })] as never;
-      });
-    });
-
-    const persisted = await store.load('sq-nested-write');
-    expect(persisted?.tasks.implementation).toHaveLength(1);
-    expect(persisted?.currentStage).toBe('code');
-  });
-
-  it("a reentrant call sees the outer execution's session, not a reload", async () => {
-    await seedSession('sq-nested-identity');
-
-    const { SessionQueue } = await import('../../src/app/session-queue.ts');
-    const queue = new SessionQueue(store);
-
-    let sameInstance = false;
-    await queue.enqueue('sq-nested-identity', async (outer) => {
-      await queue.enqueue('sq-nested-identity', async (inner) => {
-        sameInstance = inner === outer;
-      });
-    });
-
-    expect(sameInstance).toBe(true);
-  });
-
-  it('two overlapping top-level calls serialise instead of running inline', async () => {
-    // Overlapping in time is not reentrancy. Before this was decided by call
-    // context, a second top-level call landed on the inline path and both
-    // executions raced on the same root.
-    await seedSession('sq-overlap');
-
-    const { SessionQueue } = await import('../../src/app/session-queue.ts');
-    const queue = new SessionQueue(store);
-
-    const started = deferred();
-    const release = deferred();
-    const order: string[] = [];
-
-    const first = queue.enqueue('sq-overlap', async (session) => {
-      order.push('first:start');
-      started.resolve();
-      await release.promise;
-      session!.tasks.implementation = [createTask({ id: 'task-0', status: 'pending' })] as never;
-      order.push('first:end');
-    });
-
-    await started.promise;
-    const second = queue.enqueue('sq-overlap', async (session) => {
-      order.push('second:start');
-      // Must observe the first execution's persisted write.
-      expect(session!.tasks.implementation).toHaveLength(1);
-      session!.currentStage = 'review';
-      order.push('second:end');
-    });
-
-    release.resolve();
-    await Promise.all([first, second]);
-
-    expect(order).toEqual(['first:start', 'first:end', 'second:start', 'second:end']);
-    const persisted = await store.load('sq-overlap');
-    expect(persisted?.currentStage).toBe('review');
-    expect(persisted?.tasks.implementation).toHaveLength(1);
-  });
-});
-
-describe('withSession', () => {
-  it('returns null when session does not exist', async () => {
-    const result = await withSession(store, 'nonexistent', async () => {
-      return 'should-not-run';
-    });
-
-    expect(result).toBeNull();
-  });
-
-  it('executes action and returns result when session exists', async () => {
-    await seedSession('ws-exists');
-
-    const result = await withSession(store, 'ws-exists', async (session) => {
-      expect(session.sessionId).toBe('ws-exists');
-      return 'ran';
-    });
-
-    expect(result).toBe('ran');
-  });
-
-  it('does not call action when session is missing', async () => {
-    const actionCaller = { called: false };
-    await withSession(store, 'ws-no-call', () => {
-      actionCaller.called = true;
-      return null;
-    });
-
-    expect(actionCaller.called).toBe(false);
-  });
-});
-
 describe('SessionQueue root resolution through the host', () => {
   it('runs a child session action on the parent workflow session', async () => {
     // `parentID` lives on the host's session record, never in a workflow
     // session file — so before the host was asked, this resolution was
     // identity and a dispatched subagent's writes never reached the parent's
     // task scope, invariants or queue.
-    await seedSession('sq-root');
-
     const { SessionQueue } = await import('../../src/app/session-queue.ts');
     const asked: string[] = [];
     const chain: Record<string, string> = { 'sq-child': 'sq-mid', 'sq-mid': 'sq-root' };
-    const queue = new SessionQueue(store, undefined, async (id) => {
+    const queue = new SessionQueue(undefined, async (id) => {
       asked.push(id);
       return chain[id] ?? null;
     });
 
-    const seen = await queue.enqueue('sq-child', async (session, root) => {
+    const seen = await queue.enqueue('sq-child', async () => {
+      const root = await queue.rootOf('sq-child');
       expect(root).toBe('sq-root');
-      return session?.sessionId ?? null;
+      return root;
     });
 
     expect(seen).toBe('sq-root');
-    // Every hop is the host's answer — including the root, which reports no
-    // parent of its own. A save seeds nothing into the cache.
     expect(asked).toEqual(['sq-child', 'sq-mid', 'sq-root']);
 
     // Every node walked is memoised to the root: a second call asks nothing.
     asked.length = 0;
-    await queue.enqueue('sq-child', async (_session, root) => expect(root).toBe('sq-root'));
+    await queue.enqueue('sq-child', async () => {
+      const root = await queue.rootOf('sq-child');
+      expect(root).toBe('sq-root');
+    });
     expect(asked).toEqual([]);
   });
 
   it('leaves a session as its own root when the host cannot answer', async () => {
-    await seedSession('sq-orphan');
-
     const { SessionQueue } = await import('../../src/app/session-queue.ts');
-    const queue = new SessionQueue(store, undefined, async () => {
+    const queue = new SessionQueue(undefined, async () => {
       throw new Error('host unreachable');
     });
 
-    const seen = await queue.enqueue('sq-orphan', async (session, root) => {
+    const seen = await queue.enqueue('sq-orphan', async () => {
+      const root = await queue.rootOf('sq-orphan');
       expect(root).toBe('sq-orphan');
-      return session?.sessionId ?? null;
+      return root;
     });
 
     expect(seen).toBe('sq-orphan');

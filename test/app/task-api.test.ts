@@ -3,7 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import { SessionQueue } from '../../src/app/session-queue.ts';
+import { SessionExecutor } from '../../src/app/session-executor.ts';
 import { TaskApi } from '../../src/app/task-api.ts';
 import { createSession, WorkflowStore } from '../../src/session/session-store.ts';
 import { createTask } from '../support/task-factory.ts';
@@ -32,22 +32,22 @@ async function createApi(): Promise<{ api: TaskApi; store: WorkflowStore; sessio
   };
 }
 
-async function createApiWithQueue(): Promise<{
+async function createApiWithExecutor(): Promise<{
   api: TaskApi;
-  queue: SessionQueue;
+  executor: SessionExecutor;
   store: WorkflowStore;
   sessionId: string;
 }> {
-  const directory = await mkdtemp(path.join(tmpdir(), 'task-api-queue-'));
+  const directory = await mkdtemp(path.join(tmpdir(), 'task-api-executor-'));
   temporaryDirectories.push(directory);
   const store = new WorkflowStore(directory);
   const session = createSession('s1', 'profile', 'cycle');
   await store.save(session);
-  const queue = new SessionQueue(store);
+  const executor = new SessionExecutor(store);
 
   return {
-    api: new TaskApi(store, async () => ['implementation', 'review'], queue),
-    queue,
+    api: new TaskApi(store, async () => ['implementation', 'review'], executor),
+    executor,
     store,
     sessionId: session.sessionId,
   };
@@ -141,9 +141,9 @@ describe('TaskApi', () => {
     );
   });
 
-  describe('with SessionQueue', () => {
+  describe('with SessionExecutor', () => {
     it('parallel setTasks calls see consistent state', async () => {
-      const { api, sessionId } = await createApiWithQueue();
+      const { api, sessionId } = await createApiWithExecutor();
 
       await api.setTasks(sessionId, {
         listKey: 'implementation',
@@ -162,14 +162,14 @@ describe('TaskApi', () => {
     });
 
     it('concurrent setTasks + setTaskStatus do not conflict', async () => {
-      const { api, sessionId } = await createApiWithQueue();
+      const { api, sessionId } = await createApiWithExecutor();
 
       await api.setTasks(sessionId, {
         listKey: 'implementation',
         tasks: [createTask()],
       });
 
-      // Both operations are enqueued via the same queue, so they serialize
+      // Both operations are enqueued via the same executor, so they serialize
       const [setResult, statusResult] = await Promise.all([
         api.setTasks(sessionId, {
           listKey: 'implementation',
@@ -190,7 +190,7 @@ describe('TaskApi', () => {
     });
 
     it('error in one TaskApi call does not corrupt session for the next call', async () => {
-      const { api, sessionId } = await createApiWithQueue();
+      const { api, sessionId } = await createApiWithExecutor();
 
       // Successful first set
       await api.setTasks(sessionId, {

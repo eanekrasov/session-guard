@@ -56,11 +56,18 @@ afterEach(() => {
 
 async function makeOrchestrator(projectDir?: string) {
   const { MutationOrchestrator } = await import('../../src/app/mutation-orchestrator.ts');
-  const { SessionQueue } = await import('../../src/app/session-queue.ts');
-  const queue = new SessionQueue(store);
+  const { SessionExecutor } = await import('../../src/app/session-executor.ts');
+  const executor = new SessionExecutor(store);
   return {
-    orchestrator: new MutationOrchestrator(store, queue, projectDir, testDir, undefined, undefined),
-    queue,
+    orchestrator: new MutationOrchestrator(
+      store,
+      executor,
+      projectDir,
+      testDir,
+      undefined,
+      undefined
+    ),
+    executor,
   };
 }
 

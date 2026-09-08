@@ -9,7 +9,7 @@ import { mergeStages } from '../schema/schema-loader.ts';
 import { ProfileConfigurationError, firstNestedStageId } from '../schema/types.ts';
 import { GuardEvaluator, type GuardEvaluationContext } from '../schema/guard-evaluator.ts';
 import type { ResolvedSchema } from '../schema/types.ts';
-import { SessionQueue } from './session-queue.ts';
+import { SessionExecutor } from './session-executor.ts';
 import { WorkflowBlockedError } from './blocked-error.ts';
 import {
   captureBaseline,
@@ -257,7 +257,7 @@ export class MutationOrchestrator {
 
   constructor(
     private readonly store: WorkflowStore,
-    private readonly queue: SessionQueue,
+    private readonly executor: SessionExecutor,
     projectDir: string | undefined,
     private readonly profilesDir: string,
     log?: LogFn,
@@ -381,7 +381,7 @@ export class MutationOrchestrator {
       // The hook's id may be a dispatched subagent's; the workflow session is
       // the root's. Loading by the raw id found nothing and the mutation went
       // ungoverned.
-      const preCheck = await this.store.load(await this.queue.rootOf(input.sessionID));
+      const preCheck = await this.store.load(await this.executor.rootOf(input.sessionID));
       if (!preCheck) return;
       engine = await this.resolveEngine(preCheck.profileId, preCheck.schemaId);
     } catch (err) {
@@ -413,25 +413,25 @@ export class MutationOrchestrator {
       }
     }
 
-    // Enqueue the actual mutation work — serialised per root session: the
-    // enqueue isolates the concurrent write path.
-    await this.queue.enqueue(input.sessionID, async (session) => {
+    // Run the actual mutation work inside an executor transaction — serialised
+    // per root session with load/save lifecycle.
+    await this.executor.run(input.sessionID, async (tx) => {
       // No workflow session means the plugin does not govern this call.
-      if (!session) return;
+      if (!tx.session) return;
 
       // P1-014: Release interrupted locks — if active operations exist but are
       // NOT tracked in liveMutations, clear them so a new mutation can start.
-      // Runs inside enqueue so it operates on the loaded session object.
-      this.releaseInterruptedLock(session, input.callID);
+      // Runs inside executor.run so it operates on the loaded session object.
+      this.releaseInterruptedLock(tx.session, input.callID);
 
       try {
         // Список цикла текущей стадии — или `null`, если стадия не цикл.
         // Без него синтез прогона искал единственную runnable-задачу по всем
         // спискам сразу и в схеме с двумя последовательными циклами мог взять
         // задачу чужого.
-        const stageDef = engine.getStages()[session.currentStage];
+        const stageDef = engine.getStages()[tx.session.currentStage];
         beginMutation(
-          session,
+          tx.session,
           input.callID,
           'state-machine',
           (listKey) => {
@@ -449,14 +449,14 @@ export class MutationOrchestrator {
           `Mutation failed: ${err instanceof Error ? err.message : String(err)}`
         );
       }
-      const operation = session.activeOperations[input.callID];
+      const operation = tx.session.activeOperations[input.callID];
       if (operation) operation.baseline = frame;
 
       // Save stage BEFORE mutation for post-mutation transition validation.
       // `currentStage` is always set — `workflow-create` writes the compiled
       // workflow's own first stage — so there is nothing to fall back to, and
       // the base profile's `planning` would have been the wrong thing anyway.
-      const stageBefore = session.currentStage;
+      const stageBefore = tx.session.currentStage;
       this.liveMutations.set(input.callID, { rootSessionId: input.sessionID, stageBefore });
     });
   }
@@ -475,11 +475,11 @@ export class MutationOrchestrator {
     const mutationInfo = this.liveMutations.get(input.callID);
     this.liveMutations.delete(input.callID);
 
-    await this.queue.enqueue(input.sessionID, async (session) => {
-      if (!session) return;
+    await this.executor.run(input.sessionID, async (tx) => {
+      if (!tx.session) return;
 
       // Если нет активной мутации для этого callID — ничего не делаем
-      if (!session.activeOperations[input.callID]) return;
+      if (!tx.session.activeOperations[input.callID]) return;
 
       // ── Определяем passed из tool metadata ────────────────────────
       const metadataFailed =
@@ -492,10 +492,10 @@ export class MutationOrchestrator {
       // available; do not silently inspect the host repository.
       const scopeRoot = this.projectDir;
       const projectDir = this.projectDir;
-      const frame = session.activeOperations[input.callID]?.baseline;
+      const frame = tx.session.activeOperations[input.callID]?.baseline;
 
       const { finalPassed } = await processScopeAndInvariants({
-        session,
+        session: tx.session,
         scopeRoot,
         frame,
         projectDir,
@@ -506,12 +506,12 @@ export class MutationOrchestrator {
       });
 
       // ── 5. Единственный вызов finishMutation ──────────────────────
-      domainFinishMutation(session, finalPassed, input.callID);
+      domainFinishMutation(tx.session, finalPassed, input.callID);
 
       // After mutation completes, check for auto-proceed transitions
       try {
-        const engine = await this.resolveEngine(session.profileId, session.schemaId);
-        const transitionResult = engine.tryApplyTransitions(session);
+        const engine = await this.resolveEngine(tx.session.profileId, tx.session.schemaId);
+        const transitionResult = engine.tryApplyTransitions(tx.session);
         if (transitionResult.applied) {
           void transitionResult;
         }
@@ -524,14 +524,14 @@ export class MutationOrchestrator {
       // Post-factum transition validation: if stage changed, validate the transition
       if (mutationInfo) {
         try {
-          const engine = await this.resolveEngine(session.profileId, session.schemaId);
-          const stageAfter = session.currentStage;
+          const engine = await this.resolveEngine(tx.session.profileId, tx.session.schemaId);
+          const stageAfter = tx.session.currentStage;
 
           if (stageAfter !== mutationInfo.stageBefore) {
             const validation = engine.checkTransition(
               mutationInfo.stageBefore,
               stageAfter,
-              session
+              tx.session
             );
 
             if (!validation.allowed) {
@@ -539,7 +539,7 @@ export class MutationOrchestrator {
                 'warn',
                 'finishMutation: stage assignment changed without a direct transition',
                 {
-                  sessionId: session.sessionId,
+                  sessionId: tx.session.sessionId,
                   from: mutationInfo.stageBefore,
                   to: stageAfter,
                   reason: validation.reason,
@@ -613,10 +613,10 @@ export class MutationOrchestrator {
       return;
     }
 
-    await this.queue.enqueue(rootSessionId, async (session) => {
-      if (!session) return;
+    await this.executor.run(rootSessionId, async (tx) => {
+      if (!tx.session) return;
 
-      clearActiveMutation(session, callId);
+      clearActiveMutation(tx.session, callId);
       this.liveMutations.delete(callId);
     });
   }

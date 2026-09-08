@@ -89,7 +89,6 @@ export class WorkflowStore {
    * parent's workflow. The parent chain belongs to the host; only its reply
    * lands here.
    */
-  readonly parentCache = new Map<string, string>();
   readonly onSave = new Set<() => void>();
 
   constructor(basePath: string, log?: LogFn) {
@@ -309,7 +308,6 @@ export class WorkflowStore {
    * write must still be removable.
    */
   async delete(sessionId: string): Promise<void> {
-    this.parentCache.delete(sessionId);
     const filePath = this.sessionPath(sessionId);
 
     const key = sessionId;
@@ -352,7 +350,6 @@ export class WorkflowStore {
    * сессию обратно в рантайм после переноса.
    */
   async archive(sessionId: string): Promise<string | null> {
-    this.parentCache.delete(sessionId);
     const filePath = this.sessionPath(sessionId);
     const targetPath = path.join(archiveDirOf(this.directory), sessionFileName(sessionId));
 

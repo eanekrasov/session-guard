@@ -22,6 +22,7 @@ import { approve } from '../domain/approvals.ts';
 import { toGuardContext, type StateMachineEngine } from '../domain/engine.ts';
 import { admitAction, commandMatches, type AdmissionRequest } from '../domain/action-admission.ts';
 import type { ActionEntry } from '../schema/profile-schema.ts';
+import { SessionExecutor } from './session-executor.ts';
 import { SessionQueue } from './session-queue.ts';
 import { sanitizeToolOutput, validateUserInput } from './guardrails.ts';
 import { listProfiles } from '../public-api.ts';
@@ -118,6 +119,7 @@ interface EventEnvelope {
 class StateMachineRuntime {
   private store: WorkflowStore;
   private queue: SessionQueue;
+  private executor: SessionExecutor;
   private mutationOrchestrator: MutationOrchestrator;
   private consentOrchestrator: ConsentOrchestrator;
   private taskApi: TaskApi;
@@ -158,7 +160,7 @@ class StateMachineRuntime {
    */
   private async loadGoverning(sessionID: string | undefined): Promise<WorkflowSession | null> {
     if (!sessionID) return null;
-    return this.store.load(await this.queue.rootOf(sessionID));
+    return this.store.load(await this.executor.rootOf(sessionID));
   }
 
   /**
@@ -202,16 +204,17 @@ class StateMachineRuntime {
     // project in the same process read the first's value.
     const storeDir = paths?.storeDir ?? sessionsDir(opencodeStateDir());
     this.store = new WorkflowStore(storeDir, this.log);
-    this.queue = new SessionQueue(this.store, this.log, (sessionID) =>
+    this.executor = new SessionExecutor(this.store, this.log, (sessionID) =>
       this.resolveHostParent(sessionID)
     );
+    this.queue = new SessionQueue(this.log, (sessionID) => this.resolveHostParent(sessionID));
 
     this.profilesDir = paths?.profilesDir ?? getProfilesDir(context.directory);
     this.projectDir = context.directory;
 
     this.mutationOrchestrator = new MutationOrchestrator(
       this.store,
-      this.queue,
+      this.executor,
       this.projectDir,
       this.profilesDir,
       this.log,
@@ -219,7 +222,7 @@ class StateMachineRuntime {
     );
     this.consentOrchestrator = new ConsentOrchestrator(
       this.store,
-      this.queue,
+      this.executor,
       this.projectDir,
       this.profilesDir,
       context.client.session,
@@ -228,7 +231,7 @@ class StateMachineRuntime {
     this.taskApi = new TaskApi(
       this.store,
       async (profileId, schemaId) => this.declaredTaskLists(profileId, schemaId),
-      this.queue
+      this.executor
     );
 
     // Initialize the rules sub-system — rule files are discovered lazily
@@ -331,10 +334,10 @@ class StateMachineRuntime {
         tasksInput = args.tasks;
       }
 
-      // Move listKey resolution and ID computation into the queue scope
+      // Move listKey resolution and ID computation into the executor scope
       // so they see consistent state with the setTasks call
-      const result = await this.queue.enqueue(ctx.sessionID, async (session) => {
-        if (!session) {
+      const result = await this.executor.run(ctx.sessionID, async (tx) => {
+        if (!tx.session) {
           return { output: 'No workflow session found. Call workflow-create first.' } as ToolResult;
         }
 
@@ -348,26 +351,26 @@ class StateMachineRuntime {
         // otherwise the run in flight decides, and failing that the schema's
         // single declared list. With several and none named, the choice is the
         // caller's to make and guessing at it fills the wrong list.
-        const activeRun = Object.values(session.loopRuns).find(
+        const activeRun = Object.values(tx.session.loopRuns).find(
           (run) => run.status === 'running' || run.status === 'awaiting_decision'
         );
         let listKey = args.listKey ?? activeRun?.listKey;
         if (listKey === undefined) {
-          const declared = await this.declaredTaskLists(session.profileId, session.schemaId);
+          const declared = await this.declaredTaskLists(tx.session.profileId, tx.session.schemaId);
           if (declared.length === 1) {
             listKey = declared[0]!;
           } else {
             return {
               output:
                 declared.length === 0
-                  ? `${session.profileId}/${session.schemaId} declares no task list to fill: no stage names a \`loop:\` source.`
-                  : `listKey is required: ${session.profileId}/${session.schemaId} declares [${declared.join(', ')}].`,
+                  ? `${tx.session.profileId}/${tx.session.schemaId} declares no task list to fill: no stage names a \`loop:\` source.`
+                  : `listKey is required: ${tx.session.profileId}/${tx.session.schemaId} declares [${declared.join(', ')}].`,
             } as ToolResult;
           }
         }
 
         // Compute next available task ID across all existing lists
-        const maxExisting = Object.values(session.tasks)
+        const maxExisting = Object.values(tx.session.tasks)
           .flat()
           .reduce((max, t) => {
             const num = parseInt(t.id.replace('task-', ''), 10);
@@ -436,18 +439,18 @@ class StateMachineRuntime {
     if (refusal) return refusal;
     try {
       let output = 'No pending retry decision found';
-      await this.queue.enqueue(ctx.sessionID, async (session) => {
-        if (!session) {
+      await this.executor.run(ctx.sessionID, async (tx) => {
+        if (!tx.session) {
           output = `Unknown workflow session: ${ctx.sessionID}`;
           return;
         }
 
-        const pendingCtx = findPendingRetryContext(session, args.decisionId);
+        const pendingCtx = findPendingRetryContext(tx.session, args.decisionId);
         if (!pendingCtx) {
           if (args.decisionId) {
             output = `No pending retry decision found for decisionId "${args.decisionId}"`;
           } else {
-            const candidates = (session.pendingDecisions ?? [])
+            const candidates = (tx.session.pendingDecisions ?? [])
               .filter((d) => d.status === 'pending')
               .map((d) => `  - ${d.id} (${d.subject} ${d.subjectId}: ${d.kind})`);
             if (candidates.length > 0) {
@@ -474,7 +477,7 @@ class StateMachineRuntime {
         }
 
         // Verify run, task, and budget agree
-        const task = findTask(session, taskId);
+        const task = findTask(tx.session, taskId);
         if (!task) {
           output = `Task ${taskId} not found`;
           return;
@@ -485,7 +488,7 @@ class StateMachineRuntime {
           return;
         }
 
-        const budget = session.retryBudgets[taskId];
+        const budget = tx.session.retryBudgets[taskId];
         if (!budget) {
           output = `No retry budget for ${taskId}`;
           return;
@@ -497,23 +500,23 @@ class StateMachineRuntime {
             return;
           }
           budget.maximum = args.maximum;
-          const stage = await this.resolveLoopStage(session, run.listKey);
+          const stage = await this.resolveLoopStage(tx.session, run.listKey);
           run.stage = firstNestedStageId(stage) ?? run.stage;
           run.status = 'running';
           task.status = 'running';
-          this.upsertActiveTaskContextFromSession(session, run.id, 'running');
+          this.upsertActiveTaskContextFromSession(tx.session, run.id, 'running');
           output = `Increased retry maximum for ${taskId} to ${args.maximum}`;
         } else {
           run.status = args.decision;
           task.status = args.decision;
-          removeActiveTaskContext(session, run.id);
+          removeActiveTaskContext(tx.session, run.id);
           output =
             args.decision === 'failed'
               ? `Failed ${taskId} after retry decision`
               : `Cancelled ${taskId} after retry decision`;
         }
 
-        this.clearPendingDecision(session, decision.id);
+        this.clearPendingDecision(tx.session, decision.id);
       });
       return { output };
     } catch (error) {
@@ -589,6 +592,10 @@ class StateMachineRuntime {
       resolvedSchemaId,
       engine.getInitialStage()
     );
+    // Creation path — no enclosing executor transaction available.
+    // Direct store.save is appropriate: the session does not yet
+    // exist, so executor.run() would load null and no enclosing
+    // persistence exists.
     await this.store.save(session);
 
     void this.log('info', `Workflow session created`, {
@@ -676,6 +683,9 @@ class StateMachineRuntime {
     };
     const manifestEvidence = evidenceOf(manifest);
 
+    // This save is outside any enclosing executor transaction — the consent
+    // tool runs independently rather than inside a hook's executor.run().
+    // Direct store.save is correct here.
     await this.store.save(session);
 
     void this.log('info', 'workflow-consent: consent request prepared', {
@@ -789,55 +799,59 @@ class StateMachineRuntime {
     input: { tool: string; sessionID: string; callID: string },
     output: { args: unknown }
   ): Promise<void> {
-    // 0. Opt-in gate — no workflow session means no plugin mechanics at all.
-    if (!(await this.hasWorkflowSession(input.sessionID))) return;
+    await this.executor.run(input.sessionID, async (tx) => {
+      // 0. Opt-in gate — no workflow session means no plugin mechanics at all.
+      if (!tx.session) return;
 
-    // Normalize tool name to lowercase (SDK may send any casing)
-    const tool = this.normalizeTool(input.tool);
+      // Normalize tool name to lowercase (SDK may send any casing)
+      const tool = this.normalizeTool(input.tool);
 
-    // SDK передаёт args вызова в output.args для tool.execute.before,
-    // НЕ в input.args (в input.args нет поля args по типам SDK).
-    const args = output.args;
+      // SDK передаёт args вызова в output.args для tool.execute.before,
+      // НЕ в input.args (в input.args нет поля args по типам SDK).
+      const args = output.args;
 
-    // Every refusal below throws WorkflowBlockedError: the host cancels the
-    // tool call only when this hook rejects. See blocked-error.ts.
+      // Every refusal below throws WorkflowBlockedError: the host cancels the
+      // tool call only when this hook rejects. See blocked-error.ts.
 
-    // 1. Guardrails — always check first
-    this.guardrailBefore(args);
+      // 1. Guardrails — always check first
+      this.guardrailBefore(args);
 
-    // 1b. Rules — PreToolUse evaluation (throws to block the tool; let it through)
-    await this.rulesRuntime.handleToolExecuteBefore(input, output);
+      // 1b. Rules — PreToolUse evaluation (throws to block the tool; let it through)
+      await this.rulesRuntime.handleToolExecuteBefore(input, output);
 
-    // 2. Consent parsing (Question tool)
-    if (await this.consentBefore(tool, input.sessionID, input.callID, args)) return;
+      // 2. Consent parsing (Question tool)
+      if (await this.consentBefore(tool, input.sessionID, input.callID, args)) return;
 
-    // 3. Task admission — correlate the native call with declarative workflow work.
-    // Проверяем только task с маркером [workflow-task:] — обычные task (architect и т.д.) проходят без admission.
-    if (this.isWorkflowTask(tool, args)) {
-      await this.handleTaskBefore(input.sessionID, input.callID, args, output);
-    }
+      // 3. Task admission — correlate the native call with declarative workflow work.
+      // Проверяем только task с маркером [workflow-task:] — обычные task (architect и т.д.) проходят без admission.
+      if (this.isWorkflowTask(tool, args)) {
+        await this.handleTaskBefore(input.sessionID, input.callID, args, output);
+      }
 
-    // 3b. Task scope — refuse a write/read outside the active task's declared
-    // scope, before the tool runs. `bash` carries no path argument, so it is
-    // not enforced here (task-scope spec) — an out-of-scope bash write is
-    // caught only after the fact, via the per-move baseline diff.
-    await this.scopeBefore(tool, input.sessionID, args);
+      // 3b. Task scope — refuse a write/read outside the active task's declared
+      // scope, before the tool runs. `bash` carries no path argument, so it is
+      // not enforced here (task-scope spec) — an out-of-scope bash write is
+      // caught only after the fact, via the per-move baseline diff.
+      // scopeBefore and actionsBefore receive tx.session directly since
+      // they already run inside executor.run() — no redundant loadGoverning needed.
+      await this.scopeBefore(tool, tx.session, args);
 
-    // 3c. Stage actions — вторая ось рядом с переходами: те решают, можно ли
-    // уйти со стадии, эта — можно ли сделать что-то, оставаясь на ней. Стоит
-    // до выдачи delivery permit и до жизненного цикла мутации, потому что
-    // отвечает на вопрос «этот вызов вообще разрешён здесь». Когда стадия
-    // ничего не объявила, здесь же применяется дефолт ядра про прямой git.
-    await this.actionsBefore(tool, input.sessionID, input.callID, args);
+      // 3c. Stage actions — вторая ось рядом с переходами: те решают, можно ли
+      // уйти со стадии, эта — можно ли сделать что-то, оставаясь на ней. Стоит
+      // до выдачи delivery permit и до жизненного цикла мутации, потому что
+      // отвечает на вопрос «этот вызов вообще разрешён здесь». Когда стадия
+      // ничего не объявила, здесь же применяется дефолт ядра про прямой git.
+      await this.actionsBefore(tool, tx.session, input.callID, args);
 
-    // 4. Commit Permit: block forbidden git commands, issue deliveryPermit for commit-task
-    await this.commitBefore(tool, input.sessionID, input.callID, args, output);
+      // 4. Commit Permit: block forbidden git commands, issue deliveryPermit for commit-task
+      await this.commitBefore(tool, input.sessionID, input.callID, args, output);
 
-    // 5. Mutation guard (Bash/Write tool) — beginMutation captures this
-    // move's own baseline frame (move-invariants D1/D2/D3) before the tool
-    // runs. `task`'s baseline is captured in handleTaskBefore instead, since
-    // `task` never joins mutatingTools (D2).
-    await this.mutationBefore(tool, input.sessionID, input.callID, args, output);
+      // 5. Mutation guard (Bash/Write tool) — beginMutation captures this
+      // move's own baseline frame (move-invariants D1/D2/D3) before the tool
+      // runs. `task`'s baseline is captured in handleTaskBefore instead, since
+      // `task` never joins mutatingTools (D2).
+      await this.mutationBefore(tool, input.sessionID, input.callID, args, output);
+    });
   }
 
   private isWorkflowTask(tool: string, args: unknown): boolean {
@@ -872,9 +886,9 @@ class StateMachineRuntime {
     // A refused admission wastes one snapshot — the rare path.
     const frame = await this.safeCaptureBaseline();
 
-    await this.queue.enqueue(sessionID, async (session) => {
-      if (!session) return;
-      if (session.activeOperations[callID]) {
+    await this.executor.run(sessionID, async (tx) => {
+      if (!tx.session) return;
+      if (tx.session.activeOperations[callID]) {
         this.blockTaskAdmission(`Native call ${callID} is already correlated`);
         return;
       }
@@ -883,8 +897,11 @@ class StateMachineRuntime {
       let engine;
       try {
         const profileRoot = getProfilesDir(this.context.directory);
-        profile = await resolveConfig(session.profileId, profileRoot);
-        engine = await this.mutationOrchestrator.resolveEngine(session.profileId, session.schemaId);
+        profile = await resolveConfig(tx.session.profileId, profileRoot);
+        engine = await this.mutationOrchestrator.resolveEngine(
+          tx.session.profileId,
+          tx.session.schemaId
+        );
       } catch (error) {
         this.blockTaskAdmission(
           `Cannot resolve workflow admission profile: ${error instanceof Error ? error.message : String(error)}`
@@ -892,8 +909,8 @@ class StateMachineRuntime {
         return;
       }
 
-      const derivedStageId = engine.deriveStage(session);
-      session.currentStage = derivedStageId;
+      const derivedStageId = engine.deriveStage(tx.session);
+      tx.session.currentStage = derivedStageId;
       const derivedStage = engine.getStages()[derivedStageId];
       if (!derivedStage?.loop || nestedStages(derivedStage).length === 0) {
         this.blockTaskAdmission(`Stage ${derivedStageId} does not declare an executable task loop`);
@@ -907,7 +924,7 @@ class StateMachineRuntime {
       // loop's list, so a schema declaring a nested loop was accepted and its
       // child tasks were then always "not eligible" — the shape could be
       // written and never run.
-      const owner = this.resolveAdmissionLoop(session, derivedStageId, derivedStage, taskId);
+      const owner = this.resolveAdmissionLoop(tx.session, derivedStageId, derivedStage, taskId);
       if (!owner) {
         this.blockTaskAdmission(
           `Workflow task ${taskId} is not eligible in loopStage ${derivedStageId}`
@@ -927,10 +944,10 @@ class StateMachineRuntime {
       // the check below short-circuits on the strategy before reading it.
       const dispatch = loopStage.dispatch ?? { strategy: 'serial' as const };
 
-      const tasks = session.tasks[listKey]!;
+      const tasks = tx.session.tasks[listKey]!;
       const task = tasks.find((candidate) => candidate.id === taskId)!;
 
-      const nonterminalRuns = Object.values(session.loopRuns).filter(
+      const nonterminalRuns = Object.values(tx.session.loopRuns).filter(
         (run) => run.taskId === taskId && isOpenLoopRun(run)
       );
       if (nonterminalRuns.length > 1) {
@@ -957,7 +974,7 @@ class StateMachineRuntime {
       // the parent's list applies. This is the only place agent identity is
       // known, so it is the only place `allowedAgents` can be enforced.
       const allowedAgents = stage.allowedAgents ?? loopStage.allowedAgents;
-      if (allowedAgents?.length && !agentIsAllowed(agent, allowedAgents, session.profileId)) {
+      if (allowedAgents?.length && !agentIsAllowed(agent, allowedAgents, tx.session.profileId)) {
         this.blockTaskAdmission(
           `Agent ${agent} is not allowed in stage ${stageId}. Allowed: ${allowedAgents.join(', ')}`
         );
@@ -983,12 +1000,12 @@ class StateMachineRuntime {
       const stageMayEdit =
         editors.length > 0 &&
         (roster === undefined ||
-          roster.some((candidate) => agentIsAllowed(candidate, editors, session.profileId)));
+          roster.some((candidate) => agentIsAllowed(candidate, editors, tx.session.profileId)));
 
       if (
         stageMayEdit &&
         task.editingAgents?.length &&
-        !agentIsAllowed(agent, task.editingAgents, session.profileId)
+        !agentIsAllowed(agent, task.editingAgents, tx.session.profileId)
       ) {
         this.blockTaskAdmission(
           `Agent ${agent} may not edit ${taskId}. editingAgents: [${task.editingAgents.join(', ')}]`
@@ -999,7 +1016,7 @@ class StateMachineRuntime {
       // have one call per gate at a time — review and qa run together. Every
       // other stage is one call at a time, and the same agent may never hold
       // two: one agent cannot judge the same work twice at once.
-      const running = Object.values(session.activeOperations).filter(
+      const running = Object.values(tx.session.activeOperations).filter(
         (operation) => operation.taskId === taskId && operation.status === 'running'
       );
       const gateCount = stage.gates?.length ?? 0;
@@ -1027,7 +1044,7 @@ class StateMachineRuntime {
       // проверке переходов. Сырой session имеет gates в виде массива Gate[], а
       // toGuardContext проецирует в факты с Record<string, GateStatus>, и включает
       // контекст задачи (task.id, task.status и т.д.) для guard-выражений.
-      const guardContext = toGuardContext(session, {
+      const guardContext = toGuardContext(tx.session, {
         id: task.id,
         status: task.status,
         listKey,
@@ -1041,7 +1058,7 @@ class StateMachineRuntime {
         return;
       }
 
-      const activeRuns = Object.values(session.loopRuns).filter((run) => isOpenLoopRun(run));
+      const activeRuns = Object.values(tx.session.loopRuns).filter((run) => isOpenLoopRun(run));
       if (!existingRun) {
         const rejection = this.taskAdmissionRejection(
           dispatch,
@@ -1049,7 +1066,7 @@ class StateMachineRuntime {
           taskId,
           activeRuns,
           firstNestedStageId(loopStage)!,
-          session,
+          tx.session,
           listKey
         );
         if (rejection) {
@@ -1058,13 +1075,13 @@ class StateMachineRuntime {
         }
       }
 
-      const runId = existingRun?.id ?? nextLoopRunId(session);
+      const runId = existingRun?.id ?? nextLoopRunId(tx.session);
       if (!existingRun) {
-        session.loopRuns[runId] = {
+        tx.session.loopRuns[runId] = {
           id: runId,
           taskId,
           listKey,
-          ancestry: this.resolveTaskAncestry(session.tasks, listKey),
+          ancestry: this.resolveTaskAncestry(tx.session.tasks, listKey),
           stage: stageId,
           status: 'running',
           gates: {},
@@ -1072,7 +1089,7 @@ class StateMachineRuntime {
         };
         task.status = 'running';
       }
-      session.activeOperations[callID] = {
+      tx.session.activeOperations[callID] = {
         callId: callID,
         runId,
         taskId,
@@ -1082,13 +1099,13 @@ class StateMachineRuntime {
         startedAt: new Date().toISOString(),
         // The occupancy of the stage this call belongs to. A verdict that
         // arrives after the task has moved on belongs to a round that is over.
-        round: session.loopRuns[runId]?.round ?? 0,
+        round: tx.session.loopRuns[runId]?.round ?? 0,
         // The pre-move snapshot captured above, before admission. A missing
         // frame (no projectDir) leaves this unset — see D5.
         baseline: frame,
       };
 
-      upsertActiveTaskContext(session, {
+      upsertActiveTaskContext(tx.session, {
         runId,
         taskId,
         agent,
@@ -1316,47 +1333,49 @@ class StateMachineRuntime {
     input: { tool: string; sessionID: string; callID: string; args: unknown },
     output: { title: string; output: string; metadata: unknown }
   ): Promise<void> {
-    // 0. Opt-in gate — no workflow session means no plugin mechanics at all.
-    if (!(await this.hasWorkflowSession(input.sessionID))) return;
+    await this.executor.run(input.sessionID, async (tx) => {
+      // 0. Opt-in gate — no workflow session means no plugin mechanics at all.
+      if (!tx.session) return;
 
-    // Normalize tool name to lowercase (SDK may send any casing)
-    const tool = this.normalizeTool(input.tool);
+      // Normalize tool name to lowercase (SDK may send any casing)
+      const tool = this.normalizeTool(input.tool);
 
-    // 1. Guardrails — always sanitize output
-    output.output = this.guardrailAfter(output.output, tool);
+      // 1. Guardrails — always sanitize output
+      output.output = this.guardrailAfter(output.output, tool);
 
-    // 1a. Invariants for a `task` move — MUST run before handleWorkflowResult
-    // (1b): that step computes movement and deletes the operation (D3). A
-    // verdict produced after either is a verdict about a move that already
-    // left.
-    await this.invariantsAfter(tool, input.sessionID, input.callID);
+      // 1a. Invariants for a `task` move — MUST run before handleWorkflowResult
+      // (1b): that step computes movement and deletes the operation (D3). A
+      // verdict produced after either is a verdict about a move that already
+      // left.
+      await this.invariantsAfter(tool, tx.session, input.callID);
 
-    // 1b. Workflow result — parse and record <workflow-result> tags
-    await this.handleWorkflowResult(tool, input.sessionID, input.callID, input.args, output);
+      // 1b. Workflow result — parse and record <workflow-result> tags
+      await this.handleWorkflowResult(tool, tx.session, input.callID, input.args, output);
 
-    // 1c. Rules — PostToolUse evaluation + file observations
-    await this.rulesRuntime.handleToolExecuteAfter(input, output);
+      // 1c. Rules — PostToolUse evaluation + file observations
+      await this.rulesRuntime.handleToolExecuteAfter(input, output);
 
-    // 1d. File tool — run invariants on written/edited files
-    await this.handleFileToolAfter(tool, input, output);
+      // 1d. File tool — run invariants on written/edited files
+      await this.handleFileToolAfter(tool, input, output);
 
-    // 2. Commit Permit: verify HEAD changed after commit-task
-    if (tool === 'bash') {
-      await this.handleCommitTaskAfter(input.sessionID, input.callID, output);
-    }
+      // 2. Commit Permit: verify HEAD changed after commit-task
+      if (tool === 'bash') {
+        await this.handleCommitTaskAfter(tx.session, input.callID, output);
+      }
 
-    // 3. Question tool — consent request (approve/decline plan)
-    if (tool === 'question') {
-      await this.consentAfter(tool, input.sessionID, input.callID, input.args, output);
-    }
+      // 3. Question tool — consent request (approve/decline plan)
+      if (tool === 'question') {
+        await this.consentAfter(tool, input.sessionID, input.callID, input.args, output);
+      }
 
-    // 5. Finish mutation (Bash/Write tool) — единственный путь finalization.
-    //    MutationOrchestrator.finishMutation вычисляет scope, валидацию
-    //    инвариантов и устанавливает gate через один вызов domain finishMutation.
-    await this.mutationAfter(tool, input.sessionID, input.callID, input.args, output);
+      // 5. Finish mutation (Bash/Write tool) — единственный путь finalization.
+      //    MutationOrchestrator.finishMutation вычисляет scope, валидацию
+      //    инвариантов и устанавливает gate через один вызов domain finishMutation.
+      await this.mutationAfter(tool, input.sessionID, input.callID, input.args, output);
 
-    // 6. Try transitions — после любого инструмента проверяем, можно ли перейти
-    await this.transitionAfter(input.sessionID);
+      // 6. Try transitions — после любого инструмента проверяем, можно ли перейти
+      await this.transitionAfter(tx.session, (fn) => tx.deferAfterSave(fn));
+    });
   }
 
   /**
@@ -1370,12 +1389,10 @@ class StateMachineRuntime {
    * `commit` and the agent must re-run the step under a fresh permit.
    */
   private async handleCommitTaskAfter(
-    sessionID: string,
+    session: WorkflowSession,
     callID: string,
     output: { output: string }
   ): Promise<void> {
-    const session = await this.loadGoverning(sessionID);
-    if (!session) return;
     if (!session.deliveryPermit) return;
     if (session.deliveryPermit.callID !== callID) return;
 
@@ -1407,14 +1424,20 @@ class StateMachineRuntime {
         committed = (result.stdout ?? '').split('\n').filter(Boolean).sort();
       }
     } catch {
-      void this.log('warn', 'handleCommitTaskAfter: git diff-tree failed', { sessionID });
+      void this.log('warn', 'handleCommitTaskAfter: git diff-tree failed', {
+        sessionID: session.sessionId,
+      });
     }
 
     const expected = [...(session.deliveryPermit.expectedFiles ?? [])].sort();
     const reject = (reason: string, extra: Record<string, unknown>): void => {
       session.deliveryPermit = null;
       output.output += `\n\n[workflow-commit-rejected]\n${reason}\nThe commit ${currentHead} stands in git, but no delivery receipt was recorded: the workflow stays in \`commit\`. Reconcile the worktree and run the commit step again.`;
-      void this.log('warn', `handleCommitTaskAfter: ${reason}`, { sessionID, callID, ...extra });
+      void this.log('warn', `handleCommitTaskAfter: ${reason}`, {
+        sessionID: session.sessionId,
+        callID,
+        ...extra,
+      });
     };
 
     if (committed === null || committed.length === 0) {
@@ -1424,7 +1447,6 @@ class StateMachineRuntime {
           ' contains, so the commit cannot be verified against the permit.',
         { expected }
       );
-      await this.store.save(session);
       return;
     }
 
@@ -1433,15 +1455,13 @@ class StateMachineRuntime {
         `Committed files do not match the delivery permit.\nExpected: ${expected.join(', ') || '(none)'}\nCommitted: ${committed.join(', ')}`,
         { expected, committed }
       );
-      await this.store.save(session);
       return;
     }
 
     session.deliveryReceipt = currentHead;
     session.deliveryPermit = null;
-    await this.store.save(session);
     void this.log('info', `Commit detected: ${currentHead}`, {
-      sessionID,
+      sessionID: session.sessionId,
       callID,
       fileCount: committed.length,
     });
@@ -1572,8 +1592,8 @@ class StateMachineRuntime {
       const loaded = await this.store.load(sessionID);
       const loadedOperation = loaded?.activeOperations[callId];
       if (!loadedOperation || loadedOperation.status !== 'running') continue;
-      await this.queue.enqueue(sessionID, async (session) => {
-        const operation = session?.activeOperations[callId];
+      await this.executor.run(sessionID, async (tx) => {
+        const operation = tx.session?.activeOperations[callId];
         if (!operation || operation.status !== 'running') return;
         operation.status = 'interrupted';
         operation.interruptedAt = new Date().toISOString();
@@ -1663,12 +1683,14 @@ class StateMachineRuntime {
    * поставили посреди вызова — это один `warn` и выход. Никогда не
    * подставлять пустой baseline и не валить задачу из-за одного этого.
    */
-  private async invariantsAfter(tool: string, sessionID: string, callID: string): Promise<void> {
+  private async invariantsAfter(
+    tool: string,
+    session: WorkflowSession,
+    callID: string
+  ): Promise<void> {
     if (tool !== 'task') return;
     if (!this.projectDir) return;
 
-    const session = await this.loadGoverning(sessionID);
-    if (!session) return;
     const operation = session.activeOperations[callID];
     if (!operation || operation.status !== 'running') return;
 
@@ -1720,29 +1742,28 @@ class StateMachineRuntime {
       }
     }
 
-    await this.queue.enqueue(sessionID, async (s) => {
-      if (!s) return;
-      const op = s.activeOperations[callID];
-      if (op) op.checks = passed ? 'passed' : 'failed';
+    // Direct mutation — no nested enqueue. The enclosing executor.run handles
+    // the single conditional save after the action completes.
+    const op = session.activeOperations[callID];
+    if (op) op.checks = passed ? 'passed' : 'failed';
 
-      // What this move produced is part of what the workflow delivers. The
-      // list was computed above to run invariants over and then dropped, so a
-      // workflow whose work is entirely delegated — every task dispatched to a
-      // subagent, which is what the shipped workflow does — reached `commit`
-      // with `changedFiles` empty. The permit is built from that list, so it
-      // expected nothing, and the commit that carried the work was refused
-      // with 'Committed files do not match the delivery permit. Expected:
-      // (none)'.
-      const accumulated = new Set([...(s.changedFiles ?? []), ...changed]);
-      s.changedFiles = changedAgainstHead(this.projectDir)
-        .filter((file) => accumulated.has(file))
-        .sort();
-    });
+    // What this move produced is part of what the workflow delivers. The
+    // list was computed above to run invariants over and then dropped, so a
+    // workflow whose work is entirely delegated — every task dispatched to a
+    // subagent, which is what the shipped workflow does — reached `commit`
+    // with `changedFiles` empty. The permit is built from that list, so it
+    // expected nothing, and the commit that carried the work was refused
+    // with 'Committed files do not match the delivery permit. Expected:
+    // (none)'.
+    const accumulated = new Set([...(session.changedFiles ?? []), ...changed]);
+    session.changedFiles = changedAgainstHead(this.projectDir)
+      .filter((file) => accumulated.has(file))
+      .sort();
   }
 
   private async handleWorkflowResult(
     tool: string,
-    sessionID: string,
+    session: WorkflowSession,
     callID: string,
     args: unknown,
     output: { output: string }
@@ -1751,268 +1772,264 @@ class StateMachineRuntime {
     const parsed = parseWorkflowResult(output.output);
     const reportingAgent = this.dispatchedAgent(args);
 
-    await this.queue.enqueue(sessionID, async (session) => {
-      if (!session) return;
-
-      // One call, one verdict. The branches below delete the operation once
-      // they have recorded a result, so a replay of the same call arrived with
-      // no operation to attribute it to and was read as a verdict about the
-      // whole body of work — replaying two task results closed the session's
-      // own gates and moved it past validation unvalidated.
-      session.processedResultCallIDs ??= [];
-      if (session.processedResultCallIDs.includes(callID)) {
-        output.output +=
-          `\n\n[workflow-result-replayed]\n` +
-          `The result for ${callID} has already been recorded. Nothing was recorded again.`;
-        void this.log('warn', 'Workflow result replayed', { sessionID, callID });
-        return;
+    // One call, one verdict. The branches below delete the operation once
+    // they have recorded a result, so a replay of the same call arrived with
+    // no operation to attribute it to and was read as a verdict about the
+    // whole body of work — replaying two task results closed the session's
+    // own gates and moved it past validation unvalidated.
+    session.processedResultCallIDs ??= [];
+    if (session.processedResultCallIDs.includes(callID)) {
+      output.output +=
+        `\n\n[workflow-result-replayed]\n` +
+        `The result for ${callID} has already been recorded. Nothing was recorded again.`;
+      void this.log('warn', 'Workflow result replayed', { sessionID: session.sessionId, callID });
+      return;
+    }
+    if (parsed || session.activeOperations[callID]) {
+      session.processedResultCallIDs.push(callID);
+      // Bounded: a session's call ids only ever accumulate.
+      if (session.processedResultCallIDs.length > 500) {
+        session.processedResultCallIDs.splice(0, session.processedResultCallIDs.length - 500);
       }
-      if (parsed || session.activeOperations[callID]) {
-        session.processedResultCallIDs.push(callID);
-        // Bounded: a session's call ids only ever accumulate.
-        if (session.processedResultCallIDs.length > 500) {
-          session.processedResultCallIDs.splice(0, session.processedResultCallIDs.length - 500);
+    }
+
+    const operation = session.activeOperations[callID];
+    const run = operation ? session.loopRuns[operation.runId] : undefined;
+    const task = operation ? findTask(session, operation.taskId) : undefined;
+
+    if (
+      operation &&
+      run &&
+      task &&
+      operation.status === 'running' &&
+      operation.round !== run.round
+    ) {
+      // The task has entered the stage again — or a different one — since
+      // this verifier was dispatched. Its verdict is about work that has
+      // already been judged, so NOTHING it says is recorded: not the gate,
+      // not the verification. This check has to come before every write,
+      // because a stale gate left behind lets a finished round vouch for
+      // the round that replaced it, and the stage closes with one verifier
+      // of the current round never heard from.
+      output.output +=
+        `\n\n[workflow-result-stale]\n` +
+        `This result was produced for an earlier round of ${task.id}, ` +
+        `which has since moved to ${run.stage}. Nothing was recorded.`;
+      void this.log('warn', 'Workflow result from a finished round', {
+        sessionID: session.sessionId,
+        taskId: task.id,
+        resultRound: operation.round,
+        currentRound: run.round,
+      });
+      delete session.activeOperations[callID];
+      return;
+    }
+
+    // Свернуть вердикт хода (написан `invariantsAfter`, шаг 1a) в
+    // `run.checks` — строго после проверки свежести раунда выше. Старая
+    // операция не должна трогать вердикт текущего раунда даже временно.
+    if (run && operation?.checks) {
+      run.checks = operation.checks;
+    }
+
+    if (operation) {
+      if (run && task) {
+        if (operation.status !== 'running') {
+          return;
         }
-      }
+        const loopStage = parsed ? await this.resolveLoopStage(session, run.listKey) : null;
+        const nested = loopStage ? nestedStages(loopStage) : [];
+        const currentStage = nested.find((entry) => entry.id === run.stage);
+        const declaredGates = currentStage?.gates ?? [];
 
-      const operation = session.activeOperations[callID];
-      const run = operation ? session.loopRuns[operation.runId] : undefined;
-      const task = operation ? findTask(session, operation.taskId) : undefined;
-
-      if (
-        operation &&
-        run &&
-        task &&
-        operation.status === 'running' &&
-        operation.round !== run.round
-      ) {
-        // The task has entered the stage again — or a different one — since
-        // this verifier was dispatched. Its verdict is about work that has
-        // already been judged, so NOTHING it says is recorded: not the gate,
-        // not the verification. This check has to come before every write,
-        // because a stale gate left behind lets a finished round vouch for
-        // the round that replaced it, and the stage closes with one verifier
-        // of the current round never heard from.
-        output.output +=
-          `\n\n[workflow-result-stale]\n` +
-          `This result was produced for an earlier round of ${task.id}, ` +
-          `which has since moved to ${run.stage}. Nothing was recorded.`;
-        void this.log('warn', 'Workflow result from a finished round', {
-          sessionID,
-          taskId: task.id,
-          resultRound: operation.round,
-          currentRound: run.round,
-        });
-        delete session.activeOperations[callID];
-        return;
-      }
-
-      // Свернуть вердикт хода (написан `invariantsAfter`, шаг 1a) в
-      // `run.checks` — строго после проверки свежести раунда выше. Старая
-      // операция не должна трогать вердикт текущего раунда даже временно.
-      if (run && operation?.checks) {
-        run.checks = operation.checks;
-      }
-
-      if (operation) {
-        if (run && task) {
-          if (operation.status !== 'running') {
+        if (parsed && declaredGates.length > 0) {
+          // A verifier stage may run several agents at once — review and qa
+          // in parallel — so a tag names the gate it closes, never the stage
+          // it ran in. A name the stage does not declare is refused: it is
+          // evidence for something nobody asked about.
+          if (!this.mayVerify(reportingAgent, currentStage, session.profileId)) {
+            output.output +=
+              `\n\n[workflow-result-rejected]\n` +
+              `Stage ${run.stage} accepts results from ` +
+              `[${(currentStage?.allowedAgents ?? []).join(', ') || '(no roster)'}], ` +
+              `and this one came from '${reportingAgent ?? '(unknown agent)'}'. ` +
+              `Nothing was recorded.`;
+            void this.log('warn', 'Workflow result from an agent the stage does not allow', {
+              sessionID: session.sessionId,
+              stage: run.stage,
+              agent: reportingAgent ?? null,
+            });
+            delete session.activeOperations[callID];
             return;
           }
-          const loopStage = parsed ? await this.resolveLoopStage(session, run.listKey) : null;
-          const nested = loopStage ? nestedStages(loopStage) : [];
-          const currentStage = nested.find((entry) => entry.id === run.stage);
-          const declaredGates = currentStage?.gates ?? [];
-
-          if (parsed && declaredGates.length > 0) {
-            // A verifier stage may run several agents at once — review and qa
-            // in parallel — so a tag names the gate it closes, never the stage
-            // it ran in. A name the stage does not declare is refused: it is
-            // evidence for something nobody asked about.
-            if (!this.mayVerify(reportingAgent, currentStage, session.profileId)) {
-              output.output +=
-                `\n\n[workflow-result-rejected]\n` +
-                `Stage ${run.stage} accepts results from ` +
-                `[${(currentStage?.allowedAgents ?? []).join(', ') || '(no roster)'}], ` +
-                `and this one came from '${reportingAgent ?? '(unknown agent)'}'. ` +
-                `Nothing was recorded.`;
-              void this.log('warn', 'Workflow result from an agent the stage does not allow', {
-                sessionID,
-                stage: run.stage,
-                agent: reportingAgent ?? null,
-              });
-              delete session.activeOperations[callID];
-              return;
-            }
-            if (!declaredGates.includes(parsed.stage)) {
-              output.output +=
-                `\n\n[workflow-result-rejected]\n` +
-                `Stage ${run.stage} is waiting on [${declaredGates.join(', ')}], ` +
-                `and this result reports '${parsed.stage}'. Nothing was recorded.`;
-              void this.log('warn', 'Workflow result names an undeclared gate', {
-                sessionID,
-                stage: run.stage,
-                reported: parsed.stage,
-                declared: declaredGates,
-              });
-              delete session.activeOperations[callID];
-              return;
-            }
-            run.gates[parsed.stage] = parsed.status === 'pass' ? 'passed' : 'failed';
-          }
-
-          // Verification is recorded only after all admission checks pass —
-          // agent authority, declared gates, and round freshness. A result
-          // rejected above leaves nothing in session.verifications.
-          if (parsed) {
-            session.verifications.push({
-              stage: parsed.stage,
-              status: parsed.status === 'pass' ? 'confirmed' : 'rejected',
-              recordedAt: new Date().toISOString(),
-            });
-          }
-
-          const stageFailed = declaredGates.some((gate) => run.gates[gate] === 'failed');
-          const stagePassed =
-            declaredGates.length > 0 && declaredGates.every((gate) => run.gates[gate] === 'passed');
-          // A stage with no gates keeps the old contract: its single agent's
-          // own pass or fail decides.
-          const failed = declaredGates.length > 0 ? stageFailed : parsed?.status === 'fail';
-          const passed = declaredGates.length > 0 ? stagePassed : parsed?.status === 'pass';
-
-          if (!parsed) {
-            // A workflow task that reports nothing is not a task that passed.
-            // Saying so is the difference between a stalled loop and a stalled
-            // loop nobody can explain.
+          if (!declaredGates.includes(parsed.stage)) {
             output.output +=
-              `\n\n[workflow-result-missing]\n` +
-              `Stage ${run.stage} of ${task.id} ended without a <workflow-result> marker, ` +
-              `so nothing was recorded and the task did not move.`;
-            void this.log('warn', 'Workflow task returned no result', {
-              sessionID,
+              `\n\n[workflow-result-rejected]\n` +
+              `Stage ${run.stage} is waiting on [${declaredGates.join(', ')}], ` +
+              `and this result reports '${parsed.stage}'. Nothing was recorded.`;
+            void this.log('warn', 'Workflow result names an undeclared gate', {
+              sessionID: session.sessionId,
+              stage: run.stage,
+              reported: parsed.stage,
+              declared: declaredGates,
+            });
+            delete session.activeOperations[callID];
+            return;
+          }
+          run.gates[parsed.stage] = parsed.status === 'pass' ? 'passed' : 'failed';
+        }
+
+        // Verification is recorded only after all admission checks pass —
+        // agent authority, declared gates, and round freshness. A result
+        // rejected above leaves nothing in session.verifications.
+        if (parsed) {
+          session.verifications.push({
+            stage: parsed.stage,
+            status: parsed.status === 'pass' ? 'confirmed' : 'rejected',
+            recordedAt: new Date().toISOString(),
+          });
+        }
+
+        const stageFailed = declaredGates.some((gate) => run.gates[gate] === 'failed');
+        const stagePassed =
+          declaredGates.length > 0 && declaredGates.every((gate) => run.gates[gate] === 'passed');
+        // A stage with no gates keeps the old contract: its single agent's
+        // own pass or fail decides.
+        const failed = declaredGates.length > 0 ? stageFailed : parsed?.status === 'fail';
+        const passed = declaredGates.length > 0 ? stagePassed : parsed?.status === 'pass';
+
+        if (!parsed) {
+          // A workflow task that reports nothing is not a task that passed.
+          // Saying so is the difference between a stalled loop and a stalled
+          // loop nobody can explain.
+          output.output +=
+            `\n\n[workflow-result-missing]\n` +
+            `Stage ${run.stage} of ${task.id} ended without a <workflow-result> marker, ` +
+            `so nothing was recorded and the task did not move.`;
+          void this.log('warn', 'Workflow task returned no result', {
+            sessionID: session.sessionId,
+            taskId: task.id,
+            stage: run.stage,
+            outputPreview: output.output.slice(0, 200),
+          });
+        }
+
+        if (failed || passed) {
+          const engine = await this.mutationOrchestrator.resolveEngine(
+            session.profileId,
+            session.schemaId
+          );
+          const movement = nextTaskStage(
+            loopStage,
+            run,
+            passed,
+            (expression, facts) =>
+              engine.evaluateGuard(expression, toGuardContext(session, { ...facts }), {
+                currentLoopListKey: run.listKey,
+              }),
+            (type) =>
+              session.approvals.some(
+                (approval) => approval.type === type && approval.status === 'granted'
+              )
+          );
+
+          // An edge that is taken applies what it declares, at either level
+          // and whichever way it ends. The retry budget below is the one
+          // effect with its own conditions; everything else follows the
+          // edge, because a schema that is accepted has to be obeyed.
+          if (movement.kind === 'complete' || movement.kind === 'move') {
+            this.applyApprovalEffects(
+              session,
+              run,
+              movement.kind === 'move' ? movement.to : TASK_DONE,
+              movement.effects
+            );
+          }
+
+          if (movement.kind === 'complete') {
+            run.status = 'completed';
+            task.status = 'completed';
+            removeActiveTaskContext(session, run.id);
+          } else if (movement.kind === 'move') {
+            // A move that walks a failure back into the loop spends the
+            // task's budget whether or not the edge remembered to say so.
+            // An edge without the effect would otherwise cycle forever, and
+            // the operator would never be asked.
+            const spendsBudget =
+              failed || (movement.effects ?? []).some((e) => e.bumpRetry !== undefined);
+            const exhausted = spendsBudget
+              ? this.applyTaskEffects(session, run, task, loopStage, movement.effects, failed)
+              : false;
+            run.stage = movement.to;
+            // Each stage judges its own work: the next one starts with no
+            // verdicts carried over from the last, and a new round, so any
+            // verifier still working the previous one is answered too late.
+            run.gates = {};
+            run.round += 1;
+            if (exhausted) {
+              run.status = 'awaiting_decision';
+              this.upsertActiveTaskContextFromSession(session, run.id, 'awaiting_decision');
+              this.upsertPendingDecision(session, task.id, run.id);
+            } else {
+              task.status = 'running';
+              run.status = 'running';
+              this.upsertActiveTaskContextFromSession(session, run.id, 'running');
+            }
+          } else if (failed && movement.kind === 'unreachable') {
+            // No transition took the failure and there is no applicable route
+            // at all — the loop's own retry budget decides: back to the first
+            // stage, or a decision for the operator. When stayKind is
+            // 'blocked' the route exists but a guard or consent explicitly
+            // shut it — retry must NOT override that policy decision.
+            this.recordTaskRetryFailure(session, run, task, loopStage);
+          } else if (movement.kind === 'blocked') {
+            // A route exists but a guard or consent explicitly shut it —
+            // a policy decision, not a missing route. It must NOT be
+            // silently dropped, and it must NOT spend retry budget.
+            output.output +=
+              `\n\n[workflow-task-blocked]\n` +
+              `${task.id} stayed at ${run.stage}: ${movement.reason}`;
+            void this.log('warn', 'Workflow task movement blocked', {
+              sessionID: session.sessionId,
               taskId: task.id,
               stage: run.stage,
-              outputPreview: output.output.slice(0, 200),
+              reason: movement.reason,
+            });
+          } else if (passed && movement.kind === 'unreachable') {
+            // A passing stage with nowhere applicable to go — surfaced
+            // rather than silently dropped, matching the failure case above.
+            output.output +=
+              `\n\n[workflow-task-unreachable]\n` +
+              `${task.id} stayed at ${run.stage}: ${movement.reason}`;
+            void this.log('warn', 'Workflow task movement unreachable on pass', {
+              sessionID: session.sessionId,
+              taskId: task.id,
+              stage: run.stage,
+              reason: movement.reason,
             });
           }
-
-          if (failed || passed) {
-            const engine = await this.mutationOrchestrator.resolveEngine(
-              session.profileId,
-              session.schemaId
-            );
-            const movement = nextTaskStage(
-              loopStage,
-              run,
-              passed,
-              (expression, facts) =>
-                engine.evaluateGuard(expression, toGuardContext(session, { ...facts }), {
-                  currentLoopListKey: run.listKey,
-                }),
-              (type) =>
-                session.approvals.some(
-                  (approval) => approval.type === type && approval.status === 'granted'
-                )
-            );
-
-            // An edge that is taken applies what it declares, at either level
-            // and whichever way it ends. The retry budget below is the one
-            // effect with its own conditions; everything else follows the
-            // edge, because a schema that is accepted has to be obeyed.
-            if (movement.kind === 'complete' || movement.kind === 'move') {
-              this.applyApprovalEffects(
-                session,
-                run,
-                movement.kind === 'move' ? movement.to : TASK_DONE,
-                movement.effects
-              );
-            }
-
-            if (movement.kind === 'complete') {
-              run.status = 'completed';
-              task.status = 'completed';
-              removeActiveTaskContext(session, run.id);
-            } else if (movement.kind === 'move') {
-              // A move that walks a failure back into the loop spends the
-              // task's budget whether or not the edge remembered to say so.
-              // An edge without the effect would otherwise cycle forever, and
-              // the operator would never be asked.
-              const spendsBudget =
-                failed || (movement.effects ?? []).some((e) => e.bumpRetry !== undefined);
-              const exhausted = spendsBudget
-                ? this.applyTaskEffects(session, run, task, loopStage, movement.effects, failed)
-                : false;
-              run.stage = movement.to;
-              // Each stage judges its own work: the next one starts with no
-              // verdicts carried over from the last, and a new round, so any
-              // verifier still working the previous one is answered too late.
-              run.gates = {};
-              run.round += 1;
-              if (exhausted) {
-                run.status = 'awaiting_decision';
-                this.upsertActiveTaskContextFromSession(session, run.id, 'awaiting_decision');
-                this.upsertPendingDecision(session, task.id, run.id);
-              } else {
-                task.status = 'running';
-                run.status = 'running';
-                this.upsertActiveTaskContextFromSession(session, run.id, 'running');
-              }
-            } else if (failed && movement.kind === 'unreachable') {
-              // No transition took the failure and there is no applicable route
-              // at all — the loop's own retry budget decides: back to the first
-              // stage, or a decision for the operator. When stayKind is
-              // 'blocked' the route exists but a guard or consent explicitly
-              // shut it — retry must NOT override that policy decision.
-              this.recordTaskRetryFailure(session, run, task, loopStage);
-            } else if (movement.kind === 'blocked') {
-              // A route exists but a guard or consent explicitly shut it —
-              // a policy decision, not a missing route. It must NOT be
-              // silently dropped, and it must NOT spend retry budget.
-              output.output +=
-                `\n\n[workflow-task-blocked]\n` +
-                `${task.id} stayed at ${run.stage}: ${movement.reason}`;
-              void this.log('warn', 'Workflow task movement blocked', {
-                sessionID,
-                taskId: task.id,
-                stage: run.stage,
-                reason: movement.reason,
-              });
-            } else if (passed && movement.kind === 'unreachable') {
-              // A passing stage with nowhere applicable to go — surfaced
-              // rather than silently dropped, matching the failure case above.
-              output.output +=
-                `\n\n[workflow-task-unreachable]\n` +
-                `${task.id} stayed at ${run.stage}: ${movement.reason}`;
-              void this.log('warn', 'Workflow task movement unreachable on pass', {
-                sessionID,
-                taskId: task.id,
-                stage: run.stage,
-                reason: movement.reason,
-              });
-            }
-          }
         }
-        // Cleanup always follows movement recording above, for every
-        // movement kind — move, complete, blocked, and unreachable.
-        delete session.activeOperations[callID];
-      } else if (parsed) {
-        // A verdict about the whole body of work, not about one task: the
-        // current stage's own gates. A stage is a stage at either level, so the
-        // rule is the same — the tag names a gate the stage declared, or it is
-        // refused.
-        await this.recordStageGate(session, parsed, reportingAgent, output);
-        delete session.activeOperations[callID];
       }
+      // Cleanup always follows movement recording above, for every
+      // movement kind — move, complete, blocked, and unreachable.
+      delete session.activeOperations[callID];
+    } else if (parsed) {
+      // A verdict about the whole body of work, not about one task: the
+      // current stage's own gates. A stage is a stage at either level, so the
+      // rule is the same — the tag names a gate the stage declared, or it is
+      // refused.
+      await this.recordStageGate(session, parsed, reportingAgent, output);
+      delete session.activeOperations[callID];
+    }
 
-      if (parsed) {
-        void this.log('info', `Workflow result recorded`, {
-          sessionID,
-          stage: parsed.stage,
-          status: parsed.status,
-          summary: parsed.summary,
-        });
-      }
-    });
+    if (parsed) {
+      void this.log('info', `Workflow result recorded`, {
+        sessionID: session.sessionId,
+        stage: parsed.stage,
+        status: parsed.status,
+        summary: parsed.summary,
+      });
+    }
   }
 
   /**
@@ -2434,23 +2451,17 @@ class StateMachineRuntime {
    */
   private async actionsBefore(
     tool: string,
-    sessionID: string,
+    session: WorkflowSession,
     callID: string,
     args: unknown
   ): Promise<void> {
     let request: AdmissionRequest | null = null;
     if (tool === 'bash') {
-      // Один и тот же `bash`, доставка или нет: действие называет инструмент.
-      // Доставку помечает `delivers` у записи, и это отдельный вопрос — на
-      // него отвечает `isCommitDelivery`.
       request = { action: 'bash', command: extractBashCommand(args) };
     } else if (this.fileTools.has(tool)) {
       request = { action: 'edit', paths: this.scopeTargetPaths(tool, args) };
     }
     if (!request) return;
-
-    const session = await this.loadGoverning(sessionID);
-    if (!session) return;
 
     const actions = await this.actingStageActions(session);
     if (actions === undefined) {
@@ -2468,7 +2479,7 @@ class StateMachineRuntime {
     );
     if (!verdict.allowed) {
       void this.log('warn', 'Action refused by the stage', {
-        sessionID,
+        sessionID: session.sessionId,
         tool,
         reason: verdict.reason,
       });
@@ -2622,13 +2633,10 @@ class StateMachineRuntime {
 
   private readonly readTools = new Set(['read']);
 
-  private async scopeBefore(tool: string, sessionID: string, args: unknown): Promise<void> {
+  private async scopeBefore(tool: string, session: WorkflowSession, args: unknown): Promise<void> {
     const isWrite = this.fileTools.has(tool);
     const isRead = this.readTools.has(tool);
     if (!isWrite && !isRead) return;
-
-    const session = await this.loadGoverning(sessionID);
-    if (!session) return;
 
     // Check against the UNION of every running task's scope, not a single
     // arbitrarily-picked one (CRITICAL-1 remediation). Admission guarantees
@@ -2791,20 +2799,24 @@ class StateMachineRuntime {
 
   /**
    * После каждого инструмента пытаемся применить переходы.
+   *
+   * Принимает `deferAfterSave`, чтобы отложить архивирование до успешного
+   * сохранения в вызывающем `executor.run()`.
    */
-  private async transitionAfter(sessionID: string): Promise<void> {
-    const session = await this.loadGoverning(sessionID);
-    if (!session) return;
+  private async transitionAfter(
+    session: WorkflowSession,
+    deferAfterSave: (fn: () => Promise<void>) => void
+  ): Promise<void> {
     try {
       const moved = await this.mutationOrchestrator.applyTransitions(session);
       // Запись об исходе — до `save`, иначе она не уедет в архив вместе с
       // сессией, о которой рассказывает.
       if (moved.applied) await this.recordOutcomeIfFinished(session, moved);
-      await this.store.save(session);
-      if (moved.applied) await this.archiveIfFinished(session);
+      // Сохранение выполняет вызывающий executor.run().
+      if (moved.applied) deferAfterSave(() => this.archiveIfFinished(session));
     } catch (err) {
       void this.log('warn', 'transitionAfter: tryApplyTransitions failed', {
-        sessionID,
+        sessionID: session.sessionId,
         error: err instanceof Error ? err.message : String(err),
       });
     }

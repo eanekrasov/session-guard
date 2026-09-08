@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { WorkflowStore, createSession } from '../../src/session/session-store.ts';
 import { SessionQueue } from '../../src/app/session-queue.ts';
+import { SessionExecutor } from '../../src/app/session-executor.ts';
 import { StateMachineEngine, type EvaluateGuardFn } from '../../src/domain/engine.ts';
 import type { WorkflowSession } from '../../src/session/session-schema.ts';
 import type { EngineConfig } from '../../src/domain/engine.ts';
@@ -23,15 +24,17 @@ function createNoopEngine(): StateMachineEngine {
 let storeDir: string;
 let store: WorkflowStore;
 let queue: SessionQueue;
+let executor: SessionExecutor;
 
 beforeEach(() => {
   storeDir = '/tmp/state-machine-test-' + Math.random().toString(36).slice(2);
   store = new WorkflowStore(storeDir);
-  queue = new SessionQueue(store);
+  queue = new SessionQueue();
+  executor = new SessionExecutor(store);
 });
 
 async function drainQueue(rootSessionId: string): Promise<void> {
-  await queue.enqueue(rootSessionId, async () => {});
+  await executor.run(rootSessionId, async () => {});
 }
 
 function mockLogFn() {
@@ -42,7 +45,13 @@ async function makeOrchestrator(engine?: StateMachineEngine, log?: ReturnType<ty
   const { MutationOrchestrator } = await import('../../src/app/mutation-orchestrator.ts');
 
   // Create orchestrator but override resolveEngine to return our noop engine
-  const orch = new MutationOrchestrator(store, queue, '/tmp/test', '/tmp/test', log ?? mockLogFn());
+  const orch = new MutationOrchestrator(
+    store,
+    executor,
+    '/tmp/test',
+    '/tmp/test',
+    log ?? mockLogFn()
+  );
 
   if (engine) {
     // Monkey-patch resolveEngine to return our test engine

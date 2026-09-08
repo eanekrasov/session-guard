@@ -165,7 +165,7 @@ describe('a guard is evaluated with the context it was given', () => {
     const { GuardEvaluator } = await import('../../src/schema/guard-evaluator.ts');
     const { StateMachineEngine, toGuardContext } = await import('../../src/domain/engine.ts');
     const { MutationOrchestrator } = await import('../../src/app/mutation-orchestrator.ts');
-    const { SessionQueue } = await import('../../src/app/session-queue.ts');
+    const { SessionExecutor } = await import('../../src/app/session-executor.ts');
     const { fixtureProfilesDir } = await import('../support/fixture-profiles.ts');
 
     const store = new WorkflowStore(storeDirectory);
@@ -180,7 +180,7 @@ describe('a guard is evaluated with the context it was given', () => {
 
     const orchestrator = new MutationOrchestrator(
       store,
-      new SessionQueue(store),
+      new SessionExecutor(store),
       projectDirectory,
       fixtureProfilesDir('profiles')
     );

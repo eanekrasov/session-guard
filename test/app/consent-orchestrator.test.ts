@@ -31,9 +31,9 @@ function mockClient(
 
 async function makeOrchestrator(client?: SessionClient) {
   const { ConsentOrchestrator } = await import('../../src/app/consent-orchestrator.ts');
-  const { SessionQueue } = await import('../../src/app/session-queue.ts');
-  const queue = new SessionQueue(store);
-  return new ConsentOrchestrator(store, queue, directory, '', client ?? mockClient());
+  const { SessionExecutor } = await import('../../src/app/session-executor.ts');
+  const executor = new SessionExecutor(store);
+  return new ConsentOrchestrator(store, executor, directory, '', client ?? mockClient());
 }
 
 function findOpenApproval(session: Awaited<ReturnType<WorkflowStore['load']>>) {

@@ -1,6 +1,6 @@
 import { resolve } from 'node:path';
 import { WorkflowStore } from '../session/session-store.ts';
-import { SessionQueue } from './session-queue.ts';
+import { SessionExecutor } from './session-executor.ts';
 import {
   parseConsentRequest,
   evidenceOf,
@@ -28,7 +28,7 @@ export class ConsentOrchestrator {
 
   constructor(
     private readonly store: WorkflowStore,
-    private readonly queue: SessionQueue,
+    private readonly executor: SessionExecutor,
     private readonly projectDir: string,
     private readonly profilesDir: string,
     private readonly client: SessionClient,
@@ -108,11 +108,11 @@ export class ConsentOrchestrator {
     const documentEvidence = calculateDocumentSetEvidence(documents);
     const consentType = consentTypeOf(consentRequest.manifest);
 
-    await this.queue.enqueue(sessionID, async (session) => {
-      if (!session) return;
+    await this.executor.run(sessionID, async (tx) => {
+      if (!tx.session) return;
 
       // Dedup: already consented for this callID
-      if (session.consentedCallIDs.includes(callID)) return;
+      if (tx.session.consentedCallIDs.includes(callID)) return;
 
       // One record per type. `approve` and `decline` both upsert by type, so a
       // second record left them updating the wrong one — and, worse, a
@@ -130,8 +130,10 @@ export class ConsentOrchestrator {
       // type, `approve` found the first and left the second pending, and
       // `approved(<type>)` stayed true on authority given for an older
       // document.
-      session.approvals = session.approvals.filter((approval) => approval.type !== consentType);
-      session.approvals.push({
+      tx.session.approvals = tx.session.approvals.filter(
+        (approval) => approval.type !== consentType
+      );
+      tx.session.approvals.push({
         type: consentType,
         callId: callID,
         status: 'pending',
@@ -141,17 +143,17 @@ export class ConsentOrchestrator {
       // Ссылка на документ живёт под именем согласия: `refs.plan` для плана,
       // `refs.deploy` для деплоя. Guard-ы схемы уже читают `session.refs.<имя>`
       // обобщённо — писала под одним именем только эта строка.
-      session.refs[consentType] = documentPath;
-      session.consentedCallIDs = [...session.consentedCallIDs, callID];
+      tx.session.refs[consentType] = documentPath;
+      tx.session.consentedCallIDs = [...tx.session.consentedCallIDs, callID];
 
       // P1-015: HARNESS_AUTO_APPROVE — авто-одобрение для прогонов без
       // оператора. Одобряет ровно то согласие, которое спросили, а не всегда
       // план: иначе схема с двумя разными согласиями не проезжает.
       if (
         process.env.HARNESS_AUTO_APPROVE === 'true' &&
-        !session.approvals.some((a) => a.type === consentType && a.status === 'granted')
+        !tx.session.approvals.some((a) => a.type === consentType && a.status === 'granted')
       ) {
-        approve(session, consentType, documentEvidence, callID);
+        approve(tx.session, consentType, documentEvidence, callID);
         void this.log('info', 'HARNESS_AUTO_APPROVE: consent auto-approved', {
           sessionID,
           callID,
@@ -273,9 +275,9 @@ export class ConsentOrchestrator {
 
     void this.log('info', `Consent after: processing answer`, { sessionID, callID });
 
-    await this.queue.enqueue(sessionID, async (session) => {
-      if (!session) return;
-      const pendingApproval = this.findOpenApproval(session.approvals, callID);
+    await this.executor.run(sessionID, async (tx) => {
+      if (!tx.session) return;
+      const pendingApproval = this.findOpenApproval(tx.session.approvals, callID);
       if (!pendingApproval) return;
 
       // Extract user answer from output metadata
@@ -306,17 +308,17 @@ export class ConsentOrchestrator {
 
       if (result.kind === 'grant') {
         // P1-015: Re-verify plan evidence at decision time
-        if (!this.verifyPlanEvidenceAtDecision(session, callID, sessionID)) {
-          this.removeOpenApproval(session, callID);
-          session.refs[pendingApproval.type] = '';
-          void this.store.save(session);
+        if (!this.verifyPlanEvidenceAtDecision(tx.session, callID, sessionID)) {
+          this.removeOpenApproval(tx.session, callID);
+          tx.session.refs[pendingApproval.type] = '';
+          // Enclosing executor.run() handles the save — no direct store.save here.
           return;
         }
 
         // Одобряется то согласие, которое спрашивали. Здесь стояло литеральное
         // 'plan', и схема с `consent: deploy` получала одобрение с чужим
         // именем — переход ждал своего и не дожидался никогда.
-        approve(session, pendingApproval.type, pendingApproval.evidence ?? '', callID);
+        approve(tx.session, pendingApproval.type, pendingApproval.evidence ?? '', callID);
         wasGranted = true;
         grantedType = pendingApproval.type;
         evidence = pendingApproval.evidence ?? '';
@@ -336,7 +338,7 @@ export class ConsentOrchestrator {
       }
 
       if (result.kind !== 'grant') {
-        this.removeOpenApproval(session, callID);
+        this.removeOpenApproval(tx.session, callID);
       }
     });
 

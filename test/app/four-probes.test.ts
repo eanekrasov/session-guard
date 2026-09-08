@@ -285,7 +285,7 @@ describe('reading a task list from a dispatched subagent', () => {
     // it: a read from a child session answered `Unknown workflow session:
     // child` though the host knew its parent.
     const { TaskApi } = await import('../../src/app/task-api.ts');
-    const { SessionQueue } = await import('../../src/app/session-queue.ts');
+    const { SessionExecutor } = await import('../../src/app/session-executor.ts');
 
     const store = new WorkflowStore(storeDirectory);
     const session = createSession('root', 'base', 'state-machine', 'planning');
@@ -293,8 +293,8 @@ describe('reading a task list from a dispatched subagent', () => {
     await store.save(session);
 
     const chain: Record<string, string> = { child: 'root' };
-    const queue = new SessionQueue(store, undefined, async (id) => chain[id] ?? null);
-    const api = new TaskApi(store, async () => ['implementation'], queue);
+    const executor = new SessionExecutor(store, undefined, async (id) => chain[id] ?? null);
+    const api = new TaskApi(store, async () => ['implementation'], executor);
 
     const fromChild = await api.getTasks('child', 'implementation');
     expect(fromChild).toHaveLength(1);

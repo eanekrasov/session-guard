@@ -104,40 +104,6 @@ describe('WorkflowStore', () => {
     });
   });
 
-  describe('parent cache', () => {
-    it('leaves the parent cache alone on a successful save', async () => {
-      const child = createSession('cache-child', 'android', 'state-machine');
-
-      await store.save(child);
-
-      // The parent chain is the host's answer, resolved by SessionQueue.
-      // A save must not claim the session is its own root.
-      expect(store.parentCache.has('cache-child')).toBe(false);
-    });
-
-    it('leaves the parent cache alone when validation rejects the save', async () => {
-      const child = createSession('rejected-child', 'android', 'state-machine');
-      // Invalid shape: the schema rejects it, so nothing is persisted.
-      (child as unknown as { currentStage: number }).currentStage = 42;
-
-      await expect(store.save(child)).rejects.toThrow(/Failed to validate session/);
-
-      expect(store.parentCache.has('rejected-child')).toBe(false);
-    });
-
-    it('leaves the parent cache alone when the write fails', async () => {
-      const filePath = path.join(TEST_DIR, 'not-a-directory');
-      await writeFile(filePath, 'blocked');
-      const brokenStore = new WorkflowStore(filePath);
-
-      const child = createSession('io-child', 'android', 'state-machine');
-
-      await expect(brokenStore.save(child)).rejects.toThrow();
-
-      expect(brokenStore.parentCache.has('io-child')).toBe(false);
-    });
-  });
-
   describe('atomic write', () => {
     it('writes atomically — no .tmp files remain after save', async () => {
       const session = createSession('test-atomic', 'android', 'state-machine');
