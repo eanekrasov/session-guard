@@ -6,6 +6,30 @@ stages:
   planning:
     dispatch:
       strategy: serial
+    # Никакой работы до утверждённого плана — и сказано это здесь, а не
+    # получается само собой. Прежде правку на `planning` отказывал жизненный
+    # цикл мутации, потому что задач ещё нет; теперь ход вне цикла законен, и
+    # запрет обязан быть объявленным.
+    #
+    # Эта фикстура сводит весь workflow на одну стадию: её `stageAssignments`
+    # по умолчанию возвращают `planning` при любом состоянии, так что
+    # действующей стадией она остаётся и для коммита. Поэтому объявления здесь
+    # покрывают всё, что фикстура проверяет.
+    actions:
+      # Осмотреться: чтение дерева планированию не мешает.
+      - action: bash
+        commands: ['git .*', 'git', 'ls.*', 'rg.*', 'cat.*']
+      # Доставка. `delivers` говорит ядру выдать permit до вызова и сверить
+      # HEAD после — без этой записи объявленный список отказал бы коммиту.
+      - action: bash
+        commands: ['bun run .*commit-task\.ts.*']
+        delivers: true
+      # Всё остальное — только по утверждённому плану.
+      - action: bash
+        guard: "session.approved('plan')"
+      - action: edit
+        paths: ['**']
+        guard: "session.approved('plan')"
   tasks_ready: {}
   execution:
     loop: implementation
@@ -21,13 +45,13 @@ stages:
     transitions:
       - from: code
         to: verify
-        kind: pass
+        guard: "task.gates.invariants == 'passed'"
       - from: verify
         to: done
-        kind: pass
+        guard: "task.gates.invariants == 'passed' && task.gates.review == 'passed'"
       - from: verify
         to: code
-        kind: fail
+        guard: "task.gates.invariants == 'failed' || task.gates.review == 'failed'"
         effects:
           - bumpRetry: task.id
   commit: {}
@@ -45,11 +69,6 @@ transitions:
   - from: commit
     to: done
     guard: "typeof session.deliveryReceipt == 'string' || typeof session.deliveryPermit == 'string'"
-gateMapping:
-  review: ['invariants', 'review']
-settings:
-  mutationTtlMs: 1800000
-  retryMaxAttempts: 3
 stageAssignments:
   - id: default
     priority: 0
@@ -76,9 +95,3 @@ stageAssignments:
     priority: 100
     condition: "typeof session.deliveryReceipt == 'string' || typeof session.deliveryPermit == 'string'"
     result: done
-actionGuards:
-  beginMutation: "session.approved('plan')"
-requiredGates:
-  - invariants
-  - review
-  - qa

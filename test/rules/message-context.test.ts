@@ -7,7 +7,7 @@ import {
   filterValidMessages,
   extractSlashCommand,
   extractTextFromParts,
-  MessageWithInfo,
+  type MessageWithInfo,
 } from '../../src/rules/message-context.js';
 import { extractFilePathsFromMessages } from '../../src/rules/message-paths.js';
 

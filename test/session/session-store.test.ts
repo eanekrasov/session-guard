@@ -22,6 +22,44 @@ describe('WorkflowStore', () => {
     await rm(TEST_DIR, { recursive: true, force: true });
   });
 
+  /**
+   * Конец workflow убирает сессию из рантайма, но не из мира.
+   *
+   * «Сессии нет» этот проект выражает ровно одним способом — `load` не находит
+   * файла. Второй способ не-существования заводить нельзя: каждому месту
+   * пришлось бы различать два вида отсутствия. Отсюда перенос, а не удаление:
+   * расписка, гейты и вердикты — продукт работы, и стирать его в момент, когда
+   * он сложился, незачем.
+   */
+  describe('archive', () => {
+    it('убирает сессию из рантайма и сохраняет её целиком', async () => {
+      const session = createSession('finished', 'android', 'state-machine');
+      session.deliveryReceipt = 'abc123';
+      await store.save(session);
+
+      const target = await store.archive('finished');
+
+      expect(target).not.toBeNull();
+      expect(await store.load('finished')).toBeNull();
+      const archived = await store.loadArchived('finished');
+      expect(archived?.sessionId).toBe('finished');
+      expect(archived?.deliveryReceipt).toBe('abc123');
+    });
+
+    it('не показывает архив в списке рантайма', async () => {
+      await store.save(createSession('a', 'android', 'state-machine'));
+      await store.save(createSession('b', 'android', 'state-machine'));
+      await store.archive('a');
+
+      expect(await store.list()).toEqual(['b']);
+    });
+
+    it('архивировать нечего — это не ошибка', async () => {
+      expect(await store.archive('never-existed')).toBeNull();
+      expect(await store.loadArchived('never-existed')).toBeNull();
+    });
+  });
+
   describe('save and load', () => {
     it('roundtrip preserves all fields', async () => {
       const session = createSession('test-session-1', 'android', 'state-machine');

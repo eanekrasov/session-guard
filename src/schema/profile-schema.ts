@@ -34,6 +34,49 @@ const LoopSourceSchema = z
     message: 'Loop source must be a static list key or "$currentTask.id"',
   });
 export type LoopSource = z.infer<typeof LoopSourceSchema>;
+export type ActionEntry = z.infer<typeof ActionEntrySchema>;
+
+/**
+ * Одно объявление действия на стадии.
+ *
+ * Действий на стадии может быть несколько, в том числе несколько записей на
+ * одно действие: `edit` разделяется масками путей, `bash` — регулярками по
+ * команде. Поэтому список, а не карта по имени действия.
+ */
+/**
+ * Закрытый словарь действий. Каждое имя — инструмент хоста, а не назначение.
+ *
+ * Здесь был ещё `commit`, и это была ошибка уровня: инструмента `commit` не
+ * существует, коммит приезжает обычным `bash`. Отказ на стадии коммита из-за
+ * этого сообщал автору про `bash`, хотя тот написал `commit`. Доставку теперь
+ * помечает `delivers` на самой записи.
+ *
+ * `edit` — имя семейства: под ним `edit`, `write` и `apply_patch`. Все трое
+ * называют цель в аргументах, и разделять их значило бы писать «любую правку»
+ * тремя записями.
+ *
+ * Намеренно без `dispatch`: у допуска задач своя машинерия (`allowedAgents`,
+ * правила admission), и заводить ключ, который никто не читает, значит
+ * повторить историю `verifiers` и `terminalStages`.
+ */
+export const ACTION_IDS = ['edit', 'bash'] as const;
+export type ActionId = (typeof ACTION_IDS)[number];
+
+const ActionEntrySchema = z.object({
+  action: z.enum(ACTION_IDS),
+  paths: z.array(z.string()).optional(),
+  commands: z.array(z.string()).optional(),
+  /**
+   * Этот вызов — доставка, а не обычная работа.
+   *
+   * Ядро по этому признаку не входит в жизненный цикл мутации, выдаёт
+   * `deliveryPermit` до вызова и сверяет HEAD с закоммиченными файлами после.
+   * Раньше «этот bash есть коммит» решала зашитая проверка на имя
+   * `commit-task.ts`; теперь это строчка в схеме.
+   */
+  delivers: z.boolean().optional(),
+  guard: z.string().optional(),
+});
 
 const RetryBudgetSchema = z.object({
   maximum: z.number().int().min(1),
@@ -57,6 +100,14 @@ export interface StageDef {
   retryBudget?: RetryBudget;
   /** Агенты, которым разрешено действовать, пока эта стадия текущая. */
   allowedAgents?: string[];
+  /**
+   * Что на этой стадии можно делать и при каком условии.
+   *
+   * Вторая ось рядом с переходами: те отвечают «можно ли отсюда уйти», эта —
+   * «можно ли сделать вот это, оставаясь на месте». Отсутствие поля означает
+   * отсутствие ограничений; объявленный список исчерпывающий.
+   */
+  actions?: ActionEntry[];
   /**
    * Гейты, которые закрывает эта стадия.
    *
@@ -94,6 +145,7 @@ const StageDefSchema: z.ZodType<StageDef> = z.lazy(() =>
       dispatch: DispatchSchema.optional(),
       retryBudget: RetryBudgetSchema.optional(),
       allowedAgents: z.array(z.string()).optional(),
+      actions: z.array(ActionEntrySchema).optional(),
       gates: z.array(z.string()).optional(),
       entryGuards: z.array(z.string()).optional(),
       exitGuards: z.array(z.string()).optional(),
@@ -114,7 +166,6 @@ const TransitionDefSchema = z.object({
   from: z.string(),
   to: z.string(),
   guard: z.string().optional(),
-  kind: z.enum(['auto', 'pass', 'fail']).optional(),
   effects: z.array(TransitionEffectSchema).optional(),
   consent: z.union([z.string(), ConsentOnTransitionSchema]).optional(),
   onFailure: z.enum(['retry', 'terminal']).optional(),
@@ -135,15 +186,6 @@ export const GateItemSchema = z.object({
   label: z.string().optional(),
 });
 export type GateItem = z.infer<typeof GateItemSchema>;
-
-export const ToolItemSchema = z.object({
-  name: z.string(),
-  description: z.string().optional(),
-  run: z.string(),
-  guard: z.string().optional(),
-  silent: z.boolean().optional(),
-});
-export type ToolItem = z.infer<typeof ToolItemSchema>;
 
 export type DispatchDef = z.infer<typeof DispatchSchema>;
 
@@ -187,9 +229,9 @@ export const ProfileSchemaSchema = z
     /**
      * Рёбра workflow: какая стадия может следовать за какой и при каком условии.
      *
-     * `guard` — выражение над фактами сессии; `kind: pass | fail` читает
-     * `requiredGates`; `consent` ждёт оператора; `effects` — то, что делает сам
-     * переход по ребру, а `onFailure: retry` тратит бюджет ретраев.
+     * `guard` — выражение над фактами сессии; `consent` ждёт оператора;
+     * `effects` — то, что делает сам переход по ребру, а `onFailure: retry`
+     * тратит бюджет ретраев.
      */
     transitions: z.array(TransitionDefSchema).optional(),
 
@@ -201,20 +243,6 @@ export const ProfileSchemaSchema = z
      * момент, когда кто-то впервые о нём высказался.
      */
     gates: z.array(GateItemSchema).optional(),
-
-    /** Инструменты, которыми управляет workflow: когда каждый допускается и молча ли. */
-    tools: z.array(ToolItemSchema).optional(),
-
-    /** id стадии → id гейтов, за которые эта стадия отвечает. */
-    gateMapping: z.record(z.array(z.string())).optional(),
-
-    /**
-     * id действия → guard, который должен быть истинным, чтобы действие допустили.
-     *
-     * Несущий случай — `beginMutation: "session.approved('plan')"`: никаких
-     * правок, пока оператор не утвердил план.
-     */
-    actionGuards: z.record(z.string()).optional(),
 
     /**
      * Агенты, которые правят код, в масштабе всего workflow.
@@ -233,24 +261,6 @@ export const ProfileSchemaSchema = z
      * собственную стадию.
      */
     taskControlAgents: z.array(z.string()).optional(),
-
-    /**
-     * Гейты, которые должны быть `passed`, чтобы разрешить коммит, и те же
-     * гейты проверяет ребро `kind: pass` (а `kind: fail` требует, чтобы хотя бы
-     * один из них был `failed`).
-     *
-     * Если поле не объявлено, движок подставляет захардкоженный `['invariants']`
-     * (src/domain/engine.ts).
-     */
-    requiredGates: z.array(z.string()).optional(),
-
-    /**
-     * Произвольные настройки профиля.
-     *
-     * Проносятся через резолвер и не читаются ничем: объявление настройки
-     * здесь не меняет никакого поведения.
-     */
-    settings: z.record(z.unknown()).optional(),
   })
   .passthrough()
   .superRefine((value, ctx) => {

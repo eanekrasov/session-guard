@@ -4,5 +4,3 @@ stages:
 transitions:
   - from: planning
     to: done
-actionGuards:
-  beginMutation: 'false'

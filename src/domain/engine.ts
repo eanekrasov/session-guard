@@ -11,7 +11,6 @@ import { initialStageOf } from '../schema/compile-workflow.ts';
 // ─── Domain-specific type aliases ──────────────────────────────────────────────
 
 export type StageId = string;
-export type ActionId = string;
 export type { GateStatus, ApprovalStatus, TaskStatus } from '../session/session-schema.ts';
 
 // ─── Value interfaces ─────────────────────────────────────────────────────────
@@ -49,25 +48,12 @@ export interface TaskStageConfig {
   exitGuards?: string[];
 }
 
-// ─── Stage-level entry/exit guards keyed by action ────────────────────────────
-
-export interface StageEntryExitGuards {
-  entryGuards?: Partial<Record<ActionId, string[]>>;
-  exitGuards?: Partial<Record<ActionId, string[]>>;
-}
-
 // ─── Engine config ────────────────────────────────────────────────────────────
 
 export interface EngineConfig {
   stages?: Record<string, StageDef>;
   stageAssignments: StageAssignmentRule[];
   transitions: TransitionDef[];
-  /** Action guards: action → guard expression (flat, priority resolved internally). */
-  actionGuards?: Record<string, string>;
-  /** Stage-level entry/exit guards keyed by stage id */
-  stageLevelGuards?: Record<string, StageEntryExitGuards>;
-  /** gate IDs that must pass for kind=pass transitions (schema-level, last wins) */
-  requiredGates?: string[];
   /** The gates the workflow declares — what a stage's `gates:` is checked against. */
   gates?: GateItem[];
   /** agents allowed to drive workflow task state (schema-level, last wins) */
@@ -91,7 +77,6 @@ function consentType(consent: string | { type?: string }): string {
 
 export interface TransitionCheck {
   allowed: boolean;
-  kind?: 'auto' | 'pass' | 'fail';
   reason?: string;
   to?: string;
   guard?: string | null;
@@ -106,7 +91,7 @@ function deriveDefaultEvaluateGuard(expr: string, facts: SessionFacts): boolean 
 /**
  * The context every guard is evaluated against.
  *
- * One normalisation for all of them. A guard reading `session.gates.invariants`
+ * One normalisation for all of them. A guard reading `session.gates.review`
  * must mean the same thing at any level: outer transitions were handed the
  * normalised facts, where gates are a map, while inner ones were handed the raw
  * session, where gates are an array of records — so the same expression read a
@@ -183,7 +168,7 @@ export function checkTransition(
   from: string,
   to: string,
   transitions: TransitionDef[],
-  session?: SessionFacts & { requiredGates?: string[] },
+  session?: SessionFacts,
   evaluateGuard?: (expr: string) => boolean
 ): TransitionCheck {
   const candidates = transitions.filter((t) => t.from === from && t.to === to);
@@ -205,7 +190,7 @@ export function checkTransition(
 /** Whether this exact edge may be taken. */
 export function evaluateTransition(
   transition: TransitionDef,
-  session?: SessionFacts & { requiredGates?: string[] },
+  session?: SessionFacts,
   evaluateGuard?: (expr: string) => boolean
 ): TransitionCheck {
   const from = transition.from;
@@ -214,21 +199,17 @@ export function evaluateTransition(
 
   // Without a session there is nothing to evaluate a condition against, and an
   // unevaluated condition is not a satisfied one. Every conditional clause
-  // below used to be written `if (… && session)`, and `requiredGates` degraded
-  // to `[]`, so a caller with no session was told every conditional edge was
-  // allowed. An edge that carries no condition at all is still allowed: that
-  // answer is about the shape of the graph and needs no session.
+  // below used to be written `if (… && session)`, so a caller with no session
+  // was told every conditional edge was allowed. An edge that carries no
+  // condition at all is still allowed: that answer is about the shape of the
+  // graph and needs no session.
   const conditions: string[] = [];
   if (guard && guard.trim() !== '') conditions.push('a guard');
   if (transition.consent) conditions.push('consent');
-  if (transition.kind === 'pass' || transition.kind === 'fail') {
-    conditions.push(`kind=${transition.kind}`);
-  }
   if (transition.onFailure === 'retry') conditions.push('onFailure=retry');
   if (conditions.length > 0 && !session) {
     return {
       allowed: false,
-      kind: transition.kind,
       reason: `Transition ${from} → ${to} carries ${conditions.join(' and ')} and cannot be checked without a session`,
       guard,
     };
@@ -255,34 +236,6 @@ export function evaluateTransition(
     };
   }
 
-  const requiredGates = session?.requiredGates ?? [];
-
-  if (transition.kind === 'pass') {
-    const failedGates = requiredGates.filter(
-      (g) => !session?.gates?.[g] || session.gates[g] !== 'passed'
-    );
-    if (failedGates.length > 0) {
-      return {
-        allowed: false,
-        kind: 'pass',
-        reason: `Transition ${from} → ${to} (kind=pass) requires gates [${failedGates.join(', ')}] to be 'passed', but they are not`,
-        guard,
-      };
-    }
-  }
-
-  if (transition.kind === 'fail') {
-    const anyFailed = requiredGates.some((g) => session?.gates?.[g] === 'failed');
-    if (!anyFailed) {
-      return {
-        allowed: false,
-        kind: 'fail',
-        reason: `Transition ${from} → ${to} (kind=fail) requires at least one gate in [${requiredGates.join(', ')}] to be 'failed', but none are`,
-        guard,
-      };
-    }
-  }
-
   // `onFailure: retry` is the pair of clauses `base.yaml` writes by hand —
   // `!isExhausted(key)` on the edge that goes round again, and a `bumpRetry`
   // effect on it — said once. The budget is the stage being retried, so the
@@ -293,13 +246,12 @@ export function evaluateTransition(
   if (transition.onFailure === 'retry' && session?.isExhausted(from)) {
     return {
       allowed: false,
-      kind: transition.kind,
       reason: `Transition ${from} → ${to} (onFailure=retry) has spent the retry budget for ${from}`,
       guard,
     };
   }
 
-  return { allowed: true, kind: transition.kind, to: transition.to, guard };
+  return { allowed: true, to: transition.to, guard };
 }
 
 // ─── EvaluateGuardFn type ──────────────────────────────────────────────────────
@@ -350,63 +302,11 @@ export class StateMachineEngine {
   }
 
   /**
-   * Check whether an action is allowed for the current session.
-   *
-   * Guard priority: stage-level → flat actionGuards.
-   * Kind=pass/fail проверяется checkTransition при детекте фактического
-   * перехода фаз — не блокирует beginMutation внутри текущей фазы.
-   *
-   * Returns { allowed: true } if no guard or guard passes, or
-   * { allowed: false, reason } if the guard fails.
-   */
-  canPerformAction(
-    session: WorkflowSession,
-    action: ActionId,
-    evaluationContext: GuardEvaluationContext = {}
-  ): { allowed: boolean; reason?: string } {
-    const facts = toGuardContext(session);
-    const stage = this.deriveStage(session, evaluationContext);
-
-    // Agent identity is not checked here. `tool.execute.before` knows which
-    // agent a call belongs to only for `task` (via subagent_type), so
-    // `allowedAgents` is enforced during task admission, not on every mutation.
-
-    // Шаг 1: stage-level entry/exit guards
-    const stageGuard = this.config.stageLevelGuards?.[stage];
-    if (stageGuard) {
-      const guards = stageGuard.entryGuards?.[action] || stageGuard.exitGuards?.[action];
-      if (guards && guards.length > 0) {
-        const allPassed = guards.every((g) =>
-          this.evaluateGuardFn(g, facts, {}, evaluationContext)
-        );
-        if (!allPassed) {
-          return {
-            allowed: false,
-            reason: `Stage-level guard failed for ${action} in stage ${stage}`,
-          };
-        }
-      }
-    }
-
-    // Шаг 2: flat actionGuards
-    const flatGuard = this.config.actionGuards?.[action];
-    if (flatGuard) {
-      const passed = this.evaluateGuardFn(flatGuard, facts, {}, evaluationContext);
-      if (!passed) {
-        return { allowed: false, reason: `Action guard failed for ${action}: ${flatGuard}` };
-      }
-    }
-
-    return { allowed: true };
-  }
-
-  /**
    * Validate a stage transition. Evaluates every candidate edge from→to in
    * schema order — a schema may declare several edges between the same pair
    * with different guards. Returns the first that passes, or the first failure.
    *
-   * Converts session to SessionFacts internally if a session is provided,
-   * and injects requiredGates from engine config.
+   * Converts session to SessionFacts internally if a session is provided.
    */
   checkTransition(
     from: StageId,
@@ -414,9 +314,7 @@ export class StateMachineEngine {
     session?: WorkflowSession,
     evaluationContext: GuardEvaluationContext = {}
   ): TransitionCheck {
-    const gates = this.config.requiredGates ?? ['invariants'];
-    const baseFacts = session ? toGuardContext(session) : undefined;
-    const facts = baseFacts ? { ...baseFacts, requiredGates: gates } : undefined;
+    const facts = session ? toGuardContext(session) : undefined;
     return checkTransition(
       from,
       to,
@@ -424,13 +322,6 @@ export class StateMachineEngine {
       facts,
       facts ? (expr) => this.evaluateGuard(expr, facts, evaluationContext) : undefined
     );
-  }
-
-  /**
-   * P1-012: Get required gates for commit permit.
-   */
-  getRequiredGates(): string[] {
-    return this.config.requiredGates ?? ['invariants'];
   }
 
   /**
@@ -475,6 +366,19 @@ export class StateMachineEngine {
    * `$currentTask.id` also used to match any key at all. It names the list of
    * the task being worked on, whose key is that task's id, so it matches one.
    */
+  /**
+   * Заканчивается ли workflow этой стадией.
+   *
+   * Конец определяется объявлением: стадия есть в схеме, и ни одно ребро из
+   * неё не ведёт. Того же мнения держится `compileWorkflow`
+   * (`terminalStagesOf`), и оно там же проверяется — схема без единого конца
+   * или со стадией, из которой до конца не добраться, не компилируется.
+   */
+  isTerminalStage(stageId: string): boolean {
+    if (!this.getStages()[stageId]) return false;
+    return !this.config.transitions.some((transition) => transition.from === stageId);
+  }
+
   getLoopStage(listKey: string): StageDef | null {
     const owns = (stage: StageDef): boolean =>
       stage.loop === listKey || (stage.loop === '$currentTask.id' && /^task-[0-9]+$/.test(listKey));
@@ -503,7 +407,7 @@ export class StateMachineEngine {
   /**
    * Try to apply the first matching outgoing transition from the current stage.
    *
-   * Scans ALL transitions from the current derived stage (any kind: auto, pass, fail),
+   * Scans ALL transitions from the current derived stage,
    * validates each one's guard and gate requirements, and applies the first
    * that passes by setting `session.currentStage`.
    *
@@ -519,27 +423,30 @@ export class StateMachineEngine {
 
     const outgoing = this.config.transitions.filter((t) => t.from === currentStage);
     if (outgoing.length === 0) {
+      // Конец workflow, а не поломка. Прежний текст — «No outgoing transitions
+      // from X» — описывал устройство графа и одинаково звучал для честно
+      // завершённой сессии и для стадии, из которой автор забыл ребро. Второе
+      // теперь не доживает до рантайма: `validateTermination` не пускает такую
+      // схему, — так что здесь остался ровно один смысл, и он назван.
       return {
         allowed: false,
-        reason: `No outgoing transitions from ${currentStage}`,
+        reason: `Workflow finished: '${currentStage}' is where it ends`,
         applied: false,
       };
     }
 
-    const gates = this.config.requiredGates ?? ['invariants'];
-    const factsWithGates = { ...facts, requiredGates: gates };
     const currentStageDef = this.getStages()[currentStage];
 
     for (const transition of outgoing) {
       const targetStageDef = this.getStages()[transition.to];
       const blockedExitGuard = (currentStageDef?.exitGuards ?? []).find(
-        (guard) => !this.evaluateGuard(guard, factsWithGates, evaluationContext)
+        (guard) => !this.evaluateGuard(guard, facts, evaluationContext)
       );
       if (blockedExitGuard !== undefined) {
         continue;
       }
       const blockedEntryGuard = (targetStageDef?.entryGuards ?? []).find(
-        (guard) => !this.evaluateGuard(guard, factsWithGates, evaluationContext)
+        (guard) => !this.evaluateGuard(guard, facts, evaluationContext)
       );
       if (blockedEntryGuard !== undefined) {
         continue;
@@ -549,8 +456,8 @@ export class StateMachineEngine {
       // schema may declare several edges between the same two stages, and
       // re-finding by `from`/`to` judges the first of them every time — so an
       // alternative edge whose guard does hold is never reached.
-      const result = evaluateTransition(transition, factsWithGates, (expr) =>
-        this.evaluateGuard(expr, factsWithGates, evaluationContext)
+      const result = evaluateTransition(transition, facts, (expr) =>
+        this.evaluateGuard(expr, facts, evaluationContext)
       );
 
       if (result.allowed) {
@@ -571,6 +478,10 @@ export class StateMachineEngine {
           }
         }
         session.currentStage = transition.to;
+        // Вердикт ядра о ходе принадлежит стадии, на которой этот ход был
+        // сделан. Унесённый на следующую, он утверждал бы о её работе то,
+        // чего никто не проверял.
+        session.checks = undefined;
         this.resetLoopTasksOnEntry(session, transition.to);
         return { ...result, applied: true };
       }

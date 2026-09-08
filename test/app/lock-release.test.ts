@@ -6,8 +6,9 @@ import type { WorkflowSession } from '../../src/session/session-schema.ts';
 import type { EngineConfig } from '../../src/domain/engine.ts';
 import { createTask } from '../support/task-factory.ts';
 
-// ─── Minimal engine config (no actionGuards) ─────────────────────
+// ─── Minimal engine config ───────────────────────────────────────
 const NOOP_ENGINE_CONFIG: EngineConfig = {
+  stageAssignments: [],
   transitions: [],
 };
 

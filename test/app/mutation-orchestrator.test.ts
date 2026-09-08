@@ -112,10 +112,12 @@ describe('MutationOrchestrator.resolveEngine', () => {
     const alpha = await orchestrator.resolveEngine('two-schemas', 'alpha');
     const beta = await orchestrator.resolveEngine('two-schemas', 'beta');
 
-    expect(alpha.config.transitions.map((t) => t.guard)).toEqual(['FROM_ALPHA']);
-    expect(beta.config.transitions.map((t) => t.guard)).toEqual(['FROM_BETA']);
-    expect(alpha.config.requiredGates).toEqual(['alphaGate']);
-    expect(beta.config.requiredGates).toEqual(['betaGate']);
+    // Ребро одно и то же в обеих схемах, guard разный: если бы резолвер
+    // складывал схемы профиля, обе отдали бы один и тот же.
+    expect(alpha.checkTransition('execution', 'done').guard).toBe('FROM_ALPHA');
+    expect(beta.checkTransition('execution', 'done').guard).toBe('FROM_BETA');
+    expect(alpha.getEditingAgents()).toEqual(['alphaAgent']);
+    expect(beta.getEditingAgents()).toEqual(['betaAgent']);
   });
 
   it('refuses to guess which of several schemas a session runs', async () => {
@@ -200,21 +202,6 @@ describe('MutationOrchestrator.beginMutation', () => {
     expect(runs).toHaveLength(1);
     expect(runs[0]?.stage).toBe('code');
   });
-
-  it('rejects mutation when guard fails (no plan approval, non-zero revision)', async () => {
-    setFixtureProfilesDir();
-    const session = createSession('mo-guarded', 'base', 'state-machine');
-    session.revision = 1;
-    await store.save(session);
-    const { orchestrator } = await makeOrchestrator();
-
-    const output: { args: unknown } = { args: 'echo hi' };
-    await expect(
-      orchestrator.beginMutation({ sessionID: 'mo-guarded', callID: 'call-guarded' }, output)
-    ).rejects.toThrow(/Mutation blocked by engine/);
-    const reloaded = await store.load('mo-guarded');
-    expect(reloaded?.activeOperations).toEqual({});
-  });
 });
 
 describe('MutationOrchestrator.finishMutation', () => {
@@ -268,7 +255,7 @@ describe('MutationOrchestrator.finishMutation', () => {
 
   // ── Регрессионные тесты: scope, invariant validation, fail-closed ──
 
-  it('sets gate to passed and clears activeOperation on successful finishMutation', async () => {
+  it('clears activeOperation on successful finishMutation', async () => {
     setFixtureProfilesDir();
     const gitDir = makeGitDir();
     const session = createSession('mo-pass', 'base', 'state-machine');
@@ -283,12 +270,11 @@ describe('MutationOrchestrator.finishMutation', () => {
 
     const reloaded = await store.load('mo-pass');
     expect(reloaded?.activeOperations).toEqual({});
-    const invGate = reloaded?.gates.find((g) => g.id === 'invariants');
-    expect(invGate?.status).toBe('passed');
-    expect(invGate?.resolvedAt).toBeDefined();
+    // Гейт `invariants` удалён — вердикт больше никуда не пишется.
+    expect(reloaded?.gates).toEqual([]);
   });
 
-  it('sets gate to failed when output.metadata.failed is true', async () => {
+  it('clears activeOperation and leaves the retry budget alone when output.metadata.failed is true', async () => {
     setFixtureProfilesDir();
     const gitDir = makeGitDir();
     const session = createSession('mo-failed-md', 'base', 'state-machine');
@@ -310,14 +296,13 @@ describe('MutationOrchestrator.finishMutation', () => {
 
     const reloaded = await store.load('mo-failed-md');
     expect(reloaded?.activeOperations).toEqual({});
-    const invGate = reloaded?.gates.find((g) => g.id === 'invariants');
-    expect(invGate?.status).toBe('failed');
+    expect(reloaded?.gates).toEqual([]);
     // Recording the verdict is not spending an attempt: the move that retries
     // is what costs one. Bumping here spent the same counter a second time.
     expect(reloaded?.retryBudgets['task-1']).toBeUndefined();
   });
 
-  it('fails gate closed when computeChangeScope throws (no git repo)', async () => {
+  it('records no changed files when computeChangeScope throws (no git repo)', async () => {
     setFixtureProfilesDir();
     const session = createSession('mo-scope-fail', 'base', 'state-machine');
     approve(session, 'plan', 'test-evidence', 'approve-call-id');
@@ -338,9 +323,7 @@ describe('MutationOrchestrator.finishMutation', () => {
 
     const reloaded = await store.load('mo-scope-fail');
     expect(reloaded?.activeOperations).toEqual({});
-    const invGate = reloaded?.gates.find((g) => g.id === 'invariants');
-    expect(invGate?.status).toBe('passed');
-    expect(invGate?.resolvedAt).toBeDefined();
+    expect(reloaded?.gates).toEqual([]);
     expect(reloaded?.changedFiles).toEqual([]);
   });
 

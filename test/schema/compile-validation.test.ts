@@ -26,7 +26,7 @@ function schema(
   stages: ResolvedSchema['stages'],
   transitions: ResolvedSchema['transitions'] = []
 ): ResolvedSchema {
-  return { source: 'test.yaml', stages, transitions, gates: DECLARED_GATES };
+  return { id: 'test', source: 'test.yaml', stages, transitions, gates: DECLARED_GATES };
 }
 
 function messages(input: ResolvedSchema): string[] {
@@ -103,6 +103,7 @@ describe('a workflow that cannot run is refused when it is read', () => {
     // No declaration is not an empty declaration: there is nothing to be wrong
     // about, so the compiler must not invent a list of its own to reject against.
     const undeclared: ResolvedSchema = {
+      id: 'test',
       source: 'test.yaml',
       stages: { validation: { gates: ['smoke'] } },
       transitions: [],
@@ -260,6 +261,7 @@ describe('a guard that cannot be parsed is refused at load', () => {
 
   it('refuses an unparseable stage-assignment condition', () => {
     const input: ResolvedSchema = {
+      id: 'test',
       source: 'test.yaml',
       stages: { a: {} },
       stageAssignments: [{ id: 'r', priority: 0, condition: '&& ||', result: 'a' }],
@@ -287,13 +289,17 @@ describe('a guard that cannot be parsed is refused at load', () => {
   });
 
   it('accepts the guards the shipped vocabulary actually uses', () => {
-    const input = schema({ a: {}, b: {} }, [
+    // `done` здесь не про guard-ы: без стадии, из которой не ведёт ни одного
+    // ребра, workflow не заканчивается никогда, и компилятор теперь говорит
+    // об этом отдельной ошибкой. Пара `a ⇄ b` крутилась бы вечно.
+    const input = schema({ a: {}, b: {}, done: {} }, [
       { from: 'a', to: 'b', guard: "session.approved('plan') && !isExhausted('cycles')" },
       {
         from: 'b',
         to: 'a',
         guard: "session.activeOperations.some(o => o.result == 'output_ready')",
       },
+      { from: 'b', to: 'done' },
     ]);
 
     expect(messages(input)).toEqual([]);
@@ -352,5 +358,196 @@ describe('a schema that does not compile stops the work', () => {
     expect(refusal, 'a workflow with a transition to nowhere was admitted').toContain(
       'Transition verify → commit names "commit"'
     );
+  });
+});
+
+describe('a stage declares what it can do, and the compiler checks it can', () => {
+  it('refuses a path mask on an action that carries no path', () => {
+    // `bash` получает от хоста только `workdir`. Маску записать можно,
+    // выполнить нельзя — а поле, которое читается никем, здесь уже дорого
+    // обходилось.
+    const input = schema({
+      commit: { actions: [{ action: 'bash', paths: ['src/**'] }] },
+    });
+    expect(reported(input)).toContain("'paths' is only meaningful for action 'edit'");
+  });
+
+  it('refuses command patterns on an action that does not arrive as a command', () => {
+    const input = schema({
+      commit: { actions: [{ action: 'edit', commands: ['npm test'] }] },
+    });
+    expect(reported(input)).toContain("'commands' is only meaningful for action 'bash'");
+  });
+
+  it('refuses a delivery marker on anything but bash', () => {
+    // Инструмента `commit` не существует — доставка приезжает шелл-командой.
+    const input = schema({
+      commit: { actions: [{ action: 'edit', paths: ['src/**'], delivers: true }] },
+    });
+    expect(reported(input)).toContain("'delivers' is only meaningful for action 'bash'");
+  });
+
+  it('refuses a delivery that names no command', () => {
+    // Иначе весь bash стадии поехал бы мимо жизненного цикла мутации.
+    const input = schema({
+      commit: { actions: [{ action: 'bash', delivers: true }] },
+    });
+    expect(reported(input)).toContain("'delivers' needs 'commands'");
+  });
+
+  it('accepts a delivery declared as the bash call it actually is', () => {
+    const input = schema({
+      commit: {
+        actions: [{ action: 'bash', commands: ['bun run .*commit-task\\.ts.*'], delivers: true }],
+      },
+    });
+    expect(messages(input)).toEqual([]);
+  });
+
+  it('refuses a directory mask that covers nothing inside it', () => {
+    // minimatch якорит и путь, и маску: `src/auth` не совпадёт с
+    // `src/auth/login.ts`.
+    const input = schema({
+      code: { actions: [{ action: 'edit', paths: ['src/auth'] }] },
+    });
+    expect(reported(input)).toContain("Write 'src/auth/**' to cover a directory");
+  });
+
+  it('refuses a command pattern that is not a regular expression', () => {
+    const input = schema({
+      code: { actions: [{ action: 'bash', commands: ['npm ('] }] },
+    });
+    expect(reported(input)).toContain('does not compile as a regular expression');
+  });
+
+  it('parses an action guard at compile time, like every other expression', () => {
+    const input = schema({
+      commit: { actions: [{ action: 'bash', guard: 'session.gates.(((' }] },
+    });
+    expect(reported(input)).toContain('Guard expression does not parse');
+  });
+
+  it('reaches actions declared on a nested stage', () => {
+    const input = schema({
+      execution: {
+        loop: 'implementation',
+        stages: { code: { actions: [{ action: 'edit', paths: ['src/auth'] }] } },
+      },
+    });
+    expect(reported(input)).toContain('stages.execution.stages.code.actions[0].paths[0]');
+  });
+
+  it('accepts a well-formed declaration', () => {
+    const input = schema({
+      commit: {
+        actions: [
+          { action: 'edit', paths: ['src/**'], guard: "session.approved('plan')" },
+          { action: 'bash', commands: ['npm test', 'npm run .*'] },
+        ],
+      },
+    });
+    expect(messages(input)).toEqual([]);
+  });
+});
+
+describe('a stage nothing reaches is refused when the schema is read', () => {
+  it('refuses an outer stage no transition leads to', () => {
+    // Недостижимая стадия — это объявление, которое никогда не исполнится.
+    // Особенно дорого с тех пор, как стадия несёт `actions:`: недостижимая
+    // `commit` означает workflow, который не может доставить.
+    const input = schema(
+      { planning: {}, done: {}, commit: { actions: [{ action: 'bash', commands: ['x'] }] } },
+      [{ from: 'planning', to: 'done' }]
+    );
+    expect(reported(input)).toContain("Stage 'commit' is declared but nothing reaches it");
+  });
+
+  it('counts a stage named by a stage assignment as reachable', () => {
+    // `stageAssignments` назначают стадию выражением, минуя граф.
+    const input: ResolvedSchema = {
+      ...schema({ planning: {}, audit: {} }, [{ from: 'planning', to: 'planning' }]),
+      stageAssignments: [{ id: 'a', priority: 1, condition: 'true', result: 'audit' }],
+    };
+    expect(messages(input)).toEqual([]);
+  });
+
+  it('refuses a nested stage the loop’s own transitions never reach', () => {
+    const input = schema({
+      execution: {
+        loop: 'implementation',
+        stages: { code: {}, orphan: {} },
+        transitions: [{ from: 'code', to: 'done' }],
+      },
+    });
+    expect(reported(input)).toContain("Nested stage 'orphan' is declared but nothing reaches it");
+  });
+
+  it('leaves a loop that declares no transitions alone', () => {
+    // Такой цикл ходит по порядку объявления (`nextTaskStage`), и достижимы в
+    // нём все. Первая версия этой проверки ругалась на них — поймал корпус.
+    const input = schema({
+      execution: { loop: 'implementation', stages: { dev: {}, review: {}, qa: {} } },
+    });
+    expect(messages(input)).toEqual([]);
+  });
+});
+
+/**
+ * Конец workflow — объявление, а не ключ.
+ *
+ * Терминальной считается стадия, из которой автор не провёл ни одного ребра, —
+ * тем же способом, каким начальной считается первая объявленная. До этого
+ * понятия не было вовсе: «дошли до конца» и «автор забыл ребро» выглядели
+ * одинаково — молчанием движка на каждом следующем ходу.
+ */
+describe('у workflow должен быть конец, и из каждой стадии должен быть к нему путь', () => {
+  it('стадия без исходящих рёбер и есть конец', () => {
+    const input = schema({ a: {}, done: {} }, [{ from: 'a', to: 'done' }]);
+    expect(messages(input)).toEqual([]);
+    expect(compileWorkflow(input).workflow.terminalStages).toEqual(['done']);
+  });
+
+  it('концов может быть несколько — так устроен и поставляемый base', () => {
+    const input = schema({ a: {}, done: {}, failed: {} }, [
+      { from: 'a', to: 'done' },
+      { from: 'a', to: 'failed' },
+    ]);
+    expect(messages(input)).toEqual([]);
+    expect(compileWorkflow(input).workflow.terminalStages).toEqual(['done', 'failed']);
+  });
+
+  it('workflow, который не заканчивается никогда, отвергается', () => {
+    const input = schema({ a: {}, b: {} }, [
+      { from: 'a', to: 'b' },
+      { from: 'b', to: 'a' },
+    ]);
+    expect(reported(input)).toContain('This workflow has no end');
+  });
+
+  it('стадия, из которой до конца не добраться, названа по имени', () => {
+    // `stuck` достижима, но выхода из неё нет никуда, кроме себя самой.
+    const input = schema({ a: {}, stuck: {}, done: {} }, [
+      { from: 'a', to: 'stuck' },
+      { from: 'a', to: 'done' },
+      { from: 'stuck', to: 'stuck' },
+    ]);
+    const joined = reported(input);
+    expect(joined).toContain('stages.stuck');
+    expect(joined).toContain('has no way to finish');
+  });
+
+  it('при объявленных stageAssignments путь до конца не проверяется', () => {
+    // `deriveStage` выбирает стадию по условию, а не по рёбрам, так что уйти
+    // можно и оттуда, откуда не ведёт ни одно ребро. Назвать такую стадию
+    // тупиком значило бы соврать.
+    const input: ResolvedSchema = {
+      ...schema({ a: {}, stuck: {}, done: {} }, [
+        { from: 'a', to: 'done' },
+        { from: 'a', to: 'stuck' },
+        { from: 'stuck', to: 'stuck' },
+      ]),
+      stageAssignments: [{ id: 'main', priority: 1, condition: 'true', result: 'a' }],
+    };
+    expect(reported(input)).not.toContain('has no way to finish');
   });
 });

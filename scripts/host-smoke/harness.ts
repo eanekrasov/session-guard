@@ -389,18 +389,24 @@ export async function api<T>(host: Host, method: string, path: string, body?: un
   return text ? (JSON.parse(text) as T) : (undefined as T);
 }
 
-/** The workflow session the plugin persisted, or null when it wrote none. */
+/**
+ * The workflow session the plugin persisted, or null when it wrote none.
+ *
+ * A finished workflow is moved out of `runtime/` into `runtime/archive/`: from
+ * then on the plugin governs nothing, and "there is no session" is expressed
+ * the one way this project expresses it — `load` finds no file. The record
+ * itself survives, and a scenario asserting how a run ENDED has to read it
+ * where it now lives.
+ */
 export async function readWorkflowSession(host: Host, sessionId: string): Promise<unknown | null> {
   // The plugin puts its runtime under the opencode data dir (see src/app/paths.ts),
   // which the harness has pointed at the isolated home.
-  const file = join(
-    host.homeDir,
-    'data',
-    'opencode',
-    'session-guard',
-    'runtime',
-    `${sessionId}.json`
-  );
-  if (!existsSync(file)) return null;
-  return JSON.parse(await readFile(file, 'utf-8'));
+  const runtime = join(host.homeDir, 'data', 'opencode', 'session-guard', 'runtime');
+  for (const file of [
+    join(runtime, `${sessionId}.json`),
+    join(runtime, 'archive', `${sessionId}.json`),
+  ]) {
+    if (existsSync(file)) return JSON.parse(await readFile(file, 'utf-8'));
+  }
+  return null;
 }

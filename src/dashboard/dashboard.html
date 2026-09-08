@@ -335,7 +335,7 @@ function updateUI(session) {
   }
   const invEl = document.getElementById("invariants");
   invEl.innerHTML = "";
-  for (const [key, label] of [["invariants","Инварианты кода"],["review","Code Review"],["qa","QA-верификация"]]) {
+  for (const [key, label] of [["review","Code Review"],["qa","QA-верификация"]]) {
     const v = gatesMap[key] || "pending";
     const cls = v === "pass" ? "inv-pass" : v === "fail" ? "inv-fail" : "inv-pending";
     const icon = v === "pass" ? "✅" : v === "fail" ? "❌" : "⏳";

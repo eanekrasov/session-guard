@@ -8,6 +8,8 @@ import { setFixtureProfilesDir } from '../support/fixture-profiles.ts';
 import { createRuntime } from '../../src/app/runtime.ts';
 import { createSession, WorkflowStore } from '../../src/session/session-store.ts';
 import type { WorkflowSession } from '../../src/session/session-schema.ts';
+import { toolOutput } from '../support/tool-result.ts';
+import { hostPayload } from '../support/host-payload.ts';
 
 type DispatchStrategy = 'serial' | 'parallel' | 'serial_with_overlap';
 type TaskFixture = {
@@ -195,7 +197,7 @@ describe('task-cycle retry and recovery', () => {
     await afterTask(hooks, 'call-1', 'review', 'fail');
     const rejected = await beforeTask(hooks, 'call-retry');
     const system: { system: string[] } = { system: [] };
-    await hooks['experimental.chat.system.transform']!({ sessionID: 's1' }, system);
+    await hooks['experimental.chat.system.transform']!(hostPayload({ sessionID: 's1' }), system);
     const loaded = await load(store);
 
     expect(loaded.retryBudgets['task-1']).toEqual({ attempts: 1, maximum: 1 });
@@ -229,7 +231,7 @@ describe('task-cycle retry and recovery', () => {
     const retry = await beforeTask(hooks, 'call-2');
     const loaded = await load(store);
 
-    expect(result.output).toBe('Increased retry maximum for task-1 to 2');
+    expect(toolOutput(result)).toBe('Increased retry maximum for task-1 to 2');
     expect(loaded.retryBudgets['task-1']).toEqual({ attempts: 1, maximum: 2 });
     expect(loaded.loopRuns['run-1']).toMatchObject({ stage: 'dev', status: 'running' });
     expect(loaded.pendingDecisions).toEqual([]);
@@ -252,7 +254,7 @@ describe('task-cycle retry and recovery', () => {
     );
     const loaded = await load(store);
 
-    expect(result.output).toBe(output);
+    expect(toolOutput(result)).toBe(output);
     expect(loaded.loopRuns['run-1'].status).toBe(decision);
     expect(loaded.tasks.implementation[0].status).toBe(decision);
     expect(loaded.pendingDecisions).toEqual([]);
@@ -264,9 +266,11 @@ describe('task-cycle retry and recovery', () => {
     const hooks = createRuntime(pluginInput());
 
     await beforeTask(hooks, 'call-1');
-    await hooks.event!({
-      event: { type: 'message.part.updated', part: { id: 'call-1', status: 'failed' } },
-    });
+    await hooks.event!(
+      hostPayload({
+        event: { type: 'message.part.updated', part: { id: 'call-1', status: 'failed' } },
+      })
+    );
     const loaded = await load(store);
 
     expect(loaded.activeOperations['call-1']).toMatchObject({
@@ -339,7 +343,6 @@ describe('task-cycle retry and recovery', () => {
       ancestry: [],
       stage: 'dev',
       status: 'awaiting_decision',
-      priority: 0,
     };
     loaded.retryBudgets['task-2'] = { attempts: 1, maximum: 1 };
     await store.save(loaded);
@@ -349,7 +352,7 @@ describe('task-cycle retry and recovery', () => {
       { decision: 'increase', maximum: 2 },
       toolContext()
     );
-    expect(result.output).toContain('Candidate decision IDs');
+    expect(toolOutput(result)).toContain('Candidate decision IDs');
 
     // Session state unchanged (both decisions still pending)
     const loaded2 = await load(store);
@@ -390,7 +393,6 @@ describe('task-cycle retry and recovery', () => {
       ancestry: [],
       stage: 'dev',
       status: 'awaiting_decision',
-      priority: 0,
     };
     loaded.retryBudgets['task-2'] = { attempts: 1, maximum: 1 };
     await store.save(loaded);
@@ -400,7 +402,7 @@ describe('task-cycle retry and recovery', () => {
       { decision: 'failed', decisionId: 'task-1:retry_exhausted' },
       toolContext()
     );
-    expect(result.output).toMatch(/Failed.*task-1/);
+    expect(toolOutput(result)).toMatch(/Failed.*task-1/);
 
     const loaded2 = await load(store);
     expect(loaded2.pendingDecisions.filter((d) => d.status === 'pending')).toHaveLength(1);
@@ -411,7 +413,7 @@ describe('task-cycle retry and recovery', () => {
       { decision: 'increase', maximum: 2, decisionId: 'task-2:retry_exhausted' },
       toolContext()
     );
-    expect(result2.output).toMatch(/Increased.*task-2/);
+    expect(toolOutput(result2)).toMatch(/Increased.*task-2/);
 
     const loaded3 = await load(store);
     expect(loaded3.pendingDecisions.filter((d) => d.status === 'pending')).toHaveLength(0);
@@ -430,7 +432,7 @@ describe('task-cycle retry and recovery', () => {
       { decision: 'failed', decisionId: 'nonexistent-id' },
       toolContext()
     );
-    expect(result1.output).toContain('No pending retry decision found');
+    expect(toolOutput(result1)).toContain('No pending retry decision found');
 
     // State unchanged
     const loaded1 = await load(store);
@@ -454,7 +456,7 @@ describe('task-cycle retry and recovery', () => {
       { decision: 'increase', maximum: 2 },
       toolContext()
     );
-    expect(result.output).toContain('No retry budget');
+    expect(toolOutput(result)).toContain('No retry budget');
   });
 
   it('REGRESSION: save and reload with two pending decisions — both survive', async () => {
@@ -491,7 +493,6 @@ describe('task-cycle retry and recovery', () => {
       ancestry: [],
       stage: 'dev',
       status: 'awaiting_decision',
-      priority: 0,
     };
     loaded.retryBudgets['task-2'] = { attempts: 1, maximum: 1 };
     await store.save(loaded);
@@ -507,14 +508,14 @@ describe('task-cycle retry and recovery', () => {
       { decision: 'failed', decisionId: 'task-1:retry_exhausted' },
       toolContext()
     );
-    expect(result.output).toMatch(/Failed.*task-1/);
+    expect(toolOutput(result)).toMatch(/Failed.*task-1/);
 
     // Resolve task-2 via decisionId
     const result2 = await hooks.tool!['workflow.tasks-resolve-decision'].execute(
       { decision: 'increase', maximum: 2, decisionId: 'task-2:retry_exhausted' },
       toolContext()
     );
-    expect(result2.output).toMatch(/Increased.*task-2/);
+    expect(toolOutput(result2)).toMatch(/Increased.*task-2/);
 
     const loaded2 = await load(store);
     expect(loaded2.pendingDecisions.filter((d) => d.status === 'pending')).toHaveLength(0);

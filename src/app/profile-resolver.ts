@@ -198,6 +198,17 @@ export class ProfileResolver {
    * then ran. The missing-parent case two lines below has always thrown — a
    * cycle is the same mistake by the same author and deserves the same answer.
    */
+  /**
+   * Цепочка профилей от самого до корня предка, в порядке наследования.
+   *
+   * Публична, потому что метаданные наследуются по ней, а файлы, на которые
+   * они ссылаются, лежат у того предка, который их объявил: `smoke` наследует
+   * от `base` СПИСОК инвариантов, а `invariants.ts` живёт в `base`.
+   */
+  async profileChain(profileId: string): Promise<LoadedProfile[]> {
+    return this.resolveProfileExtends(profileId);
+  }
+
   private async resolveProfileExtends(profileId: string): Promise<LoadedProfile[]> {
     const profiles = await this.loadAll();
     const profile = profiles.find((p) => p.id === profileId);
@@ -282,12 +293,9 @@ export class ProfileResolver {
       source: `${chain[0].id}/${schemaFile}`,
       stages: qualifyStageAgents(chain[0].id, currentSchema.stages),
       transitions: currentSchema.transitions,
-      settings: currentSchema.settings,
       editingAgents: currentSchema.editingAgents,
-      requiredGates: currentSchema.requiredGates,
       gates: currentSchema.gates,
       taskControlAgents: currentSchema.taskControlAgents,
-      actionGuards: currentSchema.actionGuards,
       stageAssignments: currentSchema.stageAssignments,
     };
   }
@@ -300,10 +308,9 @@ export class ProfileResolver {
    *
    * The parent used to be loaded raw — `loadSchemaFile`, not resolved — so
    * only one level of inheritance survived. In a chain C → B → A, B kept A's
-   * stages and actionGuards and C lost them: a `beginMutation: "false"` in the
-   * grandparent simply disappeared, and the workflow that inherited it could
-   * mutate freely. Resolving the parent the same way this resolves the child
-   * is what makes the chain a chain.
+   * stages and C lost them: a stage declared in the grandparent simply
+   * disappeared. Resolving the parent the same way this resolves the child is
+   * what makes the chain a chain.
    */
   private async resolveInheritedSchema(
     profileId: string,

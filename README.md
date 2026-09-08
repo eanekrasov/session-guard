@@ -205,11 +205,11 @@ OpenCode Tool Call
 
 ### Роли слоёв
 
-| Слой | Компоненты | Отвечает за |
-|---|---|---|
-| **Plugin Layer** | `index.ts`, `runtime.ts` | Инициализация, регистрация хуков SDK, оркестрация вызовов, DI |
-| **Orchestrator Layer** | `mutation-orchestrator.ts`, `consent-orchestrator.ts`, `invariants.ts`, `guardrails.ts` | Бизнес-логика — жизненный цикл мутации/консента/инвариантов/безопасности, точка координации доменных функций |
-| **Domain Layer** | `engine.ts`, `session-store.ts`, `session-queue.ts`, `guard-evaluator.ts`, `profile-resolver.ts`, `schema-loader.ts` | Чистая логика — переходы фаз, guard-выражения, персистентность, сериализация, профили |
+| Слой                   | Компоненты                                                                                                           | Отвечает за                                                                                                  |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| **Plugin Layer**       | `index.ts`, `runtime.ts`                                                                                             | Инициализация, регистрация хуков SDK, оркестрация вызовов, DI                                                |
+| **Orchestrator Layer** | `mutation-orchestrator.ts`, `consent-orchestrator.ts`, `invariants.ts`, `guardrails.ts`                              | Бизнес-логика — жизненный цикл мутации/консента/инвариантов/безопасности, точка координации доменных функций |
+| **Domain Layer**       | `engine.ts`, `session-store.ts`, `session-queue.ts`, `guard-evaluator.ts`, `profile-resolver.ts`, `schema-loader.ts` | Чистая логика — переходы фаз, guard-выражения, персистентность, сериализация, профили                        |
 
 ### Внешние сервисы (опционально)
 
@@ -246,42 +246,44 @@ Zod-валидируемый JSON, сохраняемый на диск. Каж�
 ### Схема (src/session/session-schema.ts)
 
 ```
+
 WorkflowSession (Zod-схема)
-├── sessionId      — уникальный ID сессии
-├── profileId      — привязанный профиль (base, android, harness)
-├── schemaVersion  — версия схемы (=1, инкремент при брейкинге)
-├── revision       — монотонный счётчик (инкремент на каждом save)
-├── title          — заголовок сессии
+├── sessionId — уникальный ID сессии
+├── profileId — привязанный профиль (base, android, harness)
+├── schemaVersion — версия схемы (=1, инкремент при брейкинге)
+├── revision — монотонный счётчик (инкремент на каждом save)
+├── title — заголовок сессии
 │
-├── currentStage   — фаза: planning | tasks_ready | code | review | qa | commit | done | failed
-├── gates          — Gate[]: [{id, status, label?, resolvedAt?}]
-│   ├── invariants — pending | running | passed | failed | skipped
-│   ├── review     — ...
-│   └── qa         — ...
+├── currentStage — фаза: planning | tasks_ready | code | review | qa | commit | done | failed
+├── gates — Gate[]: [{id, status, label?, resolvedAt?}]
+│ ├── invariants — pending | running | passed | failed | skipped
+│ ├── review — ...
+│ └── qa — ...
 │
-├── approvals     — Approval[]: [{type, callId, status, grantedAt?, evidence?, feedback?}]
-│   ├── plan       — одобрение плана пользователем
-│   └── commit     — одобрение коммита
+├── approvals — Approval[]: [{type, callId, status, grantedAt?, evidence?, feedback?}]
+│ ├── plan — одобрение плана пользователем
+│ └── commit — одобрение коммита
 │
-├── tasks         — MutationTask[]: [{id, path, status, title, ...}]
+├── tasks — MutationTask[]: [{id, path, status, title, ...}]
 ├── currentTaskIndex — индекс активной задачи
 ├── activeOperation — ActiveOperation | null (mutex на мутацию)
 │
-├── retryBudgets  — Record<string, {attempts, maximum}> (напр. cycles: {attempts: 0, maximum: 5})
+├── retryBudgets — Record<string, {attempts, maximum}> (напр. cycles: {attempts: 0, maximum: 5})
 ├── verifications — Verification[]: [{stage, status: confirmed|rejected}]
 │
-├── deliveryPermit  — DeliveryPermit | null (preCommitHead, expectedFiles)
+├── deliveryPermit — DeliveryPermit | null (preCommitHead, expectedFiles)
 ├── deliveryReceipt — SHA коммита | null
 │
-├── pendingConsent  — PendingConsent | null (ожидающий запрос одобрения)
+├── pendingConsent — PendingConsent | null (ожидающий запрос одобрения)
 ├── consentedCallIDs — string[] (защита от повторной обработки)
 │
-├── refs           — Record<string, string> (plan, spec — ссылки на файлы)
-├── changedFiles   — string[] (изменённые файлы по git diff)
+├── refs — Record<string, string> (plan, spec — ссылки на файлы)
+├── changedFiles — string[] (изменённые файлы по git diff)
 ├── baselineHashes — string[] (контрольные суммы изменений)
 ├── invariantViolations — ValidationRecord[]
-└── updatedAt      — ISO timestamp
-```
+└── updatedAt — ISO timestamp
+
+````
 
 ### Гейты
 
@@ -300,7 +302,7 @@ gates:
     label: Code review
   - id: qa
     label: QA verification
-```
+````
 
 Компилятор (`src/schema/compile-workflow.ts`) сверяет `gates:` каждой стадии с
 этим объявлением, поэтому опечатка в имени гейта — ошибка компиляции, а не
@@ -326,12 +328,12 @@ gates:
 transitions:
   - from: planning
     to: tasks_ready
-    guard: "session.refs.plan != null"
+    guard: 'session.refs.plan != null'
     consent: plan
 
   - from: tasks_ready
     to: code
-    guard: "hasPendingTasks()"
+    guard: 'hasPendingTasks()'
 
   - from: code
     to: review
@@ -346,24 +348,24 @@ transitions:
 
   - from: commit
     to: done
-    guard: "session.deliveryReceipt != null"
+    guard: 'session.deliveryReceipt != null'
 ```
 
 **Типы переходов (TransitionDef в schema/types.ts):**
 
 ```typescript
 interface TransitionDef {
-  from: string;         // Текущая фаза
-  to: string;           // Целевая фаза
+  from: string; // Текущая фаза
+  to: string; // Целевая фаза
   guard?: string | null; // JS-выражение (опционально)
   effects?: TransitionEffect[]; // Побочные эффекты
   consent?: string | ConsentOnTransition; // Требует одобрения
 }
 
 interface TransitionEffect {
-  bumpRetry?: string;   // Ключ retry budget для инкремента
-  maxAttempts?: number;  // Лимит попыток
-  approve?: string;      // Тип approval при переходе
+  bumpRetry?: string; // Ключ retry budget для инкремента
+  maxAttempts?: number; // Лимит попыток
+  approve?: string; // Тип approval при переходе
 }
 ```
 
@@ -373,31 +375,46 @@ interface TransitionEffect {
 
 ```typescript
 interface TransitionCheck {
-  allowed: boolean;     // Разрешён ли переход
-  reason?: string;      // Причина запрета
-  to?: string;          // Целевая фаза (из найденного перехода)
+  allowed: boolean; // Разрешён ли переход
+  reason?: string; // Причина запрета
+  to?: string; // Целевая фаза (из найденного перехода)
   guard?: string | null; // Guard-выражение (для отладки)
 }
 ```
 
 Логика:
+
 1. Найти `TransitionDef`, где `from` и `to` совпадают
 2. Если есть guard — вычислить через `GuardEvaluator`
 3. Если guard вернул false — `{ allowed: false, reason: "..." }`
 
-**canPerformAction(session, action): { allowed, reason }**
+**admitAction(entries, request, evaluateGuard): { allowed, reason }**
 
-Проверяет `actionGuards[action]` из конфига движка. Flat guard — без фазового скоупа.
+Допуск действия на стадии — `src/domain/action-admission.ts`. Стадия объявляет
+`actions:`, и это исчерпывающий список: не совпало ничего — нельзя.
 
 ```yaml
-# actionGuards в profile-схеме:
-actionGuards:
-  beginMutation: "session.approved('plan') || session.revision == 0"
+code:
+  actions:
+    - action: edit
+      paths: ['**']
+      guard: "session.approved('plan')"
+    - action: bash
+      commands: ['git status', 'git diff.*']
+      guard: "session.approved('plan')"
 ```
+
+Записи читаются по порядку; побеждает первая, у которой совпал дискриминатор
+(`paths` для `edit`, `commands` для `bash`) и истинен guard. `delivers: true`
+на записи `bash` помечает доставку коммита.
+
+Раньше эту ось нёс плоский `actionGuards` — одно выражение на весь граф, без
+возможности сказать «здесь можно, а на planning нельзя».
 
 **tryApplyTransitions(session): TransitionCheck & { applied?: boolean }**
 
 Сканирует ВСЕ переходы из `session.currentStage`, для каждого:
+
 1. Если есть `consent` — проверяет `session.approved(consentType)`; если не approved — skip
 2. Если guard проходит — применяет переход:
    - `session.currentStage = transition.to`
@@ -417,21 +434,21 @@ actionGuards:
 
 **Доступные функции в guard-выражениях:**
 
-| Функция | Описание |
-|---|---|
-| `approved(type)` | `session.approvals.some(a => a.type === type && a.status === 'granted')` |
-| `isExhausted(key)` | `retryBudgets[key].attempts >= retryBudgets[key].maximum` |
-| `hasPendingTasks()` | `tasks.some(t => t.status === 'pending' \|\| t.status === 'running')` |
-| `session.*` | Поля SessionFacts (profileId, revision, refs, gates, ...) |
+| Функция             | Описание                                                                 |
+| ------------------- | ------------------------------------------------------------------------ |
+| `approved(type)`    | `session.approvals.some(a => a.type === type && a.status === 'granted')` |
+| `isExhausted(key)`  | `retryBudgets[key].attempts >= retryBudgets[key].maximum`                |
+| `hasPendingTasks()` | `tasks.some(t => t.status === 'pending' \|\| t.status === 'running')`    |
+| `session.*`         | Поля SessionFacts (profileId, revision, refs, gates, ...)                |
 
 **SessionFacts (src/domain/session-facts.ts)** — проекция сессии для guard-выражений:
 
 ```typescript
 interface SessionFacts {
-  lastApproval: { type, callId, status, grantedAt?, evidence?, feedback? } | null;
-  approvals: { type, status }[];
-  tasks: { id, status }[];
-  activeOperation: { id, startedAt, status, result? } | null;
+  lastApproval: { type; callId; status; grantedAt?; evidence?; feedback? } | null;
+  approvals: { type; status }[];
+  tasks: { id; status }[];
+  activeOperation: { id; startedAt; status; result? } | null;
   verifications: Verification[];
   gates: Record<string, GateStatus>;
   profileId: string;
@@ -454,9 +471,12 @@ export const onSessionSaved = new Set<() => void>();
 ```
 
 Любой модуль может подписаться на сохранение любой сессии:
+
 ```typescript
 import { onSessionSaved } from './session-events.ts';
-onSessionSaved.add(() => { /* реакция на сохранение */ });
+onSessionSaved.add(() => {
+  /* реакция на сохранение */
+});
 ```
 
 Вызывается в `WorkflowStore.save()` после успешной записи на диск.
@@ -471,18 +491,18 @@ onSessionSaved.add(() => { /* реакция на сохранение */ });
 
 ```typescript
 // Gate
-function getGate(session, gateId: string): Gate | undefined
-function setGateStatus(session, gateId, status: GateStatus, options?: SetGateStatusOptions): void
-  // status = passed/failed → gate.resolvedAt = now
-  // status = failed + options.bumpRetry → bumpRetry(session, key)
+function getGate(session, gateId: string): Gate | undefined;
+function setGateStatus(session, gateId, status: GateStatus, options?: SetGateStatusOptions): void;
+// status = passed/failed → gate.resolvedAt = now
+// status = failed + options.bumpRetry → bumpRetry(session, key)
 
 // Retry budget
-function bumpRetry(session, budgetKey: string): void          // attempts++
-function isExhausted(session, budgetKey: string): boolean     // attempts >= maximum
-function resetRetry(session, budgetKey: string): void         // сброс attempts → 0
+function bumpRetry(session, budgetKey: string): void; // attempts++
+function isExhausted(session, budgetKey: string): boolean; // attempts >= maximum
+function resetRetry(session, budgetKey: string): void; // сброс attempts → 0
 
 // Validation records
-function setInvariantViolations(session, violations): void    // присваивание evidenceId
+function setInvariantViolations(session, violations): void; // присваивание evidenceId
 ```
 
 ## SessionQueue (src/app/session-queue.ts)
@@ -498,14 +518,15 @@ class SessionQueue {
   enqueue<T>(
     sessionID: string,
     action: (session: WorkflowSession | null, rootSessionId: string) => Promise<T> | T
-  ): Promise<T>
+  ): Promise<T>;
 
   // Очистка всех очередей (dispose)
-  clear(): void
+  clear(): void;
 }
 ```
 
 **Разрешение корневой сессии:**
+
 - `parentCache` заполняется при каждом `store.save()`
 - `resolveRoot(sessionID)` — walk по parentCache до корня, O(1) благодаря кешу
 - Дочерние сессии (subtask) блокируются на той же очереди, что и родитель
@@ -521,7 +542,7 @@ async function withSession<T>(
   store: WorkflowStore,
   sessionID: string,
   action: (session: WorkflowSession) => Promise<T> | T
-): Promise<T | null>
+): Promise<T | null>;
 ```
 
 ## Runtime Types (src/app/runtime-types.ts)
@@ -588,15 +609,20 @@ interface OpenCodeSessionClient {
    └── Session.activeOperation уже существует с другим callID → skip (lock)
    └── session.activeOperation = { id, agent, startedAt, status: 'running' }
 
+3c. Stage actions (actionsBefore)
+   └── Действующая стадия — вложенная при открытом прогоне, иначе внешняя
+       ├── actions не объявлены → дефолт ядра: прямой git commit/push запрещён
+       └── объявлены → admitAction(); список исчерпывающий
+
 4. Commit Permit (commitBefore)
    └── Tool == Bash:
-       ├── hasForbiddenGitSubcommand() → блокировка git commit/push
-       │   └── Регексп: /^git\s+(commit|push)\b/
-       └── isCommitTaskCommand() → выдача deliveryPermit
+       └── isCommitDelivery() → выдача deliveryPermit
+           ├── команды берутся из записи `delivers: true` действующей стадии;
+           │   стадия молчит → зашитый isCommitTaskCommand как запасной вариант
            ├── getPreCommitHead() → git rev-parse HEAD
-           ├── canCommit(session, requiredGates):
-           │   └── Все gates пройдены И все tasks completed
            └── session.deliveryPermit = { callID, preCommitHead, expectedFiles }
+           (разрешён ли коммит вообще — это guard той же записи; в base это
+            все задачи завершены И оба вердикта собраны)
 
 5. Mutation guard (mutationBefore)
    └── Tool == Bash | Write:
@@ -725,6 +751,7 @@ Approvals granted: plan
 4. Поиск файла: сначала `join(directory, planRef)`, fallback `openspec/plans/{planRef}`
 
 **Классификация ответа (classifyConsentAnswer):**
+
 - Один ответ, начинающийся с `grant` → `{ kind: 'grant' }`
 - Один ответ, начинающийся с `decline` → `{ kind: 'decline' }`
 - Всё остальное → `{ kind: 'unrecognized' }`
@@ -839,19 +866,20 @@ DECLINE_KEYWORDS: decline, deny, reject, no, stop, отказ, нет...).
 interface ProfileMetadata {
   id: string;
   description?: string;
-  extends?: string;         // ID родительского профиля (base, android, ...)
-  schemas?: string[];       // Файлы YAML-схем (state-machine.yaml)
-  agentsDir?: string;       // Директория агентов (default: 'agents')
-  skillsDir?: string;       // Директория скиллов (default: 'skills')
-  agents?: string[];        // Список агентов для профиля
-  skills?: string[];        // Список скиллов для профиля
-  invariants?: string[];    // ID инвариантов для включения
+  extends?: string; // ID родительского профиля (base, android, ...)
+  schemas?: string[]; // Файлы YAML-схем (state-machine.yaml)
+  agentsDir?: string; // Директория агентов (default: 'agents')
+  skillsDir?: string; // Директория скиллов (default: 'skills')
+  agents?: string[]; // Список агентов для профиля
+  skills?: string[]; // Список скиллов для профиля
+  invariants?: string[]; // ID инвариантов для включения
 }
 ```
 
 ### ProfileResolver (src/profile-resolver.ts)
 
 **Цепочка extends:**
+
 ```
 android → base → (конец)
 harness → base → (конец)
@@ -870,12 +898,13 @@ harness → base → (конец)
 
 ```typescript
 interface ResolvedProfile {
-  metadata: ResolvedMetadata;   // id, agents[], skills[], invariants[], agentsDir, skillsDir
-  schemas: ResolvedSchema[];    // смерженные YAML-схемы
+  metadata: ResolvedMetadata; // id, agents[], skills[], invariants[], agentsDir, skillsDir
+  schemas: ResolvedSchema[]; // смерженные YAML-схемы
 }
 ```
 
 Алгоритм:
+
 1. `loadAll()` — сканирует `profilesDir/*/profile.json`, парсит через `ProfileMetadataSchema`
 2. `resolveProfileExtends(id)` — обход цепочки `extends` с детектом циклов через `visited: Set<string>`
 3. Наследование скаляров: agents, skills, invariants берутся из первой записи в chain, где они заданы (дочерний приоритет)
@@ -891,6 +920,7 @@ interface ResolvedProfile {
 **loadSchemaFile(profileId, schemaFilename): ProfileSchema | null**
 
 Загрузка YAML-файла `profilesDir/{profileId}/{schemaFilename}`. Шаги:
+
 1. `fs.access()` — проверка существования файла (null если нет — graceful degradation)
 2. `YAML.parse(await readFile(...))` — парсинг YAML
 3. `ProfileSchemaSchema.parse(raw)` — Zod-валидация
@@ -900,9 +930,9 @@ interface ResolvedProfile {
 
 ```typescript
 // Extension override:
-result.stages = extension.stages ?? base.stages
-result.transitions = extension.transitions ?? base.transitions
-result.settings = deepMerge(base.settings, extension.settings)
+result.stages = extension.stages ?? base.stages;
+result.transitions = extension.transitions ?? base.transitions;
+result.settings = deepMerge(base.settings, extension.settings);
 
 // deepMerge — рекурсивный merge объектов:
 // - значения-объекты: рекурсивный merge
@@ -933,10 +963,10 @@ result.settings = deepMerge(base.settings, extension.settings)
 
 ```typescript
 interface InvariantCheck {
-  id: string;                          // Уникальный ID (LF_ONLY, KOTLIN_STACK, ...)
-  severity: 'error' | 'warning';       // error → gate failed, warning → log
+  id: string; // Уникальный ID (LF_ONLY, KOTLIN_STACK, ...)
+  severity: 'error' | 'warning'; // error → gate failed, warning → log
   check: (content: string, filePath: string, absolutePath: string) => string | null;
-                                       // null = OK, string = нарушение
+  // null = OK, string = нарушение
   appliesTo?: (filePath: string) => boolean; // Фильтр файлов (проверка расширения)
 }
 ```
@@ -969,9 +999,11 @@ interface InvariantCheck {
 ### Встроенные профили инвариантов
 
 **base/invariants.ts:**
+
 - `LF_ONLY` (error) — CRLF-окончания строк
 
 **harness/invariants.ts:**
+
 - `LF_ONLY` (error) — CRLF
 - `BROKEN_IMPORT` (error) — нерезолвимые относительные импорты (ручной парсинг import specifiers)
 - `CONSOLE_LOG` (warning) — `console.log()` в production-коде
@@ -979,6 +1011,7 @@ interface InvariantCheck {
 - `ANGLICISM` (warning) — английские слова в русском тексте (в MD и TS string literals)
 
 **android/invariants.ts:**
+
 - `LF_ONLY` (error) — CRLF
 - `KOTLIN_STACK` (error) — импорты java.awt, javax.swing, org.springframework
 - `NO_FQN` (error) — fully qualified имена вместо импортов
@@ -1094,6 +1127,7 @@ interface ShellExecutor {
 ### Beads Bridge (src/dashboard/beads-bridge.ts)
 
 Обёртка над `bd` CLI для использования в дашборде:
+
 - `getIssue(id)` — получение задачи
 - `getReady()` — список готовых задач
 - `postComment(issueId, text, author)` — комментарий
@@ -1106,32 +1140,32 @@ interface ShellExecutor {
 
 ```typescript
 const TASK_MANIFEST_PRESETS = {
-  full:  ['dev', 'test', 'review', 'qa'],       // Полный цикл
-  fix:   ['verify', 'dev', 'test', 'review'],    // Багфикс
-  quick: ['dev'],                                 // Быстрое редактирование
+  full: ['dev', 'test', 'review', 'qa'], // Полный цикл
+  fix: ['verify', 'dev', 'test', 'review'], // Багфикс
+  quick: ['dev'], // Быстрое редактирование
 };
 
 // Алиасы для обратной совместимости (P1-009):
 const PRESET_ALIASES = {
-  feature:  'full',     // → ['dev', 'test', 'review', 'qa']
-  free_edit: 'quick',   // → ['dev']
+  feature: 'full', // → ['dev', 'test', 'review', 'qa']
+  free_edit: 'quick', // → ['dev']
 };
 ```
 
 ### API
 
 ```typescript
-function getManifest(preset: string): string[]
-  // Возвращает массив стадий по preset'у
-  // Автоматически разрешает алиасы
-  // Возвращает [] для неизвестного preset'а
+function getManifest(preset: string): string[];
+// Возвращает массив стадий по preset'у
+// Автоматически разрешает алиасы
+// Возвращает [] для неизвестного preset'а
 
-function isValidManifestPreset(value: string): value is TaskManifestPreset
-  // Проверяет, является ли строка валидным preset-ключом или алиасом
+function isValidManifestPreset(value: string): value is TaskManifestPreset;
+// Проверяет, является ли строка валидным preset-ключом или алиасом
 
-function resolvePresetAlias(value: string): string
-  // Разрешает алиас в канонический ключ
-  // Возвращает исходное значение, если не алиас
+function resolvePresetAlias(value: string): string;
+// Разрешает алиас в канонический ключ
+// Возвращает исходное значение, если не алиас
 ```
 
 ## TUI (src/tui/tui.ts)
@@ -1181,20 +1215,20 @@ Tui {
 
 ### API Endpoints
 
-| Метод | Путь | Описание |
-|---|---|---|
-| GET | `/` | HTML-интерфейс (dashboard.html) |
-| GET | `/events` | SSE: snapshot + инкрементальные события |
-| GET | `/api/schema` | Контракт дашборда (DashboardSchema) |
-| GET | `/api/dump` | Все сессии |
-| GET | `/api/session/:id` | Одна сессия с `stage` |
-| GET | `/api/session/:id/timeline` | TimelineEvent[] (transitions, gates) |
-| GET | `/api/session/:id/invariants` | InvariantViolation[] |
-| GET | `/api/metrics` | Агрегированные метрики из `.opencode/metrics.jsonl` |
-| GET | `/api/rag-eval` | RAG evaluation из `.opencode/rag/eval-results.json` |
-| GET | `/api/agents/:id/prompt` | Промпт агента (белый список: orchestrator, code, ...) |
-| GET | `/api/beads/issue/:id` | Задача из beads |
-| POST | `/api/beads/comment` | Комментарий в beads |
+| Метод | Путь                          | Описание                                              |
+| ----- | ----------------------------- | ----------------------------------------------------- |
+| GET   | `/`                           | HTML-интерфейс (dashboard.html)                       |
+| GET   | `/events`                     | SSE: snapshot + инкрементальные события               |
+| GET   | `/api/schema`                 | Контракт дашборда (DashboardSchema)                   |
+| GET   | `/api/dump`                   | Все сессии                                            |
+| GET   | `/api/session/:id`            | Одна сессия с `stage`                                 |
+| GET   | `/api/session/:id/timeline`   | TimelineEvent[] (transitions, gates)                  |
+| GET   | `/api/session/:id/invariants` | InvariantViolation[]                                  |
+| GET   | `/api/metrics`                | Агрегированные метрики из `.opencode/metrics.jsonl`   |
+| GET   | `/api/rag-eval`               | RAG evaluation из `.opencode/rag/eval-results.json`   |
+| GET   | `/api/agents/:id/prompt`      | Промпт агента (белый список: orchestrator, code, ...) |
+| GET   | `/api/beads/issue/:id`        | Задача из beads                                       |
+| POST  | `/api/beads/comment`          | Комментарий в beads                                   |
 
 ### Auth & CORS
 
@@ -1208,10 +1242,10 @@ Tui {
 
 ```typescript
 interface DashboardSchema {
-  states: DashboardState[];       // { id, label, description }
+  states: DashboardState[]; // { id, label, description }
   transitions: DashboardTransition[]; // { from, to, kind, gate }
-  gates: DashboardGate[];          // { id, label, required }
-  profile: DashboardProfile;       // { id, version, invariants, ... }
+  gates: DashboardGate[]; // { id, label, required }
+  profile: DashboardProfile; // { id, version, invariants, ... }
 }
 ```
 
@@ -1233,6 +1267,7 @@ type SSESessionEvent =
 ### Plugin Tools (SDK tools)
 
 **workflow.create**
+
 ```typescript
 tool({
   name: 'workflow.create',
@@ -1240,10 +1275,12 @@ tool({
   execute: () => { sessionId, profileId, schemaVersion, revision }
 })
 ```
+
 - Проверка существующей сессии (idempotent)
 - `createSession(sessionId, profileId)` — начальная сессия с пустым списком гейтов
 
 **workflow.list**
+
 ```typescript
 tool({
   name: 'workflow.list',
@@ -1251,9 +1288,11 @@ tool({
   execute: () => profiles list
 })
 ```
+
 - `listProfiles(profilesDir)` — загружает все profile.json из директории
 
 **workflow.consent**
+
 ```typescript
 tool({
   name: 'workflow.consent',
@@ -1266,6 +1305,7 @@ tool({
   execute: () => consentTag
 })
 ```
+
 - Читает файлы с диска
 - canonicalizePlan → computeSha256 → evidence
 - Возвращает XML-тег <consent-request> для встраивания в вопрос
@@ -1282,23 +1322,23 @@ tool({
 ### Public API (src/public-api.ts) — для npm-потребителей
 
 ```typescript
-async function resolveConfig(profileId: string, profilesDir: string): Promise<ResolvedProfile>
-async function listProfiles(profilesDir: string): Promise<ProfileMetadata[]>
+async function resolveConfig(profileId: string, profilesDir: string): Promise<ResolvedProfile>;
+async function listProfiles(profilesDir: string): Promise<ProfileMetadata[]>;
 ```
 
 ## Переменные окружения
 
-| Переменная | По умолчанию | Описание |
-|---|---|---|
-| `STATE_MACHINE_STORE_DIR` | `{harnessDir}/state-machine/runtime` | Директория session store |
-| `STATE_MACHINE_PROFILES_DIR` | `{harnessDir}/profiles` | Директория профилей |
-| `STATE_MACHINE_LOG_LEVEL` | `info` | Уровень логирования (debug, info, warn, error) |
-| `HARNESS_PROFILE` | — | Профиль по умолчанию (android, harness) |
-| `HARNESS_AUTO_APPROVE` | — | Авто-одобрение плана (true/false) |
-| `OPENCODE_HARNESS_DIR` | `.opencode` | Базовый каталог харнесса |
-| `DASHBOARD_TOKEN` | — | Bearer token для дашборда |
-| `DASHBOARD_HOST` | `127.0.0.1` | Хост дашборда |
-| `ALLOWED_ORIGIN` | — | CORS origin для дашборда |
+| Переменная                   | По умолчанию                         | Описание                                       |
+| ---------------------------- | ------------------------------------ | ---------------------------------------------- |
+| `STATE_MACHINE_STORE_DIR`    | `{harnessDir}/state-machine/runtime` | Директория session store                       |
+| `STATE_MACHINE_PROFILES_DIR` | `{harnessDir}/profiles`              | Директория профилей                            |
+| `STATE_MACHINE_LOG_LEVEL`    | `info`                               | Уровень логирования (debug, info, warn, error) |
+| `HARNESS_PROFILE`            | —                                    | Профиль по умолчанию (android, harness)        |
+| `HARNESS_AUTO_APPROVE`       | —                                    | Авто-одобрение плана (true/false)              |
+| `OPENCODE_HARNESS_DIR`       | `.opencode`                          | Базовый каталог харнесса                       |
+| `DASHBOARD_TOKEN`            | —                                    | Bearer token для дашборда                      |
+| `DASHBOARD_HOST`             | `127.0.0.1`                          | Хост дашборда                                  |
+| `ALLOWED_ORIGIN`             | —                                    | CORS origin для дашборда                       |
 
 ## Структура проекта
 
@@ -1327,7 +1367,8 @@ src/
     operation-lifecycle.ts      — beginMutation, finishMutation, clearActiveMutation
     approvals.ts               — approve, decline
     verifications.ts           — confirm, reject
-    session-queries.ts         — canCommit, hasForbiddenGitSubcommand
+    session-queries.ts         — shellSegments, hasForbiddenGitSubcommand,
+                                 isReadOnlyBashCommand
     workflow-result.ts         — парсинг <workflow-result>
 
   app/
@@ -1375,7 +1416,7 @@ docs/                          — roadmap, usage, plugin-architecture, ...
 ## Development
 
 | Команда                                     | Описание                                       |
-|---------------------------------------------|------------------------------------------------|
+| ------------------------------------------- | ---------------------------------------------- |
 | `mise run build`                            | Сборка `src/index.ts` + `tui.ts` + JSON-schema |
 | `mise run test`                             | Все тесты (bun test)                           |
 | `mise run test:coverage`                    | Тесты с покрытием                              |

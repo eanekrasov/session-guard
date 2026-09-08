@@ -157,54 +157,6 @@ describe('reading tasks changes nothing', () => {
   });
 });
 
-describe('a task is judged by its own verdict', () => {
-  it('does not leave `code` on a session-level invariants pass', async () => {
-    // `session.gates.invariants` is whatever the last move anywhere left
-    // behind. A delegated task whose own invariants failed walked on to
-    // `verify` on somebody else's pass. The move's verdict is rolled into the
-    // run's gates and reaches a loop guard as `task.gates`.
-    const { nextTaskStage } = await import('../../src/domain/task-movement.ts');
-    const { resolveConfig } = await import('../../src/public-api.ts');
-    const { join: joinPath } = await import('node:path');
-
-    const profile = await resolveConfig('base', joinPath(import.meta.dirname, '../../profiles'));
-    const schema = profile.schemas.find((entry) => entry.id === 'base')!;
-    const execution = schema.stages!.execution!;
-
-    const run = {
-      id: 'run-1',
-      taskId: 'task-1',
-      listKey: 'implementation',
-      ancestry: [],
-      stage: 'code',
-      status: 'running' as const,
-      // This task's own invariants failed; the session's gate says otherwise.
-      gates: { invariants: 'failed' as const },
-      round: 0,
-    };
-
-    // A real evaluation over the task's own facts, and a session whose gate
-    // says the opposite of the task's.
-    const { GuardEvaluator } = await import('../../src/schema/guard-evaluator.ts');
-    const evaluate = (expression: string, task: unknown): boolean =>
-      new GuardEvaluator({ gates: { invariants: 'passed' }, task } as unknown as Record<
-        string,
-        unknown
-      >).evaluate(expression);
-
-    const movement = nextTaskStage(execution, run, true, evaluate, () => true, [], {
-      invariants: 'passed',
-    });
-
-    // The guard reads the task's gates, so the failed task stays in `code`.
-    expect(movement.kind).not.toBe('move');
-
-    // And a task whose own invariants passed does move on.
-    const passing = { ...run, gates: { invariants: 'passed' as const } };
-    expect(nextTaskStage(execution, passing, true, evaluate, () => true, [], {}).kind).toBe('move');
-  });
-});
-
 describe('a guard is evaluated with the context it was given', () => {
   it('answers the same through the engine as it does directly', async () => {
     // The engine's adapter replaced the evaluation context with `{}`, so
@@ -238,5 +190,42 @@ describe('a guard is evaluated with the context it was given', () => {
     );
 
     expect(engine.evaluateGuard('allTasksCompleted()', facts, context)).toBe(direct);
+  });
+});
+
+describe('a task is judged by the checks the core ran on its own move', () => {
+  it('does not leave `code` when this task’s move failed its checks', async () => {
+    // `task.checks` — вердикт ядра о последнем ходе ЭТОЙ задачи. Он не гейт
+    // именно поэтому: гейты пишет агент, и объявленный стадией гейт он может
+    // выставить себе сам. Вердикт, снятый с диска, подделать нечем.
+    const { nextTaskStage } = await import('../../src/domain/task-movement.ts');
+    const { resolveConfig } = await import('../../src/public-api.ts');
+    const { join: joinPath } = await import('node:path');
+
+    const profile = await resolveConfig('base', joinPath(import.meta.dirname, '../../profiles'));
+    const schema = profile.schemas.find((entry) => entry.id === 'base')!;
+    const execution = schema.stages!.execution!;
+
+    const run = {
+      id: 'run-1',
+      taskId: 'task-1',
+      listKey: 'implementation',
+      ancestry: [],
+      stage: 'code',
+      status: 'running' as const,
+      gates: {},
+      checks: 'failed' as const,
+      round: 0,
+    };
+
+    const { GuardEvaluator } = await import('../../src/schema/guard-evaluator.ts');
+    const evaluate = (expression: string, task: unknown): boolean =>
+      new GuardEvaluator({ task } as unknown as Record<string, unknown>).evaluate(expression);
+
+    expect(nextTaskStage(execution, run, true, evaluate).kind).not.toBe('move');
+
+    // И проходит, когда её собственный ход вышел чистым.
+    const passing = { ...run, checks: 'passed' as const };
+    expect(nextTaskStage(execution, passing, true, evaluate).kind).toBe('move');
   });
 });

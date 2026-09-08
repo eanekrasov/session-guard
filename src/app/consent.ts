@@ -5,11 +5,27 @@ export const CONSENT_EVIDENCE_SCHEMA = 'harness.consent.evidence/v1';
 
 export const CONSENT_TAG_REGEX = /<consent-request\s+([^>]*)>([\s\S]*?)<\/consent-request>/iu;
 
+/** Тип согласия по умолчанию — исторический и единственный до сих пор. */
+export const DEFAULT_CONSENT_TYPE = 'plan';
+
 export interface ConsentManifest {
   schema: typeof CONSENT_EVIDENCE_SCHEMA;
   revision: number;
   summary: string;
   files: string[];
+  /**
+   * Чьё согласие спрашивают — имя, которым его называет схема.
+   *
+   * Переход объявляет `consent: <имя>`, и `evaluateTransition` проверяет его
+   * обобщённо, по имени. А выдать одобрение умели только с именем `plan`,
+   * захардкоженным здесь же в ядре: схема могла объявить согласие, которое
+   * невозможно получить никаким способом, и переход закрывался навсегда. Это
+   * поймал host-smoke на профиле `cicd` с его `consent: deploy`.
+   *
+   * Отсутствует — значит `plan`: манифесты, написанные до появления поля,
+   * означают ровно то же, что означали.
+   */
+  type?: string;
 }
 
 export interface ConsentRequest {
@@ -106,8 +122,18 @@ export function canonicalManifest(manifest: ConsentManifest): string {
     revision: manifest.revision,
     schema: manifest.schema,
     summary: manifest.summary,
+    // Тип входит в подпись: иначе манифест «согласие на деплой» и манифест
+    // «согласие на план» с теми же файлами дают одну и ту же evidence, и
+    // одобрение одного засчиталось бы за другое.
+    type: consentTypeOf(manifest),
   };
   return JSON.stringify(sorted);
+}
+
+/** Имя согласия этого манифеста. Отсутствие поля означает `plan`. */
+export function consentTypeOf(manifest: Pick<ConsentManifest, 'type'>): string {
+  const type = manifest.type;
+  return typeof type === 'string' && type.trim() !== '' ? type : DEFAULT_CONSENT_TYPE;
 }
 
 export function evidenceOf(manifest: ConsentManifest): string {

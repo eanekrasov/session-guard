@@ -20,6 +20,8 @@ import {
 import { nextTaskStage, TASK_DONE } from '../domain/task-movement.ts';
 import { approve } from '../domain/approvals.ts';
 import { toGuardContext, type StateMachineEngine } from '../domain/engine.ts';
+import { admitAction, commandMatches, type AdmissionRequest } from '../domain/action-admission.ts';
+import type { ActionEntry } from '../schema/profile-schema.ts';
 import { SessionQueue } from './session-queue.ts';
 import { sanitizeToolOutput, validateUserInput } from './guardrails.ts';
 import { listProfiles } from '../public-api.ts';
@@ -33,7 +35,6 @@ import { parseWorkflowResult } from '../domain/evidence.ts';
 import type { LogFn } from './logger.ts';
 import { createLogFn } from './logger.ts';
 import {
-  canCommit,
   extractBashCommand,
   hasForbiddenGitSubcommand,
   isCommitTaskCommand,
@@ -618,6 +619,11 @@ class StateMachineRuntime {
     args: {
       files: string[];
       summary: string;
+      /**
+       * Имя согласия — то же, что схема пишет в `consent:` на переходе.
+       * Отсутствует — `plan`, как было всегда.
+       */
+      type?: string;
       grant?: string;
       decline?: string;
     },
@@ -666,6 +672,7 @@ class StateMachineRuntime {
       revision,
       summary: args.summary,
       files: args.files,
+      ...(args.type ? { type: args.type } : {}),
     };
     const manifestEvidence = evidenceOf(manifest);
 
@@ -815,6 +822,13 @@ class StateMachineRuntime {
     // not enforced here (task-scope spec) — an out-of-scope bash write is
     // caught only after the fact, via the per-move baseline diff.
     await this.scopeBefore(tool, input.sessionID, args);
+
+    // 3c. Stage actions — вторая ось рядом с переходами: те решают, можно ли
+    // уйти со стадии, эта — можно ли сделать что-то, оставаясь на ней. Стоит
+    // до выдачи delivery permit и до жизненного цикла мутации, потому что
+    // отвечает на вопрос «этот вызов вообще разрешён здесь». Когда стадия
+    // ничего не объявила, здесь же применяется дефолт ядра про прямой git.
+    await this.actionsBefore(tool, input.sessionID, input.callID, args);
 
     // 4. Commit Permit: block forbidden git commands, issue deliveryPermit for commit-task
     await this.commitBefore(tool, input.sessionID, input.callID, args, output);
@@ -1266,7 +1280,7 @@ class StateMachineRuntime {
   }
 
   /**
-   * P1-012: Handle commit-task command — check canCommit, issue deliveryPermit.
+   * P1-012: Handle commit-task command — issue deliveryPermit.
    */
   private async handleCommitTaskBefore(
     sessionID: string,
@@ -1277,15 +1291,6 @@ class StateMachineRuntime {
     // No workflow session means the plugin does not apply — skip silently
     // rather than blocking a call it does not govern.
     if (!session) return;
-
-    const engine = await this.mutationOrchestrator.resolveEngine(
-      session.profileId,
-      session.schemaId
-    );
-    const requiredGates = engine.getRequiredGates();
-    if (!canCommit(session, requiredGates)) {
-      throw new WorkflowBlockedError('Cannot commit: not all gates passed or tasks completed');
-    }
 
     const preCommitHead = this.getPreCommitHead();
     session.deliveryPermit = {
@@ -1641,17 +1646,22 @@ class StateMachineRuntime {
   }
 
   /**
-   * Step 1a of `tool.execute.after` — diff a `task` move's own baseline
-   * frame, run the profile's invariants over the intersection with the
-   * task's `writeScope`, and write the verdict onto the operation. Must run
-   * before `handleWorkflowResult` (D3): that step computes movement and
-   * deletes the operation, so a verdict written after it is dead.
+   * Шаг 1a `tool.execute.after` — снять diff собственного baseline-кадра хода
+   * `task` и добавить изменённые файлы в `session.changedFiles`, из которых
+   * строится delivery permit.
    *
-   * A missing frame (D5) — admission refused, a non-workflow `task`, the
-   * plugin installed mid-call — writes no gate: one `warn` log, and the
-   * operation is still deleted by `handleWorkflowResult`/`nextTaskStage` as
-   * normal. Never fall back to an empty baseline; never fail the task on
-   * this alone.
+   * Проверяются только файлы, попавшие в пересечение диффа с `writeScope`
+   * задачи: это нарушение самого хода, а не всего грязного дерева.
+   *
+   * Вердикт пишется в `operation.checks`, откуда `handleWorkflowResult`
+   * сворачивает его в `run.checks` — строго после проверки свежести раунда,
+   * чтобы старая операция не трогала вердикт текущего. Порядок относительно
+   * `handleWorkflowResult` (D3) обязателен: тот считает движение и удаляет
+   * операцию, так что вердикт, написанный после него, мёртв.
+   *
+   * Отсутствующий кадр (D5) — админ отказал, не-workflow `task`, плагин
+   * поставили посреди вызова — это один `warn` и выход. Никогда не
+   * подставлять пустой baseline и не валить задачу из-за одного этого.
    */
   private async invariantsAfter(tool: string, sessionID: string, callID: string): Promise<void> {
     if (tool !== 'task') return;
@@ -1685,8 +1695,6 @@ class StateMachineRuntime {
       changed = [];
     }
 
-    // Only the diff intersected with the task's own writeScope is checked —
-    // this is the move's own violation, not the whole dirty tree.
     const inScope = task?.writeScope?.length
       ? changed.filter((file) => matchesScope(file, task.writeScope))
       : changed;
@@ -1715,7 +1723,7 @@ class StateMachineRuntime {
     await this.queue.enqueue(sessionID, async (s) => {
       if (!s) return;
       const op = s.activeOperations[callID];
-      if (op) op.invariants = passed ? 'passed' : 'failed';
+      if (op) op.checks = passed ? 'passed' : 'failed';
 
       // What this move produced is part of what the workflow delivers. The
       // list was computed above to run invariants over and then dropped, so a
@@ -1799,12 +1807,11 @@ class StateMachineRuntime {
         return;
       }
 
-      // Roll the move's invariants verdict (written by invariantsAfter, step
-      // 1a) into the task's own run.gates.invariants — strictly after the
-      // stale-round check. An old operation must not alter the current round's
-      // gate even temporarily.
-      if (run && operation?.invariants) {
-        run.gates.invariants = operation.invariants;
+      // Свернуть вердикт хода (написан `invariantsAfter`, шаг 1a) в
+      // `run.checks` — строго после проверки свежести раунда выше. Старая
+      // операция не должна трогать вердикт текущего раунда даже временно.
+      if (run && operation?.checks) {
+        run.checks = operation.checks;
       }
 
       if (operation) {
@@ -1905,9 +1912,7 @@ class StateMachineRuntime {
               (type) =>
                 session.approvals.some(
                   (approval) => approval.type === type && approval.status === 'granted'
-                ),
-              engine.getRequiredGates(),
-              Object.fromEntries(session.gates.map((g) => [g.id, g.status]))
+                )
             );
 
             // An edge that is taken applies what it declares, at either level
@@ -2373,7 +2378,130 @@ class StateMachineRuntime {
     return true;
   }
 
+  /**
+   * Действующая стадия — вложенная, когда открыт прогон цикла.
+   *
+   * Работа задачи идёт на стадии внутри `loop`, и объявления принадлежат ей.
+   * Внешняя стадия остаётся ответом, когда цикла нет или вложенная своих
+   * действий не объявила — тот же `??`, которым разрешается `allowedAgents`.
+   */
+  private async actingStageActions(session: WorkflowSession): Promise<ActionEntry[] | undefined> {
+    let engine: StateMachineEngine;
+    try {
+      engine = await this.mutationOrchestrator.resolveEngine(session.profileId, session.schemaId);
+    } catch {
+      // Нечитаемый профиль — это «стадия ничего не объявила», а не бросок
+      // отсюда. Вызов всё равно умрёт ниже по цепочке, с внятной причиной, а
+      // здесь мы обязаны успеть применить дефолт ядра.
+      return undefined;
+    }
+    const outerId = engine.deriveStage(session);
+    const outer = engine.getStages()[outerId];
+
+    if (!outer) return undefined;
+
+    const openRun = Object.values(session.loopRuns ?? {}).find((run) => isOpenLoopRun(run));
+    if (openRun) {
+      const nested = nestedStages(outer).find((entry) => entry.id === openRun.stage);
+      if (nested?.actions) return nested.actions;
+      return outer.actions;
+    }
+
+    // Прогон ещё не открыт, но стадия объявляет цикл — значит первый же ход
+    // его и откроет, на первой вложенной стадии. Судить такой ход по внешней
+    // стадии неверно: она про раздачу задач, работа идёт внутри.
+    //
+    // Это ровно тот момент, который сломал host-smoke: `beginMutation`
+    // открывает прогон ПОСЛЕ допуска действия, поэтому первая правка каждой
+    // задачи приходила сюда без открытого прогона и отказывалась — «stage does
+    // not declare the action 'edit'». Прогон открывает `resolveMutationRun` по
+    // тому же признаку (`operation-lifecycle.ts`), и решение о стадии обязано
+    // совпадать с ним, иначе допуск и жизненный цикл расходятся.
+    if (outer.loop) {
+      const first = nestedStages(outer)[0];
+      if (first?.actions) return first.actions;
+    }
+    return outer.actions;
+  }
+
+  /**
+   * Отказать вызову, которого действующая стадия не объявляла.
+   *
+   * Отображение инструмента в действие — единственное место, где оно живёт.
+   * `commit-task` приезжает как `bash`, но это доставка, а не команда, и
+   * действие у неё своё. Инструменты вне словаря (`read`, `glob`, `task`)
+   * этим механизмом не управляются вовсе.
+   */
+  private async actionsBefore(
+    tool: string,
+    sessionID: string,
+    callID: string,
+    args: unknown
+  ): Promise<void> {
+    let request: AdmissionRequest | null = null;
+    if (tool === 'bash') {
+      // Один и тот же `bash`, доставка или нет: действие называет инструмент.
+      // Доставку помечает `delivers` у записи, и это отдельный вопрос — на
+      // него отвечает `isCommitDelivery`.
+      request = { action: 'bash', command: extractBashCommand(args) };
+    } else if (this.fileTools.has(tool)) {
+      request = { action: 'edit', paths: this.scopeTargetPaths(tool, args) };
+    }
+    if (!request) return;
+
+    const session = await this.loadGoverning(sessionID);
+    if (!session) return;
+
+    const actions = await this.actingStageActions(session);
+    if (actions === undefined) {
+      this.forbiddenGitDefault(tool, callID, args);
+      return;
+    }
+
+    const engine = await this.mutationOrchestrator.resolveEngine(
+      session.profileId,
+      session.schemaId
+    );
+    const facts = toGuardContext(session);
+    const verdict = admitAction(actions, request, (expression) =>
+      engine.evaluateGuard(expression, facts)
+    );
+    if (!verdict.allowed) {
+      void this.log('warn', 'Action refused by the stage', {
+        sessionID,
+        tool,
+        reason: verdict.reason,
+      });
+      throw new WorkflowBlockedError(verdict.reason);
+    }
+  }
+
   // ── Inlined handler methods (former CommitPermit) ──────────────────
+
+  /**
+   * Дефолт ядра: прямой `git commit`/`push` запрещён.
+   *
+   * Именно дефолт, а не закон. Правило git-специфично, а схема здесь общая — и
+   * стадия, объявившая `actions:`, отвечает на этот вопрос сама: её список
+   * исчерпывающий, так что `git commit` отказывается уже потому, что его не
+   * покрыла ни одна запись. Профиль, которому доставка нужна обычным
+   * `git commit`, объявляет её у действия `commit` и получает.
+   *
+   * Работает, пока стадия молчит — и когда профиль не читается: тогда
+   * `actingStageActions` возвращает `undefined`, и запрет всё равно
+   * применяется. Сам по себе он ничего не открывает: `git commit` не
+   * read-only, поэтому на битом профиле вызов и так упрётся в `resolveEngine`
+   * внутри `mutationBefore`.
+   */
+  private forbiddenGitDefault(tool: string, callID: string, args: unknown): void {
+    if (tool !== 'bash') return;
+    const command = extractBashCommand(args);
+    if (!hasForbiddenGitSubcommand(command)) return;
+    void this.log('warn', `Blocked forbidden git command`, { callID: callID, command });
+    throw new WorkflowBlockedError(
+      'Direct git commit/push is blocked. Use commit-task.ts instead.'
+    );
+  }
 
   private async commitBefore(
     tool: string,
@@ -2382,17 +2510,8 @@ class StateMachineRuntime {
     args: unknown,
     output: { args: unknown }
   ): Promise<boolean> {
-    if (tool === 'bash') {
-      const command = extractBashCommand(args);
-      if (hasForbiddenGitSubcommand(command)) {
-        void this.log('warn', `Blocked forbidden git command`, { callID: callID, command });
-        throw new WorkflowBlockedError(
-          'Direct git commit/push is blocked. Use commit-task.ts instead.'
-        );
-      }
-      if (isCommitTaskCommand(command)) {
-        await this.handleCommitTaskBefore(sessionID, callID, output);
-      }
+    if (await this.isCommitDelivery(tool, sessionID, args)) {
+      await this.handleCommitTaskBefore(sessionID, callID, output);
     }
     return true;
   }
@@ -2582,8 +2701,44 @@ class StateMachineRuntime {
    * writes the receipt only once HEAD actually moved — and does not want a
    * second one.
    */
-  private isCommitDelivery(tool: string, args: unknown): boolean {
-    return tool === 'bash' && isCommitTaskCommand(extractBashCommand(args));
+  /**
+   * Команды, которыми действующая стадия объявила доставку.
+   *
+   * Пусто, когда стадия не объявляет действий или ни одна запись не помечена
+   * `delivers` — тогда работает зашитый классификатор.
+   */
+  private async declaredDeliveryCommands(sessionID: string): Promise<string[]> {
+    const session = await this.loadGoverning(sessionID);
+    if (!session) return [];
+    const actions = await this.actingStageActions(session);
+    if (!actions) return [];
+    return actions
+      .filter((entry) => entry.delivers && entry.commands)
+      .flatMap((entry) => entry.commands ?? []);
+  }
+
+  /**
+   * Доставка ли это коммита.
+   *
+   * Ответ принадлежит схеме: запись с `delivers: true` называет команды, и они
+   * же опознают вызов. Раньше это решала зашитая в ядро проверка на имя файла
+   * `commit-task.ts` — знание о том, чем именно делается коммит, лежало в
+   * ядре и дублировалось в текстах скиллов, а схема о нём не знала ничего.
+   *
+   * Пока стадия ничего не объявила, отвечает прежний классификатор: база не
+   * объявляет действий вовсе, и её поведение не меняется.
+   *
+   * Один ответ на все точки вызова намеренно: `commitBefore` выдаёт permit, а
+   * `mutationBefore`/`mutationAfter` по этому же признаку НЕ входят в
+   * жизненный цикл мутации. Разойдись они — коммит получил бы и permit, и
+   * baseline-кадр.
+   */
+  private async isCommitDelivery(tool: string, sessionID: string, args: unknown): Promise<boolean> {
+    if (tool !== 'bash') return false;
+    const command = extractBashCommand(args);
+    const declared = await this.declaredDeliveryCommands(sessionID);
+    if (declared.length > 0) return commandMatches(command, declared);
+    return isCommitTaskCommand(command);
   }
 
   /**
@@ -2611,7 +2766,7 @@ class StateMachineRuntime {
     output: { args: unknown }
   ): Promise<void> {
     if (!this.mutatingTools.has(tool)) return;
-    if (this.isCommitDelivery(tool, args)) return;
+    if (await this.isCommitDelivery(tool, sessionID, args)) return;
     if (this.isReadOnlyBash(tool, args)) return;
     await this.mutationOrchestrator.beginMutation({ sessionID, callID }, output);
   }
@@ -2624,7 +2779,7 @@ class StateMachineRuntime {
     output: { title: string; output: string; metadata: unknown }
   ): Promise<void> {
     if (!this.mutatingTools.has(tool)) return;
-    if (this.isCommitDelivery(tool, args)) return;
+    if (await this.isCommitDelivery(tool, sessionID, args)) return;
     if (this.isReadOnlyBash(tool, args)) return;
     await this.mutationOrchestrator.finishMutation(
       { sessionID, callID, metadata: output.metadata },
@@ -2641,12 +2796,51 @@ class StateMachineRuntime {
     const session = await this.loadGoverning(sessionID);
     if (!session) return;
     try {
-      await this.mutationOrchestrator.applyTransitions(session);
+      const moved = await this.mutationOrchestrator.applyTransitions(session);
       await this.store.save(session);
+      if (moved.applied) await this.archiveIfFinished(session);
     } catch (err) {
       void this.log('warn', 'transitionAfter: tryApplyTransitions failed', {
         sessionID,
         error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  /**
+   * Дошли до конца — сессия уезжает из рантайма в архив.
+   *
+   * На терминальной стадии workflow закончен, и управлять дальше нечем:
+   * ни допуска, ни переходов, ни хода мутации. «Сессии нет» выражается в
+   * этом проекте ровно одним способом — `store.load` не находит файла, — и
+   * второй способ не-существования заводить нельзя: каждому месту пришлось бы
+   * различать два вида отсутствия.
+   *
+   * Строго ПОСЛЕ `save`: расписка о доставке и последние вердикты пишутся тем
+   * же ходом, что и переход, и уехать в архив они должны уже записанными.
+   *
+   * И только когда переход ДЕЙСТВИТЕЛЬНО применён. Терминальность — свойство
+   * стадии, а не события: в схеме без переходов верхнего уровня (движение идёт
+   * внутри цикла) терминальна каждая стадия, включая стартовую, и сессия
+   * уезжала бы в архив на первом же ходу. Конец — это приход в конец.
+   */
+  private async archiveIfFinished(session: WorkflowSession): Promise<void> {
+    let engine: StateMachineEngine;
+    try {
+      engine = await this.mutationOrchestrator.resolveEngine(session.profileId, session.schemaId);
+    } catch {
+      // Профиль не читается — терминальность определить нечем. Сессия остаётся
+      // в рантайме: не убрать законченную безобиднее, чем убрать работающую.
+      return;
+    }
+    if (!engine.isTerminalStage(session.currentStage)) return;
+
+    const archived = await this.store.archive(session.sessionId);
+    if (archived) {
+      void this.log('info', 'Workflow finished: session archived', {
+        sessionID: session.sessionId,
+        stage: session.currentStage,
+        path: archived,
       });
     }
   }
@@ -2782,6 +2976,14 @@ class StateMachineRuntime {
               .union([z.array(z.string()).min(1), z.string().min(1)])
               .describe('Paths to files (e.g. [".opencode/plan.md"])'),
             summary: z.string().min(1).max(400).describe('Short summary of what the file proposes'),
+            type: z
+              .string()
+              .min(1)
+              .optional()
+              .describe(
+                'Which consent this is, by the name the schema uses on its transition ' +
+                  "(`consent: <name>`). Defaults to 'plan'."
+              ),
             grant: z.string().default('grant').describe('Label for the approve option'),
             decline: z.string().default('decline').describe('Label for the decline option'),
           },
@@ -2789,6 +2991,7 @@ class StateMachineRuntime {
             args: {
               files: string[];
               summary: string;
+              type?: string;
               grant?: string;
               decline?: string;
             },

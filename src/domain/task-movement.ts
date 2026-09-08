@@ -38,10 +38,18 @@ export interface TaskFacts {
   stage: string;
   status: LoopRun['status'];
   gates: Record<string, GateStatus>;
+  /** Вердикт ядра о последнем ходе задачи — см. `LoopRun.checks`. */
+  checks?: GateStatus;
 }
 
 export function taskFactsOf(run: LoopRun): TaskFacts {
-  return { id: run.taskId, stage: run.stage, status: run.status, gates: { ...run.gates } };
+  return {
+    id: run.taskId,
+    stage: run.stage,
+    status: run.status,
+    gates: { ...run.gates },
+    checks: run.checks,
+  };
 }
 
 /**
@@ -57,9 +65,7 @@ export function nextTaskStage(
   run: LoopRun,
   passed: boolean,
   evaluateGuard: (_expression: string, _task: TaskFacts) => boolean,
-  hasConsent: (_type: string) => boolean = () => true,
-  requiredGates: string[] = [],
-  sessionGates: Record<string, GateStatus> = {}
+  hasConsent: (_type: string) => boolean = () => true
 ): TaskMovement {
   if (!loopStage) {
     return { kind: 'unreachable', reason: 'no loop stage resolved' };
@@ -111,32 +117,6 @@ export function nextTaskStage(
       blockedReasons.push(`${transition.from} → ${transition.to} (awaiting consent: ${consent})`);
       continue;
     }
-    // kind=pass requires all requiredGates to be 'passed' in the session.
-    // Without this check, a kind=pass transition inside a loop would let a
-    // task complete or move even though invariant gates have not been passed.
-    if (transition.kind === 'pass') {
-      const failedGates = requiredGates.filter(
-        (g) => !sessionGates[g] || sessionGates[g] !== 'passed'
-      );
-      if (failedGates.length > 0) {
-        blockedReasons.push(
-          `${transition.from} → ${transition.to} (kind=pass requires [${failedGates.join(', ')}] to be 'passed')`
-        );
-        continue;
-      }
-    }
-
-    // kind=fail requires at least one requiredGate to be 'failed'.
-    if (transition.kind === 'fail') {
-      const anyFailed = requiredGates.some((g) => sessionGates[g] === 'failed');
-      if (!anyFailed) {
-        blockedReasons.push(
-          `${transition.from} → ${transition.to} (kind=fail requires at least one of [${requiredGates.join(', ')}] to be 'failed')`
-        );
-        continue;
-      }
-    }
-
     // The edge that ends a task carries its effects like any other: an
     // approval granted on the way out is granted.
     if (transition.to === TASK_DONE) return { kind: 'complete', effects: transition.effects };

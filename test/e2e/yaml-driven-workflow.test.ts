@@ -28,13 +28,12 @@ function loadEngine(): StateMachineEngine {
   }
 
   const resolvedSchema: ResolvedSchema = {
+    id: 'base',
     source: 'base/base.yaml',
     stages: raw.stages,
     transitions: raw.transitions,
     settings: raw.settings,
     editingAgents: raw.editingAgents,
-    requiredGates: raw.requiredGates,
-    actionGuards: raw.actionGuards,
     stageAssignments: raw.stageAssignments,
   };
 
@@ -54,7 +53,8 @@ const ENGINE = loadEngine();
 function freshSession(): WorkflowSession {
   return createSession(
     `test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    'state-machine'
+    'state-machine',
+    'base'
   );
 }
 

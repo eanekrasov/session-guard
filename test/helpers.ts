@@ -2,7 +2,8 @@
  * Shared test helpers — functions that exist only for test coverage
  * and are not used by production code.
  */
-import type { WorkflowSession, WorkflowStore } from '../src/session/session-schema.ts';
+import type { WorkflowSession } from '../src/session/session-schema.ts';
+import type { WorkflowStore } from '../src/session/session-store.ts';
 
 // ─── Mutation lifecycle helpers ──────────────────────────────────────────────
 

@@ -15,7 +15,7 @@ transitions:
   - from: execution
     to: done
     guard: 'FROM_ALPHA'
-requiredGates: [alphaGate]
+editingAgents: [alphaAgent]
 stageAssignments:
   - id: execution
     priority: 1

@@ -30,7 +30,7 @@ describe('createSession', () => {
     expect((session as Record<string, unknown>).baselineHashes).toBeUndefined();
     expect(session.changedFiles).toEqual([]);
     expect(session.updatedAt).toBeDefined();
-    expect(session.preset).toBeUndefined();
+    expect((session as Record<string, unknown>).preset).toBeUndefined();
   });
 
   it('carries no gates — they are created by the first verdict about them', () => {

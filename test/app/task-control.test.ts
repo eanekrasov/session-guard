@@ -8,6 +8,7 @@ import { createRuntime } from '../../src/app/runtime.ts';
 import { createSession, WorkflowStore } from '../../src/session/session-store.ts';
 import type { WorkflowSession } from '../../src/session/session-schema.ts';
 import { createTask } from '../support/task-factory.ts';
+import { toolOutput } from '../support/tool-result.ts';
 
 let storeDirectory: string;
 let profilesDirectory: string;
@@ -99,7 +100,7 @@ describe('workflow task state is orchestrator-owned', () => {
 
     const result = await setStatus(hooks, 'orchestrator');
 
-    expect(result.output).toBe('Updated task-1 to completed');
+    expect(toolOutput(result)).toBe('Updated task-1 to completed');
     expect((await load(store)).tasks.implementation[0]!.status).toBe('completed');
   });
 
@@ -110,7 +111,7 @@ describe('workflow task state is orchestrator-owned', () => {
 
     const result = await setStatus(hooks, 'cycle-minimal/orchestrator');
 
-    expect(result.output).toBe('Updated task-1 to completed');
+    expect(toolOutput(result)).toBe('Updated task-1 to completed');
     expect((await load(store)).tasks.implementation[0]!.status).toBe('completed');
   });
 
@@ -121,8 +122,8 @@ describe('workflow task state is orchestrator-owned', () => {
 
     const result = await setStatus(hooks, 'code');
 
-    expect(result.output).toContain('refused');
-    expect(result.output).toContain('orchestrator');
+    expect(toolOutput(result)).toContain('refused');
+    expect(toolOutput(result)).toContain('orchestrator');
     expect((await load(store)).tasks.implementation[0]!.status).toBe('pending');
   });
 
@@ -133,7 +134,7 @@ describe('workflow task state is orchestrator-owned', () => {
 
     const result = await setStatus(hooks, 'android/orchestrator');
 
-    expect(result.output).toContain('refused');
+    expect(toolOutput(result)).toContain('refused');
     expect((await load(store)).tasks.implementation[0]!.status).toBe('pending');
   });
 
@@ -144,7 +145,7 @@ describe('workflow task state is orchestrator-owned', () => {
 
     const result = await setStatus(hooks, undefined);
 
-    expect(result.output).toContain('refused');
+    expect(toolOutput(result)).toContain('refused');
     expect((await load(store)).tasks.implementation[0]!.status).toBe('pending');
   });
 
@@ -156,8 +157,8 @@ describe('workflow task state is orchestrator-owned', () => {
     const refused = await setStatus(hooks, 'orchestrator');
     const allowed = await setStatus(hooks, 'lead');
 
-    expect(refused.output).toContain('refused');
-    expect(allowed.output).toBe('Updated task-1 to completed');
+    expect(toolOutput(refused)).toContain('refused');
+    expect(toolOutput(allowed)).toBe('Updated task-1 to completed');
     expect((await load(store)).tasks.implementation[0]!.status).toBe('completed');
   });
 
@@ -171,7 +172,7 @@ describe('workflow task state is orchestrator-owned', () => {
       toolContext('code')
     );
 
-    expect(result.output).toContain('refused');
+    expect(toolOutput(result)).toContain('refused');
     expect((await load(store)).tasks.implementation).toHaveLength(2);
   });
 
@@ -185,7 +186,7 @@ describe('workflow task state is orchestrator-owned', () => {
       toolContext('code')
     );
 
-    expect(result.output).toContain('refused');
+    expect(toolOutput(result)).toContain('refused');
   });
 
   it('leaves reads open to every agent', async () => {
@@ -198,6 +199,6 @@ describe('workflow task state is orchestrator-owned', () => {
       toolContext('code')
     );
 
-    expect(result.output).toBe('implementation: 2 task(s)');
+    expect(toolOutput(result)).toBe('implementation: 2 task(s)');
   });
 });

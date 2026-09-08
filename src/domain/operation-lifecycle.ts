@@ -1,4 +1,4 @@
-import { setGateStatus, isOpenLoopRun, nextLoopRunId, findTask } from '../session/helpers.ts';
+import { isOpenLoopRun, nextLoopRunId, findTask } from '../session/helpers.ts';
 import type { WorkflowSession, ActiveOperation, LoopRun } from '../session/session-schema.ts';
 import { MUTATION_TTL_MS } from './evidence.ts';
 
@@ -20,24 +20,64 @@ function getActiveOperation(session: WorkflowSession, callId?: string): ActiveOp
  */
 export type ResolveInitialStage = (listKey: string) => string | null;
 
+/**
+ * Что удалось решить о прогоне для этого хода.
+ *
+ * Три исхода, а не два. `ambiguous` — прогонов или задач-кандидатов несколько,
+ * и выбрать за автора нельзя: ход отказывается. `none` — прогона нет и быть не
+ * должно, стадия не цикл. Раньше оба случая возвращали `null`, и попытка
+ * разрешить работу вне цикла заодно разрешила бы правку при двух
+ * одновременных задачах — без привязки к `writeScope` любой из них.
+ */
+type MutationRunResolution =
+  { kind: 'run'; run: LoopRun } | { kind: 'ambiguous'; reason: string } | { kind: 'none' };
+
+/**
+ * `currentListKey` — список цикла стадии, на которой идёт ход, когда она цикл.
+ * Строка сужает кандидатов до своего списка; `null`/`undefined` (стадия не
+ * цикл, или вызывающий не сказал) оставляют прежний просмотр всех списков.
+ */
 function resolveMutationRun(
   session: WorkflowSession,
-  resolveInitialStage?: ResolveInitialStage
-): LoopRun | null {
+  resolveInitialStage?: ResolveInitialStage,
+  currentListKey?: string | null
+): MutationRunResolution {
   session.loopRuns ??= {};
   session.activeOperations ??= {};
   const openRuns = Object.values(session.loopRuns).filter((run) => isOpenLoopRun(run));
-  if (openRuns.length === 1) return openRuns[0];
-  if (openRuns.length > 1) return null;
+  if (openRuns.length === 1) return { kind: 'run', run: openRuns[0]! };
+  if (openRuns.length > 1) {
+    return { kind: 'ambiguous', reason: `${openRuns.length} open task runs` };
+  }
 
-  const runnableTasks = Object.entries(session.tasks ?? {}).flatMap(([listKey, tasks]) =>
+  // Только список цикла, в котором сессия сейчас находится, когда он известен.
+  //
+  // Ход бывает и до первого диспатча — оркестратор правит, ещё стоя на стадии
+  // перед циклом. Тогда стадия своего списка не называет (`null`), и кандидаты
+  // ищутся по всем: привязать правку к единственной задаче в работе строго
+  // лучше, чем оставить её без области записи вовсе.
+  //
+  // Раньше кандидаты собирались по ВСЕМ спискам сразу. Со схемой об одном
+  // цикле это незаметно, а с двумя последовательными — `implementation`, а
+  // потом `test_suite` — ход на первом цикле мог синтезировать прогон по
+  // задаче второго, ещё не начатого: единственная runnable-задача нашлась бы
+  // в чужом списке. Стадия называет свой список сама, и спрашивать надо его.
+  const lists = Object.entries(session.tasks ?? {}).filter(
+    ([listKey]) => typeof currentListKey !== 'string' || listKey === currentListKey
+  );
+  const runnableTasks = lists.flatMap(([listKey, tasks]) =>
     tasks
       .filter((task) => task.status === 'pending' || task.status === 'running')
       .map((task) => ({ listKey, task }))
   );
-  if (runnableTasks.length !== 1) return null;
+  if (runnableTasks.length === 0) return { kind: 'none' };
+  if (runnableTasks.length > 1) {
+    return { kind: 'ambiguous', reason: `${runnableTasks.length} runnable tasks` };
+  }
 
-  const [{ listKey, task }] = runnableTasks;
+  const [{ listKey, task }] = runnableTasks as [
+    { listKey: string; task: { id: string; status: string } },
+  ];
 
   // A run has to start in a stage the profile declares. Writing a literal here
   // — this used to say `stage: 'mutation'` — parks the task in a stage no
@@ -62,14 +102,14 @@ function resolveMutationRun(
   };
   session.loopRuns[runId] = run;
   task.status = 'running';
-  return run;
+  return { kind: 'run', run };
 }
 
 /**
  * Begin a new mutation. Throws when an active non-expired operation exists.
  *
- * Every verdict about the work is cleared: verifications, the session's
- * invariants gate, and the gates of the task being edited. A gate is evidence
+ * Every verdict about the work is cleared: verifications and the gates of the
+ * task being edited. A gate is evidence
  * about the code as it was, and an edit is exactly what makes that code no
  * longer the code. Editing twice inside one stage is ordinary — an architect
  * reworking a plan with the operator does it every time — so each edit must
@@ -79,7 +119,8 @@ export function beginMutation(
   session: WorkflowSession,
   callId: string,
   agent: string = 'unknown',
-  resolveInitialStage?: ResolveInitialStage
+  resolveInitialStage?: ResolveInitialStage,
+  currentListKey?: string | null
 ): void {
   for (const operation of getActiveOperations(session)) {
     if (isExpiredMutation(session, operation.callId)) {
@@ -97,51 +138,61 @@ export function beginMutation(
     throw new Error(`Active operation already exists: ${existing.callId}`);
   }
 
-  const run = resolveMutationRun(session, resolveInitialStage);
-  if (!run) {
-    throw new Error('Cannot resolve a single workflow task run for mutation');
+  // Прогона может не быть — и это законно. Стадия без `loop:` тоже стадия, на
+  // ней тоже работают, и раньше такой ход умирал здесь с внутренней ошибкой:
+  // агент видел «Cannot resolve a single workflow task run for mutation» и
+  // уходил просить оператора сделать работу руками. Ход без прогона получает
+  // ту же машинерию — свой baseline-кадр, дифф, проверку области записи и
+  // вердикт, — а вердикту домом становится сессия (`finishMutation`).
+  //
+  // Неоднозначность — по-прежнему отказ: выбрать за автора, к какому из двух
+  // прогонов отнести правку, значит проверить её чужой областью записи.
+  const resolution = resolveMutationRun(session, resolveInitialStage, currentListKey);
+  if (resolution.kind === 'ambiguous') {
+    throw new Error(`Cannot resolve a single workflow task run for mutation: ${resolution.reason}`);
   }
+  const run = resolution.kind === 'run' ? resolution.run : null;
 
   session.activeOperations[callId] = {
     callId,
-    runId: run.id,
-    taskId: run.taskId,
+    ...(run ? { runId: run.id, taskId: run.taskId } : {}),
     agent,
     kind: 'mutation',
     startedAt: new Date().toISOString(),
     status: 'running',
   };
 
+  // Правка делает прежние вердикты вердиктами о коде, которого больше нет, —
+  // и это верно на любой стадии, а не только внутри цикла.
   session.verifications = [];
-  setGateStatus(session, 'invariants', 'pending');
-  run.gates = {};
+  if (run) run.gates = {};
+  else session.checks = undefined;
 }
 
 /**
- * Finish a mutation. Clears operation and updates invariants gate.
- * changedFiles is set by the caller (MutationOrchestrator) before calling
- * this function.
+ * Завершить ход: записать вердикт проверок и снять активную операцию.
+ *
+ * `passed` считает вызывающий (`processScopeAndInvariants`) — он складывает
+ * четыре причины: упавший инструмент, запись вне `writeScope`, несчитанный
+ * дифф и нарушенные инварианты. Вердикт кладётся на прогон задачи, а не в
+ * гейт: гейты пишет агент через `<workflow-result>`, и любой объявленный
+ * стадией гейт он может выставить себе сам. Этот вердикт движок выносит,
+ * посмотрев на диск. См. docs/gate-actions-before-removal.md.
+ *
+ * Ход вне цикла задачи вердикт не записывает — писать его некуда.
  */
 export function finishMutation(session: WorkflowSession, passed: boolean, callId?: string): void {
   const operation = getActiveOperation(session, callId);
-  if (operation) {
-    delete session.activeOperations[operation.callId];
-  }
+  if (!operation) return;
 
-  if (passed) {
-    setGateStatus(session, 'invariants', 'passed');
-    return;
-  }
+  const run = operation.runId ? session.loopRuns?.[operation.runId] : undefined;
+  // Внутри цикла вердикт кладётся на прогон задачи и читается как
+  // `task.checks`; снаружи — на сессию, и читается как `session.checks`. Одна
+  // и та же проверка, разные адресаты, потому что судить больше некого.
+  if (run) run.checks = passed ? 'passed' : 'failed';
+  else session.checks = passed ? 'passed' : 'failed';
 
-  // Recording a verdict is not spending an attempt.
-  //
-  // This used to bump the task's retry budget here, so a failed invariant cost
-  // an attempt whether or not anything was retried — and the same counter was
-  // also spent by the edge that actually goes round again (`bumpRetry` as a
-  // transition effect, and now `onFailure: retry`). One budget, two unrelated
-  // meanings: a task could exhaust its retries without a single retry having
-  // been taken. An attempt belongs to the move that takes it.
-  setGateStatus(session, 'invariants', 'failed');
+  delete session.activeOperations[operation.callId];
 }
 
 /** True when the active operation has been running longer than MUTATION_TTL_MS. */

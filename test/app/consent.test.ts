@@ -118,9 +118,23 @@ describe('canonicalManifest', () => {
       files: ['z.kt', 'a.kt', 'm.kt'],
     };
     const canonical = canonicalManifest(manifest);
+    // `type` входит в подпись даже когда манифест его не назвал: иначе
+    // «согласие на деплой» и «согласие на план» с теми же файлами дают одну и
+    // ту же evidence. Отсутствующий тип нормализуется в `plan` — манифест,
+    // написанный до появления поля, подписывается ровно как раньше значил.
     expect(canonical).toBe(
-      '{"files":["a.kt","m.kt","z.kt"],"revision":1,"schema":"harness.consent.evidence/v1","summary":"Test"}'
+      '{"files":["a.kt","m.kt","z.kt"],"revision":1,"schema":"harness.consent.evidence/v1","summary":"Test","type":"plan"}'
     );
+  });
+
+  test('манифесты с разными типами подписываются по-разному', () => {
+    const base: ConsentManifest = {
+      schema: CONSENT_EVIDENCE_SCHEMA,
+      revision: 1,
+      summary: 'Test',
+      files: ['a.kt'],
+    };
+    expect(canonicalManifest({ ...base, type: 'deploy' })).not.toBe(canonicalManifest(base));
   });
 
   test('is stable for same input', () => {

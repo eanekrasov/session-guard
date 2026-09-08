@@ -22,6 +22,7 @@
  *      HOST_SMOKE_ATTEMPTS (default 3).
  */
 import { spawnSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { appendFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
@@ -185,6 +186,14 @@ async function step(
   let detail = '';
   let session!: Session;
   for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
+    // A prompt that outlives the client's timeout aborts the whole scenario,
+    // and the error it throws names no step — `cicd-full-cycle` reported only
+    // "The operation timed out" and nothing about where. Announcing the step
+    // before it runs is what makes the last line printed the answer.
+    if (process.env.HOST_SMOKE_DEBUG) {
+      const started = new Date().toISOString().slice(11, 19);
+      console.error(`  ${started} step[${attempt}]: ${options.instruction.slice(0, 90)}`);
+    }
     session = await say(host, sessionId, model, options.instruction, options.agent);
     lastState = session.state;
     const verdict = options.expect(session);
@@ -217,13 +226,24 @@ type Scenario = {
 
 const ORCHESTRATOR = 'orchestrator';
 
-/** The consent step: prepare the tag, then ask the operator with it verbatim. */
-const CONSENT_INSTRUCTION =
-  'Do this in two tool calls and nothing else. ' +
-  'First call `workflow.consent` with files ["plan.md"] and summary "smoke plan". ' +
-  'Then call the `question` tool once, passing as the question text the ENTIRE ' +
-  '<consent-request ...>...</consent-request> tag that the first tool printed, copied ' +
-  'character for character, with options labelled "grant" and "decline".';
+/**
+ * The consent step: prepare the tag, then ask the operator with it verbatim.
+ *
+ * `type` names which consent this is — the same name the schema writes in
+ * `consent:` on its transition. Omitted, it is `plan`.
+ */
+function consentInstruction(type?: string): string {
+  return (
+    'Do this in two tool calls and nothing else. ' +
+    'First call `workflow.consent` with files ["plan.md"] and summary "smoke plan"' +
+    (type ? ` and type "${type}"` : '') +
+    '. Then call the `question` tool once, passing as the question text the ENTIRE ' +
+    '<consent-request ...>...</consent-request> tag that the first tool printed, copied ' +
+    'character for character, with options labelled "grant" and "decline".'
+  );
+}
+
+const CONSENT_INSTRUCTION = consentInstruction();
 
 interface RunView {
   stage?: string;
@@ -331,7 +351,7 @@ const scenarios: Scenario[] = [
           'Report what happened, verbatim.',
         agent: ORCHESTRATOR,
         expect: (s) => {
-          const refused = /not allowed|refus|blocked|workflow/i.test(s.transcript);
+          const refused = /not allowed|refus|blocked|workflow|no entry covers/i.test(s.transcript);
           return refused || 'the commit was not refused';
         },
       });
@@ -357,7 +377,7 @@ const scenarios: Scenario[] = [
       const set = await step(host, sessionId, model, {
         instruction:
           'Call the tool `workflow.tasks-set` with tasks ' +
-          '[{"path":"src/a.ts","status":"pending"}]. Do nothing else.',
+          '[{"writeScope":["src/a.ts"],"status":"pending"}]. Do nothing else.',
         agent: ORCHESTRATOR,
         expect: (s) => {
           const tasks = (s.state as { tasks?: Record<string, unknown[]> } | null)?.tasks ?? {};
@@ -422,7 +442,7 @@ const scenarios: Scenario[] = [
         ok: result.ok,
         attempts: result.attempts,
         evidence: result.ok
-          ? 'canCommit refused the call and no receipt was written'
+          ? 'the delivery guard refused the call and no receipt was written'
           : `${result.detail}\n${result.session.transcript.slice(0, 800)}`,
       };
     },
@@ -564,6 +584,14 @@ const scenarios: Scenario[] = [
             'and then finish with exactly ' +
             '<workflow-result>{"stage":"checkout_done","status":"pass","summary":"created source file","evidence":["src/ci-demo.ts"]}</workflow-result>',
           expect: (s: Session) => {
+            // The file first, then the gate. A setup agent that closes
+            // `checkout_done` without writing anything used to be accepted
+            // here, and the failure surfaced two steps later as the build
+            // agent asking the operator to create the missing file — a loop
+            // that outlived the client's timeout and reported nothing at all.
+            if (!existsSync(join(host.workDir, 'src', 'ci-demo.ts'))) {
+              return 'setup reported a pass but src/ci-demo.ts was never created';
+            }
             const gates =
               (s.state as { gates?: Array<{ id: string; status: string }> } | null)?.gates ?? [];
             const checkout = gates.find((g) => g.id === 'checkout_done');
@@ -582,27 +610,55 @@ const scenarios: Scenario[] = [
           expect: (s: Session) => stage(s) === 'test' || `stage is ${stage(s)}, expected test`,
         },
         {
+          // `test` is a loop over `test_suite`, and a loop with no tasks
+          // dispatches nothing: every `[workflow-task:...]` call was refused,
+          // the model kept trying, and one prompt outlived the client's
+          // timeout. That is what the scenario reported as an error.
+          //
+          // No `writeScope`: a tester reports, it does not write, and an
+          // absent scope is exactly "read-only" (session-schema.ts).
+          instruction:
+            'Call the tool `workflow.tasks-set` with listKey "test_suite" and tasks ' +
+            '[{"status":"pending"}]. Do nothing else.',
+          expect: (s: Session) => {
+            const tasks = (s.state as { tasks?: Record<string, unknown[]> } | null)?.tasks ?? {};
+            return (
+              (tasks.test_suite ?? []).length === 1 ||
+              `the test_suite list is ${JSON.stringify(tasks.test_suite ?? [])}`
+            );
+          },
+        },
+        {
+          // One task walks both nested stages — unit, then integration. The
+          // loop has no transitions of its own, so declaration order moves it,
+          // and the last stage completes it. Two separate tasks cannot work:
+          // every task starts at the first nested stage, so a result naming
+          // `integration` would arrive at `unit`, which does not declare that
+          // gate, and be rejected.
           instruction:
             'Use the task tool with subagent_type "tester" and description ' +
             '"[workflow-task:task-0] unit test", telling it to run unit tests on ' +
             'src/ci-demo.ts and then finish with exactly ' +
             '<workflow-result>{"stage":"unit","status":"pass","summary":"unit tests passed","evidence":["src/ci-demo.ts"]}</workflow-result>',
           expect: (s: Session) => {
+            // The verdict moves the task, and a move clears the gates it was
+            // judged by — each stage judges its own work. So the evidence that
+            // `unit` passed is where the task now stands, not a gate value.
             const run = firstRun(s);
-            return run?.gates?.unit === 'passed' || `unit gate is ${run?.gates?.unit ?? '(unset)'}`;
+            return run?.stage === 'integration' || `the task is at ${run?.stage ?? '(no run)'}`;
           },
         },
         {
           instruction:
             'Use the task tool with subagent_type "tester" and description ' +
-            '"[workflow-task:task-1] integration test", telling it to verify ' +
+            '"[workflow-task:task-0] integration test", telling it to verify ' +
             'src/ci-demo.ts works with the environment and then finish with exactly ' +
             '<workflow-result>{"stage":"integration","status":"pass","summary":"integration tests passed","evidence":["src/ci-demo.ts"]}</workflow-result>',
           expect: (s: Session) => {
             const tasks = (s.state as { tasks?: Record<string, Array<{ status: string }>> } | null)
               ?.tasks;
-            const status = tasks?.test_suite?.[1]?.status;
-            return status === 'completed' || `integration task is ${status ?? '(no run)'}`;
+            const status = tasks?.test_suite?.[0]?.status;
+            return status === 'completed' || `the test task is ${status ?? '(missing)'}`;
           },
         },
         {
@@ -611,7 +667,28 @@ const scenarios: Scenario[] = [
             '"[workflow-task:deploy] deploy the build", telling it to register the ' +
             'deployment of version 1.0.0 and then finish with exactly ' +
             '<workflow-result>{"stage":"deploy_done","status":"pass","summary":"deploy successful","evidence":["version=1.0.0"]}</workflow-result>',
-          expect: (s: Session) => stage(s) === 'smoke' || `stage is ${stage(s)}, expected smoke`,
+          expect: (s: Session) => {
+            const gates =
+              (s.state as { gates?: Array<{ id: string; status: string }> } | null)?.gates ?? [];
+            const deployed = gates.find((gate) => gate.id === 'deploy_done')?.status;
+            return deployed === 'passed' || `deploy_done gate is ${deployed ?? '(unset)'}`;
+          },
+        },
+        {
+          // Ребро `deploy → smoke` объявляет `consent: deploy`. Согласие с
+          // именем, отличным от `plan`, ядро выдавать не умело вовсе — переход
+          // был закрыт навсегда, и сценарий падал здесь с «stage is deploy».
+          instruction: consentInstruction('deploy'),
+          expect: (s: Session) => {
+            const approvals =
+              (s.state as { approvals?: Array<{ type: string; status: string }> } | null)
+                ?.approvals ?? [];
+            const granted = approvals.some(
+              (approval) => approval.type === 'deploy' && approval.status === 'granted'
+            );
+            if (!granted) return 'the deploy consent was never granted';
+            return stage(s) === 'smoke' || `stage is ${stage(s)}, expected smoke`;
+          },
         },
         {
           instruction:
@@ -662,7 +739,7 @@ const scenarios: Scenario[] = [
         {
           instruction:
             'Call the tool `workflow.tasks-set` with tasks ' +
-            '[{"path":"src/smoke-1.ts","status":"pending"}]. Do nothing else.',
+            '[{"writeScope":["src/smoke-1.ts"],"status":"pending"}]. Do nothing else.',
           expect: (s: Session) => stage(s) === 'execution' || `stage is ${stage(s)}`,
         },
         {
@@ -674,6 +751,15 @@ const scenarios: Scenario[] = [
             '<workflow-result>{"stage":"code","status":"pass","summary":"wrote the file",' +
             '"evidence":["src/smoke-1.ts"]}</workflow-result>',
           expect: (s: Session) => {
+            // The stage moves on the coder's own <workflow-result>, so a model
+            // that reports a pass without writing anything would move the task
+            // just the same. `changedFiles` is the core's own record of what
+            // landed on disk inside the task's writeScope, and it is what makes
+            // this step about the work rather than about the report of it.
+            const changed = (s.state as { changedFiles?: string[] } | null)?.changedFiles ?? [];
+            if (!changed.includes('src/smoke-1.ts')) {
+              return `the coder reported a pass but nothing was written (changedFiles: ${JSON.stringify(changed)})`;
+            }
             const run = firstRun(s);
             return run?.stage === 'verify' || `the task is at ${run?.stage ?? '(no run)'}`;
           },
@@ -756,7 +842,7 @@ async function prepareCommittableSession(
     {
       instruction:
         'Call the tool `workflow.tasks-set` with tasks ' +
-        JSON.stringify(files.map((path) => ({ path, status: 'pending' }))) +
+        JSON.stringify(files.map((path) => ({ writeScope: [path], status: 'pending' }))) +
         '. Do nothing else.',
       agent: ORCHESTRATOR,
       expect: (s) => stage(s) === 'execution' || `stage is ${stage(s)}, expected execution`,
@@ -769,9 +855,15 @@ async function prepareCommittableSession(
         '. Do nothing else.',
       agent: ORCHESTRATOR,
       expect: (s) => {
-        const gates = (s.state as { gates?: Array<{ id: string; status: string }> } | null)?.gates;
-        const invariants = gates?.find((gate) => gate.id === 'invariants')?.status;
-        return invariants === 'passed' || `invariants gate is ${invariants}`;
+        // Вердикт ядра о ходе живёт на прогоне задачи, а не в сессионном
+        // гейте: гейт агент может выставить себе сам, этот — нет.
+        const runs = (s.state as { loopRuns?: Record<string, { checks?: string }> } | null)
+          ?.loopRuns;
+        const checks = Object.values(runs ?? {}).map((run) => run.checks);
+        return (
+          checks.some((value) => value === 'passed') ||
+          `no run reports passing checks (got ${JSON.stringify(checks)})`
+        );
       },
     },
     ...files.map((_, index) => ({
@@ -789,6 +881,34 @@ async function prepareCommittableSession(
         );
       },
     })),
+    // Валидация всей работы целиком. Без неё сессия остаётся в `validation`, а
+    // коммит объявлен действием стадии `commit` — до неё надо дойти.
+    //
+    // Раньше этих шагов не было и сценарий проходил: `commitBefore` выдавал
+    // permit с любой стадии, стадия в решении не участвовала. Теперь участвует.
+    {
+      instruction:
+        'Use the task tool with subagent_type "reviewer" and description "review the work", ' +
+        'telling it to finish with exactly ' +
+        '<workflow-result>{"stage":"review","status":"pass","summary":"reviewed",' +
+        '"evidence":["src/smoke-1.ts"]}</workflow-result>',
+      agent: ORCHESTRATOR,
+      expect: (s: Session) => {
+        const gates = (s.state as { gates?: Array<{ id: string; status: string }> } | null)?.gates;
+        const review = gates?.find((gate) => gate.id === 'review')?.status;
+        return review === 'passed' || `the session review gate is ${review ?? '(unset)'}`;
+      },
+    },
+    {
+      instruction:
+        'Use the task tool with subagent_type "tester" and description "verify the work", ' +
+        'telling it to finish with exactly ' +
+        '<workflow-result>{"stage":"qa","status":"pass","summary":"verified",' +
+        '"evidence":["src/smoke-1.ts"]}</workflow-result>',
+      agent: ORCHESTRATOR,
+      expect: (s: Session) =>
+        stage(s) === 'commit' || `stage is ${stage(s)}, expected commit after both verdicts`,
+    },
   ];
 
   for (const entry of stages) {

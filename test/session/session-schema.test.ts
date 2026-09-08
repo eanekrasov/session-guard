@@ -303,7 +303,7 @@ describe('MutationTaskSchema', () => {
 });
 
 describe('ActiveOperationSchema', () => {
-  it('accepts an operation with a captured baseline frame and invariants verdict', () => {
+  it('accepts an operation with a captured baseline frame', () => {
     const input = {
       callId: 'c1',
       runId: 'run-1',
@@ -312,13 +312,11 @@ describe('ActiveOperationSchema', () => {
       status: 'running',
       startedAt: '2024-01-01T00:00:00.000Z',
       baseline: { 'src/a.ts': 'abc123', 'src/b.ts': null },
-      invariants: 'passed',
     };
 
     const result = ActiveOperationSchema.parse(input);
 
     expect(result.baseline).toEqual({ 'src/a.ts': 'abc123', 'src/b.ts': null });
-    expect(result.invariants).toBe('passed');
   });
 
   it('accepts an operation with no baseline frame (write/edit)', () => {
@@ -332,6 +330,6 @@ describe('ActiveOperationSchema', () => {
     });
 
     expect(result.baseline).toBeUndefined();
-    expect(result.invariants).toBeUndefined();
+    expect((result as Record<string, unknown>).invariants).toBeUndefined();
   });
 });

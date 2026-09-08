@@ -23,8 +23,6 @@
 # compiler checks a stage's `gates:` against, so a typo is a compile error
 # rather than a stage that waits forever.
 gates:
-  - id: invariants
-    label: Invariants check
   - id: review
     label: Code review
   - id: qa
@@ -39,31 +37,73 @@ stages:
   # different one — `harness` ships a single agent, `android` ships ten. A
   # roster inherited from here would name agents the child does not have.
   # Profiles declare their own; the stages themselves are the same everywhere.
-  planning: {}
+  # Здесь пишут план, а не код. До объявления `actions:` правка на этой стадии
+  # отказывалась не политикой, а жизненным циклом мутации — «Cannot resolve a
+  # single workflow task run», — потому что задач ещё нет. Защита была
+  # случайной, а сообщение говорило о сантехнике вместо правила.
+  planning:
+    actions:
+      - action: bash
+        commands: ['git status', 'git status .*', 'git diff.*', 'git log.*', 'git show.*']
 
   # Decomposition into the task list `execution` will cycle over.
-  tasks_ready: {}
+  #
+  # Разбор на задачи — тоже не работа с кодом.
+  tasks_ready:
+    actions:
+      - action: bash
+        commands: ['git status', 'git status .*', 'git diff.*', 'git log.*', 'git show.*']
 
   execution:
     loop: implementation
     retryBudget:
       maximum: 5
+    # Внешняя стадия цикла: здесь оркестратор раздаёт задачи, работа идёт во
+    # вложенной `code`. Действия объявлены и здесь, потому что действующей
+    # стадией внешняя становится, пока не открыт ни один прогон — окно между
+    # входом в `execution` и допуском первой задачи. Без этого объявления
+    # правка в этом окне проходила без утверждённого плана.
+    actions:
+      - action: bash
+        commands: ['git status', 'git status .*', 'git diff.*', 'git log.*', 'git show.*']
     stages:
-      code: {}
+      # Где идёт работа — и единственная стадия, на которой она разрешена.
+      #
+      # Никаких правок, пока оператор не утвердил план. Раньше это нёс
+      # `actionGuards: beginMutation` — одно выражение на весь граф, без
+      # возможности сказать «здесь можно, а на planning нельзя».
+      #
+      # ВНИМАНИЕ при наследовании: `actions` — одно поле стадии, и потомок,
+      # объявивший свой список, заменяет этот целиком. Профиль, добавляющий
+      # свою команду сборки, обязан переписать и запись `edit`, иначе правки
+      # останутся без guard-а. Молча.
+      code:
+        actions:
+          - action: edit
+            paths: ['**']
+            guard: "session.approved('plan')"
+          # Чем собирать и чем проверять — дело профиля; база знает только
+          # чтение состояния репозитория.
+          - action: bash
+            commands: ['git status', 'git status .*', 'git diff.*', 'git log.*', 'git show.*']
+            guard: "session.approved('plan')"
       # Review and qa run here at the same time. A stage declares what it is
       # waiting for, and each agent's result names the gate it closes — never
       # the stage it ran in, because two of them ran in it.
       verify:
         gates: [review, qa]
     transitions:
-      # The task's own verdict, not the session's. `session.gates.invariants`
-      # is whatever the last move anywhere left behind, so a task whose own
-      # invariants failed walked on to `verify` on somebody else's pass. The
-      # move's verdict is rolled into the run's gates and reaches a loop guard
-      # as `task.gates`.
+      # Вердикт самой задачи, а не сессии. `task.checks` — то, что ядро
+      # вынесло о последнем ходе этой задачи, посмотрев на диск: упал ли
+      # инструмент, писал ли ход вне своего `writeScope`, посчитался ли дифф и
+      # прошли ли инварианты профиля.
+      #
+      # Намеренно не гейт: гейты пишет агент через `<workflow-result>`, и
+      # любой объявленный стадией гейт он способен выставить себе сам. Этот
+      # вердикт тем и ценен, что от рассказа агента не зависит.
       - from: code
         to: verify
-        guard: "task.gates.invariants == 'passed'"
+        guard: "task.checks == 'passed'"
       # Where a task's work ends. `done` is not a stage — it is the loop saying
       # this task is finished, and it is guarded like any other departure so a
       # task can never finish by having nowhere else to go.
@@ -80,10 +120,45 @@ stages:
   # verdicts are about the session, so they land on the session's gates.
   validation:
     gates: [review, qa]
+    # Проверяют уже сделанное, а не доделывают. Верификаторы читают дерево и
+    # гоняют то, что профиль им объявит — база знает только чтение.
+    actions:
+      - action: bash
+        commands: ['git status', 'git status .*', 'git diff.*', 'git log.*', 'git show.*']
 
-  commit: {}
-  done: {}
-  failed: {}
+  # Доставка. `action: bash`, потому что это и есть bash — инструмента
+  # `commit` у хоста нет. Доставкой вызов делает `delivers`, и он же говорит
+  # ядру не входить в жизненный цикл мутации, а выдать permit до вызова и
+  # сверить HEAD с закоммиченными файлами после.
+  #
+  # Здесь оно, а не в профиле: `scripts/commit-task.ts` — соглашение самого
+  # харнесса, и ядро до сих пор опознаёт его зашитой проверкой, когда стадия
+  # молчит. Профилю остаётся то, что действительно его: чем собирать и чем
+  # проверять.
+  commit:
+    actions:
+      # `guard:` — то, что раньше вычислял `canCommit` в рантайме: вся работа
+      # закрыта И все вердикты собраны. Условия про review и qa намеренно
+      # повторяют ребро `validation → commit`: ребро отвечает за движение и
+      # перестанет держать, как только появится второй вход в стадию, а право
+      # на коммит выдаёт действие. См. docs/gate-actions-before-removal.md.
+      - action: bash
+        commands: ['bun run .*commit-task\.ts.*']
+        delivers: true
+        guard: "allTasksCompleted('implementation') && session.gates.review == 'passed' && session.gates.qa == 'passed'"
+
+      # Осмотреться перед доставкой. Список действий исчерпывающий, так что без
+      # этой записи `git status` на стадии коммита был бы отказан.
+      - action: bash
+        commands: ['git status', 'git status .*', 'git diff.*', 'git log.*', 'git show.*']
+
+  # Конечные стадии. Пустой список действий — это «здесь нельзя ничего»:
+  # объявлен, значит исчерпывающий. Раньше это же говорил жизненный цикл
+  # мутации, но лишь по совпадению — задач в завершённой сессии не осталось.
+  done:
+    actions: []
+  failed:
+    actions: []
 
 transitions:
   # The operator approves the plan before any work is admitted.
@@ -125,16 +200,8 @@ transitions:
     to: done
     guard: "session.deliveryReceipt != null"
 
-actionGuards:
-  # No edit before the operator has approved a plan. There is deliberately no
-  # revision-based escape hatch: a fresh session is exactly the case this must
-  # hold for.
-  beginMutation: "session.approved('plan')"
-
 editingAgents:
   - code
   - debug
   - architect
 
-settings:
-  enableDashboard: false

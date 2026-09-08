@@ -44,7 +44,7 @@ describe('GuardEvaluator', () => {
     });
   });
 
-  describe('actionGuards expression using approved()', () => {
+  describe('guard expression using approved()', () => {
     it('evaluates actionGuard expression with approved()', () => {
       const session = {
         approvals: [{ type: 'plan', status: 'granted' }],

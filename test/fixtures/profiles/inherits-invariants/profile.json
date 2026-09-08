@@ -1,0 +1,1 @@
+{"id": "inherits-invariants", "name": "inherits-invariants", "extends": "nested-rollup", "schemas": ["cycle.yaml"]}

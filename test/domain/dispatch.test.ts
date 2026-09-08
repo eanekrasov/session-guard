@@ -24,7 +24,6 @@ function makeSession(overrides: Partial<WorkflowSession> = {}): WorkflowSession 
     verifications: [],
     retryBudgets: {},
     updatedAt: new Date().toISOString(),
-    baselineHashes: [],
     changedFiles: [],
     invariantViolations: [],
     consentedCallIDs: [],
@@ -33,13 +32,7 @@ function makeSession(overrides: Partial<WorkflowSession> = {}): WorkflowSession 
   };
 }
 
-function taskList(
-  tasks: Array<{
-    id: string;
-    path: string;
-    status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
-  }>
-): WorkflowSession['tasks'] {
+function taskList(tasks: WorkflowSession['tasks'][string]): WorkflowSession['tasks'] {
   return { implementation: tasks };
 }
 

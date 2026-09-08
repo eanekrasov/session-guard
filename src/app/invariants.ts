@@ -36,6 +36,22 @@ export interface ProfileInvariants {
 }
 
 /**
+ * Импортировать первый доступный из кандидатов; бросить, если ни один не читается.
+ */
+async function importFirst(paths: string[]): Promise<InvariantCheck[]> {
+  let last: unknown;
+  for (const path of paths) {
+    try {
+      const mod = await import(path);
+      return (mod.INVARIANTS as InvariantCheck[]) ?? [];
+    } catch (err) {
+      last = err;
+    }
+  }
+  throw last ?? new Error('no invariants module to import');
+}
+
+/**
  * P0-004: Load all invariants for a given profile.
  *
  * Resolves the profile's metadata via ProfileResolver, then dynamically
@@ -76,19 +92,21 @@ export async function getAllProfileInvariants(
 
   if (enabledIds.size === 0) return [];
 
-  // Try to dynamically import the profile's invariants.ts file
-  const invariantsPath = join(profilesDir, profileId, 'invariants.ts');
+  // Файл ищется по цепочке `extends`, а не только у самого профиля: список id
+  // наследуется от предка, и реализация лежит там же. Дельта-профиль вроде
+  // `smoke` наследует список у `base` и своего файла не имеет — до этой правки
+  // он получал бросок «declares N invariant(s) but ... cannot be loaded» на
+  // каждом ходу, а с ним и провальный вердикт `run.checks`.
+  const chain = await new ProfileResolver(profilesDir).profileChain(profileId);
+  const candidates = chain.map((entry) => join(profilesDir, entry.id, 'invariants.ts'));
+  const invariantsPath = candidates[0] ?? join(profilesDir, profileId, 'invariants.ts');
   let allChecks: InvariantCheck[] = [];
 
   try {
-    const mod = await import(invariantsPath);
-    allChecks = (mod.INVARIANTS as InvariantCheck[]) ?? [];
+    allChecks = await importFirst(candidates);
   } catch (err) {
-    // Fallback: try via file:// protocol (Bun/Node compatibility)
     try {
-      const filePath = join(profilesDir, profileId, 'invariants.ts');
-      const mod = await import(`file://${filePath}`);
-      allChecks = (mod.INVARIANTS as InvariantCheck[]) ?? [];
+      allChecks = await importFirst(candidates.map((path) => `file://${path}`));
     } catch {
       // The profile declares invariants it cannot load. Same rule: silence
       // here would report the file as clean against checks that never ran.

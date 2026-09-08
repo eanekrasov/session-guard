@@ -13,7 +13,6 @@ import {
 } from '../../src/domain/operation-lifecycle.ts';
 import { approve, decline } from '../../src/domain/approvals.ts';
 import { confirm, rejectVerification as reject } from '../../test/helpers.ts';
-import { canCommit } from '../../src/domain/session-queries.ts';
 import {
   hasLiveVerifier,
   markOutputReady,
@@ -64,15 +63,18 @@ const ENGINE_CONFIG: EngineConfig = {
       guard:
         "session.tasks.implementation.length > 0 && session.tasks.implementation.some(t => t.status != 'completed')",
     },
-    { from: 'EXECUTION', to: 'EXECUTION', kind: 'auto' },
-    { from: 'EXECUTION', to: 'COMMIT', kind: 'pass' },
+    { from: 'EXECUTION', to: 'EXECUTION' },
+    // Раньше `kind: 'pass'` со списком гейтов на уровне схемы. Ребро называет
+    // их само — это и был весь смысл `kind`.
+    {
+      from: 'EXECUTION',
+      to: 'COMMIT',
+      guard:
+        "session.gates.invariants == 'passed' && session.gates.review == 'passed' && session.gates.qa == 'passed'",
+    },
     { from: 'EXECUTION', to: 'PLANNING', guard: "!session.approved('plan')" },
     { from: 'COMMIT', to: 'DONE', guard: 'session.deliveryPermit != null' },
   ],
-  actionGuards: {
-    beginMutation: "session.approved('plan') || session.revision == 0",
-  },
-  requiredGates: ['invariants', 'review', 'qa'],
 };
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
@@ -162,7 +164,6 @@ describe('E2E: Full state machine flow', () => {
 
     expect(engine.deriveStage(session)).toBe('TASKS_READY');
     expect(engine.checkTransition('PLANNING', 'TASKS_READY', session).allowed).toBe(true);
-    expect(engine.canPerformAction(session, 'beginMutation').allowed).toBe(true);
 
     // 3. addTask → EXECUTION
     addImplementationTask(session);
@@ -206,7 +207,7 @@ describe('E2E: Full state machine flow', () => {
 
   // ─── TC2: Kind=pass blocks COMMIT when gates pending ─────────────────────
 
-  test('TC2: kind=pass blocks COMMIT when gates are pending', () => {
+  test('TC2: the edge into COMMIT is closed while gates are pending', () => {
     store = makeStore();
     const session = baseSession();
     const engine = new StateMachineEngine(ENGINE_CONFIG);
@@ -221,7 +222,6 @@ describe('E2E: Full state machine flow', () => {
     // checkTransition blocks — gates not passed
     const validation = engine.checkTransition('EXECUTION', 'COMMIT', session);
     expect(validation.allowed).toBe(false);
-    expect(validation.kind).toBe('pass');
     expect(validation.reason).toContain('gate');
   });
 
@@ -242,7 +242,6 @@ describe('E2E: Full state machine flow', () => {
 
     const validation = engine.checkTransition('EXECUTION', 'COMMIT', session);
     expect(validation.allowed).toBe(false);
-    expect(validation.kind).toBe('pass');
   });
 
   // ─── TC4: All gates passed → COMMIT allowed ──────────────────────────────
@@ -264,7 +263,6 @@ describe('E2E: Full state machine flow', () => {
 
     const validation = engine.checkTransition('EXECUTION', 'COMMIT', session);
     expect(validation.allowed).toBe(true);
-    expect(validation.kind).toBe('pass');
   });
 
   // ─── TC5: COMMIT → DONE blocked without deliveryReceipt ──────────────────
@@ -290,21 +288,6 @@ describe('E2E: Full state machine flow', () => {
     expect(validation.reason).toContain('guard failed');
   });
 
-  // ─── TC6: beginMutation blocked without approved plan ────────────────────
-
-  test('TC6: canPerformAction blocks beginMutation without approved plan', () => {
-    store = makeStore();
-    const session = baseSession();
-    // Simulate a session that has already had mutations (revision > 0)
-    // so the guard `session.approved('plan') || session.revision == 0` does not shortcut.
-    session.revision = 1;
-    const engine = new StateMachineEngine(ENGINE_CONFIG);
-
-    const result = engine.canPerformAction(session, 'beginMutation');
-    expect(result.allowed).toBe(false);
-    expect(result.reason).toContain('Action guard failed for beginMutation');
-  });
-
   // ─── TC7: Kind=auto — EXECUTION loop ─────────────────────────────────────
 
   test('TC7: EXECUTION → EXECUTION (auto loop) is always allowed', () => {
@@ -317,7 +300,6 @@ describe('E2E: Full state machine flow', () => {
 
     const validation = engine.checkTransition('EXECUTION', 'EXECUTION', session);
     expect(validation.allowed).toBe(true);
-    expect(validation.kind).toBe('auto');
   });
 
   // ─── TC8: Failed mutation retry cycle ────────────────────────────────────
@@ -331,12 +313,12 @@ describe('E2E: Full state machine flow', () => {
     addImplementationTask(session);
     expect(engine.deriveStage(session)).toBe('EXECUTION');
 
-    // First mutation fails. The verdict is recorded; the attempt is not spent
-    // here — the move that retries the task is what costs one.
+    // First mutation fails. Nothing records the verdict any more — the
+    // `invariants` gate is gone — but the attempt still must not be spent
+    // here: the move that retries the task is what costs one.
     beginMutation(session, 'm-1', 'unknown', () => 'code');
     session.changedFiles = [];
     finishMutation(session, false, 'm-1');
-    expect(session.gates.find((g) => g.id === 'invariants')?.status).toBe('failed');
     expect(session.retryBudgets['task-1']).toBeUndefined();
 
     // Retry — passes
@@ -395,7 +377,6 @@ describe('E2E: Full state machine flow', () => {
     const facts = toSessionFacts(session);
 
     expect(facts.profileId).toBe('test');
-    expect(facts.gates.invariants).toBeDefined();
     expect(facts.verified('bug', 'confirmed')).toBe(false);
     expect(facts.activeOperations[0]?.callId).toBe('m-1');
   });
@@ -444,16 +425,13 @@ describe('E2E: Full state machine flow', () => {
 
     const config: EngineConfig = {
       stageAssignments: [{ id: 'always', priority: 0, condition: 'true', result: 'TASKS_READY' }],
-      transitions: [{ from: 'TASKS_READY', to: 'EXECUTION', kind: 'auto' }],
-      actionGuards: {},
-      requiredGates: [],
+      transitions: [{ from: 'TASKS_READY', to: 'EXECUTION' }],
     };
     const engine = new StateMachineEngine(config);
 
     const result = engine.tryApplyTransitions(session);
     expect(result.applied).toBe(true);
     expect(session.currentStage).toBe('EXECUTION');
-    expect(session.stageOverride).toBeUndefined();
   });
 
   // ─── TC14: Illegal transition ────────────────────────────────────────────
@@ -802,36 +780,6 @@ describe('E2E: Full state machine flow', () => {
     expect(session.verifications).toEqual([]);
   });
 
-  // ─── TC37: beginMutation resets invariants gate to pending ────────────────
-
-  test('TC37: beginMutation resets invariants gate to pending', () => {
-    store = makeStore();
-    const session = baseSession();
-
-    setGateStatus(session, 'invariants', 'passed');
-    expect(session.gates.find((g) => g.id === 'invariants')?.status).toBe('passed');
-
-    approve(session, 'plan', 'ev', 'c1');
-    setImplementationTasks(session, [createTask()]);
-    beginMutation(session, 'm-1', 'unknown', () => 'code');
-    expect(session.gates.find((g) => g.id === 'invariants')?.status).toBe('pending');
-  });
-
-  // ─── TC38: Failed mutation sets invariants to failed ──────────────────────
-
-  test('TC38: failed mutation sets invariants gate to failed', () => {
-    store = makeStore();
-    const session = baseSession();
-
-    approve(session, 'plan', 'ev', 'c1');
-    setImplementationTasks(session, [createTask()]);
-    beginMutation(session, 'm-1', 'unknown', () => 'code');
-    session.changedFiles = [];
-    finishMutation(session, false, 'm-1');
-
-    expect(session.gates.find((g) => g.id === 'invariants')?.status).toBe('failed');
-  });
-
   // ─── TC39: Multiple approvals of different types ──────────────────────────
 
   test('TC39: multiple approval types coexist', () => {
@@ -987,18 +935,6 @@ describe('E2E: Full state machine flow', () => {
     expect(engine.deriveStage(session)).toBe('EXECUTION');
   });
 
-  // ─── TC48: engine with custom ActionId — unknown action is allowed ───────
-
-  test('TC48: canPerformAction allows unknown action', () => {
-    store = makeStore();
-    const session = baseSession();
-    const engine = new StateMachineEngine(ENGINE_CONFIG);
-
-    // 'unknownAction' has no guard in config → allowed
-    const result = engine.canPerformAction(session, 'unknownAction');
-    expect(result.allowed).toBe(true);
-  });
-
   // ─── TC50: Stage derivation priority — higher wins ───────────────────────
 
   test('TC50: higher priority stage assignment wins over lower', () => {
@@ -1011,8 +947,6 @@ describe('E2E: Full state machine flow', () => {
         { id: 'high', priority: 100, condition: 'true', result: 'HIGH' },
       ],
       transitions: [],
-      actionGuards: {},
-      requiredGates: [],
     };
     const engine = new StateMachineEngine(priorityConfig);
 
@@ -1043,20 +977,24 @@ describe('E2E: Full state machine flow', () => {
 
   // ─── TC53: Guard with null gate ID is safe ───────────────────────────────
 
-  test('TC53: checkTransition with non-existent gate is handled', () => {
+  test('TC53: a guard naming a gate the session does not carry is handled', () => {
     store = makeStore();
     const session = baseSession();
 
-    const engine = new StateMachineEngine(ENGINE_CONFIG);
-    // Required gates include one that doesn't exist in gates list
     const customConfig: EngineConfig = {
       ...ENGINE_CONFIG,
-      requiredGates: ['non_existent_gate'],
+      transitions: [
+        {
+          from: 'EXECUTION',
+          to: 'COMMIT',
+          guard: "session.gates.non_existent_gate == 'passed'",
+        },
+      ],
     };
     const strictEngine = new StateMachineEngine(customConfig);
 
     const validation = strictEngine.checkTransition('EXECUTION', 'COMMIT', session);
-    // Gate not in gates map → treated as not-passed → blocked
+    // Гейта нет в карте → читается как не пройденный → закрыто.
     expect(validation.allowed).toBe(false);
   });
 

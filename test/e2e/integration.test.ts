@@ -41,9 +41,6 @@ describe('Public API', () => {
       // they are combined into one resolved schema (with extends merged)
       expect(result.schemas).toHaveLength(1);
       expect(result.schemas[0].source).toBe('android/state-machine.yaml');
-      // settings deep merged: mutationTtlMs overridden by android
-      expect(result.schemas[0].settings!.mutationTtlMs).toBe(600000);
-      expect(result.schemas[0].settings!.retryMaxAttempts).toBe(3);
     });
 
     it('throws for unknown profileId', async () => {

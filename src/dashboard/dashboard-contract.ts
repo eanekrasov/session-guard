@@ -26,7 +26,6 @@ export interface DashboardTransition {
 export interface DashboardGate {
   id: string;
   label: string;
-  required: boolean;
 }
 
 export interface DashboardProfile {
@@ -34,7 +33,6 @@ export interface DashboardProfile {
   version: string;
   description?: string;
   invariants: string[];
-  mandatoryStages: string[];
   agents: string[];
   skills: string[];
 }
@@ -112,8 +110,6 @@ export interface DashboardInput {
  * Все данные передаются явно через DashboardInput.
  */
 export function buildDashboardSchema(input: DashboardInput): DashboardSchema {
-  const mandatoryStageIds = new Set(input.profile.mandatoryStages);
-
   const states: DashboardState[] = input.stages.map((id) => ({
     id,
     label: id.replace(/_/g, ' '),
@@ -130,7 +126,6 @@ export function buildDashboardSchema(input: DashboardInput): DashboardSchema {
   const gates: DashboardGate[] = input.gates.map((g) => ({
     id: g.id,
     label: GATE_LABELS[g.id] ?? g.id,
-    required: mandatoryStageIds.has(g.id),
   }));
 
   return {

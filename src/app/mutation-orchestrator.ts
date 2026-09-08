@@ -48,27 +48,18 @@ export interface FinishMutationInput {
  * here.
  *
  * This used to fold a profile's whole schema list into one config. Stages
- * survived that only because their keys differ; `gates`, `requiredGates`,
- * `taskControlAgents`, `actionGuards` and same-endpoint transitions were
+ * survived that only because their keys differ; `gates`,
+ * `taskControlAgents` and same-endpoint transitions were
  * silently last-wins, so two independent workflows in one profile would have
  * quietly become one. No profile declared two, so it never bit.
  */
 export function schemaToEngineConfig(schema: ResolvedSchema): EngineConfig {
-  const actionGuards: Record<string, string> = {};
-  for (const [action, guard] of Object.entries(schema.actionGuards ?? {})) {
-    if (typeof guard === 'string') {
-      actionGuards[action] = guard;
-    }
-  }
-
   const stages = (mergeStages({}, schema.stages) ?? {}) as NonNullable<EngineConfig['stages']>;
 
   return {
     stages: Object.keys(stages).length > 0 ? stages : undefined,
     stageAssignments: [...(schema.stageAssignments ?? [])],
     transitions: [...(schema.transitions ?? [])],
-    actionGuards: Object.keys(actionGuards).length > 0 ? actionGuards : undefined,
-    requiredGates: schema.requiredGates ? [...schema.requiredGates] : undefined,
     gates: schema.gates?.map((gate) => ({ ...gate })),
     taskControlAgents: schema.taskControlAgents ? [...schema.taskControlAgents] : undefined,
     editingAgents: schema.editingAgents ? [...schema.editingAgents] : undefined,
@@ -373,9 +364,12 @@ export class MutationOrchestrator {
   }
 
   /**
-   * Begin a mutation for a bash/write tool call. Guards via canPerformAction,
-   * then records the pre-mutation stage in liveMutations for later
-   * post-factum transition validation.
+   * Начать ход для вызова bash/write: снять baseline-кадр и записать стадию
+   * до хода в liveMutations для последующей проверки перехода постфактум.
+   *
+   * Проверки `canPerformAction(session, 'beginMutation')` здесь больше нет —
+   * `actionGuards` удалён. Это был единственный запрет правок до утверждения
+   * плана. См. docs/gate-actions-before-removal.md.
    */
   async beginMutation(
     input: { sessionID: string; callID: string },
@@ -418,20 +412,11 @@ export class MutationOrchestrator {
       }
     }
 
-    // Enqueue the actual mutation work — serialised per root session.
-    // beginMutation guards itself internally via canPerformAction,
-    // so the early guard here is redundant for safety; the enqueue
-    // isolates the concurrent write path.
+    // Enqueue the actual mutation work — serialised per root session: the
+    // enqueue isolates the concurrent write path.
     await this.queue.enqueue(input.sessionID, async (session) => {
       // No workflow session means the plugin does not govern this call.
       if (!session) return;
-
-      const canMutate = engine.canPerformAction(session, 'beginMutation');
-      if (!canMutate.allowed) {
-        throw new WorkflowBlockedError(
-          `Mutation blocked by engine: ${canMutate.reason ?? 'unknown'}`
-        );
-      }
 
       // P1-014: Release interrupted locks — if active operations exist but are
       // NOT tracked in liveMutations, clear them so a new mutation can start.
@@ -439,10 +424,21 @@ export class MutationOrchestrator {
       this.releaseInterruptedLock(session, input.callID);
 
       try {
-        beginMutation(session, input.callID, 'state-machine', (listKey) => {
-          const loopStage = engine.getLoopStage(listKey);
-          return loopStage ? (firstNestedStageId(loopStage) ?? null) : null;
-        });
+        // Список цикла текущей стадии — или `null`, если стадия не цикл.
+        // Без него синтез прогона искал единственную runnable-задачу по всем
+        // спискам сразу и в схеме с двумя последовательными циклами мог взять
+        // задачу чужого.
+        const stageDef = engine.getStages()[session.currentStage];
+        beginMutation(
+          session,
+          input.callID,
+          'state-machine',
+          (listKey) => {
+            const loopStage = engine.getLoopStage(listKey);
+            return loopStage ? (firstNestedStageId(loopStage) ?? null) : null;
+          },
+          stageDef?.loop ?? null
+        );
       } catch (err) {
         await this.log('error', `beginMutation: domain mutation failed`, {
           callID: input.callID,
@@ -565,9 +561,16 @@ export class MutationOrchestrator {
   /**
    * Применить transitions для сессии. Вызывается из runtime после approve.
    */
-  async applyTransitions(session: WorkflowSession): Promise<void> {
+  /**
+   * Возвращает, был ли переход применён и куда. Раньше результат выбрасывался,
+   * и вызывающий не мог отличить «сессия сдвинулась» от «осталась на месте» —
+   * а это разные события, и второе происходит после каждого второго вызова
+   * инструмента.
+   */
+  async applyTransitions(session: WorkflowSession): Promise<{ applied: boolean; to?: string }> {
     const engine = await this.resolveEngine(session.profileId, session.schemaId);
-    engine.tryApplyTransitions(session);
+    const result = engine.tryApplyTransitions(session);
+    return { applied: result.applied === true, to: result.to };
   }
 
   /**

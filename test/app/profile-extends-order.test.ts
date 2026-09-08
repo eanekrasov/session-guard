@@ -24,16 +24,10 @@ describe('extends resolution order', () => {
     expect(transition?.guard).toBe('FROM_CHILD');
   });
 
-  it('lets the extending profile override an inherited action guard', async () => {
+  it('lets the extending profile override an inherited field', async () => {
     const profile = await resolveConfig('extends-child', profilesDir);
     const config = schemaToEngineConfig(selectSchema('extends-child', profile.schemas, undefined));
-    expect(config.actionGuards?.beginMutation).toBe('CHILD_GUARD');
-  });
-
-  it('lets the extending profile override inherited requiredGates', async () => {
-    const profile = await resolveConfig('extends-child', profilesDir);
-    const config = schemaToEngineConfig(selectSchema('extends-child', profile.schemas, undefined));
-    expect(config.requiredGates).toEqual(['childGate']);
+    expect(config.editingAgents).toEqual(['childAgent']);
   });
 
   it('keeps stages contributed by both profiles', async () => {
@@ -46,7 +40,7 @@ describe('extends resolution order', () => {
 describe('a delta profile keeps what its parent declared', () => {
   it('merges stages entry by entry instead of replacing the map', async () => {
     const { SchemaLoader } = await import('../../src/schema/schema-loader.ts');
-    const loader = new SchemaLoader();
+    const loader = new SchemaLoader(profilesDir);
 
     const merged = loader.mergeSchemas(
       { stages: { planning: {}, commit: {}, done: {} } },
@@ -61,7 +55,7 @@ describe('a delta profile keeps what its parent declared', () => {
 
   it('refines a stage instead of replacing it', async () => {
     const { SchemaLoader } = await import('../../src/schema/schema-loader.ts');
-    const loader = new SchemaLoader();
+    const loader = new SchemaLoader(profilesDir);
 
     const merged = loader.mergeSchemas(
       {
@@ -89,7 +83,7 @@ describe('a delta profile keeps what its parent declared', () => {
 
   it('merges transitions by their endpoints', async () => {
     const { SchemaLoader } = await import('../../src/schema/schema-loader.ts');
-    const loader = new SchemaLoader();
+    const loader = new SchemaLoader(profilesDir);
 
     const merged = loader.mergeSchemas(
       {

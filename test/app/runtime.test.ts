@@ -6,6 +6,7 @@ import { execSync } from 'node:child_process';
 import type { PluginInput } from '@opencode-ai/plugin';
 import { createSession, WorkflowStore } from '../../src/session/session-store.ts';
 import { createTask } from '../support/task-factory.ts';
+import { hostPayload } from '../support/host-payload.ts';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -1018,7 +1019,7 @@ describe('extractCallId via handleEvent', () => {
       },
     };
 
-    await hooks.event!(event);
+    await hooks.event!(hostPayload(event));
 
     const session = await loadSession(sessionId);
     // Without callID support, extractCallId would look at part.id,
@@ -1049,7 +1050,7 @@ describe('extractCallId via handleEvent', () => {
       },
     };
 
-    await hooks.event!(event);
+    await hooks.event!(hostPayload(event));
     // Should not throw
   });
 
@@ -1068,7 +1069,7 @@ describe('extractCallId via handleEvent', () => {
       },
     };
 
-    await hooks.event!(event);
+    await hooks.event!(hostPayload(event));
     // Should not throw — null callID is handled gracefully
   });
 
@@ -1087,7 +1088,7 @@ describe('extractCallId via handleEvent', () => {
       },
     };
 
-    await hooks.event!(event);
+    await hooks.event!(hostPayload(event));
     // Should not throw
   });
 });
@@ -1100,13 +1101,15 @@ describe('handleEvent always delegates to rulesRuntime', () => {
     const sessionId = 'evt-rules-ok';
     await createTestSession(sessionId);
 
-    await hooks.event!({
-      event: {
-        type: 'message.part.updated',
-        message: { id: 'msg-1', parts: [] },
-        part: { id: 'part-ok', status: 'completed', callID: 'call-ok' },
-      },
-    });
+    await hooks.event!(
+      hostPayload({
+        event: {
+          type: 'message.part.updated',
+          message: { id: 'msg-1', parts: [] },
+          part: { id: 'part-ok', status: 'completed', callID: 'call-ok' },
+        },
+      })
+    );
   });
 
   test('error (failed) event — no throw', async () => {
@@ -1114,13 +1117,15 @@ describe('handleEvent always delegates to rulesRuntime', () => {
     const sessionId = 'evt-rules-err';
     await createTestSession(sessionId);
 
-    await hooks.event!({
-      event: {
-        type: 'message.part.updated',
-        message: { id: 'msg-1', parts: [] },
-        part: { id: 'part-err', status: 'failed', callID: 'call-err' },
-      },
-    });
+    await hooks.event!(
+      hostPayload({
+        event: {
+          type: 'message.part.updated',
+          message: { id: 'msg-1', parts: [] },
+          part: { id: 'part-err', status: 'failed', callID: 'call-err' },
+        },
+      })
+    );
   });
 
   test('all event types pass through without throwing', async () => {
@@ -1132,17 +1137,19 @@ describe('handleEvent always delegates to rulesRuntime', () => {
       { type: 'message.part.updated' as const, status: 'in_progress' as const, callID: 'a' },
       { type: 'message.part.updated' as const, status: 'completed' as const, callID: 'b' },
       { type: 'message.part.updated' as const, status: 'failed' as const, callID: 'c' },
-      { type: 'message.removed' as const, status: undefined as const, callID: 'd' },
+      { type: 'message.removed' as const, status: undefined, callID: 'd' },
     ];
 
     for (const { type, status, callID } of testEvents) {
-      await hooks.event!({
-        event: {
-          type,
-          message: { id: `msg-${callID}`, parts: [] },
-          part: status ? { id: `part-${callID}`, status, callID } : undefined,
-        },
-      });
+      await hooks.event!(
+        hostPayload({
+          event: {
+            type,
+            message: { id: `msg-${callID}`, parts: [] },
+            part: status ? { id: `part-${callID}`, status, callID } : undefined,
+          },
+        })
+      );
     }
   });
 });
@@ -1275,17 +1282,19 @@ describe('handleEvent recognises the SDK ToolPart error shape', () => {
 
     // The SDK carries tool status under part.state.status with value 'error',
     // not as a flat part.status of 'failed'.
-    await hooks.event!({
-      event: {
-        type: 'message.part.updated',
-        message: { id: 'msg-sdk', parts: [] },
-        part: {
-          id: 'prt_sdk',
-          callID: 'call-sdk-err',
-          state: { status: 'error' },
+    await hooks.event!(
+      hostPayload({
+        event: {
+          type: 'message.part.updated',
+          message: { id: 'msg-sdk', parts: [] },
+          part: {
+            id: 'prt_sdk',
+            callID: 'call-sdk-err',
+            state: { status: 'error' },
+          },
         },
-      },
-    });
+      })
+    );
 
     const session = await loadSession(sessionId);
     expect(session!.activeOperations['call-sdk-err']?.status).toBe('interrupted');
@@ -1298,13 +1307,15 @@ describe('handleEvent recognises the SDK ToolPart error shape', () => {
       ...activeOperation('call-legacy-err'),
     });
 
-    await hooks.event!({
-      event: {
-        type: 'message.part.updated',
-        message: { id: 'msg-legacy', parts: [] },
-        part: { id: 'prt_legacy', callID: 'call-legacy-err', status: 'failed' },
-      },
-    });
+    await hooks.event!(
+      hostPayload({
+        event: {
+          type: 'message.part.updated',
+          message: { id: 'msg-legacy', parts: [] },
+          part: { id: 'prt_legacy', callID: 'call-legacy-err', status: 'failed' },
+        },
+      })
+    );
 
     const session = await loadSession(sessionId);
     expect(session!.activeOperations['call-legacy-err']?.status).toBe('interrupted');
@@ -1317,13 +1328,15 @@ describe('handleEvent recognises the SDK ToolPart error shape', () => {
       ...activeOperation('call-sdk-ok'),
     });
 
-    await hooks.event!({
-      event: {
-        type: 'message.part.updated',
-        message: { id: 'msg-ok', parts: [] },
-        part: { id: 'prt_ok', callID: 'call-sdk-ok', state: { status: 'completed' } },
-      },
-    });
+    await hooks.event!(
+      hostPayload({
+        event: {
+          type: 'message.part.updated',
+          message: { id: 'msg-ok', parts: [] },
+          part: { id: 'prt_ok', callID: 'call-sdk-ok', state: { status: 'completed' } },
+        },
+      })
+    );
 
     const session = await loadSession(sessionId);
     expect(session!.activeOperations['call-sdk-ok']?.status).toBe('running');
@@ -1428,12 +1441,14 @@ describe('opt-in session gate — handleEvent', () => {
   test('message.removed for an unknown session is a no-op', async () => {
     const hooks = await createRuntime();
 
-    await hooks.event!({
-      event: {
-        type: 'message.removed',
-        properties: { sessionID: 'evt-gate-none' },
-      },
-    });
+    await hooks.event!(
+      hostPayload({
+        event: {
+          type: 'message.removed',
+          properties: { sessionID: 'evt-gate-none' },
+        },
+      })
+    );
 
     expect(await loadSession('evt-gate-none')).toBeNull();
   });
@@ -1447,13 +1462,15 @@ describe('opt-in session gate — handleEvent', () => {
 
     // The error branch resolves the owning session by scanning stored sessions,
     // so it works without an event-level sessionID and never invents one.
-    await hooks.event!({
-      event: {
-        type: 'message.part.updated',
-        message: { id: 'msg-gate', parts: [] },
-        part: { id: 'prt_gate', callID: 'call-gate-err', state: { status: 'error' } },
-      },
-    });
+    await hooks.event!(
+      hostPayload({
+        event: {
+          type: 'message.part.updated',
+          message: { id: 'msg-gate', parts: [] },
+          part: { id: 'prt_gate', callID: 'call-gate-err', state: { status: 'error' } },
+        },
+      })
+    );
 
     const session = await loadSession(sessionId);
     expect(session!.activeOperations['call-gate-err']?.status).toBe('interrupted');

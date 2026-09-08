@@ -23,7 +23,6 @@ function createSession(overrides: Partial<WorkflowSession> = {}): WorkflowSessio
     retryBudgets: {},
     updatedAt: new Date().toISOString(),
     verifications: [],
-    baselineHashes: [],
     changedFiles: [],
     currentStage: 'PLANNING',
     invariantViolations: [],
@@ -34,11 +33,11 @@ function createSession(overrides: Partial<WorkflowSession> = {}): WorkflowSessio
 
 function engineFromCompiled(cw: CompiledWorkflow): StateMachineEngine {
   return new StateMachineEngine({
+    stageAssignments: [],
     transitions: cw.transitions.map((t) => ({
       from: t.from,
       to: t.to,
       guard: t.guard ?? undefined,
-      kind: t.kind,
       effects: t.effects
         .filter((e) => e.bumpRetry || e.approve)
         .map((e) => ({
@@ -63,10 +62,11 @@ describe('declarative control flow', () => {
     it('advances through an ordered sequence of stages with auto transitions', () => {
       const engine = engineFromSchema({
         source: 'test.yaml',
+        id: 'test',
         stages: { START: {}, MIDDLE: {}, END: {} },
         transitions: [
-          { from: 'START', to: 'MIDDLE', kind: 'auto' },
-          { from: 'MIDDLE', to: 'END', kind: 'auto' },
+          { from: 'START', to: 'MIDDLE' },
+          { from: 'MIDDLE', to: 'END' },
         ],
         stageAssignments: [{ id: 'main', priority: 1, condition: 'true', result: 'START' }],
       });
@@ -94,10 +94,11 @@ describe('declarative control flow', () => {
     it('chooses the first matching outgoing transition by guard', () => {
       const engine = engineFromSchema({
         source: 'test.yaml',
+        id: 'test',
         stages: { CHOOSE: { stages: { step: {} } }, PATH_A: {}, PATH_B: {} },
         transitions: [
-          { from: 'CHOOSE', to: 'PATH_A', guard: "session.gates.review == 'passed'", kind: 'auto' },
-          { from: 'CHOOSE', to: 'PATH_B', kind: 'auto' },
+          { from: 'CHOOSE', to: 'PATH_A', guard: "session.gates.review == 'passed'" },
+          { from: 'CHOOSE', to: 'PATH_B' },
         ],
         stageAssignments: [{ id: 'main', priority: 1, condition: 'true', result: 'CHOOSE' }],
       });
@@ -114,10 +115,11 @@ describe('declarative control flow', () => {
     it('takes the guarded branch when its condition is met', () => {
       const engine = engineFromSchema({
         source: 'test.yaml',
+        id: 'test',
         stages: { CHOOSE: { stages: { step: {} } }, PATH_A: {}, PATH_B: {} },
         transitions: [
-          { from: 'CHOOSE', to: 'PATH_A', guard: "session.gates.review == 'passed'", kind: 'auto' },
-          { from: 'CHOOSE', to: 'PATH_B', kind: 'auto' },
+          { from: 'CHOOSE', to: 'PATH_A', guard: "session.gates.review == 'passed'" },
+          { from: 'CHOOSE', to: 'PATH_B' },
         ],
         stageAssignments: [{ id: 'main', priority: 1, condition: 'true', result: 'CHOOSE' }],
       });
@@ -137,8 +139,9 @@ describe('declarative control flow', () => {
     it('stops at an explicitly declared terminal stage', () => {
       const engine = engineFromSchema({
         source: 'test.yaml',
+        id: 'test',
         stages: { ACTIVE: {}, DONE: {} },
-        transitions: [{ from: 'ACTIVE', to: 'DONE', kind: 'auto' }],
+        transitions: [{ from: 'ACTIVE', to: 'DONE' }],
         stageAssignments: [{ id: 'main', priority: 1, condition: 'true', result: 'ACTIVE' }],
       });
 
@@ -155,16 +158,25 @@ describe('declarative control flow', () => {
     it('resets to the retry target stage when budget is not exhausted', () => {
       const engine = engineFromSchema({
         source: 'test.yaml',
-        stages: { CODE: { stages: { dev: {} } }, REVIEW: { stages: { check: {} } } },
+        id: 'test',
+        // `DONE` — не часть предмета теста, а требование компилятора: workflow
+        // без стадии, из которой не ведёт ни одного ребра, не заканчивается
+        // никогда. Её ребро охраняется противоположным условием к retry, так
+        // что на путь повтора оно не влияет.
+        stages: {
+          CODE: { stages: { dev: {} } },
+          REVIEW: { stages: { check: {} } },
+          DONE: {},
+        },
         transitions: [
-          { from: 'CODE', to: 'REVIEW', kind: 'auto' },
+          { from: 'CODE', to: 'REVIEW' },
           {
             from: 'REVIEW',
             to: 'CODE',
             guard: "session.gates.review == 'failed'",
-            kind: 'auto',
             effects: [{ bumpRetry: 'cycles', maxAttempts: 3 }],
           },
+          { from: 'REVIEW', to: 'DONE', guard: "session.gates.review == 'passed'" },
         ],
         stageAssignments: [{ id: 'main', priority: 1, condition: 'true', result: 'CODE' }],
       });
@@ -190,11 +202,12 @@ describe('declarative control flow', () => {
     it('re-entering a stage after completion keeps previous result intact', () => {
       const engine = engineFromSchema({
         source: 'test.yaml',
+        id: 'test',
         stages: { START: {}, LOOP: {}, END: {} },
         transitions: [
-          { from: 'START', to: 'LOOP', kind: 'auto' },
-          { from: 'LOOP', to: 'END', guard: "session.gates.qa == 'passed'", kind: 'auto' },
-          { from: 'LOOP', to: 'START', guard: "session.gates.qa == 'failed'", kind: 'auto' },
+          { from: 'START', to: 'LOOP' },
+          { from: 'LOOP', to: 'END', guard: "session.gates.qa == 'passed'" },
+          { from: 'LOOP', to: 'START', guard: "session.gates.qa == 'failed'" },
         ],
         stageAssignments: [{ id: 'main', priority: 1, condition: 'true', result: 'START' }],
       });

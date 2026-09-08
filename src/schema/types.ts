@@ -11,7 +11,6 @@ export type {
   RetryBudget,
   LoopSource,
   GateItem,
-  ToolItem,
 } from './profile-schema.ts';
 
 import type {
@@ -44,7 +43,7 @@ export interface ResolvedMetadata {
   skillsDir: string;
 }
 
-// ResolvedSchema — resolved версия ProfileSchema без extends/tools/gateMapping.
+// ResolvedSchema — resolved версия ProfileSchema без extends.
 // Индексная сигнатура для совместимости с z.infer (ProfileSchemaSchema.passthrough()).
 
 /**
@@ -78,9 +77,7 @@ export interface ResolvedSchema {
   source: string;
   stages?: Record<string, StageDef>;
   transitions?: TransitionDef[];
-  settings?: Record<string, unknown>;
   editingAgents?: string[];
-  requiredGates?: string[];
   /**
    * The gates this workflow declares.
    *
@@ -90,7 +87,6 @@ export interface ResolvedSchema {
    */
   gates?: GateItem[];
   taskControlAgents?: string[];
-  actionGuards?: Record<string, string>;
   stageAssignments?: StageAssignmentRule[];
   [key: string]: unknown;
 }

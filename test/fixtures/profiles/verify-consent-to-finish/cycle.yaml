@@ -1,8 +1,25 @@
-extends: 'verify-default/cycle.yaml'
-# Finishing the task needs the operator's consent, on the edge that ends it.
+# Завершение задачи требует согласия оператора — на том ребре, которое её и
+# заканчивает.
+#
+# Профиль объявлен отдельно, а не как дельта над `verify-default`, по той же
+# причине, что и `verify-approve-done`: он определяется отсутствием стадии
+# `verify`. Наследование вернуло бы её, а вести к ней было бы нечему —
+# единственное ребро идёт из `code` сразу в `done`. Компилятор теперь такую
+# сироту отвергает, и правильно делает.
 stages:
   execution:
+    loop: implementation
+    dispatch:
+      strategy: serial
+    stages:
+      code:
+        allowedAgents: ['code']
     transitions:
       - from: code
         to: done
         consent: release
+stageAssignments:
+  - id: execution
+    priority: 1
+    condition: 'true'
+    result: execution

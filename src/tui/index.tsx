@@ -8,7 +8,7 @@ import { createEffect, createMemo, createSignal, For, Show } from 'solid-js';
 import type { KeyEvent } from '@opentui/core';
 import type { JSX } from '@opentui/solid';
 import type { TuiPlugin, TuiPluginApi } from '@opencode-ai/plugin/tui';
-import { listProfiles, readSession, resolveConfig } from '../public-api.ts';
+import { archiveDirOf, listProfiles, readSession, resolveConfig } from '../public-api.ts';
 import { opencodeStateDir, profilesDir as resolveProfilesDir, sessionsDir } from '../app/paths.ts';
 import { checkTransition } from '../domain/engine.ts';
 import { toSessionFacts } from '../domain/session-facts.ts';
@@ -60,12 +60,16 @@ async function readRuntimeSession(
 }
 
 function runtimeDirs(baseDir: string): string[] {
-  return [
+  const live: string[] = [
     process.env.STATE_MACHINE_STORE_DIR,
     sessionsDir(baseDir),
     sessionsDir(opencodeStateDir()),
     join(opencodeStateDir(), 'session-guard'),
   ].filter((dir): dir is string => Boolean(dir));
+  // Законченная сессия уезжает в `archive/` рядом со своим рантаймом и
+  // перестаёт чем-либо управлять. Показывать её всё равно надо: чем работа
+  // кончилась — это то, ради чего сюда и смотрят.
+  return [...live, ...live.map(archiveDirOf)];
 }
 
 export type SectionApi = {
@@ -383,9 +387,6 @@ async function resolveStageNeighbors(
       const facts = parsedSession?.success
         ? {
             ...toSessionFacts(parsedSession.data),
-            requiredGates:
-              [...profile.schemas].reverse().find((schema) => schema.requiredGates !== undefined)
-                ?.requiredGates ?? [],
           }
         : undefined;
       // Уникальные целевые стадии — если между from→to есть несколько переходов

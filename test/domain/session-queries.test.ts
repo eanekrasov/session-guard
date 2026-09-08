@@ -1,42 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  canCommit,
   extractBashCommand,
   hasForbiddenGitSubcommand,
   isCommitTaskCommand,
 } from '../../src/domain/session-queries.ts';
-import type { WorkflowSession } from '../../src/session/session-schema.ts';
-
-function makeSession(overrides: Partial<WorkflowSession> = {}): WorkflowSession {
-  return {
-    schemaVersion: 2,
-    sessionId: 'ses_test',
-    revision: 1,
-    title: '',
-    gates: [],
-    approvals: [],
-    refs: {},
-    tasks: {},
-    activeOperations: {},
-    activeTaskContexts: [],
-    loopRuns: {},
-    deliveryPermit: null,
-    deliveryReceipt: null,
-    retryBudgets: {},
-    pendingDecisions: [],
-    updatedAt: new Date().toISOString(),
-    verifications: [],
-    baselineHashes: [],
-    changedFiles: [],
-    currentStage: 'planning',
-    invariantViolations: [],
-    profileId: 'test',
-    schemaId: 'cycle',
-    consentedCallIDs: [],
-    ...overrides,
-  };
-}
-
 describe('extractBashCommand', () => {
   test('возвращает строку как есть', () => {
     expect(extractBashCommand('echo hi')).toBe('echo hi');
@@ -125,65 +92,6 @@ describe('isCommitTaskCommand', () => {
 
   test('не принимает упоминание commit-task.ts в комментарии', () => {
     expect(isCommitTaskCommand('printf injected > unexpected.ts # commit-task.ts')).toBe(false);
-  });
-});
-
-describe('canCommit', () => {
-  test('все гейты passed и все задачи completed → true', () => {
-    const session = makeSession({
-      gates: [
-        { id: 'invariants', status: 'passed' },
-        { id: 'review', status: 'passed' },
-      ],
-      tasks: {
-        stage1: [{ id: 'task-1', status: 'completed' } as never],
-      },
-    });
-    expect(canCommit(session, ['invariants', 'review'])).toBe(true);
-  });
-
-  test('гейт не пройден → false', () => {
-    const session = makeSession({
-      gates: [
-        { id: 'invariants', status: 'passed' },
-        { id: 'review', status: 'pending' },
-      ],
-      tasks: {
-        stage1: [{ id: 'task-1', status: 'completed' } as never],
-      },
-    });
-    expect(canCommit(session, ['invariants', 'review'])).toBe(false);
-  });
-
-  test('гейт отсутствует → false', () => {
-    const session = makeSession({
-      gates: [],
-      tasks: {},
-    });
-    expect(canCommit(session, ['missing-gate'])).toBe(false);
-  });
-
-  test('есть незавершённые задачи → false', () => {
-    const session = makeSession({
-      gates: [{ id: 'invariants', status: 'passed' }],
-      tasks: {
-        stage1: [
-          { id: 'task-1', status: 'completed' } as never,
-          { id: 'task-2', status: 'running' } as never,
-        ],
-      },
-    });
-    expect(canCommit(session, ['invariants'])).toBe(false);
-  });
-
-  test('пустой requiredGates — проверяет только задачи', () => {
-    const session = makeSession({
-      gates: [],
-      tasks: {
-        stage1: [{ id: 'task-1', status: 'completed' } as never],
-      },
-    });
-    expect(canCommit(session, [])).toBe(true);
   });
 });
 

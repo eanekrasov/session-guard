@@ -35,9 +35,13 @@ stages:
       strategy: serial
     retryBudget:
       maximum: 3
-    # P2.2: exitGuards на loop stage — не выпускает из test, пока все gates не установлены
+    # P2.2: exitGuards на loop stage. Они проверяются на уровне СЕССИИ
+    # (`engine.ts`: `toGuardContext(session)` без задачи), поэтому `task.*`
+    # здесь не существует — выражение про гейты задачи всегда было ложным и
+    # держало стадию закрытой навсегда. Сессионный факт того же смысла: пока
+    # хоть одна задача в работе, из `test` не уходим.
     exitGuards:
-      - "task.gates.unit != null && task.gates.integration != null"
+      - '!hasPendingTasks()'
     stages:
       unit:
         allowedAgents: [tester, orchestrator]
@@ -50,9 +54,10 @@ stages:
   deploy:
     allowedAgents: [deployer, orchestrator]
     gates: [deploy_done]
-    # P2.4: entryGuards — не пускает в deploy, пока тесты не пройдены
+    # P2.4: entryGuards — не пускает в deploy, пока тесты не пройдены. Тоже
+    # сессионный уровень: спрашиваем список задач, а не гейты одной из них.
     entryGuards:
-      - "task.gates.unit == 'passed' && task.gates.integration == 'passed'"
+      - "allTasksCompleted('test_suite')"
 
   smoke:
     allowedAgents: [smoke, orchestrator]
@@ -63,7 +68,7 @@ stages:
 transitions:
   - from: init
     to: checkout
-    guard: "session.refs.plan != null"
+    guard: 'session.refs.plan != null'
     consent: plan
 
   - from: checkout
@@ -83,14 +88,14 @@ transitions:
   # P1.4: fail-переход с retry — тесты не пройдены, перезапуск
   - from: test
     to: build
-    guard: "(task.gates.unit == 'failed' || task.gates.integration == 'failed') && !isExhausted('cycles')"
+    guard: "!allTasksCompleted('test_suite') && !isExhausted('cycles')"
     effects:
       - bumpRetry: cycles
         maxAttempts: 3
 
   - from: test
     to: deploy
-    guard: "task.gates.unit == 'passed' && task.gates.integration == 'passed'"
+    guard: "allTasksCompleted('test_suite')"
 
   # Consent на переходе deploy → smoke (P1.2)
   - from: deploy
@@ -105,17 +110,20 @@ transitions:
 
   - from: smoke
     to: done
-    guard: "task.gates.smoke == 'passed'"
+    guard: "session.gates.smoke == 'passed'"
 
-stageAssignments:
-  - id: init
-    priority: 1
-    condition: 'true'
-    result: init
+# Правил назначения стадии здесь нет намеренно.
+#
+# Раньше стояло одно: `condition: 'true'` → `init`. Условие истинно всегда, так
+# что `deriveStage` возвращал `init` при любом состоянии, а `applyTransitions`
+# на каждом ходу заново брал ребро `init → checkout`. Сессия доезжала до
+# `checkout` и оставалась там навсегда: гейт `checkout_done` был закрыт, а
+# переход `checkout → build` не рассматривался вовсе — стадией считалась не та,
+# в которой сессия стоит. Без правил `deriveStage` отвечает `currentStage`, и
+# для прямого конвейера это ровно то, что нужно.
 
 editingAgents:
   - setup
   - builder
   - deployer
   - orchestrator
-

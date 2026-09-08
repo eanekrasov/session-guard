@@ -1,0 +1,17 @@
+# Профиль объявляет СВОЮ команду доставки — намеренно не ту, что узнавала
+# зашитая в ядро проверка на имя `commit-task.ts`. Это и есть разница, которую
+# проверяет тест: опознание вызова принадлежит схеме.
+stages:
+  planning: {}
+  commit:
+    actions:
+      - action: bash
+        commands: ['deliver .*']
+        delivers: true
+  done: {}
+transitions:
+  - from: planning
+    to: commit
+  - from: commit
+    to: done
+    guard: 'session.deliveryReceipt != null'

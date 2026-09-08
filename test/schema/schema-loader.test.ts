@@ -58,33 +58,5 @@ describe('SchemaLoader', () => {
     });
   });
 
-  describe('resolveSchemaChain (mixed merge)', () => {
-    it('merges schemas with settings deep-merge while inheriting rest', async () => {
-      // Android extends base, so its schemas are in android/ but
-      // its extends chain includes base's schemas.
-
-      const schemaLoader = new SchemaLoader(fixturesDir);
-
-      // First load the android schema (which extends base/state-machine.yaml)
-      // Then load the base schema as its base
-      // The merge: android's gateMapping should override base's, but
-      // settings and transitions should inherit from base where android doesn't specify.
-
-      const androidSchema = await schemaLoader.loadSchemaFile('android', 'state-machine.yaml');
-      expect(androidSchema).not.toBeNull();
-
-      const baseSchema = await schemaLoader.loadSchemaFile('base', 'state-machine.yaml');
-      expect(baseSchema).not.toBeNull();
-
-      // Now merge them
-      const merged = schemaLoader.mergeSchemas(baseSchema!, androidSchema!);
-
-      // settings should be deep merged — mutationTtlMs overridden, retryMaxAttempts inherited
-      expect(merged.settings!.mutationTtlMs).toBe(600000);
-      expect(merged.settings!.retryMaxAttempts).toBe(3);
-
-      // transitions should be overridden by android
-      expect(merged.transitions).toBeDefined();
-    });
-  });
+  describe('resolveSchemaChain (mixed merge)', () => {});
 });

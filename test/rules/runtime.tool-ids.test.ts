@@ -4,6 +4,7 @@ import { SessionStore } from '../../src/rules/session-store.js';
 import * as runtimeModule from '../../src/rules/runtime.js';
 import * as runtimeContextModule from '../../src/rules/runtime-context.js';
 import * as runtimeChatModule from '../../src/rules/runtime-chat.js';
+import { hostPayload } from '../support/host-payload.ts';
 
 describe('runtime module runtime exports', () => {
   it('exports only OpenCodeRulesRuntime class at runtime', () => {
@@ -31,21 +32,23 @@ describe('runtime module boundaries', () => {
 
 describe('OpenCodeRulesRuntime.queryAvailableToolIDs', () => {
   it('augments tool ids with connected mcp capability ids', async () => {
-    const runtime = new OpenCodeRulesRuntime({
-      client: {
-        tool: { ids: async () => ({ data: ['bash'] }) },
-        mcp: {
-          status: async () => ({
-            data: { context7: { status: 'connected' } },
-          }),
-        },
-      } as unknown,
-      directory: '/tmp',
-      projectDirectory: '/tmp',
-      ruleFiles: [],
-      sessionStore: new SessionStore({ max: 10 }),
-      debugLog: () => {},
-    });
+    const runtime = new OpenCodeRulesRuntime(
+      hostPayload({
+        client: {
+          tool: { ids: async () => ({ data: ['bash'] }) },
+          mcp: {
+            status: async () => ({
+              data: { context7: { status: 'connected' } },
+            }),
+          },
+        } as unknown,
+        directory: '/tmp',
+        projectDirectory: '/tmp',
+        ruleFiles: [],
+        sessionStore: new SessionStore({ max: 10 }),
+        debugLog: () => {},
+      })
+    );
 
     const ids: string[] = await (
       runtime as unknown as { queryAvailableToolIDs: () => Promise<string[]> }
@@ -55,17 +58,19 @@ describe('OpenCodeRulesRuntime.queryAvailableToolIDs', () => {
   });
 
   it('handles missing mcp.status gracefully', async () => {
-    const runtime = new OpenCodeRulesRuntime({
-      client: {
-        tool: { ids: async () => ({ data: ['bash'] }) },
-        // no mcp property
-      } as unknown,
-      directory: '/tmp',
-      projectDirectory: '/tmp',
-      ruleFiles: [],
-      sessionStore: new SessionStore({ max: 10 }),
-      debugLog: () => {},
-    });
+    const runtime = new OpenCodeRulesRuntime(
+      hostPayload({
+        client: {
+          tool: { ids: async () => ({ data: ['bash'] }) },
+          // no mcp property
+        } as unknown,
+        directory: '/tmp',
+        projectDirectory: '/tmp',
+        ruleFiles: [],
+        sessionStore: new SessionStore({ max: 10 }),
+        debugLog: () => {},
+      })
+    );
 
     const ids: string[] = await (
       runtime as unknown as { queryAvailableToolIDs: () => Promise<string[]> }

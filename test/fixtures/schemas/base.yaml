@@ -11,10 +11,4 @@ transitions:
   - from: planning
     to: execution
     guard: "session.approved('plan')"
-settings:
-  mutationTtlMs: 1800000
-  retryMaxAttempts: 3
 editingAgents: ['architect']
-requiredGates: ['invariants']
-actionGuards:
-  beginMutation: "session.approved('plan')"

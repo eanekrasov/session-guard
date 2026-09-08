@@ -3,7 +3,8 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { WorkflowSessionSchema } from './session-schema.ts';
-import { sessionFileName, sessionIdFromFileName } from './session-files.ts';
+import { archiveDirOf, sessionFileName, sessionIdFromFileName } from './session-files.ts';
+
 import type { WorkflowSession } from './session-schema.ts';
 import type { LogFn } from '../app/logger.ts';
 
@@ -330,6 +331,66 @@ export class WorkflowStore {
     this.locks.set(key, chain);
     await chain;
     if (removed) void this.log('info', `Session deleted: ${sessionId}`);
+  }
+
+  /**
+   * Убрать законченную сессию из рантайма, сохранив её целиком.
+   *
+   * Терминальная стадия — конец workflow, и дальше сессия не должна
+   * управлять ничем: ни допуском, ни переходами, ни ходом мутации. «Сессии
+   * нет» в этом проекте выражается ровно одним способом — файла нет там, где
+   * его ищут (`load`). Заводить второй способ не-существования значило бы
+   * учить каждое место различать два вида отсутствия.
+   *
+   * Поэтому перенос, а не удаление: расписка о доставке, гейты, вердикты и
+   * одобрения — это и есть продукт работы, и стирать его в момент, когда он
+   * окончательно сложился, незачем. Архив читают те, кому нужен итог: TUI,
+   * dashboard, host-smoke.
+   *
+   * Порядок блокировок тот же, что у `delete`: цепочка в процессе плюс файловый
+   * лок, иначе `save()`, уже державший свою полезную нагрузку, переименует
+   * сессию обратно в рантайм после переноса.
+   */
+  async archive(sessionId: string): Promise<string | null> {
+    this.parentCache.delete(sessionId);
+    const filePath = this.sessionPath(sessionId);
+    const targetPath = path.join(archiveDirOf(this.directory), sessionFileName(sessionId));
+
+    const key = sessionId;
+    const prev = this.locks.get(key) ?? Promise.resolve();
+    let moved = false;
+    const chain: Promise<void> = prev
+      .catch(() => {})
+      .then(() =>
+        this.withFileLock(sessionId, async () => {
+          if (!existsSync(filePath)) return;
+          await mkdir(path.dirname(targetPath), { recursive: true });
+          await rename(filePath, targetPath);
+          moved = true;
+        })
+      )
+      .finally(() => {
+        if (this.locks.get(key) === chain) this.locks.delete(key);
+      });
+
+    this.locks.set(key, chain);
+    await chain;
+    if (moved) void this.log('info', `Session archived: ${sessionId}`, { path: targetPath });
+    return moved ? targetPath : null;
+  }
+
+  /**
+   * Прочитать законченную сессию из архива. `load` её уже не видит — в том и
+   * смысл, — а показать итог кому-то надо.
+   */
+  async loadArchived(sessionId: string): Promise<WorkflowSession | null> {
+    const filePath = path.join(archiveDirOf(this.directory), sessionFileName(sessionId));
+    if (!existsSync(filePath)) return null;
+    try {
+      return WorkflowSessionSchema.parse(JSON.parse(await readFile(filePath, 'utf-8')));
+    } catch {
+      return null;
+    }
   }
 
   async list(): Promise<string[]> {

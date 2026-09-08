@@ -9,7 +9,6 @@ import {
 import { hasLiveVerifier } from '../../test/helpers.ts';
 import { approve, decline } from '../../src/domain/approvals.ts';
 import { confirm, rejectVerification as reject } from '../../test/helpers.ts';
-import { canCommit } from '../../src/domain/session-queries.ts';
 import { parseWorkflowResult, MUTATION_TTL_MS } from '../../src/domain/evidence.ts';
 import { createTask } from '../support/task-factory.ts';
 
@@ -32,7 +31,6 @@ function makeSession(overrides: Partial<WorkflowSession> = {}): WorkflowSession 
     verifications: [],
     retryBudgets: {},
     updatedAt: new Date().toISOString(),
-    baselineHashes: [],
     changedFiles: [],
     invariantViolations: [],
     consentedCallIDs: [],
@@ -99,8 +97,6 @@ describe('beginMutation', () => {
     expect(session.activeOperations['mutation-1'].status).toBe('running');
     expect(session.activeOperations['mutation-1'].startedAt).toBeDefined();
     expect(session.verifications).toEqual([]);
-    const invGate = session.gates.find((g) => g.id === 'invariants');
-    expect(invGate?.status).toBe('pending');
   });
 
   it('throws when active operation exists and is not expired', () => {
@@ -294,7 +290,7 @@ describe('reject', () => {
 // ─── R6.6: finishMutation ─────────────────────────────────────────────────────
 
 describe('finishMutation', () => {
-  it('clears operation, stores modified artifacts, sets invariants passed', () => {
+  it('clears operation and stores modified artifacts', () => {
     const session = makeSession({
       tasks: taskList('running'),
       loopRuns: loopRun(),
@@ -306,11 +302,11 @@ describe('finishMutation', () => {
 
     expect(session.activeOperations).toEqual({});
     expect(session.changedFiles).toEqual(['src/foo.ts']);
-    const invGate = session.gates.find((g) => g.id === 'invariants');
-    expect(invGate?.status).toBe('passed');
+    // Вердикт ядра о ходе ложится на прогон задачи, а не в гейт.
+    expect(session.loopRuns['run-1'].checks).toBe('passed');
   });
 
-  it('sets invariants failed and leaves the retry budget alone', () => {
+  it('leaves the retry budget alone on a failed move', () => {
     const session = makeSession({
       tasks: taskList('running'),
       loopRuns: loopRun(),
@@ -321,8 +317,7 @@ describe('finishMutation', () => {
     session.changedFiles = [];
     finishMutation(session, false);
 
-    const invGate = session.gates.find((g) => g.id === 'invariants');
-    expect(invGate?.status).toBe('failed');
+    expect(session.loopRuns['run-1'].checks).toBe('failed');
     // An attempt belongs to the move that takes it, not to the verdict.
     expect(session.retryBudgets['task-1'].attempts).toBe(0);
     expect(session.activeOperations).toEqual({});

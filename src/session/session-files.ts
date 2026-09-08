@@ -93,3 +93,15 @@ export async function readAllSessions(directory: string): Promise<Record<string,
   }
   return sessions;
 }
+
+/**
+ * Где лежат законченные сессии — подкаталог рантайма.
+ *
+ * Подкаталогом, а не соседом: каталог рантайма задаётся извне
+ * (`STATE_MACHINE_STORE_DIR`), и сосед у произвольного пути — это уже
+ * догадка о структуре вокруг него. `list()` перечисляет только файлы, так
+ * что архив ему не мешает.
+ */
+export function archiveDirOf(runtimeDirectory: string): string {
+  return path.join(runtimeDirectory, 'archive');
+}

@@ -1,6 +1,16 @@
 # A workflow that admits nothing until the operator has approved a plan. It
 # declares one stage, because the guard is the whole subject.
+#
+# The rule lives in `actions:`, and it has to. It used to live nowhere: an
+# empty stage declares no policy at all, and the refusal came from the mutation
+# lifecycle failing to resolve a task run — plumbing, not a decision. A stage
+# that says nothing now admits everything, so a stage that means "nothing until
+# the plan is approved" has to say it.
 stages:
-  planning: {}
-actionGuards:
-  beginMutation: "session.approved('plan')"
+  planning:
+    actions:
+      - action: edit
+        paths: ['**']
+        guard: "session.approved('plan')"
+      - action: bash
+        guard: "session.approved('plan')"

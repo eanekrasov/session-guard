@@ -49,11 +49,6 @@ function collect(where: string, schema: Record<string, unknown>): Expression[] {
     }
   };
 
-  for (const [action, guard] of Object.entries(
-    (schema.actionGuards as Record<string, unknown>) ?? {}
-  )) {
-    push(`actionGuards.${action}`, guard);
-  }
   for (const [index, rule] of (
     (schema.stageAssignments as Array<Record<string, unknown>>) ?? []
   ).entries()) {

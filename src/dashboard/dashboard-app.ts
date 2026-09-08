@@ -18,7 +18,13 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildDashboardSchema } from './dashboard-contract.ts';
 import { getIssue, postComment } from './beads-bridge.ts';
-import { listProfileAgents, readAllSessions, readSession, resolveConfig } from '../public-api.ts';
+import {
+  archiveDirOf,
+  listProfileAgents,
+  readAllSessions,
+  readSession,
+  resolveConfig,
+} from '../public-api.ts';
 import { selectSchema, schemaToEngineConfig } from '../app/mutation-orchestrator.ts';
 import { compileWorkflow } from '../schema/compile-workflow.ts';
 
@@ -257,12 +263,26 @@ export function createDashboard(config: DashboardConfig): Dashboard {
    * hides a broken session behind a stale copy of itself is lying about the
    * thing it exists to show.
    */
+  /**
+   * Рантайм и архив вместе.
+   *
+   * Законченная сессия уезжает из рантайма в `archive/`: с этого момента она
+   * ничем не управляет, и «сессии нет» выражается отсутствием файла там, где
+   * его ищет `load`. Но монитор существует, чтобы показывать итог, и потерять
+   * из виду именно завершившуюся работу — ровно наоборот его назначению.
+   *
+   * Рантайм читается последним: пока сессия жива, её текущее состояние важнее
+   * любой одноимённой записи в архиве.
+   */
   async function loadAllSessions(): Promise<Record<string, unknown>> {
-    return readAllSessions(sessionsDir);
+    return {
+      ...(await readAllSessions(archiveDirOf(sessionsDir))),
+      ...(await readAllSessions(sessionsDir)),
+    };
   }
 
   async function loadSession(id: string): Promise<unknown | null> {
-    return readSession(sessionsDir, id);
+    return (await readSession(sessionsDir, id)) ?? readSession(archiveDirOf(sessionsDir), id);
   }
 
   /**
@@ -329,7 +349,6 @@ export function createDashboard(config: DashboardConfig): Dashboard {
           description: resolved.metadata.description ?? '',
           invariants: resolved.metadata.invariants ?? [],
           // What the workflow waits on before it may deliver.
-          mandatoryStages: selected.requiredGates ?? [],
           agents: resolved.metadata.agents ?? [],
           skills: resolved.metadata.skills ?? [],
         },

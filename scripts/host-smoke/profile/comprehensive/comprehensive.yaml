@@ -99,9 +99,6 @@ transitions:
     to: done
     guard: "session.deliveryReceipt != null"
 
-actionGuards:
-  beginMutation: "session.approved('plan')"
-
 editingAgents:
   - coder
   - orchestrator

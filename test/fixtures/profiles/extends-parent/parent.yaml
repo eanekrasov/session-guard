@@ -8,6 +8,4 @@ transitions:
   - from: a
     to: b
     guard: 'FROM_PARENT'
-actionGuards:
-  beginMutation: 'PARENT_GUARD'
-requiredGates: [parentGate]
+editingAgents: [parentAgent]

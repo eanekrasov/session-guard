@@ -124,3 +124,21 @@ describe('validateFilesForProfile', () => {
     expect(result.warnings).toEqual([]);
   });
 });
+
+describe('a delta profile inherits the invariants of the profile it extends', () => {
+  const FIXTURES = path.resolve(__dirname, '../fixtures/profiles');
+
+  it('finds invariants.ts along the extends chain, not only in its own directory', async () => {
+    // `profile.json.extends` наследует СПИСОК id, а файл лежит у того предка,
+    // который его объявил. Пока файл искали только у самого профиля, дельта
+    // получала «declares N invariant(s) but ... cannot be loaded» на каждом
+    // ходу — и вместе с броском провальный вердикт `run.checks`.
+    const { getAllProfileInvariants } = await import('../../src/app/invariants.ts');
+
+    const parent = await getAllProfileInvariants('nested-rollup', FIXTURES);
+    const child = await getAllProfileInvariants('inherits-invariants', FIXTURES);
+
+    expect(parent.map((c) => c.id)).toEqual(['LF_ONLY']);
+    expect(child.map((c) => c.id)).toEqual(parent.map((c) => c.id));
+  });
+});

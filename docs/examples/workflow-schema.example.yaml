@@ -69,11 +69,7 @@ transitions:
     to: done
     guard: "session.deliveryReceipt != null"
 
-
-
 # ─── Action Guards ─────────────────────────────────────────────────────────────
-actionGuards:
-  beginMutation: "session.approved('plan') || session.revision == 0"
 
 # ─── Редактирующие агенты ──────────────────────────────────────────────────────
 editingAgents:
@@ -88,5 +84,3 @@ verifiers:
   - qa
 
 # ─── Настройки ─────────────────────────────────────────────────────────────────
-settings:
-  enableDashboard: false

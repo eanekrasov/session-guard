@@ -29,12 +29,13 @@ function makeConfig(overrides?: Partial<EngineConfig>): EngineConfig {
       },
     ],
     transitions: [
-      { from: 'PLANNING', to: 'EXECUTION', kind: 'auto', guard: "session.approved('plan')" },
-      { from: 'EXECUTION', to: 'COMMIT', kind: 'pass' },
-      { from: 'EXECUTION', to: 'FIXUP', kind: 'fail' },
+      { from: 'PLANNING', to: 'EXECUTION', guard: "session.approved('plan')" },
+      // Раньше это были `kind: pass` и `kind: fail`, читавшие список гейтов с
+      // уровня схемы. Сахар снят: ребро называет гейты само.
+      { from: 'EXECUTION', to: 'COMMIT', guard: "session.gates.invariants == 'passed'" },
+      { from: 'EXECUTION', to: 'FIXUP', guard: "session.gates.invariants == 'failed'" },
       { from: 'COMMIT', to: 'DONE' },
     ],
-    actionGuards: {},
     ...overrides,
   };
 }
@@ -59,274 +60,31 @@ async function createWorkflowSession(
   return session;
 }
 
-describe('E2E: checkTransition kind=pass/fail', () => {
-  describe('kind=pass — gates must all be passed', () => {
-    test('allows COMMIT stage when invariants gate is passed', async () => {
-      directory = await mkdtemp(join(tmpdir(), 'sm-e2e-pass'));
-      store = new WorkflowStore(join(directory, '.opencode/state-machine/sessions'));
-      const session = await createWorkflowSession('root', 'test');
-
-      // Set sessions facts to make EXECUTION current stage
-      setGateStatus(session, 'invariants', 'passed');
-      session.tasks.implementation[0].status = 'completed';
-      await store.save(session);
-
-      const engine = new StateMachineEngine(makeConfig({ requiredGates: ['invariants'] }));
-      const result = engine.checkTransition('EXECUTION', 'COMMIT', session);
-
-      expect(result.allowed).toBe(true);
-      expect(result.kind).toBe('pass');
-    });
-
-    test('blocks COMMIT stage when invariants gate is pending', async () => {
-      directory = await mkdtemp(join(tmpdir(), 'sm-e2e-pass-block'));
-      store = new WorkflowStore(join(directory, '.opencode/state-machine/sessions'));
-      const session = await createWorkflowSession('root', 'test');
-
-      // invariants is still 'pending' — not passed
-      session.tasks.implementation[0].status = 'completed';
-      await store.save(session);
-
-      const engine = new StateMachineEngine(makeConfig({ requiredGates: ['invariants'] }));
-      const result = engine.checkTransition('EXECUTION', 'COMMIT', session);
-
-      expect(result.allowed).toBe(false);
-      expect(result.kind).toBe('pass');
-      expect(result.reason).toContain('invariants');
-    });
-
-    test('blocks COMMIT stage when invariants gate is failed', async () => {
-      directory = await mkdtemp(join(tmpdir(), 'sm-e2e-pass-fail'));
-      store = new WorkflowStore(join(directory, '.opencode/state-machine/sessions'));
-      const session = await createWorkflowSession('root', 'test');
-
-      setGateStatus(session, 'invariants', 'failed');
-      session.tasks.implementation[0].status = 'completed';
-      await store.save(session);
-
-      const engine = new StateMachineEngine(makeConfig({ requiredGates: ['invariants'] }));
-      const result = engine.checkTransition('EXECUTION', 'COMMIT', session);
-
-      expect(result.allowed).toBe(false);
-      expect(result.kind).toBe('pass');
-    });
-
-    test('allows transition with empty requiredGates list', async () => {
-      directory = await mkdtemp(join(tmpdir(), 'sm-e2e-pass-empty'));
-      store = new WorkflowStore(join(directory, '.opencode/state-machine/sessions'));
-      const session = await createWorkflowSession('root', 'test');
-      await store.save(session);
-
-      const engine = new StateMachineEngine(makeConfig({ requiredGates: [] }));
-      const result = engine.checkTransition('EXECUTION', 'COMMIT', session);
-
-      expect(result.allowed).toBe(true);
-      expect(result.kind).toBe('pass');
-    });
-  });
-
-  describe('kind=fail — at least one gate must be failed', () => {
-    test('allows FIXUP stage when invariants gate is failed', async () => {
-      directory = await mkdtemp(join(tmpdir(), 'sm-e2e-fail-allow'));
-      store = new WorkflowStore(join(directory, '.opencode/state-machine/sessions'));
-      const session = await createWorkflowSession('root', 'test');
-
-      setGateStatus(session, 'invariants', 'failed');
-      session.tasks.implementation[0].status = 'completed';
-      await store.save(session);
-
-      const engine = new StateMachineEngine(makeConfig({ requiredGates: ['invariants'] }));
-      const result = engine.checkTransition('EXECUTION', 'FIXUP', session);
-
-      expect(result.allowed).toBe(true);
-      expect(result.kind).toBe('fail');
-    });
-
-    test('blocks FIXUP stage when no gate is failed', async () => {
-      directory = await mkdtemp(join(tmpdir(), 'sm-e2e-fail-block'));
-      store = new WorkflowStore(join(directory, '.opencode/state-machine/sessions'));
-      const session = await createWorkflowSession('root', 'test');
-
-      // All gates passed — no failed gate
-      setGateStatus(session, 'invariants', 'passed');
-      session.tasks.implementation[0].status = 'completed';
-      await store.save(session);
-
-      const engine = new StateMachineEngine(makeConfig({ requiredGates: ['invariants'] }));
-      const result = engine.checkTransition('EXECUTION', 'FIXUP', session);
-
-      expect(result.allowed).toBe(false);
-      expect(result.kind).toBe('fail');
-      expect(result.reason).toContain('gate');
-    });
-
-    test('kind=fail looks at any required gate — one failed is enough', async () => {
-      directory = await mkdtemp(join(tmpdir(), 'sm-e2e-fail-some'));
-      store = new WorkflowStore(join(directory, '.opencode/state-machine/sessions'));
-      const session = await createWorkflowSession('root', 'test');
-
-      // Multiple gates — one failed is enough
-      setGateStatus(session, 'invariants', 'passed');
-      setGateStatus(session, 'review', 'failed');
-      session.tasks.implementation[0].status = 'completed';
-      await store.save(session);
-
-      const engine = new StateMachineEngine(
-        makeConfig({ requiredGates: ['invariants', 'review'] })
-      );
-      const result = engine.checkTransition('EXECUTION', 'FIXUP', session);
-
-      expect(result.allowed).toBe(true);
-      expect(result.kind).toBe('fail');
-    });
-  });
-
-  describe('kind=auto — bypasses gate checks', () => {
-    test('auto transition allowed even with pending gates', async () => {
-      directory = await mkdtemp(join(tmpdir(), 'sm-e2e-auto'));
-      store = new WorkflowStore(join(directory, '.opencode/state-machine/sessions'));
-      const session = await createWorkflowSession('root', 'test');
-
-      // Plan approved so auto transition guard passes
-      session.approvals.push({ type: 'plan', callId: 'c1', status: 'granted' });
-      await store.save(session);
-
-      const engine = new StateMachineEngine(makeConfig({ requiredGates: ['invariants'] }));
-      const result = engine.checkTransition('PLANNING', 'EXECUTION', session);
-
-      expect(result.allowed).toBe(true);
-      expect(result.kind).toBe('auto');
-    });
-
-    test('tryApplyTransitions sets currentStage on session', async () => {
-      directory = await mkdtemp(join(tmpdir(), 'sm-e2e-auto-apply'));
-      store = new WorkflowStore(join(directory, '.opencode/state-machine/sessions'));
-      const session = await createWorkflowSession('root', 'test');
-      session.tasks.implementation = [createTask({ status: 'running' })];
-      await store.save(session);
-
-      // Engine with a no-guard auto transition from PLANNING
-      const engine = new StateMachineEngine({
-        stageAssignments: [{ id: 'always', priority: 0, condition: 'true', result: 'planning' }],
-        transitions: [{ from: 'planning', to: 'execution', kind: 'auto' }],
-        actionGuards: {},
-        requiredGates: [],
-      });
-
-      const result = engine.tryApplyTransitions(session);
-      expect(result.applied).toBe(true);
-      expect(session.currentStage).toBe('execution');
-    });
-  });
-
-  describe('guard evaluation with kind', () => {
-    test('guard failure blocks transition regardless of kind', async () => {
-      directory = await mkdtemp(join(tmpdir(), 'sm-e2e-guard'));
-      store = new WorkflowStore(join(directory, '.opencode/state-machine/sessions'));
-      const session = await createWorkflowSession('root', 'test');
-
-      // Plan not approved — guard on PLANNING→EXECUTION fails (no session.granted('plan'))
-      await store.save(session);
-
-      const engine = new StateMachineEngine(makeConfig({ requiredGates: ['invariants'] }));
-      const result = engine.checkTransition('PLANNING', 'EXECUTION', session);
-
-      expect(result.allowed).toBe(false);
-      expect(result.reason).toContain('guard failed');
-    });
-
-    test('guard passes + kind=pass gates pass = allowed', async () => {
-      directory = await mkdtemp(join(tmpdir(), 'sm-e2e-guard-and-kind'));
-      store = new WorkflowStore(join(directory, '.opencode/state-machine/sessions'));
-      const session = await createWorkflowSession('root', 'test');
-
-      setGateStatus(session, 'invariants', 'passed');
-      session.tasks.implementation[0].status = 'completed';
-      await store.save(session);
-
-      // Use a transition with both guard and kind=pass
-      const config = makeConfig({
-        requiredGates: ['invariants'],
-        transitions: [
-          {
-            from: 'EXECUTION',
-            to: 'COMMIT',
-            kind: 'pass',
-            guard: 'session.tasks.implementation[0].status == "completed"',
-          },
-        ],
-      });
-      const engine = new StateMachineEngine(config);
-      const result = engine.checkTransition('EXECUTION', 'COMMIT', session);
-
-      expect(result.allowed).toBe(true);
-      expect(result.kind).toBe('pass');
-    });
-  });
-
-  describe('engine config — requiredGates resolution', () => {
-    test('defaults to ["invariants"] when not specified', async () => {
-      directory = await mkdtemp(join(tmpdir(), 'sm-e2e-default'));
-      store = new WorkflowStore(join(directory, '.opencode/state-machine/sessions'));
-      const session = await createWorkflowSession('root', 'test');
-
-      // invariants is pending — should block kind=pass
-      await store.save(session);
-
-      const engine = new StateMachineEngine(makeConfig({ requiredGates: undefined }));
-      const result = engine.checkTransition('EXECUTION', 'COMMIT', session);
-
-      // Default is ['invariants'], invariants is pending → blocked
-      expect(result.allowed).toBe(false);
-      expect(result.kind).toBe('pass');
-    });
-
-    test('uses config.requiredGates when set', async () => {
-      directory = await mkdtemp(join(tmpdir(), 'sm-e2e-config'));
-      store = new WorkflowStore(join(directory, '.opencode/state-machine/sessions'));
-      const session = await createWorkflowSession('root', 'test');
-
-      // Create the custom gate first (setGateStatus is no-op when gate doesn't exist)
-      session.gates.push({ id: 'custom', status: 'passed' });
-      session.gates.push({ id: 'invariants', status: 'passed' });
-      session.tasks.implementation[0].status = 'completed';
-      await store.save(session);
-
-      const engine = new StateMachineEngine(makeConfig({ requiredGates: ['custom'] }));
-      const result = engine.checkTransition('EXECUTION', 'COMMIT', session);
-
-      expect(result.allowed).toBe(true);
-    });
-  });
-});
-
 describe('E2E: checkTransition — engine.checkTransition integration', () => {
   test('engine.checkTransition without session refuses a conditional edge', async () => {
     directory = await mkdtemp(join(tmpdir(), 'sm-e2e-no-session'));
     store = new WorkflowStore(join(directory, '.opencode/state-machine/sessions'));
 
-    const engine = new StateMachineEngine(makeConfig({ requiredGates: ['invariants'] }));
+    const engine = new StateMachineEngine(makeConfig());
     const result = engine.checkTransition('EXECUTION', 'COMMIT');
 
-    // No session → the gates behind kind=pass cannot be read, and unread gates
-    // are not passed gates. The edge is refused, not waved through.
+    // Без сессии guard прочитать не на чём, а невычисленное условие — не
+    // выполненное. Ребро отказывается, а не пропускается.
     expect(result.allowed).toBe(false);
-    expect(result.kind).toBe('pass');
     expect(result.reason).toContain('cannot be checked without a session');
   });
 
-  test('engine.checkTransition with session injects requiredGates', async () => {
+  test('engine.checkTransition with a session reads the gate the edge names', async () => {
     directory = await mkdtemp(join(tmpdir(), 'sm-e2e-inject'));
     store = new WorkflowStore(join(directory, '.opencode/state-machine/sessions'));
     const session = await createWorkflowSession('root', 'test');
 
-    // invariants is pending — should block kind=pass
+    // invariants ещё pending — ребро закрыто
     await store.save(session);
 
-    const engine = new StateMachineEngine(makeConfig({ requiredGates: ['invariants'] }));
+    const engine = new StateMachineEngine(makeConfig());
     const result = engine.checkTransition('EXECUTION', 'COMMIT', session);
 
-    // requiredGates=['invariants'] injected, invariants is 'pending' → blocked
     expect(result.allowed).toBe(false);
     expect(result.reason).toContain('invariants');
   });

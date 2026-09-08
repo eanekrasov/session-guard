@@ -42,8 +42,20 @@ export const GateSchema = z.object({
 
 export const ActiveOperationSchema = z.object({
   callId: z.string().min(1),
-  runId: z.string().min(1),
-  taskId: z.string().regex(/^task-[0-9]+$/, 'Workflow task id must match task-[0-9]+'),
+  /**
+   * Прогон задачи, которому принадлежит ход, — когда он есть.
+   *
+   * Ход бывает и вне цикла: стадия без `loop:` — это обычная стадия, на
+   * которой тоже работают. Раньше `beginMutation` в таком случае бросал
+   * «Cannot resolve a single workflow task run for mutation», и любая правка
+   * на плоской стадии была невозможна в принципе — агент получал внутреннюю
+   * ошибку, а не отказ. Отсутствие прогона теперь описывает себя само.
+   */
+  runId: z.string().min(1).optional(),
+  taskId: z
+    .string()
+    .regex(/^task-[0-9]+$/, 'Workflow task id must match task-[0-9]+')
+    .optional(),
   agent: z.string().min(1),
   status: z.enum(['running', 'interrupted']),
   startedAt: z.string().min(1),
@@ -65,8 +77,16 @@ export const ActiveOperationSchema = z.object({
    * `write`/`edit` name their target in arguments and carry no frame.
    */
   baseline: z.record(z.string().nullable()).optional(),
-  /** This move's invariants verdict, rolled into `run.gates.invariants` when the operation ends. */
-  invariants: z.enum(GATE_STATUS).optional(),
+  /**
+   * Вердикт ядра об этом ходе: прошли ли проверки над ним.
+   *
+   * Сворачивается в `run.checks`, когда ход закрывается. Не гейт намеренно:
+   * гейт пишет агент через `<workflow-result>`, и любой гейт, объявленный
+   * стадией, он может выставить сам. Этот вердикт движок выносит, посмотрев
+   * на диск, и его ценность как раз в независимости от того, что агент про
+   * себя рассказал.
+   */
+  checks: z.enum(GATE_STATUS).optional(),
   /**
    * What kind of call this operation belongs to.
    *
@@ -156,6 +176,16 @@ export const LoopRunSchema = z.object({
    * on behalf of every other task.
    */
   gates: z.record(z.enum(GATE_STATUS)).default({}),
+  /**
+   * Вердикт последнего хода этой задачи — результат проверок ядра над ним.
+   *
+   * Складывает четыре причины отказа: упавший инструмент, запись вне
+   * `writeScope`, несчитанный дифф и нарушенные инварианты профиля. Поэтому
+   * `checks`, а не `invariants`: инварианты — лишь одна из четырёх.
+   *
+   * Читается guard-ами как `task.checks`.
+   */
+  checks: z.enum(GATE_STATUS).optional(),
   /** Increments every time the task enters a stage. See ActiveOperation.round. */
   round: z.number().int().min(0).default(0),
 });
@@ -285,6 +315,20 @@ export const WorkflowSessionSchema = z
     verifications: z.array(VerificationSchema).default([]),
     changedFiles: z.array(z.string()).default([]),
     currentStage: z.string().default('planning'),
+    /**
+     * Вердикт ядра о последнем ходе на текущей стадии — вне цикла задач.
+     *
+     * Ровно то же, что `run.checks` внутри цикла, и по той же причине не
+     * гейт: гейты пишет агент через `<workflow-result>` и любой объявленный
+     * стадией гейт может выставить себе сам, а этот вердикт ядро выносит,
+     * посмотрев на диск. Внутри цикла ему есть куда лечь — на прогон задачи;
+     * снаружи домом стала сессия.
+     *
+     * Живёт ровно одну стадию: при переходе сбрасывается, потому что вердикт
+     * о ходе на `checkout` ничего не говорит о работе на `build`. Читается
+     * guard-ами как `session.checks`.
+     */
+    checks: z.enum(GATE_STATUS).optional(),
     invariantViolations: z.array(InvariantViolationRecordSchema).default([]),
     consentedCallIDs: z.array(z.string()).default([]),
     /**

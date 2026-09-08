@@ -17,7 +17,7 @@ import { createTask } from '../support/task-factory.ts';
 import { approve } from '../../src/domain/approvals.ts';
 import { setGateStatus } from '../../src/session/helpers.ts';
 
-// ─── YAML-схема из profiles/state-machine.yaml (транзиции + actionGuards) ──────
+// ─── YAML-схема из profiles/state-machine.yaml (транзиции) ────────────────────
 
 const SCHEMA_TRANSITIONS: EngineConfig['transitions'] = [
   { from: 'planning', to: 'tasks_ready', guard: 'session.refs.plan != null', consent: 'plan' },
@@ -40,10 +40,6 @@ const SCHEMA_TRANSITIONS: EngineConfig['transitions'] = [
   { from: 'commit', to: 'done', guard: 'session.deliveryReceipt != null' },
 ];
 
-const SCHEMA_ACTION_GUARDS: EngineConfig['actionGuards'] = {
-  beginMutation: "session.approved('plan') || session.revision == 0",
-};
-
 // ─── Помощник: создать fresh-сессию ─────────────────────────────────────────────
 
 function createSession(overrides: Partial<WorkflowSession> = {}): WorkflowSession {
@@ -64,7 +60,6 @@ function createSession(overrides: Partial<WorkflowSession> = {}): WorkflowSessio
     retryBudgets: {},
     updatedAt: new Date().toISOString(),
     verifications: [],
-    baselineHashes: [],
     changedFiles: [],
     currentStage: 'planning',
     invariantViolations: [],
@@ -76,8 +71,8 @@ function createSession(overrides: Partial<WorkflowSession> = {}): WorkflowSessio
 
 function createEngine(): StateMachineEngine {
   return new StateMachineEngine({
+    stageAssignments: [],
     transitions: SCHEMA_TRANSITIONS,
-    actionGuards: SCHEMA_ACTION_GUARDS,
     stages: {},
   });
 }
@@ -135,9 +130,6 @@ describe('Happy path: planning → tasks_ready → code → review → qa → co
 
     // ── 1. planning ──────────────────────────────────────────────────
     // Данные: пустая сессия, revision=0, refs пуст, approvals пуст
-    // Гуард beginMutation: session.approved('plan') || session.revision == 0
-    // revision=0 → true, даже без approve
-    expect(engine.canPerformAction(session, 'beginMutation').allowed).toBe(true);
     // Переход planning→tasks_ready требует:
     //   consent: plan → approval('plan') должен быть granted
     //   guard: session.refs.plan != null → refs.plan должен быть установлен
@@ -310,6 +302,7 @@ describe('QA exhausted path: qa → failed', () => {
 describe('Guard contracts — каждый тип guard-выражения из YAML', () => {
   it("session.gates.invariants == 'passed'", () => {
     const engine = new StateMachineEngine({
+      stageAssignments: [],
       transitions: [
         { from: 'planning', to: 'code', guard: "session.gates.invariants == 'passed'" },
       ],
@@ -324,6 +317,7 @@ describe('Guard contracts — каждый тип guard-выражения из 
 
   it('session.refs.plan != null', () => {
     const engine = new StateMachineEngine({
+      stageAssignments: [],
       transitions: [{ from: 'planning', to: 'code', guard: 'session.refs.plan != null' }],
     });
     const session = createSession({ currentStage: 'planning' });
@@ -336,6 +330,7 @@ describe('Guard contracts — каждый тип guard-выражения из 
 
   it('hasPendingTasks()', () => {
     const engine = new StateMachineEngine({
+      stageAssignments: [],
       transitions: [{ from: 'planning', to: 'code', guard: 'hasPendingTasks()' }],
     });
     const session = createSession({ currentStage: 'planning' });
@@ -348,6 +343,7 @@ describe('Guard contracts — каждый тип guard-выражения из 
 
   it("isExhausted('cycles')", () => {
     const engine = new StateMachineEngine({
+      stageAssignments: [],
       transitions: [{ from: 'planning', to: 'failed', guard: "isExhausted('cycles')" }],
     });
     const session = createSession({ currentStage: 'planning' });
@@ -362,6 +358,7 @@ describe('Guard contracts — каждый тип guard-выражения из 
 
   it('session.deliveryReceipt != null', () => {
     const engine = new StateMachineEngine({
+      stageAssignments: [],
       transitions: [{ from: 'planning', to: 'done', guard: 'session.deliveryReceipt != null' }],
     });
     const session = createSession({ currentStage: 'planning' });
@@ -374,6 +371,7 @@ describe('Guard contracts — каждый тип guard-выражения из 
 
   it("Составной guard: session.gates.qa == 'failed' && !isExhausted('cycles')", () => {
     const engine = new StateMachineEngine({
+      stageAssignments: [],
       transitions: [
         {
           from: 'planning',
@@ -391,29 +389,5 @@ describe('Guard contracts — каждый тип guard-выражения из 
     // qa failed, budget не исчерпан
     setGateStatus(session, 'qa', 'failed');
     advanceTo(session, engine, 'code');
-  });
-
-  it("session.approved('plan') || session.revision == 0 (actionGuard)", () => {
-    const engine = new StateMachineEngine({
-      actionGuards: {
-        beginMutation: "session.approved('plan') || session.revision == 0",
-      },
-    });
-    const session = createSession({ revision: 0, approvals: [] });
-
-    // revision == 0 → true
-    expect(engine.canPerformAction(session, 'beginMutation').allowed).toBe(true);
-
-    // revision != 0, без approve → false
-    session.revision = 1;
-    expect(engine.canPerformAction(session, 'beginMutation')).toEqual({
-      allowed: false,
-      reason:
-        "Action guard failed for beginMutation: session.approved('plan') || session.revision == 0",
-    });
-
-    // revision != 0, но есть approve → true
-    approve(session, 'plan', 'ok', 'c1');
-    expect(engine.canPerformAction(session, 'beginMutation').allowed).toBe(true);
   });
 });

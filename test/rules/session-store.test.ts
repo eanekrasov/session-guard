@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'bun:test';
 import { SessionStore } from '../../src/rules/session-store.js';
+import { hostPayload } from '../support/host-payload.ts';
 
 describe('SessionStore', () => {
   it('prunes oldest sessions when over max', () => {
@@ -30,14 +31,14 @@ describe('SessionStore rule snapshots', () => {
   it('clones rule snapshots', () => {
     const store = new SessionStore();
     store.upsert('ses_clone', (state) => {
-      state.ruleSnapshots = [
+      state.ruleSnapshots = hostPayload([
         {
           filePath: '/rules/plan.mdc',
           relativePath: 'plan.mdc',
           metadata: { agent: ['plan'] },
           strippedContent: 'Plan body.',
         },
-      ];
+      ]);
     });
 
     const copied = store.snapshot('ses_clone');

@@ -1,0 +1,16 @@
+# Профиль доставляет коммит обычным `git commit`. Дефолт ядра это запрещает,
+# но он именно дефолт: стадия, объявившая `actions:`, отвечает сама.
+stages:
+  planning: {}
+  commit:
+    actions:
+      - action: bash
+        commands: ['git commit.*']
+        delivers: true
+  done: {}
+transitions:
+  - from: planning
+    to: commit
+  - from: commit
+    to: done
+    guard: 'session.deliveryReceipt != null'

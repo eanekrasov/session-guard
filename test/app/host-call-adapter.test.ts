@@ -71,9 +71,9 @@ describe('admitHostCall', () => {
 
     const result = admitHostCall(call, snapshot);
     expect(result.admitted).toBe(false);
-    if (!result.admitted) {
-      expect(result.reason).toContain('Unknown');
-    }
+    // `strictNullChecks: false` не сужает размеченное объединение по
+    // `admitted`, поэтому ветку называем явно.
+    expect((result as { reason?: string }).reason).toContain('Unknown');
   });
 
   it('rejects when no active scope exists', () => {

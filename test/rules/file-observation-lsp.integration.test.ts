@@ -38,7 +38,7 @@ describe('LSP observation admission through the server hook', () => {
     process.env.XDG_CONFIG_HOME = savedXDG;
   });
 
-  it.each(LSP_OPERATIONS)(
+  it.each([...LSP_OPERATIONS] as string[])(
     'admits raw successful %s output for the queried path',
     async (operation) => {
       const { testDir, globalRulesDir } = getTestDirs();

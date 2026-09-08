@@ -29,7 +29,6 @@ function makeV1Session(overrides: Record<string, unknown> = {}): string {
     retryBudgets: { cycles: { attempts: 0, maximum: 3 } },
     processedEventIds: [],
     bugVerified: false,
-    baselineHashes: {},
     changedFiles: [],
     title: 'Test Task',
     ...overrides,
@@ -416,9 +415,32 @@ describe('task gates in the status line', () => {
           { id: 'review', status: 'passed' },
           { id: 'qa', status: 'pending' },
         ],
+        checks: undefined,
       },
-      { taskId: 'task-2', stage: 'code', status: 'running', gates: [] },
+      { taskId: 'task-2', stage: 'code', status: 'running', gates: [], checks: undefined },
     ]);
+  });
+
+  test('shows a task held by the engine’s own verdict, which carries no gates', () => {
+    // Задача, застрявшая в `code` из-за `checks: failed`, гейтов не имеет
+    // вовсе. Раньше её строка пропускалась, и оператор не видел ни задачи, ни
+    // причины — только то, что ничего не движется.
+    const view = parse({
+      loopRuns: {
+        'run-1': {
+          id: 'run-1',
+          taskId: 'task-1',
+          listKey: 'implementation',
+          ancestry: [],
+          stage: 'code',
+          status: 'running',
+          gates: {},
+          checks: 'failed',
+        },
+      },
+    });
+    expect(view.taskGates[0]?.checks).toBe('failed');
+    expect(formatSectionLines(view).join('\n')).toContain('task-1@code ✗checks');
   });
 
   test('shows the verdict against the task and stage it was given for', () => {

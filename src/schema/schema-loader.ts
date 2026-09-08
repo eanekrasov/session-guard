@@ -164,12 +164,9 @@ export class SchemaLoader {
       source: extension.extends ?? '',
       stages: mergeStages(base.stages, extension.stages),
       transitions: mergeTransitions(base.transitions, extension.transitions),
-      settings: this.deepMerge(base.settings ?? {}, extension.settings ?? {}),
       editingAgents: extension.editingAgents ?? base.editingAgents,
-      requiredGates: extension.requiredGates ?? base.requiredGates,
       gates: extension.gates ?? base.gates,
       taskControlAgents: extension.taskControlAgents ?? base.taskControlAgents,
-      actionGuards: extension.actionGuards ?? base.actionGuards,
       stageAssignments: extension.stageAssignments ?? base.stageAssignments,
     };
 

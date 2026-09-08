@@ -50,7 +50,8 @@ function makeApi(tree: SessionTree): SectionApi {
       dialog: { setSize: () => {}, replace: () => {}, clear: () => {} },
     },
     kv: {
-      get: (key: string, fallback?: unknown) => (kv.has(key) ? kv.get(key) : (fallback as never)),
+      get: <Value>(key: string, fallback?: Value): Value =>
+        (kv.has(key) ? kv.get(key) : fallback) as Value,
       set: (key: string, value: unknown) => {
         kv.set(key, value);
       },
@@ -130,7 +131,7 @@ describe('sidebar-state: проводка плагина', () => {
         },
       },
     };
-    void pluginModule.tui(api as never, undefined, {} as never);
+    void (pluginModule.tui as (...args: unknown[]) => unknown)(api, undefined, {});
     expect(pluginModule.id).toBe('session-guard.sidebar-state');
     expect(registered).toEqual({
       order: 350,
@@ -193,7 +194,7 @@ describe('sidebar-state: проводка плагина', () => {
       'rootSessionID: ses_root',
       'processedEventIds: 2',
     ].join('\n');
-    await pluginModule.tui(api as never, undefined, {} as never);
+    await (pluginModule.tui as (...args: unknown[]) => Promise<unknown>)(api, undefined, {});
     const section = __sectionForTests()!;
     section.setLastDetails([initialMessage]);
 
@@ -303,7 +304,7 @@ describe('sidebar-state: видимость секции', () => {
     expect(section.open()).toBe(true);
     section.toggleOpen();
     expect(section.open()).toBe(false);
-    expect(api.kv.get('state-machine.sidebar.section_open')).toBe(false);
+    expect(api.kv.get<boolean>('state-machine.sidebar.section_open')).toBe(false);
     expect(renders).toBe(1);
   });
 });

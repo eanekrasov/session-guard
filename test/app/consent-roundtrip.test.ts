@@ -8,6 +8,7 @@ import { createRuntime } from '../../src/app/runtime.ts';
 import { createSession, WorkflowStore } from '../../src/session/session-store.ts';
 import { parseConsentRequest, questionTextOf } from '../../src/app/consent.ts';
 import type { SessionClient } from '../../src/app/runtime-types.ts';
+import { toolOutput } from '../support/tool-result.ts';
 
 /**
  * The consent tag the plugin emits must be the consent tag the plugin accepts.
@@ -71,8 +72,8 @@ describe('consent tag round trip', () => {
       { sessionID: 's1' } as never
     );
 
-    const parsed = parseConsentRequest(result.output);
-    expect(parsed, `the emitted tag did not parse:\n${result.output}`).toBeDefined();
+    const parsed = parseConsentRequest(toolOutput(result));
+    expect(parsed, `the emitted tag did not parse:\n${toolOutput(result)}`).toBeDefined();
     expect(parsed!.manifest.revision).toBe(parsed!.revision);
   });
 
@@ -82,7 +83,7 @@ describe('consent tag round trip', () => {
       { files: ['plan.md'], summary: 'do the thing' },
       { sessionID: 's1' } as never
     );
-    const tag = /<consent-request[\s\S]*?<\/consent-request>/.exec(prepared.output)?.[0];
+    const tag = /<consent-request[\s\S]*?<\/consent-request>/.exec(toolOutput(prepared))?.[0];
     expect(tag).toBeDefined();
 
     const args = {

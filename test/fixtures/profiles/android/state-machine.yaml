@@ -8,8 +8,3 @@ stages:
       compile:
         allowedAgents: ['code']
         exitGuards: ["session.activeOperations.some(o => o.result == 'output_ready')"]
-gateMapping:
-  review: ['invariants']
-  build: ['compile', 'test']
-settings:
-  mutationTtlMs: 600000

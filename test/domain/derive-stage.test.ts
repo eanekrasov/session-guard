@@ -5,6 +5,7 @@ import { deriveStageFn as deriveStage } from '../../src/domain/engine.ts';
 
 function makeFacts(overrides: Partial<SessionFacts> = {}): SessionFacts {
   return {
+    currentStage: undefined as unknown as string,
     lastApproval: null,
     approvals: [],
     tasks: [],
@@ -15,7 +16,6 @@ function makeFacts(overrides: Partial<SessionFacts> = {}): SessionFacts {
     },
     gates: {},
     profileId: 'android',
-    schemaId: 'state-machine',
     revision: 0,
     deliveryReceipt: null,
     refs: {},
@@ -24,6 +24,10 @@ function makeFacts(overrides: Partial<SessionFacts> = {}): SessionFacts {
       const budget = this.retryBudgets[budgetKey];
       return budget ? budget.attempts >= budget.maximum : false;
     },
+    approved(this: SessionFacts, type: string) {
+      return this.approvals.some((a) => a.type === type && a.status === 'granted');
+    },
+    deliveryPermit: null,
     ...overrides,
   };
 }
@@ -90,9 +94,10 @@ describe('deriveStage', () => {
   });
 
   it('answers with no stage when there is none to keep', () => {
-    // Only synthetic facts reach this: a real session always carries
-    // `currentStage`, written by `workflow.create` from the compiled
-    // workflow's own first stage.
+    // Только синтетические факты сюда доходят: реальная сессия всегда несёт
+    // `currentStage`, записанный `workflow.create` из первой стадии
+    // скомпилированного workflow. Поэтому `makeFacts` его и не заполняет —
+    // тип требует поле, а этот тест проверяет поведение при его отсутствии.
     expect(deriveStage(makeFacts(), [])).toBe('');
   });
 

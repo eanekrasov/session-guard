@@ -2,12 +2,15 @@
 /**
  * commit-task.ts — the committing step of the workflow.
  *
- * The plugin recognises this script by name (`isCommitTaskCommand`) and wraps
- * the call:
+ * The plugin recognises this call from the schema: the acting stage declares a
+ * `bash` action with `delivers: true`, and its `commands:` name this script.
+ * A stage that declares nothing falls back to recognition by file name
+ * (`isCommitTaskCommand`). The plugin then wraps the call:
  *
- *   1. `handleCommitTaskBefore` checks `canCommit` (every required gate passed,
- *      every task completed) and, if allowed, records a `deliveryPermit`
- *      holding the pre-commit HEAD and the files the session expects to land.
+ *   1. `handleCommitTaskBefore` records a `deliveryPermit` holding the
+ *      pre-commit HEAD and the files the session expects to land. Whether the
+ *      call is allowed at all is the delivering entry's own `guard:` — in
+ *      `base` that is every task completed and both verdicts collected.
  *   2. This script performs the commit.
  *   3. `handleCommitTaskAfter` re-reads HEAD; only when it actually moved does
  *      it write `deliveryReceipt`, which is what releases `commit → done`.

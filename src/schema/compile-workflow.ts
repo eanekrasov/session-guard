@@ -20,7 +20,6 @@ export interface CompiledTransition {
   from: string;
   to: string;
   guard: string | null;
-  kind: 'auto' | 'pass' | 'fail';
   effects: CompiledTransitionEffect[];
   consent: string | null;
   onFailure: 'retry' | 'terminal' | null;
@@ -61,6 +60,19 @@ export interface CompiledWorkflow {
   transitions: CompiledTransition[];
   stageAssignments: CompiledStageAssignment[];
   initialStage: string;
+  /**
+   * Стадии, которыми workflow заканчивается: объявленные в схеме и не имеющие
+   * ни одного исходящего ребра.
+   *
+   * Определяются объявлением, а не ключом, — тем же способом, что и начальная
+   * стадия. Схема ничего нового не пишет: конец — это стадия, из которой
+   * автор никуда не ведёт.
+   *
+   * До этого понятия не было вовсе, и «дошли до конца» было неотличимо от
+   * «автор забыл ребро»: и то и другое выглядело как молчание движка на
+   * каждом следующем ходу. Комментарий на этом месте обещал их вычислять и не
+   * вычислял ничего.
+   */
   terminalStages: string[];
 }
 
@@ -86,9 +98,23 @@ export function initialStageOf(stages: Record<string, StageDef> | undefined): st
   return Object.keys(stages ?? {})[0] ?? '';
 }
 
-// ─── Compiler ────────────────────────────────────────────────────────────────
+/**
+ * Стадии, из которых workflow не ведёт никуда, — его концы.
+ *
+ * Считаются только переходы верхнего уровня. Ребро внутри цикла с `to: done`
+ * говорит «задача закончена» и стадии `done` не касается вовсе
+ * (`task-movement.ts`), так что смешивать эти два `done` нельзя.
+ */
+export function terminalStagesOf(
+  stages: Record<string, StageDef> | undefined,
+  transitions: TransitionDef[] | undefined
+): string[] {
+  const ids = Object.keys(stages ?? {});
+  const departures = new Set((transitions ?? []).map((transition) => transition.from));
+  return ids.filter((id) => !departures.has(id));
+}
 
-const TERMINAL_STAGES = new Set(['done', 'terminal', 'completed', 'failed', 'cancelled']);
+// ─── Compiler ────────────────────────────────────────────────────────────────
 
 /**
  * Compile a resolved schema into a `CompiledWorkflow`.
@@ -129,11 +155,18 @@ export function compileWorkflow(schema: ResolvedSchema): {
 
   for (const [stageId, stageDef] of Object.entries(schema.stages ?? {})) {
     validateNestedStages(stageId, stageDef, declaredGates, errors);
+    validateActions(`stages.${stageId}`, stageDef, errors);
   }
 
   // Every expression the workflow will ever evaluate, parsed now rather than
   // read as `false` for ever at runtime.
   validateGuardSyntax(schema, errors);
+
+  // Стадия, до которой не дойти, — это объявление, которое никогда не
+  // исполнится. Молчать об этом особенно дорого с тех пор, как стадия несёт
+  // `actions:`: недостижимая `commit` означает workflow, который не может
+  // доставить, и ни одной жалобы при загрузке.
+  validateReachability(schema, errors);
 
   // Keys nobody reads, reported rather than ignored.
   validateKnownKeys(schema, errors);
@@ -146,9 +179,6 @@ export function compileWorkflow(schema: ResolvedSchema): {
 
   const initialStage = initialStageOf(schema.stages);
 
-  // Determine terminal stages (stages whose transitions lead to none, or explicitly named)
-  const terminalStages = findTerminalStages(stageIds, compiledTransitions);
-
   return {
     workflow: {
       version: 1,
@@ -156,7 +186,7 @@ export function compileWorkflow(schema: ResolvedSchema): {
       transitions: compiledTransitions,
       stageAssignments: compiledAssignments,
       initialStage,
-      terminalStages,
+      terminalStages: terminalStagesOf(schema.stages, schema.transitions),
     },
     errors,
   };
@@ -186,13 +216,8 @@ const SCHEMA_KEYS = new Set([
   'stageAssignments',
   'transitions',
   'gates',
-  'tools',
-  'gateMapping',
-  'actionGuards',
   'editingAgents',
   'taskControlAgents',
-  'requiredGates',
-  'settings',
 ]);
 
 const STAGE_KEYS = new Set([
@@ -200,12 +225,140 @@ const STAGE_KEYS = new Set([
   'dispatch',
   'retryBudget',
   'allowedAgents',
+  'actions',
   'gates',
   'entryGuards',
   'exitGuards',
   'stages',
   'transitions',
 ]);
+
+/**
+ * Каждая объявленная стадия должна быть достижима.
+ *
+ * Обход от начальной стадии по рёбрам. Стадия, названная результатом правила
+ * `stageAssignments`, тоже достижима — эти правила назначают стадию выражением,
+ * минуя граф, и без их учёта проверка ругалась бы на исправные профили.
+ *
+ * Вложенные стадии цикла проверяются отдельно и по своим рёбрам: старт — первая
+ * объявленная, `done` — не стадия, а «задача закончилась». Цикл, не объявивший
+ * переходов вовсе, ходит по порядку объявления — там достижимы все, и проверка
+ * пропускается. Это и поймал корпус фикстур на первой версии проверки.
+ *
+ * Комментарий к `SCHEMA_KEYS` годами обещал эту проверку («the undeclared gate
+ * and the unreachable stage already are [in the funnel]»), а её не было.
+ */
+function validateReachability(schema: ResolvedSchema, errors: CompileError[]): void {
+  const stages = schema.stages ?? {};
+  const ids = Object.keys(stages);
+  if (ids.length === 0) return;
+
+  const walk = (
+    all: string[],
+    start: string | undefined,
+    edges: Array<{ from?: string; to?: string }>,
+    seeds: string[]
+  ): Set<string> => {
+    const seen = new Set<string>();
+    const queue = [...(start ? [start] : []), ...seeds].filter((id) => all.includes(id));
+    while (queue.length > 0) {
+      const id = queue.shift()!;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      for (const edge of edges) {
+        if (edge.from === id && edge.to && all.includes(edge.to)) queue.push(edge.to);
+      }
+    }
+    return seen;
+  };
+
+  const assigned = (schema.stageAssignments ?? []).map((rule) => rule.result);
+  const reached = walk(ids, initialStageOf(stages), schema.transitions ?? [], assigned);
+  for (const id of ids) {
+    if (reached.has(id)) continue;
+    errors.push({
+      path: `stages.${id}`,
+      message: `Stage '${id}' is declared but nothing reaches it: no transition leads here from '${initialStageOf(stages)}', and no stage assignment names it`,
+    });
+  }
+
+  validateTermination(schema, errors);
+
+  for (const [stageId, stage] of Object.entries(stages)) {
+    const nested = Object.keys(stage.stages ?? {});
+    if (nested.length === 0) continue;
+    // Цикл без объявленных переходов двигается по порядку объявления
+    // (`nextTaskStage`, ветка `transitions.length === 0`): каждая стадия ведёт
+    // к следующей, последняя завершает задачу. Достижимы все, проверять нечего.
+    const innerEdges = stage.transitions ?? [];
+    if (innerEdges.length === 0) continue;
+    const inner = walk(nested, nested[0], innerEdges, []);
+    for (const id of nested) {
+      if (inner.has(id)) continue;
+      errors.push({
+        path: `stages.${stageId}.stages.${id}`,
+        message: `Nested stage '${id}' is declared but nothing reaches it: the loop starts at '${nested[0]}' and no transition leads here`,
+      });
+    }
+  }
+}
+
+/**
+ * Из каждой стадии должен быть путь к концу workflow.
+ *
+ * Обратная сторона достижимости. Прямая проверка ловит стадию, в которую не
+ * попасть; эта — стадию, из которой не выйти. Забытое ребро делало сессию
+ * неподвижной ровно так же, как выглядит честно завершённый workflow: движок
+ * молча отвечал «No outgoing transitions from X» и никому этого не показывал.
+ *
+ * Схема без единого конца — отдельная ошибка: такой workflow не заканчивается
+ * никогда, и это почти наверняка не то, что имел в виду автор.
+ *
+ * При объявленных `stageAssignments` попроцедурная проверка не делается.
+ * `deriveStage` выбирает стадию по условию, а не по рёбрам, так что сессия
+ * может уйти со стадии, из которой не ведёт ни одно ребро, — назвать такую
+ * тупиком значило бы соврать.
+ */
+function validateTermination(schema: ResolvedSchema, errors: CompileError[]): void {
+  const stages = schema.stages ?? {};
+  const ids = Object.keys(stages);
+  if (ids.length === 0) return;
+
+  const transitions = schema.transitions ?? [];
+  const terminals = terminalStagesOf(stages, transitions);
+
+  if (terminals.length === 0) {
+    errors.push({
+      path: 'stages',
+      message:
+        'This workflow has no end: every declared stage has an outgoing transition, so a session can never come to rest. Declare a stage nothing leads out of.',
+    });
+    return;
+  }
+
+  if ((schema.stageAssignments ?? []).length > 0) return;
+
+  const canFinish = new Set<string>(terminals);
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const transition of transitions) {
+      if (!transition.from || !transition.to) continue;
+      if (canFinish.has(transition.from) || !canFinish.has(transition.to)) continue;
+      if (!ids.includes(transition.from)) continue;
+      canFinish.add(transition.from);
+      grew = true;
+    }
+  }
+
+  for (const id of ids) {
+    if (canFinish.has(id)) continue;
+    errors.push({
+      path: `stages.${id}`,
+      message: `Stage '${id}' has no way to finish: no chain of transitions leads from here to any stage the workflow ends at (${terminals.join(', ')})`,
+    });
+  }
+}
 
 function validateKnownKeys(schema: ResolvedSchema, errors: CompileError[]): void {
   for (const key of Object.keys(schema)) {
@@ -262,9 +415,6 @@ function validateGuardSyntax(schema: ResolvedSchema, errors: CompileError[]): vo
     }
   };
 
-  for (const [action, guard] of Object.entries(schema.actionGuards ?? {})) {
-    check(`actionGuards.${action}`, guard);
-  }
   for (const [index, rule] of (schema.stageAssignments ?? []).entries()) {
     check(`stageAssignments[${index}].condition`, rule.condition);
   }
@@ -273,6 +423,9 @@ function validateGuardSyntax(schema: ResolvedSchema, errors: CompileError[]): vo
   }
 
   const walkStage = (path: string, stage: StageDef): void => {
+    for (const [index, entry] of (stage.actions ?? []).entries()) {
+      check(`${path}.actions[${index}].guard`, entry.guard);
+    }
     for (const [index, expression] of (stage.entryGuards ?? []).entries()) {
       check(`${path}.entryGuards[${index}]`, expression);
     }
@@ -289,6 +442,80 @@ function validateGuardSyntax(schema: ResolvedSchema, errors: CompileError[]): vo
 
   for (const [stageId, stage] of Object.entries(schema.stages ?? {})) {
     walkStage(`stages.${stageId}`, stage);
+  }
+}
+
+/**
+ * Проверить объявления действий на стадии и во всех вложенных.
+ *
+ * Два правила, и оба про то, что рантайм не сможет исполнить написанное.
+ *
+ * Первое — дискриминатор обязан подходить действию. Пути работают только для
+ * `edit`: `edit`, `write` и `apply_patch` называют цель в аргументах, и
+ * `scopeBefore` именно так их и фильтрует, а `bash` получает от хоста лишь
+ * `workdir` — пути в аргументах нет. Маску для `bash` можно записать, но
+ * нельзя выполнить, и в этом репозитории поле, которое читается никем, уже
+ * дорого обходилось. Симметрично `commands:` бессмысленны вне `bash`.
+ *
+ * Третье правило про `delivers`: пометка живёт только на `bash`, потому что
+ * доставка приезжает шелл-командой, и требует `commands`. Без них весь `bash`
+ * стадии поехал бы мимо жизненного цикла мутации — почти наверняка не то, что
+ * автор имел в виду.
+ *
+ * Второе — маска каталога без `/**` не покрывает ничего внутри себя:
+ * `matchesScope` якорит и путь, и маску, так что `src/auth` не совпадёт с
+ * `src/auth/login.ts`. Маска без метасимволов почти наверняка опечатка.
+ */
+function validateActions(path: string, stage: StageDef, errors: CompileError[]): void {
+  for (const [index, entry] of (stage.actions ?? []).entries()) {
+    const at = `${path}.actions[${index}]`;
+
+    if (entry.paths !== undefined && entry.action !== 'edit') {
+      errors.push({
+        path: at,
+        message: `'paths' is only meaningful for action 'edit'; '${entry.action}' carries no path in its arguments, so the mask could never be enforced`,
+      });
+    }
+    if (entry.commands !== undefined && entry.action !== 'bash') {
+      errors.push({
+        path: at,
+        message: `'commands' is only meaningful for action 'bash', not '${entry.action}'`,
+      });
+    }
+    if (entry.delivers && entry.action !== 'bash') {
+      errors.push({
+        path: at,
+        message: `'delivers' is only meaningful for action 'bash'; a delivery arrives as a shell command, not as '${entry.action}'`,
+      });
+    }
+    if (entry.delivers && (entry.commands ?? []).length === 0) {
+      errors.push({
+        path: at,
+        message: `'delivers' needs 'commands': without them every bash call on this stage would be routed as a delivery, skipping the mutation lifecycle`,
+      });
+    }
+    for (const [maskIndex, mask] of (entry.paths ?? []).entries()) {
+      if (!/[*?[\]{}]/.test(mask)) {
+        errors.push({
+          path: `${at}.paths[${maskIndex}]`,
+          message: `Mask '${mask}' has no wildcard, so it matches that one path and nothing inside it. Write '${mask}/**' to cover a directory`,
+        });
+      }
+    }
+    for (const [commandIndex, pattern] of (entry.commands ?? []).entries()) {
+      try {
+        new RegExp(pattern);
+      } catch (err) {
+        errors.push({
+          path: `${at}.commands[${commandIndex}]`,
+          message: `Command pattern does not compile as a regular expression: ${pattern} (${err instanceof Error ? err.message : String(err)})`,
+        });
+      }
+    }
+  }
+
+  for (const [nestedId, nested] of Object.entries(stage.stages ?? {})) {
+    validateActions(`${path}.stages.${nestedId}`, nested, errors);
   }
 }
 
@@ -437,7 +664,6 @@ function compileTransitions(
       from: t.from,
       to: t.to,
       guard: t.guard ?? null,
-      kind: t.kind ?? 'auto',
       effects: (t.effects ?? []).map((e) => ({
         bumpRetry: e.bumpRetry ?? null,
         maxAttempts: e.maxAttempts ?? null,
@@ -461,20 +687,4 @@ function compileAssignments(
       condition: a.condition,
       result: a.result,
     }));
-}
-
-function findTerminalStages(stageIds: Set<string>, transitions: CompiledTransition[]): string[] {
-  const hasOutgoing = new Set<string>();
-  for (const t of transitions) {
-    hasOutgoing.add(t.from);
-  }
-  const terminals: string[] = [];
-  for (const pid of stageIds) {
-    if (TERMINAL_STAGES.has(pid.toLowerCase())) {
-      terminals.push(pid);
-    } else if (!hasOutgoing.has(pid)) {
-      terminals.push(pid);
-    }
-  }
-  return terminals;
 }

@@ -1,5 +1,6 @@
 extends: 'cycle-code/cycle.yaml'
-# The task finishes only once its own invariants verdict is green.
+# Задача заканчивается только когда вердикт ядра о её собственном ходе
+# зелёный. `checks`, а не гейт: гейт агент выставил бы себе сам.
 stages:
   execution:
     stages:
@@ -8,4 +9,4 @@ stages:
     transitions:
       - from: code
         to: done
-        guard: "task.gates.invariants == 'passed'"
+        guard: "task.checks == 'passed'"

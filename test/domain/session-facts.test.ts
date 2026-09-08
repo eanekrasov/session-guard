@@ -22,7 +22,6 @@ function makeSession(overrides: Partial<WorkflowSession> = {}): WorkflowSession 
     verifications: [],
     retryBudgets: {},
     updatedAt: new Date().toISOString(),
-    baselineHashes: [],
     changedFiles: [],
     invariantViolations: [],
     consentedCallIDs: [],

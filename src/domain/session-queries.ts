@@ -1,6 +1,3 @@
-import { getGate } from '../session/helpers.ts';
-import type { WorkflowSession } from '../session/session-schema.ts';
-
 /**
  * Extract the shell command from bash tool arguments.
  *
@@ -80,20 +77,6 @@ const READ_ONLY_GIT_SUBCOMMANDS = new Set([
   // is exactly the guess this classifier must not make.
 ]);
 
-/**
- * Check if the session can commit: all required gates must pass, all tasks completed.
- */
-export function canCommit(session: WorkflowSession, requiredGates: string[]): boolean {
-  for (const gateId of requiredGates) {
-    const gate = getGate(session, gateId);
-    if (!gate) return false;
-    if (gate.status !== 'passed') return false;
-  }
-
-  const tasks = Object.values(session.tasks ?? {}).flat();
-  return tasks.every((t) => t.status === 'completed');
-}
-
 // ─── P1-012: Commit Permit helpers ────────────────────────────────────────────
 
 /** Git subcommands a workflow session may not run directly. */
@@ -136,7 +119,7 @@ const SEGMENT_SEPARATORS = /[\n;&|()`]/;
  * words a shell would run. A separator outside quotes ends the segment, so
  * each returned array is one command.
  */
-function shellSegments(command: string): string[][] {
+export function shellSegments(command: string): string[][] {
   const segments: string[][] = [];
   let words: string[] = [];
   let word = '';

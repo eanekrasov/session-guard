@@ -28,6 +28,7 @@ export async function listProfiles(profilesDir: string): Promise<ProfileMetadata
  * and from each other. This is the one door.
  */
 export {
+  archiveDirOf,
   listSessionIds,
   readAllSessions,
   readSession,

@@ -15,6 +15,8 @@ import {
   clearCiEnvVars,
   restoreCiEnvVars,
   type CiEnvSnapshot,
+  type HookChatMessage,
+  type HookChatOutput,
 } from '../../src/rules/test-fixtures.js';
 
 // Import modules for boundary tests

@@ -90,9 +90,17 @@ function mockExecutor(
   const rawResponses: Record<string, { exitCode: number; stdout: string; stderr: string }> = {};
   for (const [key, val] of Object.entries(responses)) {
     if (val.ok) {
-      rawResponses[key] = { exitCode: 0, stdout: val.stdout, stderr: '' };
+      rawResponses[key] = {
+        exitCode: 0,
+        stdout: (val as { stdout?: string }).stdout ?? '',
+        stderr: '',
+      };
     } else {
-      rawResponses[key] = { exitCode: 1, stdout: '', stderr: val.error };
+      rawResponses[key] = {
+        exitCode: 1,
+        stdout: '',
+        stderr: (val as { error?: string }).error ?? '',
+      };
     }
   }
 
@@ -323,8 +331,7 @@ describe('createBunExecutor', () => {
     const exec = createBunExecutor('sh');
     const result = await exec.run(['-c', 'exit 1']);
     expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error).toBeDefined();
-    }
+    // `strictNullChecks: false` не сужает размеченное объединение по `ok`.
+    expect((result as { error?: string }).error).toBeDefined();
   });
 });

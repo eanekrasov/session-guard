@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { createSession, WorkflowStore } from '../../src/session/session-store.ts';
 import type { ConsentManifest } from '../../src/app/consent.ts';
 import type { SessionClient } from '../../src/app/runtime-types.ts';
+import { hostPayload } from '../support/host-payload.ts';
 
 // ─── Helpers ──────────────────────────────────────────────────────
 
@@ -19,13 +20,13 @@ beforeEach(() => {
 function mockClient(
   messagesResult?: Array<{ id: string; parts: Array<{ type: string; status?: string }> }>
 ): SessionClient {
-  return {
+  return hostPayload({
     messages: vi.fn().mockResolvedValue({
       data: messagesResult ?? [{ id: 'msg-1', parts: [{ type: 'text', status: 'completed' }] }],
     }),
     prompt: vi.fn().mockResolvedValue({ data: {} }),
     list: vi.fn().mockResolvedValue({ data: [] }),
-  };
+  });
 }
 
 async function makeOrchestrator(client?: SessionClient) {
@@ -244,7 +245,7 @@ describe('ConsentOrchestrator.after', () => {
     expect(promptCall.path.id).toBe('co-synthetic');
     expect(promptCall.body.noReply).toBe(true);
     expect(promptCall.body.parts[0].type).toBe('text');
-    expect(promptCall.body.parts[0].text).toContain('Plan approved');
+    expect(promptCall.body.parts[0].text).toContain("Consent 'plan' approved");
   });
 
   it('is a no-op when the callID does not match the pending approval', async () => {

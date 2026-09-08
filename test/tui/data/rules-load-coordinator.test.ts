@@ -264,7 +264,7 @@ describe('createRulesLoadCoordinator', () => {
     coordinator.refresh();
     await flushPromises();
 
-    expect(onError).toHaveBeenCalledOnce();
+    expect(onError).toHaveBeenCalledTimes(1);
     expect(load).toHaveBeenCalledTimes(2);
   });
 

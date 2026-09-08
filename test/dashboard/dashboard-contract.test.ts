@@ -18,7 +18,6 @@ const defaultInput: DashboardInput = {
     version: '1.0',
     description: 'Test profile',
     invariants: ['LF_ONLY', 'CONSOLE_LOG'],
-    mandatoryStages: ['review', 'qa'],
     agents: ['code', 'review'],
     skills: ['code-review'],
   },
@@ -51,18 +50,6 @@ describe('buildDashboardSchema', () => {
       kind: '',
       gate: null,
     });
-  });
-
-  it('marks gates as required based on mandatoryStages', () => {
-    const schema = buildDashboardSchema(defaultInput);
-
-    const invariants = schema.gates.find((g) => g.id === 'invariants')!;
-    const review = schema.gates.find((g) => g.id === 'review')!;
-    const qa = schema.gates.find((g) => g.id === 'qa')!;
-
-    expect(invariants.required).toBe(false);
-    expect(review.required).toBe(true);
-    expect(qa.required).toBe(true);
   });
 
   it('copies profile data verbatim', () => {

@@ -15,7 +15,7 @@ transitions:
   - from: execution
     to: done
     guard: 'FROM_BETA'
-requiredGates: [betaGate]
+editingAgents: [betaAgent]
 stageAssignments:
   - id: execution
     priority: 1

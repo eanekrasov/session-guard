@@ -7,6 +7,4 @@ stages:
         exitGuards:
           - "session.activeOperations.some(o => o.result == 'output_ready')"
           - "session.gates.invariants == 'passed'"
-actionGuards:
-  beginMutation: "session.approved('plan')"
 editingAgents: ['code']

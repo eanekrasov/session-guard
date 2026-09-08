@@ -27,7 +27,6 @@ function makeSession(overrides: Partial<WorkflowSession> = {}): WorkflowSession 
     retryBudgets: {},
     pendingDecisions: [],
     updatedAt: new Date().toISOString(),
-    baselineHashes: [],
     changedFiles: [],
     invariantViolations: [],
     consentedCallIDs: [],
@@ -39,7 +38,6 @@ function makeConfig(overrides: Partial<EngineConfig> = {}): EngineConfig {
   return {
     stageAssignments: [],
     transitions: [],
-    actionGuards: {},
     ...overrides,
   };
 }
@@ -72,186 +70,6 @@ describe('StateMachineEngine', () => {
     const stage = engine.deriveStage(session);
 
     expect(stage).toBe('EXECUTION');
-  });
-
-  it('canPerformAction returns allowed when no guards', () => {
-    const engine = new StateMachineEngine(makeConfig({ actionGuards: {} }));
-    const session = makeSession();
-
-    const result = engine.canPerformAction(session, 'beginMutation');
-
-    expect(result).toEqual({ allowed: true });
-  });
-
-  it('canPerformAction returns allowed when guard passes', () => {
-    const engine = new StateMachineEngine(
-      makeConfig({ actionGuards: { beginMutation: "session.approved('plan')" } })
-    );
-    const session = makeSession({
-      approvals: [{ type: 'plan', callId: 'c1', status: 'granted' }],
-    });
-
-    const result = engine.canPerformAction(session, 'beginMutation');
-
-    expect(result).toEqual({ allowed: true });
-  });
-
-  it('canPerformAction returns blocked when guard fails', () => {
-    const engine = new StateMachineEngine(
-      makeConfig({ actionGuards: { beginMutation: "session.approved('plan')" } })
-    );
-    const session = makeSession({ approvals: [] });
-
-    const result = engine.canPerformAction(session, 'beginMutation');
-
-    expect(result).toEqual({
-      allowed: false,
-      reason: "Action guard failed for beginMutation: session.approved('plan')",
-    });
-  });
-
-  it('canPerformAction only checks guard for the specific action', () => {
-    const engine = new StateMachineEngine(
-      makeConfig({
-        actionGuards: { beginMutation: "session.approved('plan')" },
-      })
-    );
-    const session = makeSession({ approvals: [] });
-
-    // different action (confirm) — no guard configured, should be allowed
-    const result = engine.canPerformAction(session, 'confirm');
-
-    expect(result).toEqual({ allowed: true });
-  });
-
-  // ─── Action guards (flat, resolved internally) ──────────────────────────
-
-  it('canPerformAction blocks when actionGuard fails', () => {
-    const engine = new StateMachineEngine(
-      makeConfig({
-        actionGuards: { beginMutation: "session.approved('plan')" },
-      })
-    );
-    const session = makeSession({ approvals: [] });
-
-    const result = engine.canPerformAction(session, 'beginMutation');
-
-    expect(result).toEqual({
-      allowed: false,
-      reason: "Action guard failed for beginMutation: session.approved('plan')",
-    });
-  });
-
-  it('canPerformAction passes when actionGuard passes', () => {
-    const engine = new StateMachineEngine(
-      makeConfig({
-        actionGuards: { beginMutation: "session.approved('plan')" },
-      })
-    );
-    const session = makeSession({
-      approvals: [{ type: 'plan', callId: 'c1', status: 'granted' }],
-    });
-
-    const result = engine.canPerformAction(session, 'beginMutation');
-
-    expect(result).toEqual({ allowed: true });
-  });
-
-  // ─── Stage-level entry/exit guards ──────────────────────────────────────
-
-  it('canPerformAction blocks when stage-level entryGuard fails', () => {
-    const engine = new StateMachineEngine(
-      makeConfig({
-        stageAssignments: [{ id: 'always', priority: 0, condition: 'true', result: 'PLANNING' }],
-        stageLevelGuards: {
-          PLANNING: {
-            entryGuards: { beginMutation: ['false'] },
-          },
-        },
-      })
-    );
-    const session = makeSession();
-
-    const result = engine.canPerformAction(session, 'beginMutation');
-
-    expect(result.allowed).toBe(false);
-    expect(result.reason).toContain('Stage-level guard failed');
-  });
-
-  it('canPerformAction passes when all stage-level guards pass', () => {
-    const engine = new StateMachineEngine(
-      makeConfig({
-        stageAssignments: [{ id: 'always', priority: 0, condition: 'true', result: 'PLANNING' }],
-        stageLevelGuards: {
-          PLANNING: {
-            entryGuards: { beginMutation: ['true'] },
-          },
-        },
-      })
-    );
-    const session = makeSession();
-
-    const result = engine.canPerformAction(session, 'beginMutation');
-
-    expect(result.allowed).toBe(true);
-  });
-
-  it('stage-level guards check exitGuards too', () => {
-    const engine = new StateMachineEngine(
-      makeConfig({
-        stageAssignments: [{ id: 'always', priority: 0, condition: 'true', result: 'PLANNING' }],
-        stageLevelGuards: {
-          PLANNING: {
-            exitGuards: { beginMutation: ['false'] },
-          },
-        },
-      })
-    );
-    const session = makeSession();
-
-    const result = engine.canPerformAction(session, 'beginMutation');
-
-    expect(result.allowed).toBe(false);
-  });
-
-  it('stage-level guards only check current stage', () => {
-    const engine = new StateMachineEngine(
-      makeConfig({
-        stageAssignments: [{ id: 'always', priority: 0, condition: 'true', result: 'PLANNING' }],
-        stageLevelGuards: {
-          EXECUTION: {
-            entryGuards: { beginMutation: ['false'] },
-          },
-        },
-      })
-    );
-    const session = makeSession();
-
-    // Current stage is PLANNING, guards are for EXECUTION — allowed
-    const result = engine.canPerformAction(session, 'beginMutation');
-
-    expect(result.allowed).toBe(true);
-  });
-
-  it('stage-level guard blocks even when flat actionGuard allows', () => {
-    // stage-level blocks first, flat never reached
-    const engine = new StateMachineEngine(
-      makeConfig({
-        stageAssignments: [{ id: 'always', priority: 0, condition: 'true', result: 'PLANNING' }],
-        stageLevelGuards: {
-          PLANNING: {
-            entryGuards: { beginMutation: ['false'] },
-          },
-        },
-        actionGuards: { beginMutation: 'true' },
-      })
-    );
-    const session = makeSession();
-
-    const result = engine.canPerformAction(session, 'beginMutation');
-
-    expect(result.allowed).toBe(false);
-    expect(result.reason).toContain('Stage-level guard failed');
   });
 
   it('checkTransition allows valid transition through engine', () => {
@@ -296,23 +114,15 @@ describe('StateMachineEngine', () => {
 
   it('uses custom evaluateGuardFn when provided', () => {
     const mockGuard = () => false;
-    const engine = new StateMachineEngine(
-      makeConfig({ actionGuards: { anyAction: 'true' } }),
-      mockGuard
-    );
+    const engine = new StateMachineEngine(makeConfig(), mockGuard);
     const session = makeSession();
 
-    const result = engine.canPerformAction(session, 'anyAction');
-
-    expect(result).toEqual({
-      allowed: false,
-      reason: 'Action guard failed for anyAction: true',
-    });
+    expect(engine.evaluateGuard('true', session)).toBe(false);
   });
 
   it('tryApplyTransitions applies stageOverride for matching transition', () => {
     const config = makeConfig({
-      transitions: [{ from: 'PLANNING', to: 'EXECUTION', kind: 'auto' }],
+      transitions: [{ from: 'PLANNING', to: 'EXECUTION' }],
     });
     const engine = new StateMachineEngine(config);
     const session = makeSession();
@@ -326,7 +136,10 @@ describe('StateMachineEngine', () => {
 
   it('tryApplyTransitions does not apply when no outgoing transition matches', () => {
     const config = makeConfig({
-      transitions: [{ from: 'PLANNING', to: 'EXECUTION', kind: 'pass' }], // pass requires gate
+      // Ребро закрыто guard-ом, которому нечем стать истинным.
+      transitions: [
+        { from: 'PLANNING', to: 'EXECUTION', guard: "session.gates.review == 'passed'" },
+      ],
     });
     const engine = new StateMachineEngine(config);
     const session = makeSession({ currentStage: 'planning' });
@@ -340,9 +153,7 @@ describe('StateMachineEngine', () => {
 
   it('tryApplyTransitions evaluates guard before applying transition', () => {
     const config = makeConfig({
-      transitions: [
-        { from: 'PLANNING', to: 'EXECUTION', kind: 'auto', guard: "session.approved('plan')" },
-      ],
+      transitions: [{ from: 'PLANNING', to: 'EXECUTION', guard: "session.approved('plan')" }],
     });
     const engine = new StateMachineEngine(config);
 
@@ -360,7 +171,7 @@ describe('StateMachineEngine', () => {
 
   it('tryApplyTransitions sets currentStage (not stageOverride) for matching transition', () => {
     const config = makeConfig({
-      transitions: [{ from: 'PLANNING', to: 'EXECUTION', kind: 'auto' }],
+      transitions: [{ from: 'PLANNING', to: 'EXECUTION' }],
     });
     const engine = new StateMachineEngine(config);
     const session = makeSession();
@@ -378,7 +189,7 @@ describe('StateMachineEngine', () => {
     });
     const engine = new StateMachineEngine(config);
     // stageOverride on the session object has no effect on deriveStage
-    const session = makeSession({ stageOverride: 'COMMIT' as never });
+    const session = makeSession({ stageOverride: 'COMMIT' } as never);
 
     // deriveStage evaluates rules — rules say true -> PLANNING
     const stage = engine.deriveStage(session);
@@ -391,7 +202,6 @@ describe('StateMachineEngine', () => {
         {
           from: 'PLANNING',
           to: 'EXECUTION',
-          kind: 'auto',
           effects: [{ bumpRetry: 'task-1' }, { approve: 'plan' }],
         },
       ],
@@ -417,11 +227,11 @@ describe('StateMachineEngine', () => {
     expect(session.approvals.length).toBe(0);
   });
 
-  it('tryApplyTransitions tries kind=pass transition when kind=auto fails', () => {
+  it('tries the next edge when the first one is closed', () => {
     const config = makeConfig({
       transitions: [
-        { from: 'PLANNING', to: 'COMMIT', kind: 'pass', guard: "session.approved('commit')" },
-        { from: 'PLANNING', to: 'EXECUTION', kind: 'auto', guard: "session.approved('plan')" },
+        { from: 'PLANNING', to: 'COMMIT', guard: "session.approved('commit')" },
+        { from: 'PLANNING', to: 'EXECUTION', guard: "session.approved('plan')" },
       ],
     });
     const engine = new StateMachineEngine(config);
@@ -440,7 +250,7 @@ describe('StateMachineEngine', () => {
 });
 
 describe('onFailure: retry', () => {
-  // Two `kind: fail` edges leave the same stage: one goes round again, one
+  // Two edges leave the same stage on a failure: one goes round again, one
   // gives up. `onFailure` is what tells them apart — the field was accepted,
   // compiled and read by nobody, so both profiles declaring it described
   // behaviour that did not exist.
@@ -451,10 +261,9 @@ describe('onFailure: retry', () => {
         failed: {},
       },
       stageAssignments: [],
-      requiredGates: ['review'],
       transitions: [
-        { from: 'execution', to: 'execution', kind: 'fail', onFailure: 'retry' },
-        { from: 'execution', to: 'failed', kind: 'fail', onFailure: 'terminal' },
+        { from: 'execution', to: 'execution', onFailure: 'retry' },
+        { from: 'execution', to: 'failed', onFailure: 'terminal' },
       ],
     } as EngineConfig);
   }
@@ -525,7 +334,6 @@ describe('alternative transitions between the same two stages', () => {
         { from: 'a', to: 'b', guard: 'false' },
         { from: 'a', to: 'b', guard: 'true' },
       ],
-      requiredGates: [],
     });
 
   it('takes the alternative whose guard holds', () => {
@@ -546,7 +354,6 @@ describe('alternative transitions between the same two stages', () => {
           { from: 'a', to: 'b', guard: 'false' },
           { from: 'a', to: 'b', guard: 'false' },
         ],
-        requiredGates: [],
       })
     );
     const session = makeSession();
@@ -563,7 +370,6 @@ describe('alternative transitions between the same two stages', () => {
           { from: 'a', to: 'b', guard: 'false', effects: [{ approve: 'wrong' }] },
           { from: 'a', to: 'b', guard: 'true', effects: [{ approve: 'right' }] },
         ],
-        requiredGates: [],
       })
     );
     const session = makeSession();

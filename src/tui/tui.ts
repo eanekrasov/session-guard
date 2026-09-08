@@ -109,6 +109,15 @@ export type TaskGateInfo = {
   stage: string;
   status: string;
   gates: GateInfo[];
+  /**
+   * Вердикт движка о последнем ходе задачи (`run.checks`).
+   *
+   * Показывается наравне с гейтами, потому что решает ровно то же — выйдет ли
+   * задача со стадии, — но вносит его не агент, а плагин. Задача, застрявшая в
+   * `code` с `failed`, гейтов не имеет вовсе, и без этой строки оператор не
+   * видел бы ни задачи, ни причины.
+   */
+  checks?: string;
 };
 
 /**
@@ -224,6 +233,7 @@ export function parseRuntimeState(raw: string): ParseResult {
         stage: String(value.stage ?? ''),
         status: String(value.status ?? ''),
         gates: runGates,
+        checks: typeof value.checks === 'string' ? value.checks : undefined,
       });
     }
   }
@@ -333,11 +343,14 @@ export function formatSectionLines(view: Tui): string[] {
   // task-1@verify ✓review ⏳qa — a session row would say "review passed"
   // while another task is still in code.
   for (const task of view.taskGates) {
-    if (task.gates.length === 0) continue;
+    if (task.gates.length === 0 && !task.checks) continue;
     const verdicts = task.gates
       .map((gate) => `${GATE_GLYPH[gate.status] ?? '?'}${gate.id}`)
       .join('');
-    statusParts.push(`${task.taskId}@${task.stage} ${verdicts}`);
+    // Вердикт движка идёт первым: он и есть причина, по которой задача не
+    // ушла со стадии, когда гейтов ещё нет.
+    const checks = task.checks ? `${GATE_GLYPH[task.checks] ?? '?'}checks` : '';
+    statusParts.push(`${task.taskId}@${task.stage} ${checks}${verdicts}`);
   }
 
   // Gates: ⏳invariants  ✓test

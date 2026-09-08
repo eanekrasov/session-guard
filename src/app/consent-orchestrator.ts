@@ -6,7 +6,9 @@ import {
   evidenceOf,
   calculateDocumentSetEvidence,
   classifyConsentAnswer,
+  consentTypeOf,
   questionTextOf,
+  DEFAULT_CONSENT_TYPE,
 } from './consent.ts';
 import type { LogFn } from './logger.ts';
 import { approve } from '../domain/approvals.ts';
@@ -104,6 +106,7 @@ export class ConsentOrchestrator {
       documentRefs.find((f) => f.includes('plan') && f.endsWith('plan.md')) ?? documentRefs[0]!;
     const documentPath = resolve(this.projectDir, documentRef);
     const documentEvidence = calculateDocumentSetEvidence(documents);
+    const consentType = consentTypeOf(consentRequest.manifest);
 
     await this.queue.enqueue(sessionID, async (session) => {
       if (!session) return;
@@ -122,25 +125,30 @@ export class ConsentOrchestrator {
       // honest reading: the document under discussion has changed.
       session.approvals = session.approvals.filter((approval) => approval.type !== 'plan');
       session.approvals.push({
-        type: 'plan',
+        type: consentType,
         callId: callID,
         status: 'pending',
         evidence: documentEvidence,
         files: documentRefs,
       });
-      session.refs[REF_PLAN] = documentPath;
+      // Ссылка на документ живёт под именем согласия: `refs.plan` для плана,
+      // `refs.deploy` для деплоя. Guard-ы схемы уже читают `session.refs.<имя>`
+      // обобщённо — писала под одним именем только эта строка.
+      session.refs[consentType] = documentPath;
       session.consentedCallIDs = [...session.consentedCallIDs, callID];
 
-      // P1-015: HARNESS_AUTO_APPROVE — auto-approve plan if env var is set
-      // and the plan hasn't been approved yet.
+      // P1-015: HARNESS_AUTO_APPROVE — авто-одобрение для прогонов без
+      // оператора. Одобряет ровно то согласие, которое спросили, а не всегда
+      // план: иначе схема с двумя разными согласиями не проезжает.
       if (
         process.env.HARNESS_AUTO_APPROVE === 'true' &&
-        !session.approvals.some((a) => a.type === 'plan' && a.status === 'granted')
+        !session.approvals.some((a) => a.type === consentType && a.status === 'granted')
       ) {
-        approve(session, 'plan', documentEvidence, callID);
-        void this.log('info', 'HARNESS_AUTO_APPROVE: plan auto-approved', {
+        approve(session, consentType, documentEvidence, callID);
+        void this.log('info', 'HARNESS_AUTO_APPROVE: consent auto-approved', {
           sessionID,
           callID,
+          type: consentType,
           evidence: documentEvidence.slice(0, 16),
         });
       }
@@ -219,17 +227,22 @@ export class ConsentOrchestrator {
     return match;
   }
 
+  /**
+   * Незакрытая запись согласия этого вызова.
+   *
+   * Ищется по `callId`, а не по типу: идентификатор вызова и так уникален, а
+   * фильтр `type === 'plan'` делал невидимым любое согласие с другим именем —
+   * запись создавалась и оставалась висеть вечно.
+   */
   private findOpenApproval(approvals: Approval[], callID: string): Approval | undefined {
     return approvals.find(
-      (approval) =>
-        approval.type === 'plan' && approval.callId === callID && approval.status === 'pending'
+      (approval) => approval.callId === callID && approval.status === 'pending'
     );
   }
 
   private removeOpenApproval(session: { approvals?: Approval[] }, callID: string): void {
     session.approvals = (session.approvals ?? []).filter(
-      (approval) =>
-        !(approval.type === 'plan' && approval.callId === callID && approval.status === 'pending')
+      (approval) => !(approval.callId === callID && approval.status === 'pending')
     );
   }
 
@@ -246,6 +259,7 @@ export class ConsentOrchestrator {
   ): Promise<void> {
     let wasGranted = false;
     let evidence = '';
+    let grantedType = DEFAULT_CONSENT_TYPE;
 
     void this.log('info', `Consent after: processing answer`, { sessionID, callID });
 
@@ -284,23 +298,29 @@ export class ConsentOrchestrator {
         // P1-015: Re-verify plan evidence at decision time
         if (!this.verifyPlanEvidenceAtDecision(session, callID, sessionID)) {
           this.removeOpenApproval(session, callID);
-          session.refs[REF_PLAN] = '';
+          session.refs[pendingApproval.type] = '';
           void this.store.save(session);
           return;
         }
 
-        approve(session, 'plan', pendingApproval.evidence ?? '', callID);
+        // Одобряется то согласие, которое спрашивали. Здесь стояло литеральное
+        // 'plan', и схема с `consent: deploy` получала одобрение с чужим
+        // именем — переход ждал своего и не дожидался никогда.
+        approve(session, pendingApproval.type, pendingApproval.evidence ?? '', callID);
         wasGranted = true;
+        grantedType = pendingApproval.type;
         evidence = pendingApproval.evidence ?? '';
-        void this.log('info', `Consent granted: plan approved`, {
+        void this.log('info', `Consent granted`, {
           sessionID,
           callID,
+          type: pendingApproval.type,
           evidence: evidence.slice(0, 16),
         });
       } else {
-        void this.log('info', `Consent: plan declined or unrecognized`, {
+        void this.log('info', `Consent declined or unrecognized`, {
           sessionID,
           callID,
+          type: pendingApproval.type,
           kind: result.kind,
         });
       }
@@ -320,7 +340,7 @@ export class ConsentOrchestrator {
             parts: [
               {
                 type: 'text',
-                text: `Plan approved with evidence ${evidence}.`,
+                text: `Consent '${grantedType}' approved with evidence ${evidence}.`,
               },
             ],
           },

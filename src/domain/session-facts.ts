@@ -43,6 +43,13 @@ export interface SessionFacts {
   isExhausted(budgetKey: string): boolean;
   /** Guard-expression helper: `session.approved(type)` — для consent-проверок в tryApplyTransitions. */
   approved(type: string): boolean;
+  /**
+   * Вердикт ядра о последнем ходе на текущей стадии, вне цикла задач.
+   *
+   * Внутри цикла тот же вердикт живёт на прогоне и читается как
+   * `task.checks`. Guard-ы стадии читают его как `session.checks`.
+   */
+  checks?: GateStatus;
 }
 
 // ─── Projection function ───────────────────────────────────────────────────────
@@ -82,5 +89,6 @@ export function toSessionFacts(session: WorkflowSessionRead): SessionFacts {
     approved(type: string) {
       return this.approvals.some((a) => a.type === type && a.status === 'granted');
     },
+    checks: session.checks,
   };
 }
