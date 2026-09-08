@@ -1,7 +1,7 @@
 {
   "name": "opencode-state-machine",
-  "version": "0.1.0",
-  "description": "State machine library for OpenCode plugins \u2014 gives schema-based workflow with strict validation between steps",
+  "version": "1.0.0",
+  "description": "State machine library for OpenCode plugins — gives schema-based workflow with strict validation between steps",
   "keywords": [
     "opencode",
     "opencode-plugin",
