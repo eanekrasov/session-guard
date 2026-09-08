@@ -369,7 +369,8 @@ export class MutationOrchestrator {
    *
    * Проверки `canPerformAction(session, 'beginMutation')` здесь больше нет —
    * `actionGuards` удалён. Это был единственный запрет правок до утверждения
-   * плана. См. docs/gate-actions-before-removal.md.
+   * плана, и теперь его несёт `actions:` стадии: запись `edit` с guard-ом
+   * `session.approved('plan')`.
    */
   async beginMutation(
     input: { sessionID: string; callID: string },
@@ -567,10 +568,17 @@ export class MutationOrchestrator {
    * а это разные события, и второе происходит после каждого второго вызова
    * инструмента.
    */
-  async applyTransitions(session: WorkflowSession): Promise<{ applied: boolean; to?: string }> {
+  async applyTransitions(
+    session: WorkflowSession
+  ): Promise<{ applied: boolean; from?: string; to?: string; guard?: string | null }> {
     const engine = await this.resolveEngine(session.profileId, session.schemaId);
     const result = engine.tryApplyTransitions(session);
-    return { applied: result.applied === true, to: result.to };
+    return {
+      applied: result.applied === true,
+      from: result.from,
+      to: result.to,
+      guard: result.guard ?? null,
+    };
   }
 
   /**

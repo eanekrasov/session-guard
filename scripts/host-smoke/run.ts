@@ -1070,7 +1070,7 @@ async function main(): Promise<void> {
     '',
   ].join('\n');
 
-  const reportPath = join(import.meta.dir!, '../../docs/host-smoke.md');
+  const reportPath = join(import.meta.dir!, '../../docs/plans/host-smoke.md');
   await writeFile(reportPath, report, 'utf-8');
   console.error(`\n${passed}/${results.length} passed — report written to ${reportPath}`);
   process.exit(passed === results.length ? 0 : 1);

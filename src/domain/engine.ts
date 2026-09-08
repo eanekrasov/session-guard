@@ -417,7 +417,7 @@ export class StateMachineEngine {
   tryApplyTransitions(
     session: WorkflowSession,
     evaluationContext: GuardEvaluationContext = {}
-  ): TransitionCheck & { applied?: boolean } {
+  ): TransitionCheck & { applied?: boolean; from?: string } {
     const currentStage = this.deriveStage(session, evaluationContext);
     const facts = toGuardContext(session);
 
@@ -477,13 +477,14 @@ export class StateMachineEngine {
             approve(session, effect.approve, '', `transition:${currentStage}->${transition.to}`);
           }
         }
+        const leftStage = currentStage;
         session.currentStage = transition.to;
         // Вердикт ядра о ходе принадлежит стадии, на которой этот ход был
         // сделан. Унесённый на следующую, он утверждал бы о её работе то,
         // чего никто не проверял.
         session.checks = undefined;
         this.resetLoopTasksOnEntry(session, transition.to);
-        return { ...result, applied: true };
+        return { ...result, applied: true, from: leftStage };
       }
     }
 

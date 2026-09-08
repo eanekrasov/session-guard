@@ -60,8 +60,6 @@ in parallel). The stage passes when every gate it declares passes, and fails as
 soon as one fails. Inside a loop those verdicts live on the task's own run;
 outside it they are the session's gates.
 
-Full model: `docs/stage-model.md`. Target workflow: `docs/stage-model-plan.md`.
-
 ## Known traps
 
 **`allowedAgents` is enforced at task admission only.** Agent identity reaches

@@ -1,5 +1,8 @@
 # Примеры schema
 
+Более полный набор примеров вместе с разбором каждого поля — в
+[profile-authoring.md](profile-authoring.md).
+
 ## Минимальный линейный workflow
 
 ```yaml
@@ -11,7 +14,7 @@ stages:
 transitions:
   - from: planning
     to: review
-    guard: "session.refs.plan != null"
+    guard: 'session.refs.plan != null'
   - from: review
     to: done
     guard: "session.gates.review == 'passed'"
@@ -23,7 +26,7 @@ transitions:
 transitions:
   - from: planning
     to: tasks_ready
-    guard: "session.refs.plan != null"
+    guard: 'session.refs.plan != null'
     consent: plan
 ```
 

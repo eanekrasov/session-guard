@@ -12,16 +12,16 @@ Last updated 2026-09-08.
 
 ## Where things stand
 
-|                                   |                                                                                                                                                                                                             |
-| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Branch                            | `main`                                                                                                                                                                                                      |
-| --------------------------------- | ----------------------------------------------------------------------------------------------------------                                                                                                  |
-| Last commit                       | `14b09ad`; the tool rename and the handoff update are uncommitted                                                                                                                                           |
-| `mise run test`                   | 1709 pass / 0 fail                                                                                                                                                                                          |
-| `mise run typecheck`              | clean — **and it now covers `test/` and `scripts/`**, see below                                                                                                                                             |
-| `mise run lint`, `mise run build` | clean                                                                                                                                                                                                       |
-| `openspec validate`               | valid                                                                                                                                                                                                       |
-| `bun run smoke`                   | 2026-09-08: 11/11 once, then 9/11 and 10/11 — **one scenario fails per full run, a different one each time, and every one of them passes when run alone**. Unsettled; see «The flake nobody has caught yet» |
+|                                   |                                                                                                                                                                                                                                                                                       |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Branch                            | `main`                                                                                                                                                                                                                                                                                |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------                                                                                                                                                                            |
+| Last commit                       | `14b09ad`; the tool rename and the handoff update are uncommitted                                                                                                                                                                                                                     |
+| `mise run test`                   | 1709 pass / 0 fail                                                                                                                                                                                                                                                                    |
+| `mise run typecheck`              | clean — **and it now covers `test/` and `scripts/`**, see below                                                                                                                                                                                                                       |
+| `mise run lint`, `mise run build` | clean                                                                                                                                                                                                                                                                                 |
+| `openspec validate`               | valid                                                                                                                                                                                                                                                                                 |
+| `bun run smoke`                   | 2026-09-08: 11/11, then 9/11, 10/11, and 11/11 again under `HOST_SMOKE_DEBUG` with zero retries. **One scenario failed per full run for three runs, a different one each time, each passing alone; the last full run was clean.** Not settled — see «The flake nobody has caught yet» |
 
 **Read «What the host smoke found on 2026-09-08» first**, then «Policy left the
 core». The smoke run against a live opencode found two holes in the core that
@@ -132,6 +132,12 @@ with no top-level transitions — where movement happens inside a loop — every
 stage is terminal, including the first, so a session was archived on its very
 first move.
 
+### A finished workflow says why it finished
+
+`session.outcome`, written once on entering a terminal stage: the edge taken
+(`from` → `stage`), its `guard` verbatim, and the session's failed gates and
+exhausted retry budgets at that moment. See open item 1, now closed.
+
 ### The refusal now says it is a refusal
 
 `actions:` refusals opened with `Action 'bash' is declared here, but no entry
@@ -177,25 +183,36 @@ option still goes back. That is why every off-script answer is now recorded and
 carried into the step's transcript as `[off-script question] …`: a run steered
 by one has to say so instead of letting the next step guess.
 
-### The flake nobody has caught yet
+### The flake nobody has caught yet — still uncaught
 
 Three scenarios — `commit-mismatch`, `cicd-full-cycle`, `verify-loop` — have
 each failed **once** in a full run and then passed when run alone, on the same
 code, first attempt every step. No two runs failed the same scenario.
 
-What is known: the last failure (`verify-loop`, «no executable task loop is
-declared») carried **zero** `[off-script question]` lines, so the model had not
-been given permission to run ahead — that explanation is ruled out for it. What
-is not known is anything else. The refusal means the session's acting stage
-declared no loop, i.e. it had already left `execution`, which the step before it
-had just verified was not so.
+The planned experiment was run: a **full suite under `HOST_SMOKE_DEBUG`**, which
+prints the session state on failure. It came back **11/11**, every scenario
+first attempt on every step, in seven minutes rather than the usual fifteen.
 
-The next step is a **full run under `HOST_SMOKE_DEBUG`**: the debug path prints
-the session state on failure, and a full run answers the first question by
-itself — a different scenario failing again means the conditions of a long run,
-the same one failing means a defect to chase. Do not conclude «the model was
-careless» before that; twice today that conclusion was wrong and the cause was a
-hole in the core.
+So the honest state is: **the defect is neither found nor ruled out.** A green
+run is the absence of evidence, not evidence of absence. What it did settle is
+what the cause is _not_ — **zero** `[off-script question]` lines across the
+whole run, so the auto-answerer steering the model past a step is dead as an
+explanation (it was already ruled out for the `verify-loop` failure, and now for
+the suite as a whole).
+
+What is left is the conditions of a long run, and that hypothesis is not tested
+by one more green suite — only by repetition. The instrumentation is in place
+and costs nothing until it fires:
+
+- every step announces itself with a timestamp under `HOST_SMOKE_DEBUG`, so a
+  failure or a timeout names the step it happened on;
+- an answer to a question the scenario never scripted is recorded and carried
+  into the step's transcript as `[off-script question] …`;
+- the debug path prints the session state when a scenario fails.
+
+Next time it appears, that is what to read. Do not conclude «the model was
+careless» before reading it: twice on 2026-09-08 that conclusion was wrong and
+the cause was a hole in the core.
 
 ### Tool names use `-`, not `.`
 
@@ -208,7 +225,7 @@ rename is textual and complete.
 
 Three things the runtime decided by itself were deleted and rebuilt as
 declarations. The record made before the deletion, and used to rebuild from,
-is `docs/gate-actions-before-removal.md` — it describes what each one did, in
+is `docs/plans/gate-actions-before-removal.md` — it describes what each one did, in
 what order, and what it stood between.
 
 ### What went
@@ -396,7 +413,7 @@ narrow. Two places cast explicitly because of it, and `AdmissionResult` in
 ### Host smoke, 2026-09-06
 
 Every scenario except `cicd-full-cycle`, which the operator asked to skip while
-its profile is in progress. Report at `docs/host-smoke.md`.
+its profile is in progress. Report at `docs/plans/host-smoke.md`.
 
 | Scenario                                                               |                                                                                                                                                        |
 | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -600,23 +617,35 @@ lost every agent its parent shipped.
 
 ### Waiting on the operator, raised 2026-09-07 evening
 
-1. **What `failed` should mean — and `done` with it.** ~~Neither is
-   enforced~~ — **still half open, and the remaining half is now sharper.**
-   As of 2026-09-08 both are terminal stages by declaration, both archive the
-   session, and the engine says `Workflow finished`. What none of that answers
-   is **why** it stopped: `failed` carries no reason, so a reader of the
-   archived file cannot tell a clean finish from an exhausted budget or a
-   failed gate. Option 4 of the four once put to the operator — record which
-   gate failed or which budget ran out on entry — is the piece left.
-   The older text follows. `terminalStages` and its hardcoded
-   `TERMINAL_STAGES` are gone, and `base` now declares `actions: []` on both
-   stages, so nothing can be _done_ there: a probe against the live runtime
-   refuses an edit, a bash call and a commit on either. What is still not
-   answered is the other half — `failed` carries no reason. Why the workflow
-   stopped is nowhere in the session, so «finished», «failed» and «stuck» still
-   read alike to anyone looking at the file. Option 4 of the four once put to
-   the operator: require the entry to record which gate failed or which budget
-   ran out.
+1. ~~**What `failed` should mean — and `done` with it.**~~ **Closed
+   2026-09-08.** Both halves are done. `done` and `failed` are terminal stages
+   by declaration, both archive the session, and the engine now says
+   `Workflow finished` instead of `No outgoing transitions from done`. The
+   second half — **why** it stopped — is `session.outcome`, written once on
+   entering a terminal stage:
+
+   ```
+   outcome: work → failed
+     because: session.gates.review == 'failed'
+     failedGates: review
+     exhaustedBudgets: cycles
+   ```
+
+   **The schema names the reason, not the core.** `guard` is the condition of
+   the edge the workflow left by, word for word as the profile author wrote it.
+   Inventing a classification of our own on top of someone else's rules — «gate
+   failure», «budget exhausted» — would state it in terms the profile does not
+   contain. `failedGates` and `exhaustedBudgets` add what was true at that
+   moment; `from` and `stage` say which edge was taken.
+
+   Written **before** `save`, or it would not travel into the archive with the
+   session it describes. `tryApplyTransitions` now also returns the stage that
+   was left, and `applyTransitions` the whole four rather than one flag.
+
+   The TUI details pane prints it. Tests: one end-to-end through the runtime on
+   an unguarded edge (the reason is honestly empty, not invented) and two on the
+   new `outcome` fixture, whose two ends are told apart by nothing but their
+   guards.
 
 2. ~~**`settings` is read by nothing.**~~ **Closed** — deleted, together with
    `tools` and `gateMapping`, both equally unread. That is six such fields
@@ -643,12 +672,30 @@ lost every agent its parent shipped.
    readers were taught the archive. See «A finished session leaves the
    runtime».
 
-6. **`parseRuntimeState` carries unreachable tolerance.** It accepts `gates`
-   as an array _or_ an object, `tasks` as either, and a missing `sessionId`
-   standing in as `rootSessionID` (`src/tui/tui.ts:158-260`). The TUI reads
-   schema-validated sessions now, so those branches cannot be entered. Left in
-   place deliberately: clearing them is its own change, not a rider on this
-   one.
+6. ~~**`parseRuntimeState` carries unreachable tolerance.**~~ **Closed
+   2026-09-08**, and by changing the contract rather than deleting branches:
+   `parseRuntimeState` and `formatDetailsLines` now take a `WorkflowSession`,
+   not a string. The tolerance did not need removing — it stopped being
+   expressible. Of the seven `IdleReason` values one survives (`no_stage`); the
+   rest belonged to `readSession`, which answers `null` to all of them before
+   anything reaches the TUI.
+
+   Three kinds of dead thing came out with it: tolerance for shapes the schema
+   rejects; reads of fields the session does not have (`runId`,
+   `currentTaskIndex`, `activeMutation`, `processedEventIds`, and the task
+   statuses `active` / `committed`, neither of which is in `TASK_STATUS`); and
+   `formatIdleLine` with its icon and label tables — exported, tested, and
+   called from nowhere, because the caller discards the reason and returns
+   `null`.
+
+   **The test fixture was the reason it survived.** `makeV1Session` built a
+   `schemaVersion: 1` session with `activeMutation`, `commitPermit`,
+   `currentTaskIndex` and `tasks` as an array — not one of those fields exists
+   in the current schema. 195 lines of tests were green against a shape
+   production has not written for a long time, and they were what kept the
+   tolerance alive. The fixture now goes through `WorkflowSessionSchema.parse`,
+   so a test can no longer assert behaviour that does not exist. Net: −75 lines
+   of source and tests, +14.
 
 ### Schema machinery — status corrected
 
@@ -680,12 +727,40 @@ The morning handoff listed 14-19 as open. Re-checked:
    from the one their name claims. When a test passes, check that it fails
    without the fix.
 
+### An entire subsystem nobody switched on
+
+`src/app/workflow-module.ts` was on the list below for three defects. Looking
+into it on 2026-09-08 found something larger: **nothing in `src/` imports it**,
+and pulling that thread uncovered a closed island.
+
+| File                        | Lines | Imported from `src/` by |
+| --------------------------- | ----- | ----------------------- |
+| `domain/workflow-model.ts`  | 598   | only the four below     |
+| `app/workflow-module.ts`    | 134   | **nobody**              |
+| `app/host-call-adapter.ts`  | 154   | **nobody**              |
+| `domain/run-view.ts`        | 165   | **nobody**              |
+| `domain/scoped-policy.ts`   | 202   | **nobody**              |
+| `domain/resource-claims.ts` | 181   | **nobody**              |
+
+1434 lines of source, closed on itself, exported from neither `public-api.ts`
+nor `index.ts`. Its only consumers are seven test files — another 1395 lines
+and 74 tests, all passing.
+
+So it is not dead code in the ordinary sense: it is a complete, tested
+subsystem that was never wired in — run snapshots, command dispatch, views,
+scoped policy, resource claims — sitting beside the machinery that actually
+runs, which is `WorkflowSession`. In that light the three «defects» read
+differently: the always-false `isDuplicate` and the empty `validateSnapshot`
+are not bugs but unfinished work, and the latter says so («placeholder for Task
+6 full validation»).
+
+**The operator's call, deferred 2026-09-08**: delete the island (−2829 lines,
+−74 tests) if the approach was abandoned, or keep it and say in each file that
+it is not wired in. What must not happen is leaving it as today, where a reader
+finds a coherent subsystem and assumes it runs.
+
 ### Lower priority
 
-6. `src/app/workflow-module.ts` — `isDuplicate(snapshot, cmdId)` is called with
-   a freshly generated `cmdId`, so it is always false; `validateSnapshot` is an
-   empty placeholder; `loadSnapshot` swallows corrupt JSON and returns `null`,
-   silently resetting the run.
 7. ~~raw tool arguments dumped at `info` on every call~~ — **closed**
    (`fdd04f8`); they are at `debug` now.
 8. `src/app/guardrails.ts` is a regex blacklist: `\beval\s*\(` and unanchored
@@ -922,7 +997,7 @@ nothing fails loudly when it does not.
 - **Comments in this repository outlive the code they describe.** Two stale
   claims were repeated as fact this session before being checked: that
   `phases:` was a key the schema never had (it was the previous name of
-  `stages:` — `docs/stage-model.md:106`), and that stage-level `allowedAgents`
+  `stages:` — `docs/plans/stage-model.md:106`), and that stage-level `allowedAgents`
   blocks mutations. Read the code.
 - **Verify agent reports overstate and understate.** One remediation report
   claimed "two concurrent task operations can never both survive a mutating

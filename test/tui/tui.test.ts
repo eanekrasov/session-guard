@@ -1,11 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import {
-  formatDetailsLines,
-  formatIdleLine,
-  formatSectionLines,
-  parseRuntimeState,
-  type IdleReason,
-} from '../../src/tui/tui.ts';
+import { formatDetailsLines, formatSectionLines, parseRuntimeState } from '../../src/tui/tui.ts';
 import { WorkflowSessionSchema } from '../../src/session/session-schema.ts';
 import type { WorkflowSession } from '../../src/session/session-schema.ts';
 
@@ -205,23 +199,6 @@ describe('parseRuntimeState', () => {
     if (!r.ok) return;
     expect(r.value.activeOperations).toEqual([]);
   });
-});
-
-describe('formatIdleLine', () => {
-  const check = (reason: IdleReason) => {
-    const line = formatIdleLine(reason);
-    expect(line).toContain('▶');
-    expect(line).toContain('✕');
-    expect(line.length).toBeLessThanOrEqual(44);
-  };
-
-  test('no_session', () => check('no_session'));
-  test('no_file', () => check('no_file'));
-  test('parse_error', () => check('parse_error'));
-  test('invalid_structure', () => check('invalid_structure'));
-  test('unknown_schema', () => check('unknown_schema'));
-  test('missing_session_id', () => check('missing_session_id'));
-  test('no_stage', () => check('no_stage'));
 });
 
 describe('formatSectionLines', () => {

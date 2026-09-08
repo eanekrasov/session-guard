@@ -9,8 +9,7 @@
 # its own invariants. A copy of the stages and transitions would be a second
 # workflow to keep in step with the first, and that is exactly what went wrong:
 # the stage model renamed `phases:` to `stages:` and rewrote base.yaml around
-# the `execution` loop (docs/stage-model.md), and this file was left behind on
-# both counts. Its `phases:` block stopped being read the day of the rename,
+# the `execution` loop, and this file was left behind on both counts. Its `phases:` block stopped being read the day of the rename,
 # and every transition it declared named a stage — code, review, qa — that no
 # longer existed.
 #
@@ -25,7 +24,7 @@
 # Restricting who may run is also not what planning needs: `allowedAgents` says
 # who is permitted once dispatched, and dispatch itself is read only as
 # `loopStage.dispatch`. Launching the architect on planning is a capability the
-# workflow does not have yet — see docs/plans/.
+# workflow does not have yet.
 #
 # Task-stage-level `allowedAgents` (see task-cycles.yaml) uses the dispatched
 # agent and does work.
@@ -68,4 +67,3 @@ stages:
           - action: bash
             commands: ['git status', 'git status .*', 'git diff.*', 'git log.*', './gradlew .*']
             guard: "session.approved('plan')"
-

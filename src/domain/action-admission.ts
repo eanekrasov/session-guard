@@ -8,8 +8,7 @@
  *
  * Раньше эту ось нёс плоский `actionGuards` на весь workflow: одно выражение
  * на весь граф, без возможности сказать «править можно на `code`, но не на
- * `planning`». Привязка к стадии строго выразительнее. См.
- * docs/gate-actions-before-removal.md.
+ * `planning`». Привязка к стадии строго выразительнее.
  */
 import { matchesScope } from '../app/scope-match.ts';
 import { shellSegments } from './session-queries.ts';

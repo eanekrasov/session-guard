@@ -91,7 +91,6 @@ export type RetryBudget = z.infer<typeof RetryBudgetSchema>;
  * единственное отличие внутренней стадии от внешней: `allowedAgents`, `gates`,
  * `transitions`, guard-ы, эффекты и бюджеты ретраев означают на обоих уровнях
  * одно и то же, поэтому читателю нужен один набор правил, а не два.
- * См. docs/stage-model.md.
  */
 export interface StageDef {
   /** Список задач, по которому стадия ходит циклом. Её `stages` выполняются на каждую задачу. */

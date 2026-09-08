@@ -117,6 +117,34 @@ export const PendingDecisionSchema = z.object({
   resolution: z.string().optional(),
 });
 
+/**
+ * Чем и почему кончился workflow.
+ *
+ * Пишется один раз, при входе в терминальную стадию. До этого «дошли до
+ * конца», «упёрлись в исчерпанный бюджет» и «провалили проверку» выглядели в
+ * файле сессии одинаково: стадия `done` или `failed` и больше ничего. Читатель
+ * архива видел ИСХОД и не видел ПРИЧИНЫ.
+ *
+ * Причину называет сама схема: `guard` — это условие ребра, по которому
+ * workflow ушёл в конец, слово в слово как его написал автор профиля. Ядру не
+ * приходится выдумывать классификацию поверх чужих правил, а `failedGates` и
+ * `exhaustedBudgets` показывают, что было верно в тот момент.
+ */
+export const WorkflowOutcomeSchema = z.object({
+  /** Терминальная стадия, в которую пришли. */
+  stage: z.string().min(1),
+  /** Откуда пришли. */
+  from: z.string().min(1),
+  /** Условие ребра — причина словами схемы. `null`, когда ребро без guard-а. */
+  guard: z.string().nullable(),
+  /** Гейты сессии, провалившиеся к этому моменту. */
+  failedGates: z.array(z.string()).default([]),
+  /** Бюджеты повторов, израсходованные к этому моменту. */
+  exhaustedBudgets: z.array(z.string()).default([]),
+  recordedAt: z.string().min(1),
+});
+export type WorkflowOutcome = z.infer<typeof WorkflowOutcomeSchema>;
+
 export const MutationTaskSchema = z.object({
   id: z.string().regex(/^task-[0-9]+$/, 'Workflow task id must match task-[0-9]+'),
   status: z.enum(TASK_STATUS),
@@ -329,6 +357,8 @@ export const WorkflowSessionSchema = z
      * guard-ами как `session.checks`.
      */
     checks: z.enum(GATE_STATUS).optional(),
+    /** Чем кончился workflow — см. `WorkflowOutcomeSchema`. */
+    outcome: WorkflowOutcomeSchema.optional(),
     invariantViolations: z.array(InvariantViolationRecordSchema).default([]),
     consentedCallIDs: z.array(z.string()).default([]),
     /**

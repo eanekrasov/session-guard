@@ -3,12 +3,33 @@
 State machine плагин для [OpenCode](https://opencode.ai/) — управляет жизненным циклом
 workflow-сессий: фазы, переходы, консент (одобрение), мутации, gates, инварианты и верификация.
 
-## Документация для пользователя
+## Документация
 
-Начните с [руководства пользователя](docs/user-guide.md). Отдельные разделы:
+Три входа, по тому, что вы собираетесь делать.
 
+### Работаю под управлением плагина
+
+[Как это устроено](docs/architecture-overview.md) — что происходит с сессией,
+кто и почему вас останавливает, где смотреть состояние. Короткая версия для
+первого запуска — [руководство пользователя](docs/user-guide.md).
+
+### Пишу свой профиль
+
+[Как написать свой профиль](docs/profile-authoring.md) — полное руководство:
+структура профиля, схема целиком (стадии, переходы, `actions:`, циклы, guard-ы,
+области записи), наследование, готовые примеры и способ проверки.
+
+### Правлю сам плагин
+
+[Устройство кода](docs/plugin-architecture.md) — слои, направление
+зависимостей, путь одного вызова инструмента, чем что проверяется.
+
+### Отдельные разделы
+
+- [установка и запуск](docs/usage.md);
 - [настройка](docs/configuration.md);
-- [справочник workflow schema](docs/schema-reference.md);
+- [справочник workflow schema](docs/schema-reference.md) — сжатая выжимка по
+  полям, когда полное руководство уже прочитано;
 - [примеры schema](docs/schema-examples.md);
 - [guide по написанию schema](docs/schema-writing-guide.md);
 - [статус возможностей](docs/feature-status.md);
@@ -151,7 +172,7 @@ OpenCode Tool Call
 │     → проверка HARNESS_AUTO_APPROVE               │
 │                                                   │
 │  3. TaskHandler (только task tool)                │
-│     → session.activeOperation = { id, agent }     │
+│     → session.activeOperations[callId] = { agent }│
 │                                                   │
 │  4. CommitPermit (только Bash)                    │
 │     → hasForbiddenGitSubcommand() → block         │
@@ -247,40 +268,40 @@ Zod-валидируемый JSON, сохраняемый на диск. Каж�
 
 ```
 
-WorkflowSession (Zod-схема)
+WorkflowSession (Zod-схема, src/session/session-schema.ts)
 ├── sessionId — уникальный ID сессии
 ├── profileId — привязанный профиль (base, android, harness)
-├── schemaVersion — версия схемы (=1, инкремент при брейкинге)
+├── schemaId — какую из схем профиля выполняет сессия
+├── schemaVersion — версия формата (=2)
 ├── revision — монотонный счётчик (инкремент на каждом save)
 ├── title — заголовок сессии
 │
-├── currentStage — фаза: planning | tasks_ready | code | review | qa | commit | done | failed
-├── gates — Gate[]: [{id, status, label?, resolvedAt?}]
-│ ├── invariants — pending | running | passed | failed | skipped
-│ ├── review — ...
-│ └── qa — ...
+├── currentStage — стадия; имена задаёт схема профиля, а не ядро
+├── gates — Gate[]: [{id, status, label?, resolvedAt?}] — только сессионные
+│ гейты; гейты задач живут на прогонах
+├── checks — вердикт ядра о последнем ходе ВНЕ цикла (см. ниже)
+├── outcome — чем и почему кончился workflow; пишется при входе в конец
 │
-├── approvals — Approval[]: [{type, callId, status, grantedAt?, evidence?, feedback?}]
-│ ├── plan — одобрение плана пользователем
-│ └── commit — одобрение коммита
+├── approvals — Approval[]: [{type, callId, status, grantedAt?, evidence?}]
+│ тип — имя согласия из схемы: plan, deploy, любое
+├── refs — Record<string, string> — документ под именем своего согласия
+├── consentedCallIDs — string[] (защита от повторной обработки)
 │
-├── tasks — MutationTask[]: [{id, path, status, title, ...}]
-├── currentTaskIndex — индекс активной задачи
-├── activeOperation — ActiveOperation | null (mutex на мутацию)
-│
-├── retryBudgets — Record<string, {attempts, maximum}> (напр. cycles: {attempts: 0, maximum: 5})
-├── verifications — Verification[]: [{stage, status: confirmed|rejected}]
+├── tasks — Record<listKey, MutationTask[]> — списки по имени цикла
+├── loopRuns — Record<runId, LoopRun> — прогон задачи: стадия, гейты, checks
+├── activeTaskContexts — открытые задачи для показа
+├── activeOperations — Record<callId, ActiveOperation> — открытые ходы;
+│ на стадии с гейтами их несколько сразу
+├── pendingDecisions — решения, переданные оператору при исчерпании бюджета
+├── retryBudgets — Record<string, {attempts, maximum}>
 │
 ├── deliveryPermit — DeliveryPermit | null (preCommitHead, expectedFiles)
 ├── deliveryReceipt — SHA коммита | null
 │
-├── pendingConsent — PendingConsent | null (ожидающий запрос одобрения)
-├── consentedCallIDs — string[] (защита от повторной обработки)
-│
-├── refs — Record<string, string> (plan, spec — ссылки на файлы)
-├── changedFiles — string[] (изменённые файлы по git diff)
-├── baselineHashes — string[] (контрольные суммы изменений)
+├── verifications — Verification[]: [{stage, status: confirmed|rejected}]
+├── changedFiles — string[] — что накопила работа, сверено с HEAD
 ├── invariantViolations — ValidationRecord[]
+├── processedResultCallIDs — string[] (защита от повторного вердикта)
 └── updatedAt — ISO timestamp
 
 ````
@@ -613,14 +634,15 @@ interface OpenCodeSessionClient {
        ├── calculatePlanEvidence() — SHA-256 канонизированного плана
        ├── Queue.enqueue():
        │   ├── session.consentedCallIDs dedup
-       │   ├── session.pendingConsent = { callID, revision, evidence }
-       │   └── HARNESS_AUTO_APPROVE → approve('plan') без вопроса
+       │   ├── session.approvals += { type: <имя согласия>, callId, status: 'pending' }
+       │   ├── session.refs[<имя>] = путь документа
+       │   └── HARNESS_AUTO_APPROVE → одобряет то согласие, которое спросили
        └── finishMutation() — после auto-approve проверяет переход
 
 3. Task start (handleTaskBefore)
    └── Tool != task или нет subagent_type/agent/type → skip
-   └── Session.activeOperation уже существует с другим callID → skip (lock)
-   └── session.activeOperation = { id, agent, startedAt, status: 'running' }
+   └── Ход этого callID уже коррелирован → отказ
+   └── session.activeOperations[callID] = { runId?, taskId?, agent, status }
 
 3c. Stage actions (actionsBefore)
    └── Действующая стадия — вложенная при открытом прогоне, иначе внешняя
@@ -644,10 +666,10 @@ interface OpenCodeSessionClient {
            ├── Queue.enqueue():
            │   ├── releaseInterruptedLock() — освобождение зависших мутаций
            │   ├── beginMutation() domain:
-           │   │   ├── Проверка activeOperation (mutex, TTL 30мин)
-           │   │   ├── session.activeOperation = новый
-           │   │   ├── session.verifications = []
-           │   │   └── gate('invariants') = pending
+           │   │   ├── Проверка чужого хода (mutex, TTL 30мин)
+           │   │   ├── resolveMutationRun() → run | ambiguous | none
+           │   │   ├── session.activeOperations[callID] = новый
+           │   │   └── session.verifications = []
            │   └── liveMutations.set(callID, { rootSessionId, stageBefore })
 ```
 
@@ -682,7 +704,7 @@ interface OpenCodeSessionClient {
 5. Consent answer (handleQuestionAfter)
    └── Tool == Question
    └── parseConsentRequest(questionText) — ищем <consent-request> тег
-   └── session.pendingConsent?.callID == callID
+   └── незакрытая запись одобрения с этим callId
    └── Извлечение ответов из metadata.answers + extractLabels()
    └── classifyConsentAnswer() → grant | decline
    └── verifyPlanEvidenceAtDecision() — сверка SHA-256 плана на диске
@@ -700,8 +722,8 @@ interface OpenCodeSessionClient {
        │   │   ├── validateFiles() — прогон инвариантов профиля
        │   │   └── finalPassed = !metadataFailed && !scopeError && нет errors
        │   ├── finishMutation() domain:
-       │   │   ├── session.activeOperation = null
-       │   │   └── gate('invariants') = passed | failed
+       │   │   ├── delete session.activeOperations[callID]
+       │   │   └── run.checks = passed | failed  (вне цикла — session.checks)
        │   ├── tryApplyTransitions() — авто-переход после мутации
        │   └── Post-factum transition validation:
        │       └── Была ли смена фазы? Валидна ли она?
@@ -807,15 +829,15 @@ Approvals granted: plan
 1. **beginMutation** — заводит активную операцию, сбрасывает verifications
 2. **finishMutation** — снимает операцию и записывает вердикт о ходе
 
-Если activeOperation уже существует и не истекла (TTL 30 минут) — новый beginMutation
+Если чужой ход уже открыт и не истёк (TTL 30 минут) — новый beginMutation
 выбрасывает ошибку.
 
 ### P1-014: Освобождение зависших блокировок
 
 `releaseInterruptedLock()` в MutationOrchestrator:
 
-- Если activeOperation есть НО не отслеживается в `liveMutations` → прервана
-- Если activeOperation истекла (старше MUTATION_TTL_MS = 30 мин) → освободить
+- Если ход есть НО не отслеживается в `liveMutations` → прерван
+- Если ход истёк (старше MUTATION_TTL_MS = 30 мин) → освободить
 - Если callID совпадает с входящим → retry, не трогать
 
 ### Обработка ошибок
@@ -1195,15 +1217,15 @@ function resolvePresetAlias(value: string): string;
 ```
 Tui {
   rootSessionID: string;
-  stage: Stage;           // planning | tasks_ready | execution | validation | commit | done | failed
+  stage: Stage;           // имя задаёт схема профиля
   prevStage: Stage | null;
   nextStage: Stage | null;
-  dispatchStage: DispatchStage;  // EMPTY | MUTATING | BOTH_ACTIVE | MUTATING_END
   revision: number;
   completedTasks: number;
   totalTasks: number;
-  activeMutation: { taskId, agent, outputReady } | null;
-  gates: GateInfo[];
+  activeOperations: ActiveOperationInfo[];  // на стадии с гейтами их несколько
+  gates: GateInfo[];      // сессионные
+  taskGates: TaskGateInfo[];  // по прогону задачи: стадия, гейты, checks
   retryBudgets: RetryInfo[];
   raw: Record<string, unknown>;
 }

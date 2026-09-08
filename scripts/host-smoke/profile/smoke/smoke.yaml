@@ -32,9 +32,9 @@ stages:
         gates: [review, qa]
     transitions:
       # Base guards this edge on the invariants gate. A subagent's edits are
-      # made in its own session, and the plugin does not link a child session to
-      # its parent (see docs/stage-model-plan.md), so the parent's invariants
-      # gate never turns green from delegated work. This run is about the
+      # made in its own session, and the plugin does not link a child session
+      # to its parent, so the parent's invariants gate never turns green from
+      # delegated work. This run is about the
       # verifier gates, so the edge is refined to move on the coder's own result.
       - from: code
         to: verify
@@ -45,4 +45,3 @@ stages:
 editingAgents:
   - coder
   - orchestrator
-

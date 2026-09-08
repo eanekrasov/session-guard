@@ -2797,6 +2797,9 @@ class StateMachineRuntime {
     if (!session) return;
     try {
       const moved = await this.mutationOrchestrator.applyTransitions(session);
+      // Запись об исходе — до `save`, иначе она не уедет в архив вместе с
+      // сессией, о которой рассказывает.
+      if (moved.applied) await this.recordOutcomeIfFinished(session, moved);
       await this.store.save(session);
       if (moved.applied) await this.archiveIfFinished(session);
     } catch (err) {
@@ -2824,6 +2827,55 @@ class StateMachineRuntime {
    * внутри цикла) терминальна каждая стадия, включая стартовую, и сессия
    * уезжала бы в архив на первом же ходу. Конец — это приход в конец.
    */
+  /**
+   * Записать, чем и почему кончился workflow.
+   *
+   * До этого `done` и `failed` выглядели в файле одинаково: стадия и больше
+   * ничего. Читатель архива видел исход и не видел причины — «завершилось»,
+   * «провалилось» и «застряло» были неразличимы.
+   *
+   * Причину называет схема, а не ядро: `guard` — условие ребра, по которому
+   * ушли в конец, слово в слово как его написал автор профиля. Выдумывать
+   * поверх чужих правил свою классификацию значило бы врать в терминах,
+   * которых в профиле нет.
+   */
+  private async recordOutcomeIfFinished(
+    session: WorkflowSession,
+    moved: { from?: string; to?: string; guard?: string | null }
+  ): Promise<void> {
+    const stage = moved.to;
+    if (!stage) return;
+
+    let engine: StateMachineEngine;
+    try {
+      engine = await this.mutationOrchestrator.resolveEngine(session.profileId, session.schemaId);
+    } catch {
+      return;
+    }
+    if (!engine.isTerminalStage(stage)) return;
+
+    session.outcome = {
+      stage,
+      from: moved.from ?? session.currentStage,
+      guard: moved.guard ?? null,
+      failedGates: (session.gates ?? [])
+        .filter((gate) => gate.status === 'failed')
+        .map((gate) => gate.id),
+      exhaustedBudgets: Object.entries(session.retryBudgets ?? {})
+        .filter(([, budget]) => budget.attempts >= budget.maximum)
+        .map(([key]) => key),
+      recordedAt: new Date().toISOString(),
+    };
+    void this.log('info', 'Workflow finished', {
+      sessionID: session.sessionId,
+      stage,
+      from: session.outcome.from,
+      guard: session.outcome.guard,
+      failedGates: session.outcome.failedGates,
+      exhaustedBudgets: session.outcome.exhaustedBudgets,
+    });
+  }
+
   private async archiveIfFinished(session: WorkflowSession): Promise<void> {
     let engine: StateMachineEngine;
     try {

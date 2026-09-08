@@ -437,9 +437,10 @@ async function readSessionView(
     section.setLastDetails(null);
     return null;
   }
-  section.setLastDetails(
-    formatDetailsLines(session) ?? [`runId: ${String(parsed.value.raw.runId)}`]
-  );
+  // Запасной строки больше нет: `formatDetailsLines` не разбирает текст и
+  // потому не может не справиться, а поля `runId` у схемы сессии нет — эта
+  // ветка печатала бы `runId: undefined`, если бы вообще достигалась.
+  section.setLastDetails(formatDetailsLines(session));
   return parsed.value;
 }
 

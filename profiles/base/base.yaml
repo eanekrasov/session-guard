@@ -7,8 +7,7 @@
 #
 # One unit of state: the stage. `execution` names a task list in `loop:`, so
 # its own stages run once per task, moved by its own transitions. Nesting is
-# the only difference between an inner stage and an outer one — see
-# docs/stage-model.md.
+# the only difference between an inner stage and an outer one.
 #
 # Guard functions: approved(type), isExhausted(key), hasPendingTasks(),
 # allTasksCompleted(listKey). Inside a loop, guards also read `task`.
@@ -141,7 +140,7 @@ stages:
       # закрыта И все вердикты собраны. Условия про review и qa намеренно
       # повторяют ребро `validation → commit`: ребро отвечает за движение и
       # перестанет держать, как только появится второй вход в стадию, а право
-      # на коммит выдаёт действие. См. docs/gate-actions-before-removal.md.
+      # на коммит выдаёт действие.
       - action: bash
         commands: ['bun run .*commit-task\.ts.*']
         delivers: true
@@ -164,12 +163,12 @@ transitions:
   # The operator approves the plan before any work is admitted.
   - from: planning
     to: tasks_ready
-    guard: "session.refs.plan != null"
+    guard: 'session.refs.plan != null'
     consent: plan
 
   - from: tasks_ready
     to: execution
-    guard: "hasPendingTasks()"
+    guard: 'hasPendingTasks()'
 
   # Every task has been through code and verify.
   - from: execution
@@ -198,10 +197,9 @@ transitions:
   # and must not advance the workflow.
   - from: commit
     to: done
-    guard: "session.deliveryReceipt != null"
+    guard: 'session.deliveryReceipt != null'
 
 editingAgents:
   - code
   - debug
   - architect
-

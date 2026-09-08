@@ -266,6 +266,16 @@ describe('a nested task finishes, not only starts', () => {
     const after = await store.loadArchived('finish');
     expect(after?.currentStage).toBe('done');
     expect(after?.tasks['task-1']?.[0]?.status).toBe('completed');
+
+    // Чем и почему кончилось. Без этой записи `done` и `failed` выглядят в
+    // архиве одинаково — стадия и больше ничего, — и читатель видит исход, но
+    // не причину. Ребро `execution → done` в этой фикстуре без условия, так
+    // что причина честно пуста, а не выдумана.
+    expect(after?.outcome?.stage).toBe('done');
+    expect(after?.outcome?.from).toBe('execution');
+    expect(after?.outcome?.guard).toBeNull();
+    expect(after?.outcome?.failedGates).toEqual([]);
+    expect(after?.outcome?.recordedAt).toBeTruthy();
   });
 });
 
@@ -291,5 +301,57 @@ describe('reading a task list from a dispatched subagent', () => {
 
     // And it still writes nothing.
     expect((await store.load('root'))?.revision).toBe(1);
+  });
+});
+
+/**
+ * Чем и почему кончился workflow.
+ *
+ * До этой записи `done` и `failed` выглядели в файле одинаково — стадия и
+ * больше ничего, — так что «завершилось», «провалилось» и «застряло»
+ * читались неразличимо. Причину называет схема: `guard` ребра, по которому
+ * ушли в конец, слово в слово как его написал автор профиля.
+ */
+describe('исход workflow записывается при входе в терминальную стадию', () => {
+  async function drive(sessionId: string, reviewStatus: 'passed' | 'failed') {
+    const store = new WorkflowStore(storeDirectory);
+    const session = createSession(sessionId, 'outcome', 'flow', 'work');
+    session.currentStage = 'work';
+    session.gates = [{ id: 'review', status: reviewStatus }];
+    if (reviewStatus === 'failed') {
+      session.retryBudgets = { cycles: { attempts: 3, maximum: 3 } };
+    }
+    await store.save(session);
+
+    const hooks: Hooks = createRuntime(pluginInput());
+    // Переходы применяются после любого инструмента; читающий `bash` подходит.
+    await hooks['tool.execute.after']!(
+      { tool: 'bash', sessionID: sessionId, callID: 'call-1', args: { command: 'git status' } },
+      { title: 'bash', output: '', metadata: {} }
+    );
+    return store;
+  }
+
+  it('записывает условие ребра как причину и уезжает в архив', async () => {
+    const store = await drive('outcome-done', 'passed');
+
+    expect(await store.load('outcome-done')).toBeNull();
+    const after = await store.loadArchived('outcome-done');
+    expect(after?.currentStage).toBe('done');
+    expect(after?.outcome?.from).toBe('work');
+    expect(after?.outcome?.stage).toBe('done');
+    expect(after?.outcome?.guard).toBe("session.gates.review == 'passed'");
+    expect(after?.outcome?.failedGates).toEqual([]);
+  });
+
+  it('на провале называет и условие, и упавший гейт, и исчерпанный бюджет', async () => {
+    const store = await drive('outcome-failed', 'failed');
+
+    const after = await store.loadArchived('outcome-failed');
+    expect(after?.currentStage).toBe('failed');
+    expect(after?.outcome?.stage).toBe('failed');
+    expect(after?.outcome?.guard).toBe("session.gates.review == 'failed'");
+    expect(after?.outcome?.failedGates).toEqual(['review']);
+    expect(after?.outcome?.exhaustedBudgets).toEqual(['cycles']);
   });
 });

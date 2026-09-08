@@ -1,0 +1,24 @@
+# Два конца у одного workflow, и каждый со своим условием.
+#
+# Нужен, чтобы проверить запись об исходе: `done` и `failed` — обе терминальные
+# стадии, и различает их только guard ребра, по которому туда пришли. Именно он
+# и есть причина, записываемая в `session.outcome`.
+#
+# Без `stageAssignments` намеренно: правила выводят стадию по состоянию, и
+# сессия тогда не стоит там, где её поставили.
+gates:
+  - id: review
+
+stages:
+  work:
+    gates: [review]
+  done: {}
+  failed: {}
+
+transitions:
+  - from: work
+    to: done
+    guard: "session.gates.review == 'passed'"
+  - from: work
+    to: failed
+    guard: "session.gates.review == 'failed'"

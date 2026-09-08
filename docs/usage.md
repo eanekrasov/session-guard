@@ -1,91 +1,149 @@
-# Usage: State-Machine Plugin в Harness
+# Установка и запуск
 
-> Как использовать плагин вместо встроенного `state-machine/`.
+Как подключить плагин к opencode, где он держит данные и как проверить, что он
+работает.
 
-## Status
-
-Плагин **уже подключён** в `opencode.jsonc` (строка 24):
-
-```json
-"plugin": ["file://plugins/state-machine/src/plugin.ts"]
-```
-
-OpenCode загружает его по этому пути напрямую. `package.json["main"]`
-(`./src/plugin.ts`) — для npm-установленных копий.
-
-На данный момент **плагин не заменяет полностью** встроенный
-`state-machine/runtime.ts` — см. [roadmap.md](./roadmap.md) для списка
-недостающих компонентов (guardrails, consent, change-scope, invariants и др.).
-
-**Текущее состояние**: плагин загружается OpenCode параллельно со встроенной
-версией, но та остаётся основным workflow-движком. Плагин предоставляет
-`createRuntime()`, чистую модульную архитектуру и покрытие тестами >99%.
+Что он делает и почему — [architecture-overview.md](architecture-overview.md).
+Как написать свой профиль — [profile-authoring.md](profile-authoring.md).
 
 ---
 
-## Архитектура подключения
+## Требования
 
-### Плагин
+opencode `>= 0.15.0` (объявлено в `engines`) и [bun](https://bun.sh) для сборки
+и тестов.
 
-Плагин реализует интерфейс `@opencode-ai/plugin` (`Plugin`):
+---
+
+## Подключение
+
+Плагин экспортирует `default` — объект `{ id, server }`, где `server` и есть
+хук-фабрика:
 
 ```typescript
-// src/plugin.ts
+// src/index.ts
 export const StateMachinePlugin: Plugin = async (ctx: PluginInput) => {
-  return createRuntime(ctx); // Возвращает Hooks
+  return createRuntime(ctx, { storeDir, profilesDir });
 };
+
+export default { id: 'state-machine', server: StateMachinePlugin };
 ```
 
-OpenCode загружает его через `opencode.jsonc` или package.json:
+Подключается он как обычный плагин opencode — путём к собранному пакету либо к
+исходникам:
 
-```json
-"plugin": ["file://plugins/state-machine/src/plugin.ts"]
+```jsonc
+// opencode.jsonc
+{
+  "plugin": ["file://путь/до/session-guard"],
+}
 ```
 
-### Встроенная версия (текущий production)
+Точный синтаксис поля `plugin` зависит от версии opencode; сверяйтесь с
+конфигурацией своего checkout-а.
 
-Встроенный `state-machine/runtime.ts` — набор awaited-хуков, вызываемых
-напрямую из кода харнесса. Он **не является** стандартным Plugin.
-
----
-
-## Entry point
-
-- `src/plugin.ts` — `"main"` в package.json, как у beads
-- `package.json["exports"]["."]` → `dist/index.js` — для npm
-- TUI вынесен в `tui-plugins/sidebar-state.tsx`
-
----
-
-## Переменные окружения
-
-| Переменная                   | По умолчанию                         | Описание                            |
-|------------------------------|--------------------------------------|-------------------------------------|
-| `STATE_MACHINE_STORE_DIR`    | `{harnessDir}/state-machine/runtime` | Директория для session store        |
-| `STATE_MACHINE_PROFILES_DIR` | —                                    | Директория с profile-конфигами      |
-| `HARNESS_PROFILE`            | —                                    | Активный профиль (android, harness) |
-| `OPENCODE_HARNESS_DIR`       | `.opencode`                          | Базовый каталог харнесса            |
-
----
-
-## Быстрый старт разработки
+### Сборка
 
 ```bash
-cd plugins/state-machine
-
-# Тесты
-bun test
-bun test --coverage
-
-# Конкретный файл
-bun test test/app/runtime.test.ts
-
-# Watch
-bun test --watch
-
-# Сборка библиотеки
+bun install
 bun run build
-
-# Типчекинг
-bun run typecheck
 ```
+
+Собирается два независимых артефакта:
+
+| Файл                              | Что это                              |
+| --------------------------------- | ------------------------------------ |
+| `dist/index.js`                   | плагин и публичное API библиотеки    |
+| `dist/tui.js`                     | TUI-модуль: боковая панель состояния |
+| `dist/profile.schema.json`        | JSON Schema для `profile.json`       |
+| `dist/profile-schema.schema.json` | JSON Schema для YAML-схемы workflow  |
+
+`build:verify` проверяет, что все четыре на месте и что две точки входа не
+перезаписали друг друга — такое однажды случилось молча.
+
+В `package.json` они разведены по экспортам: `.` → `dist/index.js`,
+`./tui` → `dist/tui.js`.
+
+---
+
+## Где лежат данные
+
+**Профили** — `<project>/.opencode/profiles`, переопределяется
+`STATE_MACHINE_PROFILES_DIR`. Корень `.opencode` меняется через
+`OPENCODE_HARNESS_DIR`.
+
+**Сессии** — `<XDG_DATA_HOME>/opencode/session-guard/runtime/<sessionId>.json`,
+переопределяется `STATE_MACHINE_STORE_DIR`. Законченные сессии переезжают в
+подкаталог `archive/` и перестают чем-либо управлять, оставаясь читаемыми.
+
+Каталоги создаются при инициализации плагина. Значения вычисляются **на
+экземпляр** и не пишутся в `process.env`: запись превращала локальный дефолт
+первого проекта в глобальный, и второй проект получал чужие профили и сессии.
+
+Полный список переменных — [configuration.md](configuration.md).
+
+---
+
+## На что плагин подписывается
+
+| Хук                   | Что делает                                                                                                  |
+| --------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `chat.message`        | guardrails над сообщениями                                                                                  |
+| `tool.execute.before` | допуск: guardrails, правила, согласие, задача, область записи, действия стадии, permit коммита, начало хода |
+| `tool.execute.after`  | дифф, инварианты, вердикт, разбор `<workflow-result>`, переходы                                             |
+| `event`               | уборка прерванных ходов                                                                                     |
+| `dispose`             | освобождение ресурсов                                                                                       |
+
+Плагин серверный. TUI — отдельный модуль (`dist/tui.js`), он только читает файлы
+сессий и ничего не решает.
+
+---
+
+## Проверка, что всё работает
+
+```bash
+bun test          # модульные тесты
+bun run typecheck
+bun run lint
+bun run smoke     # прогон против живого opencode
+```
+
+`bun run smoke` поднимает настоящий opencode в изолированном временном каталоге,
+проходит одиннадцать сценариев живой моделью и печатает результат по каждому.
+Это единственная проверка, доказывающая, что механизм работает в продакшене, а
+не что тесты согласны сами с собой: она уже находила дыры, которых не видели
+полторы тысячи модульных тестов.
+
+Полезные переменные прогона: `HOST_SMOKE_MODEL`, `HOST_SMOKE_ATTEMPTS`,
+`HOST_SMOKE_DEBUG` (печатает шаги со временем, вопросы оператору и снимок
+состояния при падении).
+
+Один сценарий по имени:
+
+```bash
+bun run scripts/host-smoke/run.ts verify-loop
+```
+
+---
+
+## Dashboard
+
+```bash
+bun run dashboard
+```
+
+Порт `3456`. `DASHBOARD_TOKEN` включает Bearer-аутентификацию, `DASHBOARD_HOST`
+меняет адрес (по умолчанию `127.0.0.1`), `ALLOWED_ORIGIN` — CORS. Показывает все
+сессии, включая архивные.
+
+---
+
+## Первый workflow
+
+1. Положите профиль в каталог профилей (или возьмите `base` из поставки).
+2. Скажите агенту вызвать `workflow-create` с нужной схемой.
+3. Дальше он ведёт вас по стадиям, а плагин следит за порядком.
+
+Что означают отказы и где смотреть состояние —
+[architecture-overview.md](architecture-overview.md), при затыке —
+[troubleshooting.md](troubleshooting.md).

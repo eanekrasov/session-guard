@@ -1,6 +1,6 @@
 # Stage model — what we are building
 
-Working plan. Companion to `docs/stage-model.md`, which states the model
+Working plan. Companion to `docs/plans/stage-model.md`, which states the model
 itself; this file tracks the target schemas, what is done, and what is left.
 
 Decided with the operator on 2026-09-06.
@@ -212,7 +212,7 @@ smoke profile does exactly that, and says why in a comment.
 > silently declared a child its own root and stopped the host from being asked.
 > `save()` no longer touches the cache at all.
 
-This is item 2 of `docs/handoff.md` — parent/child session linkage — reproduced end to end.
+This is item 2 of `docs/plans/handoff.md` — parent/child session linkage — reproduced end to end.
 
 ## Defects fixed in the loop, after the model landed
 

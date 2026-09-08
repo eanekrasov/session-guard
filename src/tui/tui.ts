@@ -30,44 +30,15 @@ export const STAGES = [
 
 export type Stage = string;
 
-export type IdleReason =
-  | 'no_session'
-  | 'no_file'
-  | 'parse_error'
-  | 'invalid_structure'
-  | 'unknown_schema'
-  | 'missing_session_id'
-  | 'no_stage';
-
-export const IDLE_REASONS: IdleReason[] = [
-  'no_session',
-  'no_file',
-  'parse_error',
-  'invalid_structure',
-  'unknown_schema',
-  'missing_session_id',
-  'no_stage',
-] as const;
-
-export const IDLE_ICON: Record<IdleReason, string> = {
-  no_session: '⏳',
-  no_file: '⏳',
-  parse_error: '✗',
-  invalid_structure: '✗',
-  unknown_schema: '?',
-  missing_session_id: '✗',
-  no_stage: '⏳',
-};
-
-export const IDLE_LABEL: Record<IdleReason, string> = {
-  no_session: 'sess',
-  no_file: 'file',
-  parse_error: 'parse',
-  invalid_structure: 'struct',
-  unknown_schema: 'schema',
-  missing_session_id: 'sess id',
-  no_stage: 'sess',
-};
+/**
+ * Почему панель не показывает состояние.
+ *
+ * Значение осталось одно. Прежние семь описывали формы, до которых разбор
+ * больше не доходит: битый текст, чужую структуру, отсутствующий
+ * `sessionId` — на всё это `readSession` отвечает `null` раньше, и сюда
+ * приходит уже разобранная схемой сессия.
+ */
+export type IdleReason = 'no_stage';
 
 export interface GateInfo {
   id: string;
@@ -240,16 +211,6 @@ function gateStatusGlyph(gates: GateInfo[]): string {
   const active = gates.find((g) => g.status === 'failed' || g.status === 'running');
   if (active) return `${active.id}=${GATE_GLYPH[active.status] ?? active.status}`;
   return '';
-}
-
-export function formatIdleLine(reason: IdleReason): string {
-  const label = ` ${IDLE_ICON[reason]} ${IDLE_LABEL[reason]} `;
-  const leftCtrl = '▶';
-  const rightCtrl = '✕';
-  const contentWidth = leftCtrl.length + label.length + rightCtrl.length;
-  const padTotal = SIDEBAR_WIDTH - contentWidth;
-  const padLeft = Math.floor(padTotal / 2);
-  return `${leftCtrl}${' '.repeat(Math.max(0, padLeft))}${label}${' '.repeat(Math.max(0, padTotal - padLeft))}${rightCtrl}`;
 }
 
 export function formatSectionLines(view: Tui): string[] {
@@ -459,6 +420,20 @@ export function formatDetailsLines(session: WorkflowSession): string[] {
     lines.push(`gates: ${gates.map((gate) => `${gate.id}=${gate.status}`).join(', ')}`);
   }
 
+  // Чем кончилось — и почему. Ради этой строки архив и существует: без неё
+  // «завершилось», «провалилось» и «застряло» читаются одинаково.
+  const outcome = session.outcome;
+  if (outcome) {
+    lines.push(`outcome: ${outcome.from} → ${outcome.stage}`);
+    lines.push(`  because: ${outcome.guard ?? '(ребро без условия)'}`);
+    if (outcome.failedGates.length > 0) {
+      lines.push(`  failedGates: ${outcome.failedGates.join(', ')}`);
+    }
+    if (outcome.exhaustedBudgets.length > 0) {
+      lines.push(`  exhaustedBudgets: ${outcome.exhaustedBudgets.join(', ')}`);
+    }
+  }
+
   lines.push(...collectionLines('changedFiles', session.changedFiles ?? []));
 
   for (const [budget, value] of Object.entries(session.retryBudgets ?? {})) {
@@ -470,6 +445,7 @@ export function formatDetailsLines(session: WorkflowSession): string[] {
     'activeOperations',
     'tasks',
     'gates',
+    'outcome',
     'changedFiles',
     'retryBudgets',
   ]);
