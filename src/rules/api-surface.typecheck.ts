@@ -5,7 +5,7 @@
  * If a forbidden type is accidentally re-exported, the @ts-expect-error will
  * become invalid and TypeScript compilation will fail.
  *
- * This file is checked by `npm run build` / `tsc` but produces no runtime output.
+ * This file is checked by `mise run build` / `tsc` but produces no runtime output.
  */
 
 // --- mcp-tools.ts: McpStatusMap should NOT be exported ---

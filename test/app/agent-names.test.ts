@@ -7,17 +7,23 @@ import {
 
 describe('qualifyAgentName', () => {
   it('prefixes a bare name with the profile id', () => {
-    expect(qualifyAgentName('android', 'code')).toBe('android/code');
+    expect(qualifyAgentName('android', 'code')).toBe('android_code');
   });
 
   it('leaves an already-qualified name alone', () => {
-    expect(qualifyAgentName('android', 'android/code')).toBe('android/code');
-    expect(qualifyAgentName('android', 'other/code')).toBe('other/code');
+    expect(qualifyAgentName('android', 'android_code')).toBe('android_code');
   });
 
-  it('recognises qualified names', () => {
-    expect(isQualifiedAgentName('android/code')).toBe(true);
-    expect(isQualifiedAgentName('code')).toBe(false);
+  it("recognises this profile's prefix", () => {
+    expect(isQualifiedAgentName('android_code', 'android')).toBe(true);
+    expect(isQualifiedAgentName('code', 'android')).toBe(false);
+  });
+
+  it('does not read an underscore inside an agent name as a prefix', () => {
+    // `code_review` is one agent's name, not profile `code` and agent
+    // `review` — the test is against the profile, not against the separator.
+    expect(isQualifiedAgentName('code_review', 'android')).toBe(false);
+    expect(qualifyAgentName('android', 'code_review')).toBe('android_code_review');
   });
 });
 
@@ -29,24 +35,24 @@ describe('agentIsAllowed', () => {
   });
 
   it('accepts the qualified name the host actually reports', () => {
-    // Synced agents register as `<profileId>/<name>`, so this is the form a
+    // Synced agents register as `<profileId>_<name>`, so this is the form a
     // dispatch normally carries.
-    expect(agentIsAllowed('android/code', allowed, 'android')).toBe(true);
+    expect(agentIsAllowed('android_code', allowed, 'android')).toBe(true);
   });
 
   it('accepts a schema authored with qualified names', () => {
-    expect(agentIsAllowed('android/code', ['android/code'], 'android')).toBe(true);
-    expect(agentIsAllowed('code', ['android/code'], 'android')).toBe(true);
+    expect(agentIsAllowed('android_code', ['android_code'], 'android')).toBe(true);
+    expect(agentIsAllowed('code', ['android_code'], 'android')).toBe(true);
   });
 
   it('rejects an agent belonging to another profile', () => {
     // Profiles stay isolated: another profile's `code` is a different agent.
-    expect(agentIsAllowed('other/code', allowed, 'android')).toBe(false);
+    expect(agentIsAllowed('other_code', allowed, 'android')).toBe(false);
   });
 
   it('rejects an agent that is not listed at all', () => {
     expect(agentIsAllowed('qa', allowed, 'android')).toBe(false);
-    expect(agentIsAllowed('android/qa', allowed, 'android')).toBe(false);
+    expect(agentIsAllowed('android_qa', allowed, 'android')).toBe(false);
   });
 
   it('allows anything when the list is empty', () => {

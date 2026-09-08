@@ -111,10 +111,10 @@ describe('syncProfileAgents', () => {
 
     await syncProfileAgents('test-profile', root);
 
-    const synced = path.join(root, '.opencode', 'agents', 'test-profile');
-    expect(existsSync(path.join(synced, 'code.md'))).toBe(true);
+    const synced = path.join(root, '.opencode', 'agents');
+    expect(existsSync(path.join(synced, 'test-profile_code.md'))).toBe(true);
     // A file the profile does not list is not this profile's to register.
-    expect(existsSync(path.join(synced, 'undeclared.md'))).toBe(false);
+    expect(existsSync(path.join(synced, 'test-profile_undeclared.md'))).toBe(false);
   });
 
   it('copies agent files from profile to .opencode/agents/<profileId>/', async () => {
@@ -128,11 +128,11 @@ describe('syncProfileAgents', () => {
     const logLines: string[] = [];
     await syncProfileAgents('test-profile', root, (msg) => logLines.push(msg));
 
-    const targetDir = path.join(root, '.opencode', 'agents', 'test-profile');
-    expect(existsSync(path.join(targetDir, 'code.md'))).toBe(true);
-    expect(existsSync(path.join(targetDir, 'review.md'))).toBe(true);
+    const targetDir = path.join(root, '.opencode', 'agents');
+    expect(existsSync(path.join(targetDir, 'test-profile_code.md'))).toBe(true);
+    expect(existsSync(path.join(targetDir, 'test-profile_review.md'))).toBe(true);
 
-    const codeContent = await readFile(path.join(targetDir, 'code.md'), 'utf-8');
+    const codeContent = await readFile(path.join(targetDir, 'test-profile_code.md'), 'utf-8');
     expect(codeContent).toContain('# Code agent');
     expect(codeContent).toContain('# MANAGED BY session-guard');
   });
@@ -145,7 +145,7 @@ describe('syncProfileAgents', () => {
     });
 
     await syncProfileAgents('test-profile', root);
-    const targetPath = path.join(root, '.opencode', 'agents', 'test-profile', 'code.md');
+    const targetPath = path.join(root, '.opencode', 'agents', 'test-profile_code.md');
     const content1 = await readFile(targetPath, 'utf-8');
 
     await syncProfileAgents('test-profile', root);
@@ -163,8 +163,8 @@ describe('syncProfileAgents', () => {
 
     // First run — sync code.md
     await syncProfileAgents('test-profile', root);
-    const targetDir = path.join(root, '.opencode', 'agents', 'test-profile');
-    expect(existsSync(path.join(targetDir, 'code.md'))).toBe(true);
+    const targetDir = path.join(root, '.opencode', 'agents');
+    expect(existsSync(path.join(targetDir, 'test-profile_code.md'))).toBe(true);
 
     // Remove code.md from source, add a new file
     const sourceDir = path.join(root, '.opencode', 'profiles', 'test-profile', 'agents');
@@ -174,8 +174,8 @@ describe('syncProfileAgents', () => {
     // Second run
     await syncProfileAgents('test-profile', root);
 
-    expect(existsSync(path.join(targetDir, 'code.md'))).toBe(false);
-    expect(existsSync(path.join(targetDir, 'review.md'))).toBe(true);
+    expect(existsSync(path.join(targetDir, 'test-profile_code.md'))).toBe(false);
+    expect(existsSync(path.join(targetDir, 'test-profile_review.md'))).toBe(true);
   });
 
   it('does not remove user-created files outside profile subdirectory', async () => {
@@ -228,8 +228,8 @@ describe('syncProfileAgents', () => {
 
     await syncProfileAgents('test-profile', root);
 
-    const targetDir = path.join(root, '.opencode', 'agents', 'test-profile');
-    expect(existsSync(path.join(targetDir, 'good.md'))).toBe(true);
+    const targetDir = path.join(root, '.opencode', 'agents');
+    expect(existsSync(path.join(targetDir, 'test-profile_good.md'))).toBe(true);
   });
 
   it('supports custom agentsDir in profile.json', async () => {
@@ -253,8 +253,8 @@ describe('syncProfileAgents', () => {
 
     await syncProfileAgents('test-profile', root);
 
-    const targetDir = path.join(root, '.opencode', 'agents', 'test-profile');
-    const content = await readFile(path.join(targetDir, 'code.md'), 'utf-8');
+    const targetDir = path.join(root, '.opencode', 'agents');
+    const content = await readFile(path.join(targetDir, 'test-profile_code.md'), 'utf-8');
     expect(content).toContain('custom dir');
   });
 
@@ -267,17 +267,17 @@ describe('syncProfileAgents', () => {
       },
     });
 
-    const targetDir = path.join(root, '.opencode', 'agents', 'test-profile');
+    const targetDir = path.join(root, '.opencode', 'agents');
     await mkdir(targetDir, { recursive: true });
     // Pre-place an unowned file with same name
     const unownedContent = '# Unowned agent — NOT managed by session-guard\n';
-    await writeFile(path.join(targetDir, 'code.md'), unownedContent);
+    await writeFile(path.join(targetDir, 'test-profile_code.md'), unownedContent);
 
     const logLines: string[] = [];
     await syncProfileAgents('test-profile', root, (msg) => logLines.push(msg));
 
     // Must NOT overwrite the unowned file
-    const contentAfter = await readFile(path.join(targetDir, 'code.md'), 'utf-8');
+    const contentAfter = await readFile(path.join(targetDir, 'test-profile_code.md'), 'utf-8');
     expect(contentAfter).toBe(unownedContent);
 
     // Must emit a collision diagnostic
@@ -290,14 +290,14 @@ describe('syncProfileAgents', () => {
       agentsContent: {},
     });
 
-    const targetDir = path.join(root, '.opencode', 'agents', 'test-profile');
+    const targetDir = path.join(root, '.opencode', 'agents');
     await mkdir(targetDir, { recursive: true });
     // Place an unowned Markdown file that has no ownership marker
     const unownedContent = '# Unowned\nsome content\n';
-    await writeFile(path.join(targetDir, 'unrelated.md'), unownedContent);
+    await writeFile(path.join(targetDir, 'test-profile_unrelated.md'), unownedContent);
 
     await syncProfileAgents('test-profile', root);
-    const contentAfter = await readFile(path.join(targetDir, 'unrelated.md'), 'utf-8');
+    const contentAfter = await readFile(path.join(targetDir, 'test-profile_unrelated.md'), 'utf-8');
     expect(contentAfter).toBe(unownedContent);
   });
 
@@ -310,8 +310,8 @@ describe('syncProfileAgents', () => {
 
     await syncProfileAgents('test-profile', root);
 
-    const targetDir = path.join(root, '.opencode', 'agents', 'test-profile');
-    const content = await readFile(path.join(targetDir, 'review.md'), 'utf-8');
+    const targetDir = path.join(root, '.opencode', 'agents');
+    const content = await readFile(path.join(targetDir, 'test-profile_review.md'), 'utf-8');
     // YAML frontmatter must remain at the start
     expect(content).toMatch(/^---\n/m);
     // Managed marker must be after frontmatter
@@ -330,10 +330,10 @@ describe('syncProfileAgents', () => {
     });
 
     // Create an existing target file with legacy ownership header
-    const targetDir = path.join(root, '.opencode', 'agents', 'test-profile');
+    const targetDir = path.join(root, '.opencode', 'agents');
     await mkdir(targetDir, { recursive: true });
     const legacyContent = '# MANAGED BY session-guard — do not edit\n# Legacy agent\ncontent';
-    await writeFile(path.join(targetDir, 'code.md'), legacyContent);
+    await writeFile(path.join(targetDir, 'test-profile_code.md'), legacyContent);
 
     // Now source has changed
     const sourceAgentsDir = path.join(root, '.opencode', 'profiles', 'test-profile', 'agents');
@@ -341,7 +341,7 @@ describe('syncProfileAgents', () => {
 
     await syncProfileAgents('test-profile', root);
 
-    const contentAfter = await readFile(path.join(targetDir, 'code.md'), 'utf-8');
+    const contentAfter = await readFile(path.join(targetDir, 'test-profile_code.md'), 'utf-8');
     // Should still have the managed marker and updated source content (not the old content)
     expect(contentAfter).toContain('# MANAGED BY session-guard');
     expect(contentAfter).toContain('updated content');
@@ -355,7 +355,7 @@ describe('syncProfileAgents', () => {
     });
 
     // Remove write permission from the target parent directory
-    const targetDir = path.join(root, '.opencode', 'agents', 'test-profile');
+    const targetDir = path.join(root, '.opencode', 'agents');
     await mkdir(targetDir, { recursive: true });
     await rename(targetDir, targetDir);
     // Make target dir unwritable
@@ -383,20 +383,20 @@ describe('syncProfileAgents', () => {
     });
 
     // Place an unowned file in target that just happens to have frontmatter
-    const targetDir = path.join(root, '.opencode', 'agents', 'test-profile');
+    const targetDir = path.join(root, '.opencode', 'agents');
     await mkdir(targetDir, { recursive: true });
     const unownedContent = '---\nname: plain-agent\n---\n\n# Unowned\n';
-    await writeFile(path.join(targetDir, 'plain.md'), unownedContent);
+    await writeFile(path.join(targetDir, 'test-profile_plain.md'), unownedContent);
 
     const logLines: string[] = [];
     await syncProfileAgents('test-profile', root, (msg) => logLines.push(msg));
 
     // unowned file must be preserved
-    const after = await readFile(path.join(targetDir, 'plain.md'), 'utf-8');
+    const after = await readFile(path.join(targetDir, 'test-profile_plain.md'), 'utf-8');
     expect(after).toBe(unownedContent);
 
     // Owned simple file must be written
-    const simpleContent = await readFile(path.join(targetDir, 'simple.md'), 'utf-8');
+    const simpleContent = await readFile(path.join(targetDir, 'test-profile_simple.md'), 'utf-8');
     expect(simpleContent).toContain('# MANAGED BY session-guard');
     expect(simpleContent).toContain('body content');
   });
@@ -410,9 +410,13 @@ describe('the synced directory is marked as generated', () => {
 
     await syncProfileAgents('test-profile', root);
 
-    const ignorePath = path.join(root, '.opencode', 'agents', 'test-profile', '.gitignore');
+    const ignorePath = path.join(root, '.opencode', 'agents', '.gitignore');
     expect(existsSync(ignorePath)).toBe(true);
-    expect(await readFile(ignorePath, 'utf-8')).toContain('*');
+    // The directory is flat and shared, so the managed files are named one by
+    // one. A blanket `*` here would hide the agents a user keeps beside them.
+    const ignore = await readFile(ignorePath, 'utf-8');
+    expect(ignore).toContain('/test-profile_coder.md');
+    expect(ignore.split('\n')).not.toContain('*');
   });
 
   it('keeps git from staging them, so a commit carries only the work', async () => {
@@ -439,12 +443,12 @@ describe('the synced directory is marked as generated', () => {
     const staged = git(['diff', '--cached', '--name-only']).split('\n').filter(Boolean);
 
     expect(staged).toContain('work.ts');
-    expect(staged.filter((file) => file.includes('.opencode/agents/test-profile/'))).toEqual([]);
+    expect(staged.filter((file) => file.startsWith('.opencode/agents/'))).toEqual([]);
   });
 
   it('leaves a .gitignore somebody else wrote alone', async () => {
     const root = await createFixtureLayout({ agentsContent: { 'coder.md': '# Coder\n' } });
-    const target = path.join(root, '.opencode', 'agents', 'test-profile');
+    const target = path.join(root, '.opencode', 'agents');
     await mkdir(target, { recursive: true });
     await writeFile(path.join(target, '.gitignore'), '# mine\n', 'utf-8');
 

@@ -22,7 +22,8 @@ const ROOT = path.join('/tmp', 'dashboard-app-test-' + randomUUID());
 const SESSIONS = path.join(ROOT, 'sessions');
 const OPENCODE = path.join(ROOT, '.opencode');
 const AGENTS = path.join(ROOT, 'agents');
-const ANDROID_AGENTS = path.join(AGENTS, 'android');
+// The sync writes one flat directory, with the profile in the file name.
+const ANDROID_AGENTS = AGENTS;
 const PROFILES = path.join(ROOT, 'profiles');
 const PROFILE_AGENTS = path.join(PROFILES, 'android', 'agents');
 
@@ -179,7 +180,7 @@ describe('dashboard', () => {
     // used to read a flat `<repo>/agent/<agent>.md`, a directory this project
     // does not have, so it answered 404 for every agent that has ever existed.
     it('reads a prompt named by profile and agent', async () => {
-      await writeFile(path.join(ANDROID_AGENTS, 'code.md'), '# code');
+      await writeFile(path.join(ANDROID_AGENTS, 'android_code.md'), '# code');
 
       const body = (await (
         await dashboard.fetch(get('/api/agents/android/code/prompt'))
@@ -189,7 +190,7 @@ describe('dashboard', () => {
     });
 
     it('takes the profile from the session being worked on when the url omits it', async () => {
-      await writeFile(path.join(ANDROID_AGENTS, 'code.md'), '# code');
+      await writeFile(path.join(ANDROID_AGENTS, 'android_code.md'), '# code');
       await writeSession('ses-1'); // createSession writes profileId android
 
       const body = (await (await dashboard.fetch(get('/api/agents/code/prompt'))).json()) as {
@@ -200,7 +201,7 @@ describe('dashboard', () => {
     });
 
     it('says so when no session names a profile and the url does not either', async () => {
-      await writeFile(path.join(ANDROID_AGENTS, 'code.md'), '# code');
+      await writeFile(path.join(ANDROID_AGENTS, 'android_code.md'), '# code');
 
       const response = await dashboard.fetch(get('/api/agents/code/prompt'));
 
@@ -219,7 +220,7 @@ describe('dashboard', () => {
       // android exactly, so it could not visibly drift — and the first agent
       // any other profile introduced would have been refused.
       await writeFile(path.join(PROFILE_AGENTS, 'kotlin-reviewer.md'), '# reviewer');
-      await writeFile(path.join(ANDROID_AGENTS, 'kotlin-reviewer.md'), '# reviewer');
+      await writeFile(path.join(ANDROID_AGENTS, 'android_kotlin-reviewer.md'), '# reviewer');
 
       const body = (await (
         await dashboard.fetch(get('/api/agents/android/kotlin-reviewer/prompt'))

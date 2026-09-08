@@ -1,7 +1,7 @@
 {
   "name": "opencode-state-machine",
   "version": "0.1.0",
-  "description": "State machine library for OpenCode plugins \u2014 gives schema-based workflow with strict validation between steps",
+  "description": "State machine library for OpenCode plugins — gives schema-based workflow with strict validation between steps",
   "keywords": [
     "opencode",
     "opencode-plugin",
@@ -40,18 +40,6 @@
   },
   "publishConfig": {
     "access": "public"
-  },
-  "scripts": {
-    "dashboard": "bun run src/dashboard/dashboard-server.ts",
-    "build": "bun build ./src/index.ts --outdir dist --target bun && bun run build:tui && bun run build:schema && bun run build:decl && bun run build:verify",
-    "build:verify": "bun -e \"const { existsSync, readFileSync } = require('fs'); const required = ['dist/index.js', 'dist/tui.js', 'dist/index.d.ts', 'dist/tui.d.ts', 'dist/profile.schema.json', 'dist/profile-schema.schema.json']; const missing = required.filter(f => !existsSync(f)); if (missing.length) { console.error('Missing build outputs:', missing.join(', ')); process.exit(1); } const idx = readFileSync('dist/index.js','utf-8'); const tui = readFileSync('dist/tui.js','utf-8'); if (idx === tui) { console.error('ERROR: dist/index.js and dist/tui.js are identical - one entrypoint overwrites the other'); process.exit(1); } console.error('Build verification: all outputs present, entrypoints distinct');\"",
-    "build:tui": "bun scripts/build-tui.ts",
-    "build:schema": "bun -e \"import { ProfileMetadataJsonSchema } from './src/schema/profile-metadata.ts'; import { writeFileSync } from 'fs'; writeFileSync('dist/profile.schema.json', JSON.stringify(ProfileMetadataJsonSchema, null, 2));\" && bun -e \"import { ProfileSchemaJsonSchema } from './src/schema/profile-schema.ts'; import { writeFileSync } from 'fs'; writeFileSync('dist/profile-schema.schema.json', JSON.stringify(ProfileSchemaJsonSchema, null, 2));\"",
-    "build:decl": "tsc -p tsconfig.decl.json",
-    "typecheck": "tsc --noEmit",
-    "test": "bun test",
-    "test:coverage": "bun test --coverage",
-    "smoke": "bun run scripts/host-smoke/run.ts"
   },
   "files": [
     "dist",

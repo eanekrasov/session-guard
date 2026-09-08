@@ -64,7 +64,7 @@ permission:
 1. Изучи код: для `.ts` — читай файлы напрямую (и `ast-index`/grep при необходимости), для структуры промптов — образцы выше.
 2. Реализуй задачу — строго в scope.
 3. **Обязательно проверь себя** после правки `.ts` (из `.opencode/`):
-   - `bun run typecheck`
+   - `mise run typecheck`
    - `bun test --max-concurrency=1 state-machine scripts`
    Исправь все ошибки типов и упавшие тесты.
 4. Не выполняй commit: его разрешит Координатор после review.

@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+#MISE description="Typecheck, lint and test — everything but the build"
+#MISE depends=["typecheck", "lint", "test"]

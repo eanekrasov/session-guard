@@ -357,7 +357,7 @@ export function schemaId(schemaFile: string): string {
  * Qualify every `allowedAgents` entry with the owning profile id.
  *
  * Schemas are authored with bare agent names, but synced agents register under
- * `<profileId>/<name>` (see agent-names.ts). Qualifying at resolution keeps the
+ * `<profileId>_<name>` (see agent-names.ts). Qualifying at resolution keeps the
  * YAML readable while letting the runtime compare against the host's names.
  */
 function qualifyStageAgents(

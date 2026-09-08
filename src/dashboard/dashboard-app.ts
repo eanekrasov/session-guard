@@ -40,10 +40,10 @@ export interface DashboardConfig {
   /**
    * The root the profile agent sync writes into — `<harness>/agents`.
    *
-   * A profile's agents are copied to `<harness>/agents/<profileId>/<agent>.md`,
-   * so this is a directory of profiles, not of agents. It used to point at
-   * `<repo>/agent`, a flat directory that does not exist in this project at
-   * all, which is why the prompt endpoint has always answered 404.
+   * A profile's agents are copied to `<harness>/agents/<profileId>_<agent>.md`
+   * — one flat directory, with the profile in the file name. It used to point
+   * at `<repo>/agent`, a directory that does not exist in this project at all,
+   * which is why the prompt endpoint has always answered 404.
    */
   agentsDir: string;
   /** The page to serve at `/`. Defaults to the one shipped beside this file. */
@@ -415,11 +415,11 @@ export function createDashboard(config: DashboardConfig): Dashboard {
    * One agent's prompt, as the profile ships it.
    *
    * `resolve` is compared against `join` so a segment climbing out of the
-   * directory with `..` names nothing — the check the flat version already
-   * made, extended over the profile segment as well.
+   * directory with `..` names nothing. Both halves of the file name are
+   * attacker-shaped input, so the check covers the composed name.
    */
   function readAgentPrompt(profileId: string, agentId: string): { content: string } | null {
-    const expected = join(agentsDir, profileId, `${agentId}.md`);
+    const expected = join(agentsDir, `${profileId}_${agentId}.md`);
     if (resolve(expected) !== expected) return null;
     if (!existsSync(expected)) return null;
     try {

@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+#MISE description="Run ESLint with auto-fix"
+
+# Invoked the same way as `lint` — the pair used to disagree, one going through
+# `bun x` and the other trusting PATH.
+bun x eslint . --fix

@@ -1459,12 +1459,14 @@ docs/                          — roadmap, usage, plugin-architecture, ...
 | ------------------------------------------- | ---------------------------------------------- |
 | `mise run build`                            | Сборка `src/index.ts` + `tui.ts` + JSON-schema |
 | `mise run test`                             | Все тесты (bun test)                           |
-| `mise run test:coverage`                    | Тесты с покрытием                              |
+| `mise run test-coverage`                    | Тесты с покрытием                              |
 | `mise run lint`                             | ESLint                                         |
-| `mise run lint:fix`                         | Автофикс                                       |
+| `mise run lint-fix`                         | Автофикс                                       |
 | `mise run format`                           | Prettier                                       |
-| `bun run typecheck`                         | tsc --noEmit                                   |
-| `bun run src/dashboard/dashboard-server.ts` | Запуск дашборда (порт 3456)                    |
+| `mise run typecheck`                        | tsc --noEmit                                   |
+| `mise run check`                            | typecheck + lint + тесты                       |
+| `mise run smoke`                            | Прогон против живого opencode                  |
+| `mise run dashboard`                        | Запуск дашборда (порт 3456)                    |
 
 ---
 

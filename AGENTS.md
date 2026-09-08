@@ -15,7 +15,7 @@
 - **Single Test**: `bun test BackgroundTask.test.ts` (use file glob pattern)
 - **Watch Mode**: `bun test --watch`
 - **Lint**: `mise run lint` (eslint)
-- **Fix Lint**: `mise run lint:fix` (eslint --fix)
+- **Fix Lint**: `mise run lint-fix` (eslint --fix)
 - **Format**: `mise run format` (prettier)
 
 ## Code Style Guidelines

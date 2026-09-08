@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+#MISE description="Serve the read-only session dashboard"
+
+bun run src/dashboard/dashboard-server.ts

@@ -502,7 +502,7 @@ describe('consent covers every document it named, and only the plan in hand', ()
 
   it('does not let a granted plan authorise the plan that replaced and was declined', async () => {
     // `before` pushed a second record while the first stayed `granted`, and
-    // `refs[REF_PLAN]` was repointed at the new document straight away. A
+    // `refs.plan` was repointed at the new document straight away. A
     // decline removed only the pending one, so `session.approved('plan')`
     // stayed true — authority from a plan nobody was working on any more.
     await store.save(createSession('co-supersede', 'base', 'state-machine'));
@@ -533,5 +533,124 @@ describe('consent covers every document it named, and only the plan in hand', ()
     const session = await store.load('co-supersede');
     expect(session!.approvals.filter((a) => a.type === 'plan')).toHaveLength(0);
     expect(session!.refs.plan).toContain('plan-two');
+  });
+});
+
+describe('a consent under any name is treated like the plan', () => {
+  async function askNamed(
+    sessionID: string,
+    callID: string,
+    storyId: string,
+    type: string,
+    files: Record<string, string>
+  ): Promise<{ orchestrator: Awaited<ReturnType<typeof makeOrchestrator>>; questionText: string }> {
+    const { evidenceOf, CONSENT_EVIDENCE_SCHEMA } = await import('../../src/app/consent.ts');
+    const dir = join(directory, '.opencode/plan', storyId);
+    mkdirSync(dir, { recursive: true });
+    const refs: string[] = [];
+    for (const [name, content] of Object.entries(files)) {
+      writeFileSync(join(dir, name), content);
+      refs.push(`.opencode/plan/${storyId}/${name}`);
+    }
+    const manifest = {
+      schema: CONSENT_EVIDENCE_SCHEMA,
+      revision: 1,
+      summary: `Consent ${storyId}`,
+      type,
+      files: refs,
+    } as const;
+    const evidence = evidenceOf(manifest as unknown as ConsentManifest);
+    const questionText = `<consent-request schema="harness.consent/v1" revision="1" evidence="${evidence}" grant="grant" decline="decline">${JSON.stringify(manifest)}</consent-request>`;
+    const orchestrator = await makeOrchestrator();
+    await orchestrator.before(sessionID, callID, questionText);
+    return { orchestrator, questionText };
+  }
+
+  it('withdraws a standing verdict of the same name when asked again', async () => {
+    // The withdrawal used to filter on the literal 'plan', so a consent under
+    // any other name was never withdrawn: the new pending record joined a
+    // standing granted one of the same type, and `approved('deploy')` kept
+    // answering true on authority given for an older document.
+    await store.save(createSession('co-named', 'base', 'state-machine'));
+
+    const first = await askNamed('co-named', 'call-d1', 'deploy-one', 'deploy', {
+      'deploy.md': '# Deploy one\n',
+    });
+    await first.orchestrator.after(
+      'co-named',
+      'call-d1',
+      {},
+      { title: 'Consent', output: first.questionText, metadata: { answers: ['grant'] } }
+    );
+    expect(
+      (await store.load('co-named'))!.approvals.filter(
+        (a) => a.type === 'deploy' && a.status === 'granted'
+      )
+    ).toHaveLength(1);
+
+    const second = await askNamed('co-named', 'call-d2', 'deploy-two', 'deploy', {
+      'deploy.md': '# Deploy two\n',
+    });
+    await second.orchestrator.after(
+      'co-named',
+      'call-d2',
+      {},
+      { title: 'Consent', output: second.questionText, metadata: { answers: ['decline'] } }
+    );
+
+    // Nothing of that name survives: the standing verdict was withdrawn when
+    // the question was asked again, and the decline removed the new record.
+    // Before the fix the standing `granted` was still here.
+    const session = await store.load('co-named');
+    expect(session!.approvals.filter((a) => a.type === 'deploy')).toHaveLength(0);
+  });
+
+  it('refuses a grant for a record that names no files instead of reading refs.plan', async () => {
+    // The decision-time check fell back to `refs.plan` when a record carried
+    // no file list — whatever consent was being decided. The evidence below is
+    // the plan document's own, so that fallback found a match and granted a
+    // `deploy` consent on the strength of a file it never named. A record that
+    // names nothing is a record this cannot verify, so it fails closed.
+    const { calculateDocumentSetEvidence } = await import('../../src/app/consent.ts');
+    const planRef = '.opencode/plan/fallback/plan.md';
+    const planContent = '# Untouched plan\n';
+    const dir = join(directory, '.opencode/plan', 'fallback');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'plan.md'), planContent);
+
+    const session = createSession('co-fallback', 'base', 'state-machine');
+    session.refs.plan = planRef;
+    session.approvals.push({
+      type: 'deploy',
+      callId: 'call-bare',
+      status: 'pending',
+      evidence: calculateDocumentSetEvidence([[planRef, planContent]]),
+    });
+    await store.save(session);
+
+    // A real question must reach `after`: with no consent-request tag it
+    // returns before the check this test is about, and would pass for the
+    // wrong reason.
+    const { evidenceOf, CONSENT_EVIDENCE_SCHEMA } = await import('../../src/app/consent.ts');
+    writeFileSync(join(dir, 'deploy.md'), '# Deploy\n');
+    const manifest = {
+      schema: CONSENT_EVIDENCE_SCHEMA,
+      revision: 1,
+      summary: 'Deploy',
+      type: 'deploy',
+      files: ['.opencode/plan/fallback/deploy.md'],
+    } as const;
+    const questionText = `<consent-request schema="harness.consent/v1" revision="1" evidence="${evidenceOf(manifest as unknown as ConsentManifest)}" grant="grant" decline="decline">${JSON.stringify(manifest)}</consent-request>`;
+
+    const orchestrator = await makeOrchestrator();
+    await orchestrator.after(
+      'co-fallback',
+      'call-bare',
+      {},
+      { title: 'Consent', output: questionText, metadata: { answers: ['grant'] } }
+    );
+
+    const after = await store.load('co-fallback');
+    expect(after!.approvals.some((a) => a.type === 'deploy' && a.status === 'granted')).toBe(false);
   });
 });

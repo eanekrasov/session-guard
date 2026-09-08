@@ -109,7 +109,7 @@ describe('workflow task state is orchestrator-owned', () => {
     const store = await createWorkflowSession();
     const hooks = createRuntime(pluginInput());
 
-    const result = await setStatus(hooks, 'cycle-minimal/orchestrator');
+    const result = await setStatus(hooks, 'cycle-minimal_orchestrator');
 
     expect(toolOutput(result)).toBe('Updated task-1 to completed');
     expect((await load(store)).tasks.implementation[0]!.status).toBe('completed');

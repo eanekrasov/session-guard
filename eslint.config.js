@@ -4,7 +4,7 @@ import tseslint from 'typescript-eslint';
 
 export default [
   {
-    ignores: ['.memory/**', 'dist/**', '.opencode/plugin/**', 'node_modules/**'],
+    ignores: ['.memory/**', 'dist/**', '.opencode/**', 'node_modules/**'],
   },
   {
     files: ['**/*.{ts,tsx}'],

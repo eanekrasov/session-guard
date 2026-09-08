@@ -1,3 +1,7 @@
 #!/usr/bin/env bash
 #MISE description="Run ESLint"
-bun x eslint . --ext .ts,.tsx
+
+# No `--ext`: ESLint 9 dropped it, and the flat config in eslint.config.js is
+# what decides which files are linted. Passing it looked like a filter and
+# filtered nothing.
+bun x eslint .

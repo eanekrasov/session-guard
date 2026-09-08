@@ -399,8 +399,3 @@ export type DeliveryPermit = z.output<typeof DeliveryPermitSchema>;
 
 export type WorkflowSession = z.output<typeof WorkflowSessionSchema>;
 export type WorkflowSessionRead = z.input<typeof WorkflowSessionSchema>;
-
-// ─── Well-known reference keys ─────────────────────────────────────────────────
-
-/** Key for the plan document reference in `refs`. */
-export const REF_PLAN = 'plan';

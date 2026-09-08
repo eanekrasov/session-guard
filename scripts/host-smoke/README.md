@@ -1,8 +1,8 @@
 # host-smoke — the plugin against a real opencode
 
 ```bash
-bun run smoke              # every scenario
-bun run smoke git-block    # one scenario by id
+mise run smoke              # every scenario
+mise run smoke git-block    # one scenario by id
 ```
 
 Nothing here calls into the plugin. Each scenario starts a real `opencode

@@ -55,9 +55,9 @@ const dashboard = createDashboard({
   opencodeRoot: resolve(join(PROJECT_ROOT, '.opencode')),
   /**
    * Where the plugin's profile agent sync puts prompts:
-   * `<harness>/agents/<profileId>/<agent>.md`. This used to be
-   * `<repo>/agent` — a flat directory this project does not have — so the
-   * prompt endpoint answered 404 for every agent that has ever existed.
+   * `<harness>/agents/<profileId>_<agent>.md`. This used to be
+   * `<repo>/agent` — a directory this project does not have — so the prompt
+   * endpoint answered 404 for every agent that has ever existed.
    */
   agentsDir: join(harnessDir(PROJECT_ROOT), 'agents'),
   token: process.env['DASHBOARD_TOKEN'] ?? '',

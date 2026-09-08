@@ -69,12 +69,19 @@ nested stage's list or, when it declares none, its parent's. A stage without
 `stages` never reaches that check, so a roster there is inert.
 
 **Agent names carry the profile prefix, and resolution handles it.**
-`syncProfileAgents` copies `profiles/<id>/<agentsDir>/*.md` into
-`.opencode/agents/<id>/`, and OpenCode derives an agent's name from the path
-under `agent/` or `agents/` — so `code.md` registers as `<id>/code`. Schemas stay
-authored with bare names; the resolver qualifies them (`src/app/agent-names.ts`),
-and a dispatch matching either form is accepted. A name qualified by a different
-profile never matches.
+`syncProfileAgents` copies `profiles/<id>/<agentsDir>/<name>.md` into one flat
+`.opencode/agents/<id>_<name>.md`, and OpenCode derives an agent's name from the
+path under `agent/` or `agents/` — so `code.md` registers as `<id>_code`.
+
+The profile lives in the file name because the directory is flat and shared:
+`base` and `android` both ship `code.md`, and under bare names one would
+silently overwrite the other. Only files carrying this profile's prefix are
+swept when its agent list changes; anything else in that directory — another
+profile's agents, or your own — is left alone.
+
+Schemas stay authored with bare names; the resolver qualifies them
+(`src/app/agent-names.ts`), and a dispatch matching either form is accepted. A
+name qualified by a different profile never matches.
 
 **`editingAgents` says which agents edit.** A stage whose `allowedAgents`
 admits one of them is a stage where work happens, which is what lets a task's

@@ -46,7 +46,7 @@ export default { id: 'state-machine', server: StateMachinePlugin };
 
 ```bash
 bun install
-bun run build
+mise run build
 ```
 
 Собирается два независимых артефакта:
@@ -102,13 +102,11 @@ bun run build
 ## Проверка, что всё работает
 
 ```bash
-bun test          # модульные тесты
-bun run typecheck
-bun run lint
-bun run smoke     # прогон против живого opencode
+mise run check    # typecheck + lint + модульные тесты
+mise run smoke    # прогон против живого opencode
 ```
 
-`bun run smoke` поднимает настоящий opencode в изолированном временном каталоге,
+`mise run smoke` поднимает настоящий opencode в изолированном временном каталоге,
 проходит одиннадцать сценариев живой моделью и печатает результат по каждому.
 Это единственная проверка, доказывающая, что механизм работает в продакшене, а
 не что тесты согласны сами с собой: она уже находила дыры, которых не видели
@@ -121,7 +119,7 @@ bun run smoke     # прогон против живого opencode
 Один сценарий по имени:
 
 ```bash
-bun run scripts/host-smoke/run.ts verify-loop
+mise run smoke verify-loop
 ```
 
 ---
@@ -129,7 +127,7 @@ bun run scripts/host-smoke/run.ts verify-loop
 ## Dashboard
 
 ```bash
-bun run dashboard
+mise run dashboard
 ```
 
 Порт `3456`. `DASHBOARD_TOKEN` включает Bearer-аутентификацию, `DASHBOARD_HOST`

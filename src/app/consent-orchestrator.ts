@@ -12,7 +12,7 @@ import {
 } from './consent.ts';
 import type { LogFn } from './logger.ts';
 import { approve } from '../domain/approvals.ts';
-import { REF_PLAN, type Approval } from '../session/session-schema.ts';
+import { type Approval } from '../session/session-schema.ts';
 import { readFile } from './sdd-artifacts.ts';
 import type { SessionClient } from './runtime-types.ts';
 
@@ -100,8 +100,8 @@ export class ConsentOrchestrator {
       documents.push([ref, content]);
     }
 
-    // The primary document is what `refs[REF_PLAN]` points at, for display and
-    // for sessions written before the list existed. The evidence is over all.
+    // The primary document is the one shown to the operator; the evidence
+    // is over every file the manifest named.
     const documentRef =
       documentRefs.find((f) => f.includes('plan') && f.endsWith('plan.md')) ?? documentRefs[0]!;
     const documentPath = resolve(this.projectDir, documentRef);
@@ -116,14 +116,21 @@ export class ConsentOrchestrator {
 
       // One record per type. `approve` and `decline` both upsert by type, so a
       // second record left them updating the wrong one — and, worse, a
-      // standing `granted` from an earlier plan survived a decline of this
-      // one while `refs[REF_PLAN]` had already been repointed at the new
-      // document. Every `session.approved('plan')` guard then passed on
+      // standing `granted` from an earlier document survived a decline of this
+      // one while `refs[<type>]` had already been repointed at the new
+      // document. Every `session.approved(<type>)` guard then passed on
       // authority nobody had given for the work in hand.
       //
-      // Asking about a new plan withdraws the standing verdict, which is the
-      // honest reading: the document under discussion has changed.
-      session.approvals = session.approvals.filter((approval) => approval.type !== 'plan');
+      // Asking again withdraws the standing verdict, which is the honest
+      // reading: the document under discussion has changed.
+      //
+      // The withdrawal is by `consentType`, not by a literal name. It used to
+      // read `!== 'plan'`, so a consent under any other name was never
+      // withdrawn: the new pending record joined a standing one of the same
+      // type, `approve` found the first and left the second pending, and
+      // `approved(<type>)` stayed true on authority given for an older
+      // document.
+      session.approvals = session.approvals.filter((approval) => approval.type !== consentType);
       session.approvals.push({
         type: consentType,
         callId: callID,
@@ -173,11 +180,14 @@ export class ConsentOrchestrator {
     sessionID?: string
   ): boolean {
     const pendingApproval = this.findOpenApproval(session.approvals ?? [], callID);
-    // Sessions written before the manifest list existed carry only the primary
-    // ref; re-reading that one is what they can support.
-    const documentRefs = pendingApproval?.files?.length
-      ? pendingApproval.files
-      : [session.refs?.[REF_PLAN]].filter((ref): ref is string => Boolean(ref));
+    // Only the manifest's own file list. There used to be a fallback to
+    // `refs.plan` here, for records written before the list existed — but it
+    // read the plan document whatever consent was being decided, so a consent
+    // under another name was verified against a file it never named. Records
+    // this can reach are the pending ones this orchestrator pushed at question
+    // time, and those always carry `files`; an approval without one is a
+    // record nothing here can verify, and it fails closed below.
+    const documentRefs = pendingApproval?.files ?? [];
     const documentRef = documentRefs[0];
     if (!documentRef || !pendingApproval?.evidence) {
       void this.log('warn', `verifyPlanEvidenceAtDecision: missing ref or evidence`, {
