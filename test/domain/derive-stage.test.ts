@@ -95,7 +95,7 @@ describe('deriveStage', () => {
 
   it('answers with no stage when there is none to keep', () => {
     // Только синтетические факты сюда доходят: реальная сессия всегда несёт
-    // `currentStage`, записанный `workflow.create` из первой стадии
+    // `currentStage`, записанный `workflow-create` из первой стадии
     // скомпилированного workflow. Поэтому `makeFacts` его и не заполняет —
     // тип требует поле, а этот тест проверяет поведение при его отсутствии.
     expect(deriveStage(makeFacts(), [])).toBe('');

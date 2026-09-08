@@ -66,8 +66,8 @@ async function listProfilesThrough(hooks: Record<string, unknown>): Promise<stri
   const tools = (await (hooks as { tool?: { register?: unknown } }).tool) as
     | Record<string, { execute: (args: unknown, ctx: unknown) => Promise<{ output: string }> }>
     | undefined;
-  if (!tools?.['workflow.list']) throw new Error('workflow.list is not registered');
-  const result = await tools['workflow.list'].execute({}, {});
+  if (!tools?.['workflow-list']) throw new Error('workflow-list is not registered');
+  const result = await tools['workflow-list'].execute({}, {});
   return result.output;
 }
 

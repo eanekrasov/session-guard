@@ -6,65 +6,67 @@ import {
   parseRuntimeState,
   type IdleReason,
 } from '../../src/tui/tui.ts';
+import { WorkflowSessionSchema } from '../../src/session/session-schema.ts';
+import type { WorkflowSession } from '../../src/session/session-schema.ts';
 
-function makeV1Session(overrides: Record<string, unknown> = {}): string {
-  return JSON.stringify({
-    schemaVersion: 1,
-    runId: '00000000-0000-0000-0000-000000000001',
+/**
+ * Настоящая сессия, а не её прежняя форма.
+ *
+ * Фикстура строила `schemaVersion: 1` с полями `runId`, `currentTaskIndex`,
+ * `activeMutation`, `commitPermit`, `processedEventIds`, `tasks` массивом — ни
+ * одного из них у сегодняшней схемы нет. Тесты были зелены против формы,
+ * которую продакшен не производит, и держали живой толерантность парсера к
+ * ней. Схема сама раздаёт умолчания, так что переопределять нужно только то,
+ * о чём тест.
+ */
+function makeSession(overrides: Record<string, unknown> = {}): WorkflowSession {
+  return WorkflowSessionSchema.parse({
     sessionId: 'ses_root',
+    profileId: 'base',
+    schemaId: 'state-machine',
     revision: 1,
     updatedAt: '2026-08-23T00:00:00.000Z',
-    approvals: [],
-
-    tasks: [],
-    currentTaskIndex: null,
-    activeMutation: null,
     gates: [
-      { id: 'invariants', status: 'pending' },
       { id: 'review', status: 'pending' },
       { id: 'qa', status: 'pending' },
     ],
-    commitPermit: null,
-    deliveryReceipt: null,
     retryBudgets: { cycles: { attempts: 0, maximum: 3 } },
-    processedEventIds: [],
-    bugVerified: false,
-    changedFiles: [],
     title: 'Test Task',
     ...overrides,
   });
 }
 
-function makeTasks(count: number, manifest: string[] = ['dev', 'test', 'review', 'qa']) {
-  return Array.from({ length: count }, (_, i) => ({
-    id: `task_${i}`,
-    title: `Task ${i}`,
-    declaredScope: '',
-    status: i === 0 ? 'active' : 'pending',
-    branch: `feature/task-${i}`,
-    manifest,
-  }));
+/** Список задач под ключом цикла — так их держит сессия. */
+function makeTasks(count: number): Record<string, unknown[]> {
+  return {
+    implementation: Array.from({ length: count }, (_, index) => ({
+      id: `task-${index}`,
+      title: `Task ${index}`,
+      status: index === 0 ? 'running' : 'pending',
+      branch: `feature/task-${index}`,
+    })),
+  };
 }
 
 describe('parseRuntimeState', () => {
-  test('non-numeric schemaVersion returns unknown_schema', () => {
-    const r = parseRuntimeState(makeV1Session({ schemaVersion: 'abc' }));
-    expect(r.ok).toBe(false);
-    if (r.ok === false) expect(r.reason).toBe('unknown_schema');
-  });
+  // Отказы `parse_error`, `invalid_structure`, `unknown_schema` и
+  // `missing_session_id` больше не существуют: сюда приходит разобранная
+  // схемой сессия, и на всё перечисленное `readSession` отвечает `null`
+  // раньше. Остался один настоящий исход — стадии нет.
 
-  test('valid v1 session with currentStage returns Tui', () => {
+  test('сессия со стадией даёт вид панели', () => {
     const r = parseRuntimeState(
-      makeV1Session({
+      makeSession({
         currentStage: 'code',
-        approvals: [{ type: 'plan', status: 'granted' }],
+        approvals: [
+          {
+            type: 'plan',
+            callId: 'call_1',
+            status: 'granted',
+            evidence: 'sha256:abc',
+          },
+        ],
         tasks: makeTasks(3),
-        activeMutation: {
-          callID: 'call_1',
-          agent: 'code',
-          startedAt: new Date().toISOString(),
-          outputReady: false,
-        },
       })
     );
     expect(r.ok).toBe(true);
@@ -76,10 +78,8 @@ describe('parseRuntimeState', () => {
     expect(r.value.stage).toBe('code');
   });
 
-  test('no currentStage and completely unrelated fields returns no_stage', () => {
-    const r = parseRuntimeState(
-      JSON.stringify({ schemaVersion: 1, sessionId: 's1', something: 'x' })
-    );
+  test('пустая стадия — единственный настоящий отказ', () => {
+    const r = parseRuntimeState(makeSession({ currentStage: '' }));
     expect(r.ok).toBe(false);
     if (r.ok === false) expect(r.reason).toBe('no_stage');
   });
@@ -88,66 +88,44 @@ describe('parseRuntimeState', () => {
   // gone: none of those fields is in the session schema, and `currentStage`
   // carries a schema default, so the branch was unreachable. A session without
   // a stage is a session the TUI cannot place.
-  test('a session carrying none of the old fields has no stage', () => {
-    for (const legacy of [
-      { planApproved: false },
-      { approvals: [{ type: 'plan', status: 'granted' }] },
-      {
-        commitPermit: {
-          callID: 'commit_1',
-          preCommitHead: 'a'.repeat(40),
-          expectedFiles: [],
-          createdAt: '',
-        },
-      },
-      { deliveryReceipt: 'a'.repeat(40) },
-    ]) {
-      const r = parseRuntimeState(makeV1Session(legacy));
-      expect(r.ok, JSON.stringify(legacy)).toBe(false);
-      if (r.ok === false) expect(r.reason).toBe('no_stage');
-    }
-  });
+  // Тест про откат к `planApproved` / `commitPermit` / `deliveryReceipt` удалён
+  // вместе с самим откатом: этих полей у схемы нет, она их срезает, а стадию
+  // всегда несёт `currentStage`.
 
   test('currentStage=planning returns planning', () => {
-    const r = parseRuntimeState(makeV1Session({ currentStage: 'planning' }));
+    const r = parseRuntimeState(makeSession({ currentStage: 'planning' }));
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.value.stage).toBe('planning');
   });
 
   test('currentStage=code returns code', () => {
-    const r = parseRuntimeState(makeV1Session({ currentStage: 'code', tasks: makeTasks(2) }));
+    const r = parseRuntimeState(makeSession({ currentStage: 'code', tasks: makeTasks(2) }));
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.value.stage).toBe('code');
   });
 
   test('currentStage=commit returns commit', () => {
-    const r = parseRuntimeState(
-      makeV1Session({
-        currentStage: 'commit',
-        tasks: makeTasks(1).map((t) => {
-          t.status = 'committed';
-          return t;
-        }),
-      })
-    );
+    const r = parseRuntimeState(makeSession({ currentStage: 'commit', tasks: makeTasks(1) }));
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.value.stage).toBe('commit');
   });
 
   test('currentStage=done returns done', () => {
-    const r = parseRuntimeState(makeV1Session({ currentStage: 'done' }));
+    const r = parseRuntimeState(makeSession({ currentStage: 'done' }));
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.value.stage).toBe('done');
   });
 
-  test('completedTasks derived from committed tasks', () => {
+  test('completedTasks считается по статусу completed', () => {
+    // `committed` статусом задачи не является и не являлся: в `TASK_STATUS`
+    // его нет, так что прежняя проверка не могла сработать никогда.
     const tasks = makeTasks(3);
-    tasks[1].status = 'committed';
-    const r = parseRuntimeState(makeV1Session({ currentStage: 'code', tasks }));
+    (tasks.implementation[1] as Record<string, unknown>).status = 'completed';
+    const r = parseRuntimeState(makeSession({ currentStage: 'code', tasks }));
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.value.completedTasks).toBe(1);
@@ -157,7 +135,7 @@ describe('parseRuntimeState', () => {
     // A verifier stage runs review and qa at once, so a single `activeMutation`
     // could not describe the session even when the field still existed.
     const r = parseRuntimeState(
-      makeV1Session({
+      makeSession({
         currentStage: 'execution',
         activeOperations: {
           'call-review': {
@@ -166,7 +144,7 @@ describe('parseRuntimeState', () => {
             taskId: 'task-1',
             agent: 'review',
             status: 'running',
-            startedAt: '',
+            startedAt: '2026-08-23T00:00:00.000Z',
             result: 'output_ready',
           },
           'call-qa': {
@@ -175,7 +153,7 @@ describe('parseRuntimeState', () => {
             taskId: 'task-1',
             agent: 'qa',
             status: 'running',
-            startedAt: '',
+            startedAt: '2026-08-23T00:00:00.000Z',
           },
         },
       })
@@ -203,7 +181,7 @@ describe('parseRuntimeState', () => {
       ['done', 'commit', 'failed'],
     ];
     for (const [stage, previous, next] of expected) {
-      const r = parseRuntimeState(makeV1Session({ currentStage: stage }));
+      const r = parseRuntimeState(makeSession({ currentStage: stage }));
       expect(r.ok, stage).toBe(true);
       if (!r.ok) continue;
       expect(r.value.prevStage, `prev of ${stage}`).toBe(previous);
@@ -214,7 +192,7 @@ describe('parseRuntimeState', () => {
   test('a stage the chain does not know has no neighbours to offer', () => {
     // A profile may name its stages anything; guessing a neighbour for one the
     // chain has never heard of is how `nextStage: planning` got shown.
-    const r = parseRuntimeState(makeV1Session({ currentStage: 'triage' }));
+    const r = parseRuntimeState(makeSession({ currentStage: 'triage' }));
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.value.prevStage).toBeNull();
@@ -222,23 +200,10 @@ describe('parseRuntimeState', () => {
   });
 
   test('a session holding no open call reports none', () => {
-    const r = parseRuntimeState(makeV1Session({ currentStage: 'planning', activeOperations: {} }));
+    const r = parseRuntimeState(makeSession({ currentStage: 'planning', activeOperations: {} }));
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.value.activeOperations).toEqual([]);
-  });
-
-  test('corrupted JSON returns parse_error without throwing', () => {
-    expect(parseRuntimeState('{ broken')).toEqual({ ok: false, reason: 'parse_error' });
-    expect(parseRuntimeState('')).toEqual({ ok: false, reason: 'parse_error' });
-    expect(parseRuntimeState('null')).toEqual({ ok: false, reason: 'invalid_structure' });
-    expect(parseRuntimeState('{}')).toEqual({ ok: false, reason: 'unknown_schema' });
-  });
-
-  test('empty sessionId returns missing_session_id', () => {
-    const r = parseRuntimeState(makeV1Session({ sessionId: '' }));
-    expect(r.ok).toBe(false);
-    if (r.ok === false) expect(r.reason).toBe('missing_session_id');
   });
 });
 
@@ -261,16 +226,15 @@ describe('formatIdleLine', () => {
 
 describe('formatSectionLines', () => {
   function parse(overrides: Record<string, unknown> = {}) {
-    const r = parseRuntimeState(makeV1Session({ currentStage: 'code', ...overrides }));
+    const r = parseRuntimeState(makeSession({ currentStage: 'code', ...overrides }));
     if (r.ok === false) throw new Error(`parse failed: ${r.reason}`);
     return r.value;
   }
 
   test('contains stage name in first line', () => {
     const view = parse({
-      approvals: [{ type: 'plan', status: 'granted' }],
-      tasks: makeTasks(2, ['dev', 'test']),
-      activeMutation: { callID: 'c1', agent: 'code', startedAt: '', outputReady: false },
+      approvals: [{ type: 'plan', callId: 'call_1', status: 'granted', evidence: 'sha256:abc' }],
+      tasks: makeTasks(2),
     });
     const lines = formatSectionLines(view);
     expect(lines[0]).toContain('code');
@@ -279,7 +243,7 @@ describe('formatSectionLines', () => {
   });
 
   test('planning shown with prevStage=· nextStage=tasks_ready (compact at 37)', () => {
-    const r = parseRuntimeState(makeV1Session({ currentStage: 'planning' }));
+    const r = parseRuntimeState(makeSession({ currentStage: 'planning' }));
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     const lines = formatSectionLines(r.value);
@@ -295,7 +259,7 @@ describe('formatSectionLines', () => {
       activeMutation: {
         callID: 'call_abcdefghijk',
         agent: 'code',
-        startedAt: '',
+        startedAt: '2026-08-23T00:00:00.000Z',
         outputReady: false,
       },
     });
@@ -309,8 +273,7 @@ describe('formatSectionLines', () => {
 
   test('third line shows gates and retry budgets', () => {
     const view = parse({
-      tasks: makeTasks(1, ['dev']),
-      activeMutation: { callID: 'c1', agent: 'code', startedAt: '', outputReady: false },
+      tasks: makeTasks(1),
       gates: [
         { id: 'invariants', status: 'passed' },
         { id: 'tests', status: 'pending' },
@@ -327,7 +290,6 @@ describe('formatSectionLines', () => {
   test('third line overflows — shows +N more', () => {
     const view = parse({
       tasks: makeTasks(1),
-      activeMutation: { callID: 'c1', agent: 'code', startedAt: '', outputReady: false },
       gates: [
         { id: 'invariants', status: 'pending' },
         { id: 'review', status: 'running' },
@@ -348,7 +310,6 @@ describe('formatSectionLines', () => {
   test('third line overflows heavily — truncated with …', () => {
     const view = parse({
       tasks: makeTasks(1),
-      activeMutation: { callID: 'c1', agent: 'code', startedAt: '', outputReady: false },
       gates: [
         { id: 'very_long_gate_name_that_takes_space', status: 'pending' },
         { id: 'another_really_long_one', status: 'running' },
@@ -362,7 +323,7 @@ describe('formatSectionLines', () => {
 
   test('graph line truncated for long stage names', () => {
     const r = parseRuntimeState(
-      makeV1Session({
+      makeSession({
         currentStage: 'planning',
         gates: [],
         retryBudgets: {},
@@ -378,7 +339,7 @@ describe('formatSectionLines', () => {
 
 describe('task gates in the status line', () => {
   function parse(overrides: Record<string, unknown> = {}) {
-    const r = parseRuntimeState(makeV1Session({ currentStage: 'execution', ...overrides }));
+    const r = parseRuntimeState(makeSession({ currentStage: 'execution', ...overrides }));
     if (r.ok === false) throw new Error(`parse failed: ${r.reason}`);
     return r.value;
   }
@@ -453,22 +414,20 @@ describe('task gates in the status line', () => {
 });
 
 describe('formatDetailsLines', () => {
-  test('invalid JSON returns null', () => {
-    expect(formatDetailsLines('{')).toBeNull();
-    expect(formatDetailsLines('[]')).toBeNull();
-  });
+  // Разбора текста здесь больше нет: приходит разобранная схемой сессия, и
+  // отдавать `null` не на что.
 
-  test('v1 scalar fields present', () => {
-    const lines = formatDetailsLines(makeV1Session({ revision: 5, title: 'My Task' }));
-    expect(lines).not.toBeNull();
-    expect(lines!.some((l) => l.startsWith('schemaVersion: 1'))).toBe(true);
-    expect(lines!.some((l) => l.startsWith('revision: 5'))).toBe(true);
-    expect(lines!.some((l) => l.startsWith('title: My Task'))).toBe(true);
+  test('скалярные поля сессии выводятся построчно', () => {
+    const lines = formatDetailsLines(makeSession({ revision: 5, title: 'My Task' }));
+    expect(lines.some((l) => l.startsWith('sessionId: ses_root'))).toBe(true);
+    expect(lines.some((l) => l.startsWith('schemaVersion: 2'))).toBe(true);
+    expect(lines.some((l) => l.startsWith('revision: 5'))).toBe(true);
+    expect(lines.some((l) => l.startsWith('title: My Task'))).toBe(true);
   });
 
   test('one detail line per open call', () => {
     const lines = formatDetailsLines(
-      makeV1Session({
+      makeSession({
         activeOperations: {
           call_xyz: {
             callId: 'call_xyz',
@@ -476,7 +435,7 @@ describe('formatDetailsLines', () => {
             taskId: 'task-1',
             agent: 'review',
             status: 'running',
-            startedAt: '',
+            startedAt: '2026-08-23T00:00:00.000Z',
             result: 'output_ready',
           },
         },
@@ -492,17 +451,19 @@ describe('formatDetailsLines', () => {
 
   test('tasks summary includes count and active index', () => {
     const tasks = makeTasks(3);
-    const lines = formatDetailsLines(makeV1Session({ tasks }));
+    const lines = formatDetailsLines(makeSession({ tasks }));
     expect(lines).not.toBeNull();
-    expect(lines!.some((l) => l.startsWith('tasks: 3'))).toBe(true);
-    expect(lines!.some((l) => l.startsWith('  active=0 committed=0'))).toBe(true);
+    expect(lines.some((l) => l.startsWith('tasks: 3'))).toBe(true);
+    // `active` и `committed` статусами задачи не являются: в `TASK_STATUS`
+    // их нет, и обе цифры всегда были нулями.
+    expect(lines.some((l) => l.startsWith('  running=1 completed=0'))).toBe(true);
   });
 
   test('gates summary shows status per gate', () => {
     const lines = formatDetailsLines(
-      makeV1Session({
+      makeSession({
         gates: [
-          { id: 'invariants', status: 'pass' },
+          { id: 'invariants', status: 'passed' },
           { id: 'review', status: 'pending' },
           { id: 'qa', status: 'running' },
         ],
@@ -510,13 +471,13 @@ describe('formatDetailsLines', () => {
     );
     expect(lines).not.toBeNull();
     expect(
-      lines!.some((l) => l.startsWith('gates: invariants=pass, review=pending, qa=running'))
+      lines.some((l) => l.startsWith('gates: invariants=passed, review=pending, qa=running'))
     ).toBe(true);
   });
 
   test('changedFiles: counter + top-3 + +X ещё', () => {
     const lines = formatDetailsLines(
-      makeV1Session({
+      makeSession({
         changedFiles: ['file_a.txt', 'file_b.txt', 'file_c.txt', 'file_d.txt'],
       })
     );
@@ -528,7 +489,7 @@ describe('formatDetailsLines', () => {
 
   test('retry budget shows attempts/maximum', () => {
     const lines = formatDetailsLines(
-      makeV1Session({
+      makeSession({
         retryBudgets: { cycles: { attempts: 2, maximum: 3 } },
       })
     );
@@ -536,21 +497,15 @@ describe('formatDetailsLines', () => {
     expect(lines!.some((l) => l.startsWith('retry.cycles: 2/3'))).toBe(true);
   });
 
-  test('unknown future fields appear at end', () => {
-    const lines = formatDetailsLines(makeV1Session({ brandNewField: 'future value' }));
-    expect(lines).not.toBeNull();
-    const last = lines![lines!.length - 1]!;
-    expect(last.startsWith('brandNewField:')).toBe(true);
+  test('поля схемы, не названные явно, всё равно попадают в дамп', () => {
+    // Неизвестных полей у сессии больше не бывает — схема их срезает, — но
+    // названы построчно не все её поля, и остальные должен подобрать хвост.
+    const lines = formatDetailsLines(makeSession({ deliveryReceipt: 'a'.repeat(40) }));
+    expect(lines.some((l) => l.startsWith('deliveryReceipt:'))).toBe(true);
   });
 
   test('long values truncated', () => {
-    const lines = formatDetailsLines(makeV1Session({ title: 'T'.repeat(200) }));
+    const lines = formatDetailsLines(makeSession({ title: 'T'.repeat(200) }));
     expect(lines!.every((l) => l.length <= 100)).toBe(true);
-  });
-
-  test('processedEventIds shown as count', () => {
-    const lines = formatDetailsLines(makeV1Session({ processedEventIds: ['a', 'b', 'c'] }));
-    expect(lines).not.toBeNull();
-    expect(lines!.some((l) => l.startsWith('processedEventIds: 3'))).toBe(true);
   });
 });

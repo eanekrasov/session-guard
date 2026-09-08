@@ -12,17 +12,23 @@ Last updated 2026-09-08.
 
 ## Where things stand
 
-|                                   |                                                                                                                           |
-| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| Branch                            | `main`                                                                                                                    |
-| Last commit                       | `6e23ed0`; two days of work are **uncommitted in the working tree**                                                       |
-| `mise run test`                   | 1677 pass / 0 fail                                                                                                        |
-| `mise run typecheck`              | clean — **and it now covers `test/` and `scripts/`**, see below                                                           |
-| `mise run lint`, `mise run build` | clean                                                                                                                     |
-| `openspec validate`               | valid                                                                                                                     |
-| `bun run smoke`                   | 2026-09-08: 7/11, plus `commit-cwd` and `commit-mismatch` re-run green after the harness fix — see «Policy left the core» |
+|                                   |                                                                                                                                                                                                             |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Branch                            | `main`                                                                                                                                                                                                      |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------                                                                                                  |
+| Last commit                       | `14b09ad`; the tool rename and the handoff update are uncommitted                                                                                                                                           |
+| `mise run test`                   | 1709 pass / 0 fail                                                                                                                                                                                          |
+| `mise run typecheck`              | clean — **and it now covers `test/` and `scripts/`**, see below                                                                                                                                             |
+| `mise run lint`, `mise run build` | clean                                                                                                                                                                                                       |
+| `openspec validate`               | valid                                                                                                                                                                                                       |
+| `bun run smoke`                   | 2026-09-08: 11/11 once, then 9/11 and 10/11 — **one scenario fails per full run, a different one each time, and every one of them passes when run alone**. Unsettled; see «The flake nobody has caught yet» |
 
-**Read the section «Policy left the core» first.** Between 2026-09-07 and
+**Read «What the host smoke found on 2026-09-08» first**, then «Policy left the
+core». The smoke run against a live opencode found two holes in the core that
+1701 unit tests did not, and closing them changed how mutation, consent and the
+end of a workflow work.
+
+**Read the section «Policy left the core» second.** Between 2026-09-07 and
 2026-09-08 the runtime stopped holding the workflow's policy, and a good deal
 of what the rest of this document describes was deleted and rebuilt somewhere
 else. Sections below that predate it are still accurate about the machinery
@@ -32,6 +38,171 @@ they describe, but three names in them no longer exist.
 vitest, 156 tests fail for reasons that have nothing to do with the code, and
 at least one file (`test/app/mutation-orchestrator.test.ts`) imports `bun:test`
 and cannot be collected at all. A count taken with the wrong runner is noise.
+
+## What the host smoke found on 2026-09-08
+
+Eleven scenarios against a live opencode, model
+`crpt/deepseek-ai/DeepSeek-V4-Flash-small`. It started at 8/11 and ended at
+**11/11**. Neither failure was the model being careless, which is what both
+looked like at first — though a third failure, still open, may yet be exactly
+that; see «The flake nobody has caught yet» at the end of this section.
+
+### The core allowed no work outside a task loop
+
+`beginMutation` resolved a task run or threw. A stage without `loop:` has no
+run and can have none, so **every write on a flat stage died** with
+`Cannot resolve a single workflow task run for mutation`. The agent saw an
+internal error rather than a refusal, gave up, and started asking the operator
+to create the file by hand — which is what the ten-minute timeout in
+`cicd-full-cycle` actually was.
+
+A move outside a loop is now legal and gets the same machinery: its own
+baseline frame, the diff, the write-scope check, the invariants. The verdict
+needed a home — inside a loop it lands on the run and reads as `task.checks`;
+outside it lands on the session as **`session.checks`** and is cleared on every
+stage change, because a verdict about a move on `checkout` says nothing about
+the work on `build`.
+
+Three things went with it:
+
+- **Ambiguity is still a refusal.** The first version conflated "no run
+  applies" with "cannot tell which of two", and the concurrency tests caught
+  it: two open runs would have produced a move bound to neither task's
+  `writeScope`. `resolveMutationRun` now answers `run` / `ambiguous` / `none`.
+- **Two loops in one schema.** Candidates for a synthesised run are taken from
+  the list of the stage's own loop, not from every list at once. With
+  `implementation` followed by `test_suite`, a move in the first loop could
+  synthesise a run against a task of the second.
+- **The accidental protection is gone.** A stage with no tasks used to refuse a
+  write by itself, and five tests asserted that plumbing. The rule now lives in
+  `actions:`, which is where this project decided it belongs; the fixtures
+  declare it.
+
+### Consent had exactly one name, hardcoded
+
+A transition may declare `consent: <name>` and `evaluateTransition` checks it
+generically — but the only producer wrote `type: 'plan'` literally. A schema
+could therefore declare a consent **nobody could ever grant**, and the
+transition stayed shut for ever. `cicd`'s `consent: deploy` was that schema.
+
+The name now travels the whole chain: the `type` argument of
+`workflow-consent`, the manifest (and its evidence — otherwise "consent to
+deploy" and "consent to plan" over the same files sign identically), the
+approval record, `refs.<name>`, `HARNESS_AUTO_APPROVE`, and the operator's
+answer. A second mine sat next to it: `findOpenApproval` also filtered on
+`type === 'plan'`, so even a correctly created record would have been invisible
+and left pending for ever. It matches on `callId` now, which was always unique.
+
+### A workflow now has an end, and says so
+
+`done` was not declared to be anything — it was a stage that happened to have
+no outgoing edge. So «the workflow finished» and «the author forgot an edge»
+were the same state, and the engine answered both with a silent
+`No outgoing transitions from done`.
+
+A **terminal stage** is now a declared stage with no outgoing transition —
+determined by declaration, like the initial stage, with no new key. `base` has
+two, `done` and `failed`, and both are legal. `compileWorkflow` computes them
+(the comment on that line had promised to for months and computed nothing) and
+`validateTermination` refuses two shapes: a workflow with no end at all, and a
+stage from which no chain of transitions reaches one. The per-stage half is
+skipped when the schema declares `stageAssignments` — `deriveStage` moves a
+session by condition rather than by edges, so calling such a stage a dead end
+would be a lie.
+
+At runtime the reason reads `Workflow finished: 'done' is where it ends`.
+
+### A finished session leaves the runtime
+
+Reaching a terminal stage moves the session file from `runtime/` to
+`runtime/archive/`. The point is that this project expresses «there is no
+session» exactly one way — `store.load` finds no file — and a finished session
+must govern nothing. Inventing a second kind of non-existence would force every
+call site to tell two absences apart.
+
+Moved, not deleted: the delivery receipt, the gates, the verdicts and the
+approvals are the product of the work, and erasing them at the moment they are
+complete is pointless. `store.loadArchived` reads them, and the host smoke
+harness, the TUI and the dashboard all know the archive. The dashboard reads
+the runtime last, so a live session always wins over an archived namesake.
+
+Archiving fires on **arriving** at a terminal stage, not on sitting in one. The
+first version keyed off the stage alone and 49 tests fell at once: in a schema
+with no top-level transitions — where movement happens inside a loop — every
+stage is terminal, including the first, so a session was archived on its very
+first move.
+
+### The refusal now says it is a refusal
+
+`actions:` refusals opened with `Action 'bash' is declared here, but no entry
+covers …` — accurate about the table, silent about the outcome. They now open
+with `Refused:`. The agent whose call was stopped and the operator watching the
+TUI both read that line.
+
+### What the harness itself had wrong
+
+- Tasks were created with a `path` field the session schema does not have, so
+  zod dropped it and **every smoke task was read-only** (an absent `writeScope`
+  means exactly that). Delegated work could never write.
+- Steps asserted on gates the agent set itself, so an agent that reported a
+  pass without doing the work moved the workflow. They check the disk now —
+  `changedFiles`, and the file's existence.
+- `cicd`'s only stage-assignment rule was `condition: 'true' → init`, which
+  pinned `deriveStage` to `init` for ever: the session reached `checkout` and
+  stayed there while its gate sat green.
+- `cicd` never set the `test_suite` list its loop cycles over, and dispatched
+  two tasks for two nested stages where one task walks both.
+- Under `HOST_SMOKE_DEBUG` a step now announces itself before it is sent. A
+  timeout aborts the scenario and its error names no step, so before this the
+  ten-minute failure carried nothing that could explain it.
+
+### The auto-answerer answered questions nobody asked it
+
+`answerQuestions` replies to **every** pending question so the host does not
+block. It looked for an option containing «grant» and otherwise took the
+**first** one — and the first option of a model-authored question («How would
+you like to proceed?») is almost always some flavour of «yes, go ahead». So a
+question the scenario never scripted became permission to run past it:
+`cicd-full-cycle` reached `test` while the next step still expected `checkout`,
+and the failure blamed the stage.
+
+Consent requests — recognised by the plugin's own tag in the question text —
+still get the decision the instruction asked for. Anything else now prefers an
+option that declines (`decline`, `no`, `cancel`, `stop`, `skip`, `don't`),
+because the honest answer of an operator who already gave an instruction is «do
+nothing beyond it».
+
+When the model offers no way to decline there is no safe answer and the first
+option still goes back. That is why every off-script answer is now recorded and
+carried into the step's transcript as `[off-script question] …`: a run steered
+by one has to say so instead of letting the next step guess.
+
+### The flake nobody has caught yet
+
+Three scenarios — `commit-mismatch`, `cicd-full-cycle`, `verify-loop` — have
+each failed **once** in a full run and then passed when run alone, on the same
+code, first attempt every step. No two runs failed the same scenario.
+
+What is known: the last failure (`verify-loop`, «no executable task loop is
+declared») carried **zero** `[off-script question]` lines, so the model had not
+been given permission to run ahead — that explanation is ruled out for it. What
+is not known is anything else. The refusal means the session's acting stage
+declared no loop, i.e. it had already left `execution`, which the step before it
+had just verified was not so.
+
+The next step is a **full run under `HOST_SMOKE_DEBUG`**: the debug path prints
+the session state on failure, and a full run answers the first question by
+itself — a different scenario failing again means the conditions of a long run,
+the same one failing means a defect to chase. Do not conclude «the model was
+careless» before that; twice today that conclusion was wrong and the cause was a
+hole in the core.
+
+### Tool names use `-`, not `.`
+
+`workflow.create` → `workflow-create`, and the same for `list`, `consent`,
+`tasks-set`, `tasks-get`, `tasks-set-status`, `tasks-resolve-decision`. 142
+occurrences across 36 files. Nothing builds a tool name dynamically, so the
+rename is textual and complete.
 
 ## Policy left the core — 2026-09-07 / 2026-09-08
 
@@ -246,7 +417,7 @@ so preparation is not broken in general. Not diagnosed further; do not assume
 it is the model ignoring an instruction until someone has looked.
 
 One lead worth checking first: `prepareCommittableSession`
-(`scripts/host-smoke/run.ts:857`) still calls `workflow.tasks-set` with
+(`scripts/host-smoke/run.ts:857`) still calls `workflow-tasks-set` with
 `{ path, status }`, and `path` was **removed from `MutationTask` by
 `fa78850`**. The harness may have been left behind by the task-scope change the
 same way `android.yaml` was left behind by the stage model. Unproven — the
@@ -293,7 +464,7 @@ operator's decision.
 2. **Parent/child linkage** (`28ba4ff`). `SessionQueue` takes a parent
    resolver, walks the host's chain through `client.session.get` and memoises
    every node to its root; hook-driven reads go through `loadGoverning`.
-   `workflow.create` keeps its own id. A host that cannot answer leaves the
+   `workflow-create` keeps its own id. A host that cannot answer leaves the
    session as its own root.
 3. **Optimistic concurrency** (`3e62e99`). `save` reads the file's revision
    inside its own lock chain and throws `WorkflowSessionConflictError` when it
@@ -430,7 +601,14 @@ lost every agent its parent shipped.
 ### Waiting on the operator, raised 2026-09-07 evening
 
 1. **What `failed` should mean — and `done` with it.** ~~Neither is
-   enforced~~ — **half closed**. `terminalStages` and its hardcoded
+   enforced~~ — **still half open, and the remaining half is now sharper.**
+   As of 2026-09-08 both are terminal stages by declaration, both archive the
+   session, and the engine says `Workflow finished`. What none of that answers
+   is **why** it stopped: `failed` carries no reason, so a reader of the
+   archived file cannot tell a clean finish from an exhausted budget or a
+   failed gate. Option 4 of the four once put to the operator — record which
+   gate failed or which budget ran out on entry — is the piece left.
+   The older text follows. `terminalStages` and its hardcoded
    `TERMINAL_STAGES` are gone, and `base` now declares `actions: []` on both
    stages, so nothing can be _done_ there: a probe against the live runtime
    refuses an edit, a bash call and a commit on either. What is still not
@@ -459,10 +637,11 @@ lost every agent its parent shipped.
    its own change and probably a large one; the workarounds name the reason
    where they sit.
 
-5. **The dashboard and TUI have no notion of a terminal session.** Related to
-   item 1: `done` and `failed` now refuse every action, but nothing tells a
-   reader the session is finished. That was option 2 of the four, and it is
-   still worth doing beside option 4.
+5. ~~**The dashboard and TUI have no notion of a terminal session.**~~
+   **Closed 2026-09-08**, and more strongly than proposed: a finished session
+   leaves `runtime/` for `runtime/archive/`, so it governs nothing, and both
+   readers were taught the archive. See «A finished session leaves the
+   runtime».
 
 6. **`parseRuntimeState` carries unreachable tolerance.** It accepts `gates`
    as an array _or_ an object, `tasks` as either, and a missing `sessionId`
@@ -478,10 +657,10 @@ The morning handoff listed 14-19 as open. Re-checked:
 |     | Claim                                                                                   | Now                                                                                                                                                                                                 |
 | --- | --------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 14  | `compileWorkflow` never called from `src`                                               | **closed** — `src/app/mutation-orchestrator.ts:263`                                                                                                                                                 |
-| 15  | `exitGuards` unread, `stageLevelGuards` unpopulated                                     | **half** — the array form is read (`src/domain/task-movement.ts:76`); `stageLevelGuards` is still never populated, `schemaToEngineConfig` does not return it                                        |
+| 15  | `exitGuards` unread, `stageLevelGuards` unpopulated                                     | **closed** — `exitGuards` are read at both levels (`src/domain/task-movement.ts:76`, `src/domain/engine.ts:424`), and `stageLevelGuards` no longer exists anywhere in the tree                      |
 | 16  | `onFailure` has no consumer                                                             | **closed** — `retry` implemented, `terminal` needs nothing; see below                                                                                                                               |
-| 17  | no profile uses `kind: pass\|fail`                                                      | **open** — it appears only in `profiles/android/task-cycles.yaml`, which declares itself unregistered                                                                                               |
-| 18  | `deriveStageFn` falls back to `'PLANNING'`                                              | **open** — see the stage-name audit below                                                                                                                                                           |
+| 17  | no profile uses `kind: pass\|fail`                                                      | **closed** — `kind` and `requiredGates` were removed by operator decision, and `profiles/android/task-cycles.yaml` with them; the identifier is nowhere in the tree                                 |
+| 18  | `deriveStageFn` falls back to `'PLANNING'`                                              | **closed** — it returns `currentStage`; the reason is written at `src/domain/engine.ts:118`                                                                                                         |
 | 19  | `editingAgents` / `verifiers` are declarative only (`verifiers` has since been deleted) | **closed** — schema-level `editingAgents` is read by `engine.getEditingAgents()` (`src/app/runtime.ts:967`) to classify whether a stage edits; `verifiers` was read by nothing and has been deleted |
 
 ### Testing
@@ -899,8 +1078,8 @@ driving the real hooks against a profile with `loop: 42`:
 | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
 | `tool.execute.before` (`bash`, `task`)   | caught, converted to `WorkflowBlockedError` with the reason                                                                                     |
 | `tool.execute.after` (`task`)            | returns cleanly; its own catch at `runtime.ts:1794` logs a warning                                                                              |
-| `workflow.tasks-get`                     | catches, returns the message as tool output                                                                                                     |
-| `workflow.tasks-set`, `tasks-set-status` | ~~throw a raw `ProfileConfigurationError`~~ — **fixed** (`fdd04f8`): the authority check returns the failure as tool output, like its neighbour |
+| `workflow-tasks-get`                     | catches, returns the message as tool output                                                                                                     |
+| `workflow-tasks-set`, `tasks-set-status` | ~~throw a raw `ProfileConfigurationError`~~ — **fixed** (`fdd04f8`): the authority check returns the failure as tool output, like its neighbour |
 
 The last row used to be the odd one and the cause was exact: `tasks-get` is
 open to any caller, while the others go through the task-control authority
@@ -1022,7 +1201,7 @@ Decided and built 2026-09-07.
 **The rule.** A profile may hold as many schemas as it likes, and they are
 independent workflows. Schemas combine **only** through `extends`. Schema names
 are unique within their profile, profiles are unique among themselves, and
-`workflow.create` is given `{profileId}/{schemaId}`.
+`workflow-create` is given `{profileId}/{schemaId}`.
 
 **Why it is not a new feature but an unfinished one.** `handleCreateWorkflow`
 (`src/app/runtime.ts:428`) already selects by schema: it turns `schemaId` into a
@@ -1066,7 +1245,7 @@ but unarmed.
    `ResolvedSchema`, and `selectSchema(profileId, schemas, wanted)` picks which.
    `resolveEngine(profileId, schemaId?)` takes both and keys its cache on both.
    Inheritance stayed where it already was, in `resolveSingleSchema`'s `extends`.
-3. `workflow.create` accepts `{profileId}/{schemaId}`. A bare id names the
+3. `workflow-create` accepts `{profileId}/{schemaId}`. A bare id names the
    profile and is legal while that profile holds one schema; with several it is
    refused with the choices named.
 

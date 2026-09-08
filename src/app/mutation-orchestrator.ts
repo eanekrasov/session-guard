@@ -452,7 +452,7 @@ export class MutationOrchestrator {
       if (operation) operation.baseline = frame;
 
       // Save stage BEFORE mutation for post-mutation transition validation.
-      // `currentStage` is always set — `workflow.create` writes the compiled
+      // `currentStage` is always set — `workflow-create` writes the compiled
       // workflow's own first stage — so there is nothing to fall back to, and
       // the base profile's `planning` would have been the wrong thing anyway.
       const stageBefore = session.currentStage;

@@ -255,8 +255,8 @@ export const ProfileSchemaSchema = z
 
     /**
      * Агенты, которым разрешено управлять состоянием задач workflow
-     * (workflow.tasks-set, workflow.tasks-set-status,
-     * workflow.tasks-resolve-decision).
+     * (workflow-tasks-set, workflow-tasks-set-status,
+     * workflow-tasks-resolve-decision).
      * По умолчанию ['orchestrator'] — исполнитель не должен закрывать
      * собственную стадию.
      */

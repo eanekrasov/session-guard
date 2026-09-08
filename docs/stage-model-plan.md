@@ -16,7 +16,7 @@ stages:
   planning:                      # architect writes the plan; consent gates it
     allowedAgents: [architect]
 
-  tasks_ready:                   # decomposition via workflow.tasks-set
+  tasks_ready:                   # decomposition via workflow-tasks-set
     allowedAgents: [architect]
 
   execution:                     # the loop

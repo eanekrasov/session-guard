@@ -176,8 +176,8 @@ engine reaches itself, and in the same namespace an agent could claim it.
 
 ## Who may change workflow task state
 
-`workflow.tasks-set`, `workflow.tasks-set-status` and
-`workflow.tasks-resolve-decision` are refused for every agent except the ones a
+`workflow-tasks-set`, `workflow-tasks-set-status` and
+`workflow-tasks-resolve-decision` are refused for every agent except the ones a
 schema names in `taskControlAgents` (default: `orchestrator`). The calling agent
 comes from `ToolContext.agent`, which the host populates from the real agent
 name — a caller the host does not name is refused too.
@@ -187,7 +187,7 @@ what `allTasksCompleted()` and `hasPendingTasks()` read, so an agent that can
 write it closes its own stage without evidence. Workers report outcomes; the
 orchestrator records them.
 
-`workflow.tasks-get` stays open — reading is not control.
+`workflow-tasks-get` stays open — reading is not control.
 
 Names follow the usual rule: a bare name (`orchestrator`) and the qualified form
 the host reports (`android/orchestrator`) both match, another profile's

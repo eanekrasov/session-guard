@@ -35,7 +35,7 @@ const KNOWN_TOOLS = new Set(['Bash', 'Write', 'Read', 'Glob', 'Grep', 'Edit', 't
  */
 export function normaliseTool(tool: string): string | null {
   if (KNOWN_TOOLS.has(tool)) return tool;
-  // Handle prefixed forms: workflow.tasks-get → tasks-get
+  // Handle prefixed forms: workflow-tasks-get → tasks-get
   if (tool.startsWith('workflow.')) {
     // These are plugin tools, not host tools — reject
     return null;

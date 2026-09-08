@@ -57,23 +57,56 @@ interface Session {
 }
 
 /**
- * Answer consent questions while a prompt is running.
+ * Words an option uses to say "no". Ordered: the earlier one wins, so an
+ * explicit refusal beats a merely negative-sounding label.
+ */
+const DECLINING_WORDS = ['decline', 'no,', 'no ', 'cancel', 'stop', 'skip', "don't", 'do not'];
+
+/** Questions the plugin raised carry its consent tag; anything else is the model's own. */
+function isConsentQuestion(request: { questions?: Array<{ question?: string }> }): boolean {
+  return (request.questions ?? []).some((entry) =>
+    (entry?.question ?? '').includes('<consent-request')
+  );
+}
+
+/**
+ * Answer the host's questions while a prompt is running.
  *
  * The host's `question` tool blocks until an operator replies, so the run would
- * hang otherwise. The harness plays the operator: it picks the option the
- * instruction asked for (default: grant), which is exactly the decision the
- * consent mechanism is there to record.
+ * hang otherwise. The harness plays the operator, and an operator answers two
+ * quite different things.
+ *
+ * A **consent request** is the scenario's own subject: it gets the decision the
+ * instruction asked for (default: grant), which is exactly what the consent
+ * mechanism exists to record.
+ *
+ * Anything else is a question the model invented — «How would you like to
+ * proceed?» — and the harness used to answer it with the FIRST option, which is
+ * almost always some flavour of «yes, go ahead». So an unscripted question
+ * became permission to run past the scenario: `cicd-full-cycle` reached `test`
+ * while the next step still expected `checkout`, and the failure blamed the
+ * stage. The operator's honest answer to a question nobody asked for is «do
+ * nothing beyond the instruction», so a declining option is preferred.
+ *
+ * When the model offers no way to decline, there is no safe answer — the first
+ * option goes back, and that is precisely why every off-script answer is
+ * recorded: a run steered by one has to say so rather than let the next step
+ * guess.
  */
-function answerQuestions(host: Host, choose: 'grant' | 'decline'): { stop: () => void } {
+function answerQuestions(
+  host: Host,
+  choose: 'grant' | 'decline'
+): { stop: () => void; offScript: () => string[] } {
   let stopped = false;
   const seen = new Set<string>();
+  const offScript: string[] = [];
 
   const loop = async (): Promise<void> => {
     while (!stopped) {
       try {
         const pending = (await api(host, 'GET', '/question')) as Array<{
           id: string;
-          questions?: Array<{ options?: Array<{ label?: string } | string> }>;
+          questions?: Array<{ question?: string; options?: Array<{ label?: string } | string> }>;
         }>;
         for (const request of pending ?? []) {
           if (seen.has(request.id)) continue;
@@ -81,12 +114,26 @@ function answerQuestions(host: Host, choose: 'grant' | 'decline'): { stop: () =>
           if (process.env.HOST_SMOKE_DEBUG) {
             console.error(`  question: ${JSON.stringify(request).slice(0, 400)}`);
           }
+          const consent = isConsentQuestion(request);
           const answers = (request.questions ?? [{}]).map((question) => {
             const labels = (question.options ?? []).map((option) =>
               typeof option === 'string' ? option : (option.label ?? '')
             );
-            const wanted = labels.find((label) => label.toLowerCase().includes(choose));
-            return [wanted ?? labels[0] ?? choose];
+            if (consent) {
+              const wanted = labels.find((label) => label.toLowerCase().includes(choose));
+              return [wanted ?? labels[0] ?? choose];
+            }
+            const refusal = DECLINING_WORDS.reduce<string | undefined>(
+              (found, word) => found ?? labels.find((label) => label.toLowerCase().includes(word)),
+              undefined
+            );
+            if (!consent) {
+              const text = (question.question ?? '').replace(/\s+/gu, ' ').slice(0, 160);
+              offScript.push(
+                `${refusal ? 'declined' : 'answered with the only option offered'}: "${text}"`
+              );
+            }
+            return [refusal ?? labels[0] ?? 'no'];
           });
           await api(host, 'POST', `/question/${request.id}/reply`, { answers });
         }
@@ -97,7 +144,7 @@ function answerQuestions(host: Host, choose: 'grant' | 'decline'): { stop: () =>
     }
   };
   void loop();
-  return { stop: () => (stopped = true) };
+  return { stop: () => (stopped = true), offScript: () => [...offScript] };
 }
 
 const SESSION_LOG = join(import.meta.dirname!, '../../.memory/session.log');
@@ -147,7 +194,15 @@ async function say(
 
   const parts = reply.parts ?? [];
   const error = reply.info?.error?.data?.message ?? '';
+  // Вопрос, которого сценарий не задавал, — это модель, ушедшая в сторону.
+  // Он попадает в транскрипт шага, чтобы падение следующего шага называло
+  // причину, а не гадало про стадию.
+  const strayed = operator
+    .offScript()
+    .map((entry) => `[off-script question] ${entry}`)
+    .join('\n');
   const transcript = [
+    strayed,
     error,
     ...parts.map((part) =>
       [
@@ -235,7 +290,7 @@ const ORCHESTRATOR = 'orchestrator';
 function consentInstruction(type?: string): string {
   return (
     'Do this in two tool calls and nothing else. ' +
-    'First call `workflow.consent` with files ["plan.md"] and summary "smoke plan"' +
+    'First call `workflow-consent` with files ["plan.md"] and summary "smoke plan"' +
     (type ? ` and type "${type}"` : '') +
     '. Then call the `question` tool once, passing as the question text the ENTIRE ' +
     '<consent-request ...>...</consent-request> tag that the first tool printed, copied ' +
@@ -274,19 +329,19 @@ const scenarios: Scenario[] = [
       const sessionId = await newSession(host, 'plugin-loads');
       const result = await step(host, sessionId, model, {
         instruction:
-          'Call the tool `workflow.list` with no arguments, then reply with its output verbatim.',
+          'Call the tool `workflow-list` with no arguments, then reply with its output verbatim.',
         agent: ORCHESTRATOR,
         // Evidence the tool really ran: the reply carries the resolved
         // profilesDir, a temp path the model has no way to invent.
         expect: (s) =>
           (s.transcript.includes('profilesDir') && s.transcript.includes('smoke')) ||
-          `workflow.list did not report the smoke profile: ${s.transcript.slice(0, 300)}`,
+          `workflow-list did not report the smoke profile: ${s.transcript.slice(0, 300)}`,
       });
       return {
         ok: result.ok,
         attempts: result.attempts,
         evidence: result.ok
-          ? 'workflow.list ran through the host and listed the project profiles'
+          ? 'workflow-list ran through the host and listed the project profiles'
           : `${result.detail}\n${result.session.transcript.slice(0, 600)}`,
       };
     },
@@ -313,12 +368,12 @@ const scenarios: Scenario[] = [
   },
   {
     id: 'create',
-    title: 'workflow.create puts the session under the state machine',
+    title: 'workflow-create puts the session under the state machine',
     run: async (host, model) => {
       const sessionId = await newSession(host, 'create');
       const result = await step(host, sessionId, model, {
         instruction:
-          'Call the tool `workflow.create` with schemaId "smoke". Do nothing else and add no commentary.',
+          'Call the tool `workflow-create` with schemaId "smoke". Do nothing else and add no commentary.',
         agent: ORCHESTRATOR,
         expect: (s) => {
           if (!s.state) return 'no workflow session was persisted';
@@ -341,9 +396,9 @@ const scenarios: Scenario[] = [
     run: async (host, model) => {
       const sessionId = await newSession(host, 'git-block');
       await step(host, sessionId, model, {
-        instruction: 'Call the tool `workflow.create` with schemaId "smoke". Do nothing else.',
+        instruction: 'Call the tool `workflow-create` with schemaId "smoke". Do nothing else.',
         agent: ORCHESTRATOR,
-        expect: (s) => s.state !== null || 'workflow.create did not run',
+        expect: (s) => s.state !== null || 'workflow-create did not run',
       });
       const result = await step(host, sessionId, model, {
         instruction:
@@ -370,13 +425,13 @@ const scenarios: Scenario[] = [
     run: async (host, model) => {
       const sessionId = await newSession(host, 'task-control');
       await step(host, sessionId, model, {
-        instruction: 'Call the tool `workflow.create` with schemaId "smoke". Do nothing else.',
+        instruction: 'Call the tool `workflow-create` with schemaId "smoke". Do nothing else.',
         agent: ORCHESTRATOR,
-        expect: (s) => s.state !== null || 'workflow.create did not run',
+        expect: (s) => s.state !== null || 'workflow-create did not run',
       });
       const set = await step(host, sessionId, model, {
         instruction:
-          'Call the tool `workflow.tasks-set` with tasks ' +
+          'Call the tool `workflow-tasks-set` with tasks ' +
           '[{"writeScope":["src/a.ts"],"status":"pending"}]. Do nothing else.',
         agent: ORCHESTRATOR,
         expect: (s) => {
@@ -397,7 +452,7 @@ const scenarios: Scenario[] = [
       }
       const refused = await step(host, sessionId, model, {
         instruction:
-          'Call the tool `workflow.tasks-set-status` with taskId "task-1" and status "completed". ' +
+          'Call the tool `workflow-tasks-set-status` with taskId "task-1" and status "completed". ' +
           'Report the tool output verbatim.',
         // The default agent is a worker, not the orchestrator.
         expect: (s) => {
@@ -423,9 +478,9 @@ const scenarios: Scenario[] = [
     run: async (host, model) => {
       const sessionId = await newSession(host, 'commit-gate');
       await step(host, sessionId, model, {
-        instruction: 'Call the tool `workflow.create` with schemaId "smoke". Do nothing else.',
+        instruction: 'Call the tool `workflow-create` with schemaId "smoke". Do nothing else.',
         agent: ORCHESTRATOR,
-        expect: (s) => s.state !== null || 'workflow.create did not run',
+        expect: (s) => s.state !== null || 'workflow-create did not run',
       });
       const result = await step(host, sessionId, model, {
         instruction:
@@ -457,9 +512,9 @@ const scenarios: Scenario[] = [
     run: async (host, model) => {
       const sessionId = await newSession(host, 'plan-consent');
       await step(host, sessionId, model, {
-        instruction: 'Call the tool `workflow.create` with schemaId "smoke". Do nothing else.',
+        instruction: 'Call the tool `workflow-create` with schemaId "smoke". Do nothing else.',
         agent: ORCHESTRATOR,
-        expect: (s) => s.state !== null || 'workflow.create did not run',
+        expect: (s) => s.state !== null || 'workflow-create did not run',
       });
       const result = await step(host, sessionId, model, {
         instruction: CONSENT_INSTRUCTION,
@@ -568,8 +623,8 @@ const scenarios: Scenario[] = [
 
       for (const entry of [
         {
-          instruction: 'Call the tool `workflow.create` with schemaId "cicd". Do nothing else.',
-          expect: (s: Session) => s.state !== null || 'workflow.create did not run',
+          instruction: 'Call the tool `workflow-create` with schemaId "cicd". Do nothing else.',
+          expect: (s: Session) => s.state !== null || 'workflow-create did not run',
         },
         {
           instruction: CONSENT_INSTRUCTION,
@@ -618,7 +673,7 @@ const scenarios: Scenario[] = [
           // No `writeScope`: a tester reports, it does not write, and an
           // absent scope is exactly "read-only" (session-schema.ts).
           instruction:
-            'Call the tool `workflow.tasks-set` with listKey "test_suite" and tasks ' +
+            'Call the tool `workflow-tasks-set` with listKey "test_suite" and tasks ' +
             '[{"status":"pending"}]. Do nothing else.',
           expect: (s: Session) => {
             const tasks = (s.state as { tasks?: Record<string, unknown[]> } | null)?.tasks ?? {};
@@ -728,8 +783,8 @@ const scenarios: Scenario[] = [
 
       for (const entry of [
         {
-          instruction: 'Call the tool `workflow.create` with schemaId "smoke". Do nothing else.',
-          expect: (s: Session) => s.state !== null || 'workflow.create did not run',
+          instruction: 'Call the tool `workflow-create` with schemaId "smoke". Do nothing else.',
+          expect: (s: Session) => s.state !== null || 'workflow-create did not run',
         },
         {
           instruction: CONSENT_INSTRUCTION,
@@ -738,7 +793,7 @@ const scenarios: Scenario[] = [
         },
         {
           instruction:
-            'Call the tool `workflow.tasks-set` with tasks ' +
+            'Call the tool `workflow-tasks-set` with tasks ' +
             '[{"writeScope":["src/smoke-1.ts"],"status":"pending"}]. Do nothing else.',
           expect: (s: Session) => stage(s) === 'execution' || `stage is ${stage(s)}`,
         },
@@ -830,9 +885,9 @@ async function prepareCommittableSession(
     expect: (s: Session) => boolean | string;
   }> = [
     {
-      instruction: 'Call the tool `workflow.create` with schemaId "smoke". Do nothing else.',
+      instruction: 'Call the tool `workflow-create` with schemaId "smoke". Do nothing else.',
       agent: ORCHESTRATOR,
-      expect: (s) => s.state !== null || 'workflow.create did not run',
+      expect: (s) => s.state !== null || 'workflow-create did not run',
     },
     {
       instruction: CONSENT_INSTRUCTION,
@@ -841,7 +896,7 @@ async function prepareCommittableSession(
     },
     {
       instruction:
-        'Call the tool `workflow.tasks-set` with tasks ' +
+        'Call the tool `workflow-tasks-set` with tasks ' +
         JSON.stringify(files.map((path) => ({ writeScope: [path], status: 'pending' }))) +
         '. Do nothing else.',
       agent: ORCHESTRATOR,
@@ -868,7 +923,7 @@ async function prepareCommittableSession(
     },
     ...files.map((_, index) => ({
       instruction:
-        `Call the tool \`workflow.tasks-set-status\` with taskId "task-${index}" and status "completed". ` +
+        `Call the tool \`workflow-tasks-set-status\` with taskId "task-${index}" and status "completed". ` +
         'Do nothing else.',
       agent: ORCHESTRATOR,
       expect: (s: Session) => {

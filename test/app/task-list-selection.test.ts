@@ -81,7 +81,7 @@ describe('the workflow says which task list it has', () => {
     // set without a run.
     const store = await seed('jobs', 'jobs-loop', 'flow');
 
-    const result = await tools()['workflow.tasks-set']!.execute(
+    const result = await tools()['workflow-tasks-set']!.execute(
       { tasks: TASKS },
       { sessionID: 'jobs', agent: 'orchestrator' }
     );
@@ -93,7 +93,7 @@ describe('the workflow says which task list it has', () => {
   it('asks which list when the schema declares several', async () => {
     await seed('ambiguous', 'two-loops', 'flow');
 
-    const result = await tools()['workflow.tasks-set']!.execute(
+    const result = await tools()['workflow-tasks-set']!.execute(
       { tasks: TASKS },
       { sessionID: 'ambiguous', agent: 'orchestrator' }
     );
@@ -106,7 +106,7 @@ describe('the workflow says which task list it has', () => {
   it('takes the list a caller names', async () => {
     const store = await seed('named', 'two-loops', 'flow');
 
-    const result = await tools()['workflow.tasks-set']!.execute(
+    const result = await tools()['workflow-tasks-set']!.execute(
       { tasks: TASKS, listKey: 'deliveries' },
       { sessionID: 'named', agent: 'orchestrator' }
     );
@@ -118,7 +118,7 @@ describe('the workflow says which task list it has', () => {
   it('still refuses a list the workflow does not declare, and says what it has', async () => {
     await seed('wrong', 'jobs-loop', 'flow');
 
-    const result = await tools()['workflow.tasks-set']!.execute(
+    const result = await tools()['workflow-tasks-set']!.execute(
       { tasks: TASKS, listKey: 'implementation' },
       { sessionID: 'wrong', agent: 'orchestrator' }
     );

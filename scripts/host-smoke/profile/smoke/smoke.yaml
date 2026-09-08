@@ -12,7 +12,7 @@
 # schemas became its own — combining is schema-level only — and this delta was
 # left behind: on its own it declares an `execution` loop whose only edge is
 # `code → verify`, so nothing reaches `done` and the workflow does not compile.
-# `workflow.create` then returned a configuration error and persisted no
+# `workflow-create` then returned a configuration error and persisted no
 # session at all, which is what the `create` scenario reported.
 
 extends: 'base/base.yaml'

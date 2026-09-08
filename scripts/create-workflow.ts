@@ -35,7 +35,7 @@ async function main() {
     $: {} as never,
   });
 
-  const result = await hooks.tool!['workflow.create'].execute(
+  const result = await hooks.tool!['workflow-create'].execute(
     { schemaId: 'android' },
     {
       sessionID,

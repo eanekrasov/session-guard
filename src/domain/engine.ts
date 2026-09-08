@@ -133,7 +133,7 @@ export function deriveStageFn(
 ): string {
   // `SessionFacts` types this optional, but every real session carries it —
   // `currentStage` is a required string on the session and is written by
-  // `workflow.create` from the compiled workflow's own first stage.
+  // `workflow-create` from the compiled workflow's own first stage.
   const currentStage = facts.currentStage ?? '';
   if (rules.length === 0) return currentStage;
 

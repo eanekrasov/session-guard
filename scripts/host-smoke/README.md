@@ -56,7 +56,7 @@ prompt problem; a step that never succeeded is a finding.**
 
 | Finding | Status |
 |---|---|
-| `workflow.tasks-set` reported success while persisting nothing — a reentrant write overwritten by the outer save | fixed (`SessionQueue`) |
-| the consent tag carried a `revision` its own manifest did not, so the plugin's own parser rejected it | fixed (`workflow.consent`) |
+| `workflow-tasks-set` reported success while persisting nothing — a reentrant write overwritten by the outer save | fixed (`SessionQueue`) |
+| the consent tag carried a `revision` its own manifest did not, so the plugin's own parser rejected it | fixed (`workflow-consent`) |
 | the answer handler looked for the consent tag in the tool's output instead of the question | fixed (`ConsentOrchestrator.after`) |
 | nothing in `src` ever sets the `review` or `qa` gate, so the shipped base machine cannot reach `commit` | open — pinned by the `machine-limit` scenario |

@@ -1,3 +1,5 @@
+import type { WorkflowSession } from '../session/session-schema.ts';
+
 // Чистая логика секции workflow для TUI-плагина.
 // Без JSX: импортируется и плагином, и bun-тестами (scripts/tui.test.ts).
 // Контракт: specs/002-sidebar-state-display/contracts/runtime-state-read.md
@@ -133,142 +135,93 @@ export type TaskGateInfo = {
  * schema has — and returned pre-stage-model names like `code` and `qa`. It was
  * unreachable anyway: `currentStage` carries a schema default.
  */
-function deriveStageFromSession(record: Record<string, unknown>): string | null {
-  const currentStage = record.currentStage;
-  if (typeof currentStage === 'string' && currentStage !== '') return currentStage;
-  return null;
-}
-
 /**
- * The open calls, from `activeOperations`.
+ * Открытые вызовы сессии.
  *
- * This read `record.activeMutation` — a single object, and a field the session
- * schema does not have — so the sidebar's "active" line never appeared. A
- * session holds a map keyed by call id, and a verifier stage runs several
- * agents at once, so there can be more than one.
+ * Читалось `record.activeMutation` — одиночный объект и поле, которого у схемы
+ * сессии нет, — поэтому строка «active» в боковой панели не появлялась никогда.
+ * Сессия держит карту по идентификатору вызова, а на стадии проверки работают
+ * несколько агентов сразу, так что их бывает больше одного.
  */
-function parseActiveOperations(value: unknown): ActiveOperationInfo[] {
-  if (!isRecord(value)) return [];
-  const operations: ActiveOperationInfo[] = [];
-  for (const [callId, raw] of Object.entries(value)) {
-    if (!isRecord(raw)) continue;
-    operations.push({
-      callId: typeof raw.callId === 'string' && raw.callId !== '' ? raw.callId : callId,
-      taskId: typeof raw.taskId === 'string' ? raw.taskId : '',
-      agent: typeof raw.agent === 'string' ? raw.agent : '',
-      outputReady: raw.result === 'output_ready',
-    });
-  }
-  return operations;
+function parseActiveOperations(
+  operations: WorkflowSession['activeOperations']
+): ActiveOperationInfo[] {
+  return Object.entries(operations ?? {}).map(([callId, operation]) => ({
+    callId: operation.callId !== '' ? operation.callId : callId,
+    taskId: operation.taskId,
+    agent: operation.agent,
+    outputReady: operation.result === 'output_ready',
+  }));
 }
 
 export type ParseResult = { ok: true; value: Tui } | { ok: false; reason: IdleReason };
 
-export function parseRuntimeState(raw: string): ParseResult {
-  let data: unknown;
-  try {
-    data = JSON.parse(raw);
-  } catch {
-    return { ok: false, reason: 'parse_error' };
-  }
-  if (typeof data !== 'object' || data === null || Array.isArray(data)) {
-    return { ok: false, reason: 'invalid_structure' };
-  }
-  const record = data as Record<string, unknown>;
-  if (typeof record.schemaVersion !== 'number') {
-    return { ok: false, reason: 'unknown_schema' };
-  }
-  const sid = (record.sessionId as string) ?? (record.rootSessionID as string) ?? '';
-  if (sid === '') {
-    return { ok: false, reason: 'missing_session_id' };
-  }
-  (record as Record<string, unknown>).sessionId = sid;
-  const finalStage = deriveStageFromSession(record);
-  if (finalStage === null) {
+/**
+ * Вид боковой панели по уже разобранной сессии.
+ *
+ * Принимает объект, а не текст. Раньше сюда приходила строка, и функция сама
+ * защищалась от всего подряд: битого JSON, `gates` объектом вместо массива,
+ * `tasks` массивом вместо карты, `rootSessionID` вместо `sessionId`, статуса
+ * `committed`, которого нет среди статусов задачи. Ни одна из этих форм не
+ * доходит сюда с тех пор, как читатель (`readSession`) валидирует сессию
+ * схемой и на всё перечисленное отвечает `null`. Толерантность оставалась
+ * живой только в тестах, которые её и кормили.
+ *
+ * Единственный настоящий отказ — стадии нет: поле есть у схемы, но пустая
+ * строка стадией не является.
+ */
+export function parseRuntimeState(session: WorkflowSession): ParseResult {
+  const finalStage = session.currentStage;
+  if (finalStage === '') {
     return { ok: false, reason: 'no_stage' };
   }
-  const taskLists = Array.isArray(record.tasks)
-    ? [record.tasks]
-    : isRecord(record.tasks)
-      ? Object.values(record.tasks).filter(Array.isArray)
-      : [];
-  const tasks = taskLists.flat();
-  const committedCount = tasks.filter(
-    (t) => isRecord(t) && (t.status === 'committed' || t.status === 'completed')
-  ).length;
 
-  // Neighbours in the graph. A stage the chain does not know — a profile is
-  // free to name its own — has none: `indexOf` returns -1, and -1 satisfied
-  // `stageIndex < STAGES.length - 1`, so the sidebar offered STAGES[0] as the
-  // next stage for every stage it did not recognise.
+  const tasks = Object.values(session.tasks ?? {}).flat();
+  const completedCount = tasks.filter((task) => task.status === 'completed').length;
+
+  // Соседи по графу. Стадия, которой цепочка не знает — профиль вправе назвать
+  // свою, — соседей не имеет: `indexOf` возвращает -1, а -1 удовлетворял
+  // условию `stageIndex < STAGES.length - 1`, и панель предлагала STAGES[0]
+  // следующей стадией для каждой неизвестной.
   const stageIndex = (STAGES as readonly string[]).indexOf(finalStage);
   const prevStage: Stage | null = stageIndex > 0 ? STAGES[stageIndex - 1] : null;
   const nextStage: Stage | null =
     stageIndex >= 0 && stageIndex < STAGES.length - 1 ? STAGES[stageIndex + 1] : null;
 
-  // Gates из массива или объекта
-  const rawGates = record.gates;
-  let gates: GateInfo[] = [];
-  if (Array.isArray(rawGates)) {
-    gates = (rawGates as Array<Record<string, unknown>>).map((g) => ({
-      id: String(g.id ?? ''),
-      status: String(g.status ?? ''),
-    }));
-  } else if (isRecord(rawGates)) {
-    gates = Object.entries(rawGates).map(([id, status]) => ({ id, status: String(status) }));
-  }
+  const gates: GateInfo[] = (session.gates ?? []).map((gate) => ({
+    id: gate.id,
+    status: gate.status,
+  }));
 
-  // Task gates: inside a loop each task carries its own verdicts, so a session
-  // gate row would hide which task actually passed review.
-  const taskGates: TaskGateInfo[] = [];
-  const rawRuns = record.loopRuns;
-  if (isRecord(rawRuns)) {
-    for (const value of Object.values(rawRuns)) {
-      if (!isRecord(value)) continue;
-      const runGates = isRecord(value.gates)
-        ? Object.entries(value.gates).map(([id, status]) => ({ id, status: String(status) }))
-        : [];
-      taskGates.push({
-        taskId: String(value.taskId ?? ''),
-        stage: String(value.stage ?? ''),
-        status: String(value.status ?? ''),
-        gates: runGates,
-        checks: typeof value.checks === 'string' ? value.checks : undefined,
-      });
-    }
-  }
+  // Гейты задач: внутри цикла каждая задача несёт свои вердикты, и сессионная
+  // строка скрыла бы, какая именно прошла review.
+  const taskGates: TaskGateInfo[] = Object.values(session.loopRuns ?? {}).map((run) => ({
+    taskId: run.taskId,
+    stage: run.stage,
+    status: run.status,
+    gates: Object.entries(run.gates ?? {}).map(([id, status]) => ({ id, status })),
+    checks: run.checks,
+  }));
 
-  // Retry budgets
-  const rawBudgets = record.retryBudgets;
-  let retryBudgets: RetryInfo[] = [];
-  if (isRecord(rawBudgets)) {
-    retryBudgets = Object.entries(rawBudgets).map(([key, value]) => {
-      if (isRecord(value)) {
-        return {
-          key,
-          attempts: Number((value as Record<string, unknown>).attempts ?? 0),
-          maximum: Number((value as Record<string, unknown>).maximum ?? 3),
-        };
-      }
-      return { key, attempts: 0, maximum: 3 };
-    });
-  }
+  const retryBudgets: RetryInfo[] = Object.entries(session.retryBudgets ?? {}).map(
+    ([key, budget]) => ({ key, attempts: budget.attempts, maximum: budget.maximum })
+  );
 
   return {
     ok: true as const,
     value: {
-      rootSessionID: record.sessionId as string,
+      rootSessionID: session.sessionId,
       stage: finalStage,
       prevStage,
       nextStage,
-      revision: typeof record.revision === 'number' ? record.revision : 0,
-      completedTasks: committedCount,
+      revision: session.revision,
+      completedTasks: completedCount,
       totalTasks: tasks.length,
-      activeOperations: parseActiveOperations(record.activeOperations),
+      activeOperations: parseActiveOperations(session.activeOperations),
       gates,
       taskGates,
       retryBudgets,
-      raw: record,
+      raw: session as unknown as Record<string, unknown>,
     },
   };
 }
@@ -449,72 +402,67 @@ function collectionLines(
   return [head, ...shown, ...(rest > 0 ? [`  +${rest} ещё`] : [])];
 }
 
+/**
+ * Скалярные поля сессии, выводимые построчно и в этом порядке.
+ *
+ * Здесь стояли `runId`, `rootSessionID`, `currentTaskIndex` и `state` — ни
+ * одного из них у схемы сессии нет, так что четыре строки из восьми всегда
+ * печатали «—».
+ */
 const KNOWN_KEYS = [
+  'sessionId',
+  'profileId',
+  'schemaId',
   'schemaVersion',
-  'runId',
-  'rootSessionID',
   'revision',
   'updatedAt',
   'title',
-  'currentTaskIndex',
-  'state',
+  'currentStage',
+  'checks',
 ] as const;
 
-export function formatDetailsLines(rawText: string): string[] | null {
-  let data: unknown;
-  try {
-    data = JSON.parse(rawText);
-  } catch {
-    return null;
-  }
-  if (!isRecord(data)) return null;
-
+/**
+ * Полный дамп сессии для панели подробностей.
+ *
+ * Тоже принимает объект. Разбор текста и защита от чужих форм здесь не нужны
+ * по той же причине, что и в `parseRuntimeState`: сессию уже проверила схема.
+ * Вместе с текстом ушли и мёртвые чтения — `tasks` массивом, статусы `active`
+ * и `committed`, которых нет среди статусов задачи, и поле `processedEventIds`,
+ * которого нет у схемы.
+ */
+export function formatDetailsLines(session: WorkflowSession): string[] {
+  const record = session as unknown as Record<string, unknown>;
   const lines: string[] = [];
   for (const key of KNOWN_KEYS) {
-    const value = data[key];
-    lines.push(`${key}: ${scalar(value)}`);
+    lines.push(`${key}: ${scalar(record[key])}`);
   }
 
-  // One line per open call. `activeMutation` was a single object and is not a
-  // field the session schema has, so this printed nothing.
-  for (const operation of parseActiveOperations(data.activeOperations)) {
+  // По строке на открытый вызов. Читалось `activeMutation` — одиночный объект
+  // и поле, которого у схемы нет, — так что не печаталось ничего.
+  for (const operation of parseActiveOperations(session.activeOperations)) {
     lines.push(
       `activeOperation: callID=${scalar(operation.callId)} task=${scalar(operation.taskId)} ` +
         `agent=${scalar(operation.agent)} outputReady=${scalar(operation.outputReady)}`
     );
   }
 
-  const tasks = Array.isArray(data.tasks) ? data.tasks : [];
+  const tasks = Object.values(session.tasks ?? {}).flat();
   lines.push(`tasks: ${tasks.length}`);
   if (tasks.length > 0) {
-    const active = tasks.findIndex((t: Record<string, unknown>) => t.status === 'active');
-    const committed = tasks.filter((t: Record<string, unknown>) => t.status === 'committed').length;
-    lines.push(`  active=${active >= 0 ? active : '—'} committed=${committed}`);
+    const running = tasks.filter((task) => task.status === 'running').length;
+    const completed = tasks.filter((task) => task.status === 'completed').length;
+    lines.push(`  running=${running} completed=${completed}`);
   }
 
-  const gates = Array.isArray(data.gates) ? data.gates : [];
+  const gates = session.gates ?? [];
   if (gates.length > 0) {
-    lines.push(
-      `gates: ${gates.map((g: Record<string, unknown>) => `${g.id}=${g.status}`).join(', ')}`
-    );
+    lines.push(`gates: ${gates.map((gate) => `${gate.id}=${gate.status}`).join(', ')}`);
   }
 
-  if (Array.isArray(data.changedFiles)) {
-    lines.push(...collectionLines('changedFiles', data.changedFiles));
-  }
-  if (isRecord(data.retryBudgets)) {
-    for (const [budget, value] of Object.entries(data.retryBudgets)) {
-      if (isRecord(value)) {
-        lines.push(
-          `retry.${budget}: ${scalar((value as Record<string, unknown>).attempts)}/${scalar((value as Record<string, unknown>).maximum)}`
-        );
-      } else {
-        lines.push(`retry.${budget}: ${scalar(value)}`);
-      }
-    }
-  }
-  if (Array.isArray(data.processedEventIds)) {
-    lines.push(`processedEventIds: ${(data.processedEventIds as string[]).length}`);
+  lines.push(...collectionLines('changedFiles', session.changedFiles ?? []));
+
+  for (const [budget, value] of Object.entries(session.retryBudgets ?? {})) {
+    lines.push(`retry.${budget}: ${scalar(value.attempts)}/${scalar(value.maximum)}`);
   }
 
   const known = new Set<string>([
@@ -524,10 +472,8 @@ export function formatDetailsLines(rawText: string): string[] | null {
     'gates',
     'changedFiles',
     'retryBudgets',
-    'processedEventIds',
-    'currentTaskIndex',
   ]);
-  for (const [key, value] of Object.entries(data)) {
+  for (const [key, value] of Object.entries(record)) {
     if (!known.has(key)) lines.push(`${key}: ${trunc(JSON.stringify(value) ?? scalar(value))}`);
   }
   return lines;

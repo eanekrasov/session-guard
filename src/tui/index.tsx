@@ -432,16 +432,14 @@ async function readSessionView(
     section.setLastDetails(null);
     return null;
   }
-  // `parseRuntimeState` and `formatDetailsLines` build the view model from
-  // text. Handing them the session's own JSON keeps this change to the reading
-  // of it; taking the object directly is a separate cleanup of those two.
-  const raw = JSON.stringify(session);
-  const parsed = parseRuntimeState(raw);
+  const parsed = parseRuntimeState(session);
   if (!parsed.ok) {
     section.setLastDetails(null);
     return null;
   }
-  section.setLastDetails(formatDetailsLines(raw) ?? [`runId: ${String(parsed.value.raw.runId)}`]);
+  section.setLastDetails(
+    formatDetailsLines(session) ?? [`runId: ${String(parsed.value.raw.runId)}`]
+  );
   return parsed.value;
 }
 

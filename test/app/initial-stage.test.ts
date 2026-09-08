@@ -61,7 +61,7 @@ describe("a session starts in its own workflow's first stage", () => {
     const hooks = createRuntime(pluginInput()) as Hooks & { tool?: ToolMap };
     const store = new WorkflowStore(storeDirectory);
 
-    const result = await hooks.tool!['workflow.create']!.execute(
+    const result = await hooks.tool!['workflow-create']!.execute(
       { schemaId: 'start-done/flow' },
       { sessionID: 'starts-at-start' }
     );
@@ -78,7 +78,7 @@ describe("a session starts in its own workflow's first stage", () => {
     const hooks = createRuntime(pluginInput()) as Hooks & { tool?: ToolMap };
     const store = new WorkflowStore(storeDirectory);
 
-    await hooks.tool!['workflow.create']!.execute(
+    await hooks.tool!['workflow-create']!.execute(
       { schemaId: 'base/state-machine' },
       { sessionID: 'starts-at-planning' }
     );

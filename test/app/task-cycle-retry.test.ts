@@ -213,7 +213,7 @@ describe('task-cycle retry and recovery', () => {
     ]);
     expect(rejected.blockedReason).toEqual(expect.any(String));
     expect(system.system).toContain(
-      '[workflow pending decision: task task-1 retry_exhausted; use workflow.tasks-resolve-decision (no taskId needed)]'
+      '[workflow pending decision: task task-1 retry_exhausted; use workflow-tasks-resolve-decision (no taskId needed)]'
     );
   });
 
@@ -224,7 +224,7 @@ describe('task-cycle retry and recovery', () => {
 
     await beforeTask(hooks, 'call-1');
     await afterTask(hooks, 'call-1', 'review', 'fail');
-    const result = await hooks.tool!['workflow.tasks-resolve-decision'].execute(
+    const result = await hooks.tool!['workflow-tasks-resolve-decision'].execute(
       { decision: 'increase', maximum: 2 },
       toolContext()
     );
@@ -248,7 +248,7 @@ describe('task-cycle retry and recovery', () => {
 
     await beforeTask(hooks, 'call-1');
     await afterTask(hooks, 'call-1', 'review', 'fail');
-    const result = await hooks.tool!['workflow.tasks-resolve-decision'].execute(
+    const result = await hooks.tool!['workflow-tasks-resolve-decision'].execute(
       { decision },
       toolContext()
     );
@@ -291,7 +291,7 @@ describe('task-cycle retry and recovery', () => {
 
     await beforeTask(hooks, 'call-child', 'task-2');
     await afterTask(hooks, 'call-child', 'review', 'fail');
-    await hooks.tool!['workflow.tasks-resolve-decision'].execute(
+    await hooks.tool!['workflow-tasks-resolve-decision'].execute(
       { decision: 'failed' },
       toolContext()
     );
@@ -348,7 +348,7 @@ describe('task-cycle retry and recovery', () => {
     await store.save(loaded);
 
     // Try to resolve without decisionId — must fail with candidates
-    const result = await hooks.tool!['workflow.tasks-resolve-decision'].execute(
+    const result = await hooks.tool!['workflow-tasks-resolve-decision'].execute(
       { decision: 'increase', maximum: 2 },
       toolContext()
     );
@@ -398,7 +398,7 @@ describe('task-cycle retry and recovery', () => {
     await store.save(loaded);
 
     // Resolve task-1 only
-    const result = await hooks.tool!['workflow.tasks-resolve-decision'].execute(
+    const result = await hooks.tool!['workflow-tasks-resolve-decision'].execute(
       { decision: 'failed', decisionId: 'task-1:retry_exhausted' },
       toolContext()
     );
@@ -409,7 +409,7 @@ describe('task-cycle retry and recovery', () => {
     expect(loaded2.pendingDecisions[0].subjectId).toBe('task-2');
 
     // task-2 is still resolvable independently
-    const result2 = await hooks.tool!['workflow.tasks-resolve-decision'].execute(
+    const result2 = await hooks.tool!['workflow-tasks-resolve-decision'].execute(
       { decision: 'increase', maximum: 2, decisionId: 'task-2:retry_exhausted' },
       toolContext()
     );
@@ -428,7 +428,7 @@ describe('task-cycle retry and recovery', () => {
     await afterTask(hooks, 'call-1', 'review', 'fail');
 
     // Unknown decisionId
-    const result1 = await hooks.tool!['workflow.tasks-resolve-decision'].execute(
+    const result1 = await hooks.tool!['workflow-tasks-resolve-decision'].execute(
       { decision: 'failed', decisionId: 'nonexistent-id' },
       toolContext()
     );
@@ -452,7 +452,7 @@ describe('task-cycle retry and recovery', () => {
     delete loaded.retryBudgets['task-1'];
     await store.save(loaded);
 
-    const result = await hooks.tool!['workflow.tasks-resolve-decision'].execute(
+    const result = await hooks.tool!['workflow-tasks-resolve-decision'].execute(
       { decision: 'increase', maximum: 2 },
       toolContext()
     );
@@ -504,14 +504,14 @@ describe('task-cycle retry and recovery', () => {
     expect(loaded1.pendingDecisions[1].runId).toBeDefined();
 
     // Resolve task-1 via decisionId
-    const result = await hooks.tool!['workflow.tasks-resolve-decision'].execute(
+    const result = await hooks.tool!['workflow-tasks-resolve-decision'].execute(
       { decision: 'failed', decisionId: 'task-1:retry_exhausted' },
       toolContext()
     );
     expect(toolOutput(result)).toMatch(/Failed.*task-1/);
 
     // Resolve task-2 via decisionId
-    const result2 = await hooks.tool!['workflow.tasks-resolve-decision'].execute(
+    const result2 = await hooks.tool!['workflow-tasks-resolve-decision'].execute(
       { decision: 'increase', maximum: 2, decisionId: 'task-2:retry_exhausted' },
       toolContext()
     );

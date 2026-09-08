@@ -148,7 +148,7 @@ describe('reading tasks changes nothing', () => {
     const hooks = createRuntime(pluginInput()) as Hooks & {
       tool?: Record<string, { execute: (a: unknown, c: unknown) => Promise<{ output: string }> }>;
     };
-    await hooks.tool!['workflow.tasks-get']!.execute(
+    await hooks.tool!['workflow-tasks-get']!.execute(
       { listKey: 'implementation' },
       { sessionID: 'reader' }
     );

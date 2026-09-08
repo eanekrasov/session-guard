@@ -1,5 +1,5 @@
 /**
- * Live test: workflow.create without mocks
+ * Live test: workflow-create without mocks
  * Run: bun test/live-workflow-create.test.ts
  */
 import { resolve } from 'node:path';
@@ -41,9 +41,9 @@ async function main() {
   console.log('✅ Runtime created');
   console.log('📋 Available tools:', Object.keys(runtime.tool ?? {}));
 
-  // Test 1: workflow.create with profileId
-  console.log('\n🧪 Test 1: workflow.create with profileId');
-  const result1 = await runtime.tool!['workflow.create'].execute(
+  // Test 1: workflow-create with profileId
+  console.log('\n🧪 Test 1: workflow-create with profileId');
+  const result1 = await runtime.tool!['workflow-create'].execute(
     { schemaId: 'android' },
     {
       sessionID: 'live-session-1',
@@ -62,9 +62,9 @@ async function main() {
   console.log('📤 Output:', output1);
   console.log('📊 Metadata:', JSON.stringify(meta1, null, 2));
 
-  // Test 2: workflow.create without args (should fallback to HARNESS_PROFILE)
-  console.log('\n🧪 Test 2: workflow.create without args (fallback to HARNESS_PROFILE)');
-  const result2 = await runtime.tool!['workflow.create'].execute(
+  // Test 2: workflow-create without args (should fallback to HARNESS_PROFILE)
+  console.log('\n🧪 Test 2: workflow-create without args (fallback to HARNESS_PROFILE)');
+  const result2 = await runtime.tool!['workflow-create'].execute(
     {},
     {
       sessionID: 'live-session-2',

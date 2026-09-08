@@ -3,7 +3,7 @@ import type { PluginInput } from '@opencode-ai/plugin';
 import { WorkflowStore } from '../../src/session/session-store.ts';
 import { fixtureProfilesDir } from '../support/fixture-profiles.ts';
 
-// `workflow.create` names the workflow a session runs as
+// `workflow-create` names the workflow a session runs as
 // `<profileId>/<schemaId>`. Schema names are unique only inside their profile,
 // so the qualified form is what makes the choice unambiguous; a bare id names
 // the profile, and is legal only while that profile holds one schema.
@@ -45,7 +45,7 @@ async function create(sessionID: string, schemaId: string | undefined): Promise<
     serverUrl: new URL('http://localhost:0'),
     $: {} as PluginInput['$'],
   });
-  const result = await runtime.tool!['workflow.create'].execute(
+  const result = await runtime.tool!['workflow-create'].execute(
     { schemaId } as never,
     {
       sessionID,
@@ -61,7 +61,7 @@ async function create(sessionID: string, schemaId: string | undefined): Promise<
   return typeof result === 'string' ? result : result.output;
 }
 
-describe('workflow.create picks one schema', () => {
+describe('workflow-create picks one schema', () => {
   it('records the schema named as profileId/schemaId', async () => {
     const output = await create('s-qualified', 'two-schemas/beta');
     expect(output).not.toContain('error');

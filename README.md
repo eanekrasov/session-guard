@@ -38,7 +38,7 @@ workflow-сессий: фазы, переходы, консент (одобре�
 │  │                      │  │                                  │  │
 │  │ Создаёт runtime dir,  │  │ Регистрирует хуки OpenCode SDK:  │  │
 │  │ env init, делегирует │  │ - config() — sm-* команды + агент │  │
-│  │ createRuntime(ctx)   │  │ - tool() — workflow.create/list    │  │
+│  │ createRuntime(ctx)   │  │ - tool() — workflow-create/list    │  │
 │  └──────────────────────┘  │ - chat.message() — log state      │  │
 │                            │ - tool.execute.before() — guard   │  │
 │                            │ - tool.execute.after() — capture  │  │
@@ -296,13 +296,17 @@ WorkflowSession (Zod-схема)
 ```yaml
 # profiles/base/base.yaml
 gates:
-  - id: invariants
-    label: Invariants check
   - id: review
     label: Code review
   - id: qa
     label: QA verification
-````
+```
+
+Гейта `invariants` в этом списке нет намеренно. Вердикт ядра о ходе перестал
+быть гейтом: гейты пишет агент через `<workflow-result>` и любой объявленный
+стадией гейт может выставить себе сам, а этот вердикт ядро выносит, посмотрев
+на диск. Он живёт отдельным полем — `task.checks` на прогоне задачи внутри
+цикла и `session.checks` на сессии вне его.
 
 Компилятор (`src/schema/compile-workflow.ts`) сверяет `gates:` каждой стадии с
 этим объявлением, поэтому опечатка в имени гейта — ошибка компиляции, а не
@@ -314,8 +318,17 @@ gates:
 - Сессии хранятся как `{storeDir}/{encodeURIComponent(sessionId)}.json`
 - `save()` — атомарная запись через tmp + rename, per-session цепочка блокировок
 - `load()` — чтение + Zod-валидация с `.passthrough()` для неизвестных полей
-- `list()` — сканирование директории, декодирование URI
+- `list()` — сканирование директории, декодирование URI (подкаталог `archive/`
+  в перечисление не попадает: перечисляются только файлы)
+- `archive()` — перенос законченной сессии в `{storeDir}/archive/`,
+  `loadArchived()` — чтение оттуда
 - События: `onSave` (Set) + `onSessionSaved` (глобальный Set из session-events.ts)
+
+**Архив.** Дойдя до терминальной стадии — объявленной в схеме и не имеющей
+исходящих рёбер, — сессия уезжает из рантайма в `archive/` и перестаёт чем-либо
+управлять: `load()` её не находит, а «сессии нет» этот проект выражает ровно
+одним способом. Перенос, а не удаление: расписка о доставке, гейты, вердикты и
+одобрения — продукт работы. Архив читают TUI, dashboard и host-smoke.
 
 **parentCache**: кеш sessionId → rootSessionId, заполняемый при каждом save.
 Используется SessionQueue для разрешения корневой сессии.
@@ -726,11 +739,11 @@ Approvals granted: plan
 
 ## Consent System (согласование планов)
 
-Два параллельных формата консента — эволюция от YAML-блоков к XML-тегам.
+Один формат — XML-тег. Прежний YAML-блок и его парсер удалены.
 
-### Современный: XML-теги (src/app/consent.ts)
+### XML-тег (src/app/consent.ts)
 
-Агент вызывает `workflow.consent` tool, возвращающий XML-тег для встраивания в вопрос:
+Агент вызывает `workflow-consent` tool, возвращающий XML-тег для встраивания в вопрос:
 
 ```xml
 <consent-request
@@ -743,12 +756,19 @@ Approvals granted: plan
 </consent-request>
 ```
 
+**Имя согласия.** У манифеста есть необязательное поле `type` — то же имя,
+которое схема пишет в `consent:` на переходе (`plan`, `deploy`, что угодно).
+Отсутствует — значит `plan`. Имя входит в подпись манифеста, поэтому «согласие
+на деплой» и «согласие на план» над одними файлами не дают одинаковую evidence,
+и записывается оно в трёх местах: одобрение сессии, `session.refs.<имя>` и
+ответ оператора. Раньше имя было захардкожено, и объявленное схемой согласие с
+любым другим именем получить было невозможно — ребро закрывалось навсегда.
+
 **Проверка evidence (verifyPlanEvidenceAtDecision):**
 
 1. `canonicalizePlan(content)`: удаление BOM → \r\n → \n → обрезка трейлинговых пробелов → удаление трейлинг-новлайн
-2. `calculatePlanEvidence(content)` = `sha256:${SHA-256(canonicalizePlan)}`
-3. Сравнение с `session.pendingConsent.evidence`
-4. Поиск файла: сначала `join(directory, planRef)`, fallback `openspec/plans/{planRef}`
+2. `calculateDocumentSetEvidence(documents)` — по всем файлам манифеста, а не только по первому
+3. Сравнение с evidence незакрытой записи одобрения (`session.approvals`), найденной по `callId`
 
 **Классификация ответа (classifyConsentAnswer):**
 
@@ -756,38 +776,36 @@ Approvals granted: plan
 - Один ответ, начинающийся с `decline` → `{ kind: 'decline' }`
 - Всё остальное → `{ kind: 'unrecognized' }`
 
-### Устаревший: YAML-блоки (src/app/consent-parser.ts)
-
-Формат `[consent-request]...[/consent-request]` с YAML-подобными полями:
-
-```
-type: plan
-revision: 3
-evidence: abc123...
-manifest:
-  files:
-    - path/to/file
-  actions:
-    - code
-decline: "Текст отказа"
-```
-
-Классификация через keyword matching (GRANT_KEYWORDS: grant, approve, continue, да, yes...
-DECLINE_KEYWORDS: decline, deny, reject, no, stop, отказ, нет...).
-
 ### HARNESS_AUTO_APPROVE
 
-При `HARNESS_AUTO_APPROVE=true` план одобряется автоматически без показа
-вопроса пользователю — для CI/CD сценариев.
+При `HARNESS_AUTO_APPROVE=true` согласие одобряется автоматически, без показа
+вопроса оператору — для прогонов без человека. Одобряется **то согласие,
+которое спросили**, а не всегда план: иначе схема с двумя разными согласиями не
+проезжает.
 
 ## Mutation Lifecycle
 
+### Ход вне цикла задач
+
+Прогон задачи для хода не обязателен. Стадия без `loop:` — обычная стадия, на
+которой тоже работают, и `beginMutation` там заводит операцию без привязки к
+прогону: `runId` и `taskId` отсутствуют честно, а не выдумываются. Машинерия та
+же — свой baseline-кадр, дифф, проверка `writeScope`, инварианты, — и вердикт
+ложится на сессию как `session.checks`.
+
+Неоднозначность при этом остаётся отказом. `resolveMutationRun` различает три
+исхода: прогон найден, прогонов или задач-кандидатов несколько, прогона нет
+вовсе. Второй — отказ: выбрать за автора, к какому из двух прогонов отнести
+правку, значит проверить её чужой областью записи. Кандидаты берутся только из
+списка цикла текущей стадии, иначе в схеме с двумя последовательными циклами
+ход первого синтезировал бы прогон по задаче второго.
+
 ### Lock-механизм
 
-Мутации (Bash/Write/Subtask) защищены через `activeOperation` mutex:
+Мутации (Bash/Write/Subtask) защищены через `activeOperations` mutex:
 
-1. **beginMutation** — устанавливает активную операцию, сбрасывает verifications
-2. **finishMutation** — очищает операцию, обновляет gate('invariants')
+1. **beginMutation** — заводит активную операцию, сбрасывает verifications
+2. **finishMutation** — снимает операцию и записывает вердикт о ходе
 
 Если activeOperation уже существует и не истекла (TTL 30 минут) — новый beginMutation
 выбрасывает ошибку.
@@ -816,9 +834,9 @@ DECLINE_KEYWORDS: decline, deny, reject, no, stop, отказ, нет...).
   │       └── MutationOrchestrator.beginMutation()
   │           ├── Queue.enqueue()
   │           │   ├── releaseInterruptedLock() [P1-014]
-  │           │   ├── session.activeOperation = { callID, agent, status:'running' }
-  │           │   ├── session.verifications = []
-  │           │   └── gate('invariants') = pending
+  │           │   ├── resolveMutationRun() → run | ambiguous | none
+  │           │   ├── session.activeOperations[callID] = { runId?, taskId?, agent, … }
+  │           │   └── session.verifications = []
   │           └── liveMutations.set(callID, { rootSessionId, stageBefore })
   │
   ├── [Bash/Write executes]
@@ -833,8 +851,8 @@ DECLINE_KEYWORDS: decline, deny, reject, no, stop, отказ, нет...).
                   │   ├── session.changedFiles = [...]
                   │   └── validateFiles() → invariant checks
                   ├── finishMutation(session, finalPassed):
-                  │   ├── session.activeOperation = null
-                  │   └── gate('invariants') = passed|failed
+                  │   ├── delete session.activeOperations[callID]
+                  │   └── run.checks = passed|failed   (вне цикла — session.checks)
                   ├── tryApplyTransitions()
                   └── Post-factum validation → checkTransition()
 ```
@@ -1266,11 +1284,11 @@ type SSESessionEvent =
 
 ### Plugin Tools (SDK tools)
 
-**workflow.create**
+**workflow-create**
 
 ```typescript
 tool({
-  name: 'workflow.create',
+  name: 'workflow-create',
   args: { profileId?: string },
   execute: () => { sessionId, profileId, schemaVersion, revision }
 })
@@ -1279,11 +1297,11 @@ tool({
 - Проверка существующей сессии (idempotent)
 - `createSession(sessionId, profileId)` — начальная сессия с пустым списком гейтов
 
-**workflow.list**
+**workflow-list**
 
 ```typescript
 tool({
-  name: 'workflow.list',
+  name: 'workflow-list',
   args: {},
   execute: () => profiles list
 })
@@ -1291,11 +1309,11 @@ tool({
 
 - `listProfiles(profilesDir)` — загружает все profile.json из директории
 
-**workflow.consent**
+**workflow-consent**
 
 ```typescript
 tool({
-  name: 'workflow.consent',
+  name: 'workflow-consent',
   args: {
     files: string[],     // [".opencode/plan/story-42/plan.md"]
     summary: string,     // "Add login page"
@@ -1443,3 +1461,4 @@ Contributions are welcome! Please file issues or submit pull requests on the Git
 ## License
 
 See the [LICENSE](LICENSE) file for details.
+````

@@ -32,8 +32,8 @@ describe('normaliseTool', () => {
   });
 
   it('rejects plugin tools', () => {
-    expect(normaliseTool('workflow.tasks-get')).toBeNull();
-    expect(normaliseTool('workflow.create')).toBeNull();
+    expect(normaliseTool('workflow-tasks-get')).toBeNull();
+    expect(normaliseTool('workflow-create')).toBeNull();
   });
 
   it('rejects unknown tools', () => {

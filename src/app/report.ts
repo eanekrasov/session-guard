@@ -9,7 +9,7 @@ import type { LogFn } from './logger.ts';
  * a refusal carried by `WorkflowBlockedError`. Two switches for one idea of
  * "debug", and what the operator saw depended on which tool they happened to
  * call — the same `ProfileConfigurationError` became tool output in
- * `workflow.tasks-get` and escaped `workflow.tasks-set` raw.
+ * `workflow-tasks-get` and escaped `workflow-tasks-set` raw.
  *
  * The rule is now one rule: an error reaches the operator as readable text,
  * always goes to the log, and shows as a toast when debug is on. The text is

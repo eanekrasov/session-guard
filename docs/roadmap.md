@@ -91,7 +91,7 @@ SHA-256 evidence, классификация.
 
 | Hook                  | Встроенный                                   | Плагин                       |
 | --------------------- | -------------------------------------------- | ---------------------------- |
-| `workflow.create`     | ✅ + preset                                  | ✅ + profileId               |
+| `workflow-create`     | ✅ + preset                                  | ✅ + profileId               |
 | `chat.message`        | ✅ guardrails                                | ✅ (логирование)             |
 | `tool.execute.before` | ✅ guardrails + consent + git + task         | ✅ (Bash/Write guard только) |
 | `tool.execute.after`  | ✅ consent + file val. + mutation + verifier | ✅ (finishMutation только)   |

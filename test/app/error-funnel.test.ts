@@ -120,7 +120,7 @@ describe('every error the plugin reports takes one path', () => {
   it('turns a broken profile into readable tool output instead of a raw throw', async () => {
     // `tasks-get` is open to any caller and caught its own errors, while the
     // task-control tools resolved the engine before their handler's own try —
-    // so the same ProfileConfigurationError escaped `workflow.tasks-set` raw
+    // so the same ProfileConfigurationError escaped `workflow-tasks-set` raw
     // and became tool output next door. What the operator saw depended on
     // which tool they happened to call.
     await seedBrokenSession();
@@ -128,12 +128,12 @@ describe('every error the plugin reports takes one path', () => {
       tool?: Record<string, { execute: (a: unknown, c: unknown) => Promise<{ output: string }> }>;
     };
 
-    const result = await hooks.tool!['workflow.tasks-set']!.execute(
+    const result = await hooks.tool!['workflow-tasks-set']!.execute(
       { tasks: [] },
       { sessionID: 's1', agent: 'orchestrator' }
     );
 
-    expect(result.output).toContain('workflow.tasks-set is refused');
+    expect(result.output).toContain('workflow-tasks-set is refused');
     expect(result.output).toContain('nobody-declared-this');
   });
 
@@ -143,7 +143,7 @@ describe('every error the plugin reports takes one path', () => {
       tool?: Record<string, { execute: (a: unknown, c: unknown) => Promise<{ output: string }> }>;
     };
 
-    await hooks.tool!['workflow.tasks-set']!.execute(
+    await hooks.tool!['workflow-tasks-set']!.execute(
       { tasks: [] },
       { sessionID: 's1', agent: 'orchestrator' }
     );
@@ -157,7 +157,7 @@ describe('every error the plugin reports takes one path', () => {
     const quiet = createRuntime(pluginInput()) as Hooks & {
       tool?: Record<string, { execute: (a: unknown, c: unknown) => Promise<{ output: string }> }>;
     };
-    await quiet.tool!['workflow.tasks-set']!.execute(
+    await quiet.tool!['workflow-tasks-set']!.execute(
       { tasks: [] },
       { sessionID: 's1', agent: 'orchestrator' }
     );
@@ -167,7 +167,7 @@ describe('every error the plugin reports takes one path', () => {
     const loud = createRuntime(pluginInput()) as Hooks & {
       tool?: Record<string, { execute: (a: unknown, c: unknown) => Promise<{ output: string }> }>;
     };
-    await loud.tool!['workflow.tasks-set']!.execute(
+    await loud.tool!['workflow-tasks-set']!.execute(
       { tasks: [] },
       { sessionID: 's1', agent: 'orchestrator' }
     );

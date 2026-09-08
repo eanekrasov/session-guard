@@ -69,7 +69,7 @@ describe('cancelling a task ends the work on it', () => {
     );
     expect(Object.values((await store.load('cancel'))!.loopRuns)).toHaveLength(1);
 
-    await hooks.tool!['workflow.tasks-set-status']!.execute(
+    await hooks.tool!['workflow-tasks-set-status']!.execute(
       { taskId: 'task-1', status: 'cancelled' },
       { sessionID: 'cancel', agent: 'orchestrator' }
     );
@@ -110,13 +110,13 @@ describe('inheritance keeps what the grandparent forbids', () => {
 
 describe('a schema a profile declares and does not have', () => {
   it('is a configuration error, not an empty workflow', async () => {
-    // The resolver returned a stub, so workflow.create reported success and
+    // The resolver returned a stub, so workflow-create reported success and
     // persisted a session with `currentStage: ''` — a session under a state
     // machine with no states.
     const store = new WorkflowStore(storeDirectory);
     const hooks = createRuntime(pluginInput()) as Hooks & { tool?: ToolMap };
 
-    const result = await hooks.tool!['workflow.create']!.execute(
+    const result = await hooks.tool!['workflow-create']!.execute(
       { schemaId: 'absent-schema/absent' },
       { sessionID: 'absent' }
     );

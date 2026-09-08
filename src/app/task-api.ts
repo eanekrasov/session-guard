@@ -52,7 +52,7 @@ export class TaskApi {
    * Read one list. Reading changes nothing, so nothing is written.
    *
    * This used to go through `runInQueue`, and both of that helper's paths save
-   * the session unconditionally — so a single `workflow.tasks-get` bumped the
+   * the session unconditionally — so a single `workflow-tasks-get` bumped the
    * revision from 5 to 6 without a task having moved. Every read wrote a
    * version nobody asked for, and with optimistic concurrency in place those
    * are conflicts waiting for a second writer.

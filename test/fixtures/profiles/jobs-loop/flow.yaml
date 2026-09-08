@@ -1,6 +1,6 @@
 # The task list is `jobs`, not `implementation`.
 #
-# `workflow.tasks-set` defaulted its listKey to the literal `implementation` —
+# `workflow-tasks-set` defaulted its listKey to the literal `implementation` —
 # the base profile's loop source written into the core — so this workflow was
 # refused with "Unknown task list: implementation" and could never be started:
 # no run exists until tasks are dispatched, and no tasks could be set without a

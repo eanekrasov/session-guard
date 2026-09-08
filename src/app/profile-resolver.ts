@@ -280,7 +280,7 @@ export class ProfileResolver {
     if (!currentSchema) {
       // A schema a profile declares and does not have is a defect in the
       // profile, not an empty workflow. Returning a stub here made
-      // `workflow.create` report success and persist a session with
+      // `workflow-create` report success and persist a session with
       // `currentStage: ''` — a session under a state machine with no states.
       throw new Error(
         `Profile "${chain[0].id}" declares schema "${schemaFile}", but no profile in its ` +

@@ -11,7 +11,7 @@ function makeSession(overrides: Partial<WorkflowSession> = {}): WorkflowSession 
     schemaVersion: 1,
     revision: 0,
     title: '',
-    // A session is always in some stage — `workflow.create` writes the
+    // A session is always in some stage — `workflow-create` writes the
     // compiled workflow's first one. These tests speak the uppercase
     // vocabulary of their own fixture config, so this is theirs.
     currentStage: 'PLANNING',

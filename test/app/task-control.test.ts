@@ -67,7 +67,7 @@ async function load(store: WorkflowStore): Promise<WorkflowSession> {
 }
 
 function setStatus(hooks: Hooks, agent: string | undefined) {
-  return hooks.tool!['workflow.tasks-set-status'].execute(
+  return hooks.tool!['workflow-tasks-set-status'].execute(
     { taskId: 'task-1', status: 'completed' },
     toolContext(agent)
   );
@@ -167,7 +167,7 @@ describe('workflow task state is orchestrator-owned', () => {
     const store = await createWorkflowSession();
     const hooks = createRuntime(pluginInput());
 
-    const result = await hooks.tool!['workflow.tasks-set'].execute(
+    const result = await hooks.tool!['workflow-tasks-set'].execute(
       { tasks: [{ status: 'completed' }] },
       toolContext('code')
     );
@@ -181,7 +181,7 @@ describe('workflow task state is orchestrator-owned', () => {
     await createWorkflowSession();
     const hooks = createRuntime(pluginInput());
 
-    const result = await hooks.tool!['workflow.tasks-resolve-decision'].execute(
+    const result = await hooks.tool!['workflow-tasks-resolve-decision'].execute(
       { decision: 'increase', maximum: 2 },
       toolContext('code')
     );
@@ -194,7 +194,7 @@ describe('workflow task state is orchestrator-owned', () => {
     await createWorkflowSession();
     const hooks = createRuntime(pluginInput());
 
-    const result = await hooks.tool!['workflow.tasks-get'].execute(
+    const result = await hooks.tool!['workflow-tasks-get'].execute(
       { listKey: 'implementation' },
       toolContext('code')
     );

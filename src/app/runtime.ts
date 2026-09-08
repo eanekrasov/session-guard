@@ -265,7 +265,7 @@ class StateMachineRuntime {
 
     // `tasks-get` is open to any caller and catches its own errors; the
     // task-control tools resolve the engine here, before their handler's own
-    // try. A broken profile therefore escaped `workflow.tasks-set` as a raw
+    // try. A broken profile therefore escaped `workflow-tasks-set` as a raw
     // ProfileConfigurationError while the same error became readable tool
     // output next door. Two neighbouring tools, one broken profile, two shapes
     // of failure.
@@ -315,7 +315,7 @@ class StateMachineRuntime {
     args: { tasks: Omit<SetTasksInput['tasks'][number], 'id'>[] | string; listKey?: string },
     ctx: { sessionID: string; agent?: string }
   ): Promise<ToolResult> {
-    const refusal = await this.refuseUnlessTaskController('workflow.tasks-set', ctx);
+    const refusal = await this.refuseUnlessTaskController('workflow-tasks-set', ctx);
     if (refusal) return refusal;
     try {
       // Normalize tasks: if string, parse as JSON array
@@ -335,7 +335,7 @@ class StateMachineRuntime {
       // so they see consistent state with the setTasks call
       const result = await this.queue.enqueue(ctx.sessionID, async (session) => {
         if (!session) {
-          return { output: 'No workflow session found. Call workflow.create first.' } as ToolResult;
+          return { output: 'No workflow session found. Call workflow-create first.' } as ToolResult;
         }
 
         // Which list to fill. The fallback used to be the literal
@@ -415,7 +415,7 @@ class StateMachineRuntime {
     args: { taskId: string; status: (typeof TASK_STATUS)[number] },
     ctx: { sessionID: string; agent?: string }
   ): Promise<ToolResult> {
-    const refusal = await this.refuseUnlessTaskController('workflow.tasks-set-status', ctx);
+    const refusal = await this.refuseUnlessTaskController('workflow-tasks-set-status', ctx);
     if (refusal) return refusal;
     try {
       const task = await this.taskApi.setTaskStatus(ctx.sessionID, args.taskId, args.status);
@@ -432,7 +432,7 @@ class StateMachineRuntime {
     args: { decision: 'increase' | 'failed' | 'cancelled'; maximum?: number; decisionId?: string },
     ctx: { sessionID: string; agent?: string }
   ): Promise<ToolResult> {
-    const refusal = await this.refuseUnlessTaskController('workflow.tasks-resolve-decision', ctx);
+    const refusal = await this.refuseUnlessTaskController('workflow-tasks-resolve-decision', ctx);
     if (refusal) return refusal;
     try {
       let output = 'No pending retry decision found';
@@ -522,7 +522,7 @@ class StateMachineRuntime {
   }
 
   /**
-   * Handle workflow.create tool.
+   * Handle workflow-create tool.
    */
   async handleCreateWorkflow(
     args: { schemaId?: string },
@@ -609,7 +609,7 @@ class StateMachineRuntime {
   }
 
   /**
-   * Handle workflow.consent tool.
+   * Handle workflow-consent tool.
    *
    * Reads plan files from disk, computes integrity evidence, stores a consent
    * request on the session, and returns a consent tag. The agent then calls
@@ -631,7 +631,7 @@ class StateMachineRuntime {
   ): Promise<ToolResult> {
     const session = await this.loadGoverning(ctx.sessionID);
     if (!session) {
-      return { output: 'No workflow session found. Call workflow.create first.' };
+      return { output: 'No workflow session found. Call workflow-create first.' };
     }
 
     // Read and canonicalize each file to compute combined evidence
@@ -678,7 +678,7 @@ class StateMachineRuntime {
 
     await this.store.save(session);
 
-    void this.log('info', 'workflow.consent: consent request prepared', {
+    void this.log('info', 'workflow-consent: consent request prepared', {
       sessionID: ctx.sessionID,
       summary: args.summary,
       files: args.files,
@@ -1466,7 +1466,7 @@ class StateMachineRuntime {
     lines.push(`[workflow profile: ${session.profileId}]`);
 
     // Read the stage from the session. `currentStage` is written by
-    // tryApplyTransitions, and by workflow.create before that from the
+    // tryApplyTransitions, and by workflow-create before that from the
     // compiled workflow's own first stage — so it is always set, and the
     // `?? 'planning'` that stood here was a fallback to the base profile's
     // first stage that could never fire and would have been wrong if it did.
@@ -1497,7 +1497,7 @@ class StateMachineRuntime {
     );
     for (const decision of pendingDecisions) {
       lines.push(
-        `[workflow pending decision: ${decision.subject} ${decision.subjectId} ${decision.kind}; use workflow.tasks-resolve-decision (no taskId needed)]`
+        `[workflow pending decision: ${decision.subject} ${decision.subjectId} ${decision.kind}; use workflow-tasks-resolve-decision (no taskId needed)]`
       );
     }
 
@@ -2939,7 +2939,7 @@ class StateMachineRuntime {
       },
       tool: {
         // Compatibility alias for the original public tool name.
-        'workflow.create': tool({
+        'workflow-create': tool({
           description: 'Create a new state-machine workflow session',
           args: {
             schemaId: z.string().optional().describe('Schema ID without .yaml (e.g., android)'),
@@ -2947,7 +2947,7 @@ class StateMachineRuntime {
           execute: async (args: { schemaId?: string }, ctx: ToolContext) =>
             this.handleCreateWorkflow(args, ctx),
         }),
-        'workflow.list': tool({
+        'workflow-list': tool({
           description:
             'List all available workflow profiles (schemas). Returns profilesDir and profile IDs with descriptions.',
           args: {},
@@ -2966,7 +2966,7 @@ class StateMachineRuntime {
             return { output };
           },
         }),
-        'workflow.consent': tool({
+        'workflow-consent': tool({
           description:
             'Request file consent from the operator. Reads files from disk, ' +
             'computes integrity evidence, and prepares the session for a consent question. ' +
@@ -3000,7 +3000,7 @@ class StateMachineRuntime {
             return this.handleWorkflowConsent(args, ctx);
           },
         }),
-        'workflow.tasks-set': tool({
+        'workflow-tasks-set': tool({
           description:
             'Replace a workflow task list. Without listKey the list is the one the run in ' +
             'flight is cycling over, or the single list this workflow declares; a workflow ' +
@@ -3022,13 +3022,13 @@ class StateMachineRuntime {
             ctx: ToolContext
           ) => this.handleTasksSet(args, ctx),
         }),
-        'workflow.tasks-get': tool({
+        'workflow-tasks-get': tool({
           description: 'Read one named workflow task list',
           args: { listKey: z.string().min(1) },
           execute: async (args: { listKey: string }, ctx: ToolContext) =>
             this.handleTasksGet(args, ctx),
         }),
-        'workflow.tasks-set-status': tool({
+        'workflow-tasks-set-status': tool({
           description: 'Set a workflow task status by global task ID',
           args: { taskId: z.string().regex(/^task-[0-9]+$/), status: z.enum(TASK_STATUS) },
           execute: async (
@@ -3036,7 +3036,7 @@ class StateMachineRuntime {
             ctx: ToolContext
           ) => this.handleTasksSetStatus(args, ctx),
         }),
-        'workflow.tasks-resolve-decision': tool({
+        'workflow-tasks-resolve-decision': tool({
           description:
             'Resolve a pending workflow task retry decision. ' +
             'Accepts an optional decisionId selector. Without it, selects the single unique pending retry context; ' +
