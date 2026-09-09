@@ -999,7 +999,7 @@ result.settings = deepMerge(base.settings, extension.settings);
 
 ## Инварианты (Profile-specific validation)
 
-### Контракт InvariantCheck (profiles/invariants.types.ts)
+### Контракт InvariantCheck (src/app/invariants.ts)
 
 ```typescript
 interface InvariantCheck {
@@ -1447,7 +1447,6 @@ profiles/
     profile.json               — Self-edit профиль
     invariants.ts              — 5 инвариантов для TypeScript
   state-machine.yaml           — Базовая схема (фазы, переходы, guards)
-  invariants.types.ts          — InvariantCheck, InvariantResult
 
 test/                          — vitest-тесты
 docs/                          — roadmap, usage, plugin-architecture, ...

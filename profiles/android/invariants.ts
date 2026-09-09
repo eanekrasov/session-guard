@@ -3,11 +3,11 @@
  *
  * Адаптировано из state-machine/profiles/android/invariants.ts.
  * Отличия:
- * - Типы импортируются из локального invariants.types.ts (вместо @harness/types/invariants)
+ * - Типы импортируются из src/app/invariants.ts (вместо @harness/types/invariants)
  * - Все проверки и функции идентичны оригиналу
  */
 
-import type { InvariantCheck } from '../invariants.types.ts';
+import type { InvariantCheck } from '../../src/app/invariants.ts';
 
 const isKotlin = (filePath: string) => filePath.endsWith('.kt');
 const isKotlinUi = (filePath: string) => filePath.endsWith('.kt') && isUiFile(filePath);

@@ -3,13 +3,13 @@
  *
  * Адаптировано из state-machine/profiles/harness/invariants.ts.
  * Отличия:
- * - Типы импортируются из локального invariants.types.ts (вместо @harness/types/invariants)
+ * - Типы импортируются из src/app/invariants.ts (вместо @harness/types/invariants)
  * - Все проверки и функции идентичны оригиналу
  */
 
 import { existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
-import type { InvariantCheck } from '../invariants.types.ts';
+import type { InvariantCheck } from '../../src/app/invariants.ts';
 
 const isTypeScript = (filePath: string) => filePath.endsWith('.ts');
 const LOCK_FILES = new Set(['package-lock.json', 'bun.lock', 'bun.lockb']);

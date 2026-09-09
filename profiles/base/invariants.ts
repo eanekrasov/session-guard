@@ -5,7 +5,7 @@
  * Включает только LF_ONLY — проверку на CRLF-окончания строк.
  */
 
-import type { InvariantCheck } from '../invariants.types.ts';
+import type { InvariantCheck } from '../../src/app/invariants.ts';
 
 export const INVARIANTS: InvariantCheck[] = [
   {
