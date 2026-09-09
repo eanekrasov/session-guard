@@ -1,4 +1,4 @@
-extends: 'base/state-machine.yaml'
+extends: 'base/session-guard.yaml'
 stages:
   execution:
     stages:

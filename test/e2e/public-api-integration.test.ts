@@ -23,7 +23,7 @@ describe('Public API', () => {
 
     it('resolves a profile with full two-level extends chain', async () => {
       // android extends base
-      // android/state-machine.yaml extends base/state-machine.yaml
+      // android/session-guard.yaml extends base/session-guard.yaml
       const result = await resolveConfig('android', fixturesDir);
 
       // Metadata — android extends base
@@ -40,7 +40,7 @@ describe('Public API', () => {
       // since both profile and extended profile list the same schema filename,
       // they are combined into one resolved schema (with extends merged)
       expect(result.schemas).toHaveLength(1);
-      expect(result.schemas[0].source).toBe('android/state-machine.yaml');
+      expect(result.schemas[0].source).toBe('android/session-guard.yaml');
     });
 
     it('throws for unknown profileId', async () => {
@@ -70,7 +70,7 @@ describe('Public API', () => {
       expect(base).toBeDefined();
       expect(base!.description).toBe('Base development profile');
       expect(base!.extends).toBeUndefined();
-      expect(base!.schemas).toEqual(['state-machine.yaml']);
+      expect(base!.schemas).toEqual(['session-guard.yaml']);
       expect(base!.agentsDir).toBe('agents');
       expect(base!.skillsDir).toBe('skills');
       expect(base!.agents).toEqual(['code', 'architect']);

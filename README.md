@@ -1,7 +1,7 @@
-# opencode-state-machine
+# opencode-session-guard
 
 State machine плагин для [OpenCode](https://opencode.ai/) — управляет жизненным циклом
-workflow-сессий: фазы, переходы, консент (одобрение), мутации, gates, инварианты и верификация.
+workflow-сессий: стадии, переходы, консент (одобрение), мутации, gates, инварианты и верификация.
 
 ## Документация
 
@@ -48,315 +48,168 @@ workflow-сессий: фазы, переходы, консент (одобре�
 
 ### Трёхслойная модель
 
-Код организован в три слоя, каждый со своей ответственностью:
+Проект сейчас состоит из плагинного входа, прикладного runtime и доменно-инфраструктурных модулей. Отдельно от runtime подключаются TUI, dashboard и rule-delivery подсистема.
 
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│  LAYER 1: Plugin Entry + Hooks Orchestrator                      │
-│  ┌──────────────────────┐  ┌──────────────────────────────────┐  │
-│  │ StateMachinePlugin   │  │ StateMachineRuntime               │  │
-│  │ (src/index.ts)       │─▶│ (src/app/runtime.ts)              │  │
-│  │                      │  │                                  │  │
-│  │ Создаёт runtime dir,  │  │ Регистрирует хуки OpenCode SDK:  │  │
-│  │ env init, делегирует │  │ - config() — sm-* команды + агент │  │
-│  │ createRuntime(ctx)   │  │ - tool() — workflow-create/list    │  │
-│  └──────────────────────┘  │ - chat.message() — log state      │  │
-│                            │ - tool.execute.before() — guard   │  │
-│                            │ - tool.execute.after() — capture  │  │
-│                            │ - event() — error recovery        │  │
-│                            │ - system.transform() — inject      │  │
-│                            │   workflow context в system prompt │  │
-│                            │ - session.compacting() — state     │  │
-│                            │   preservation при compaction     │  │
-│                            │ - dispose() — cleanup             │  │
-│                            └──────────────────────────────────┘  │
-│                                                                  │
-│  Hook Handlers (inline в runtime.ts):                            │
-│  ┌────────────────┐ ┌────────────────┐ ┌──────────────────────┐ │
-│  │GuardrailHandler │ │ ConsentHandler │ │   CommitPermit       │ │
-│  │ validateInput   │ │ parseConsent   │ │   block git commit   │ │
-│  │ sanitizeOutput  │ │ classifyAnswer │ │   issue deliveryPermit││
-│  └────────────────┘ │ verifyEvidence  │ └──────────────────────┘ │
-│                     └────────────────┘                          │
-│  ┌────────────────────┐ ┌────────────────────┐                  │
-│  │  MutationHandler   │ │  TransitionHandler  │                  │
-│  │  begin/finish      │ │  tryApplyTransitions │                  │
-│  │  file invariants   │ │  после каждого шага  │                  │
-│  └────────────────────┘ └────────────────────┘                 │
-└──────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌──────────────────────────────────────────────────────────────────┐
-│  LAYER 2: Orchestrators + Business Logic                        │
-│                                                                  │
-│  ┌──────────────────────┐  ┌──────────────────────────┐         │
-│  │ MutationOrchestrator  │  │  ConsentOrchestrator      │         │
-│  │ (src/app/...)        │  │  (src/app/...)            │         │
-│  │                      │  │                          │         │
-│  │ - resolveEngine()    │  │ - before(): парсинг       │         │
-│  │ - beginMutation()    │  │   consent-request тега,   │         │
-│  │ - finishMutation()   │  │   чтение плана, evidence  │         │
-│  │ - processScopeAnd-   │  │ - after(): классификация  │         │
-│  │   Invariants()       │  │   ответа, ре-верификация  │         │
-│  │ - applyTransitions() │  │ - verifyPlanEvidence-     │         │
-│  │ - clearOnError()     │  │   AtDecision()            │         │
-│  │ - releaseInterrupted-│  └──────────────────────────┘         │
-│  │   Lock() [P1-014]    │                                      │
-│  └──────────────────────┘                                      │
-│                                                                  │
-│  ┌──────────────────────┐  ┌──────────────────────────┐         │
-│  │ InvariantsEngine     │  │  GuardrailsEngine         │         │
-│  │ (src/app/invariants) │  │  (src/app/guardrails.ts)  │         │
-│  │                      │  │                          │         │
-│  │ - getAllProfile-     │  │ - GUARDS[]: 7 категорий  │         │
-│  │   Invariants()       │  │   (PROMPT_INJECTION,     │         │
-│  │ - validateFiles()    │  │    ROLE_OVERRIDE, ...)    │         │
-│  │ - validateFiles-     │  │ - validateUserInput()    │         │
-│  │   ForProfile()       │  │ - sanitizeToolOutput()   │         │
-│  └──────────────────────┘  └──────────────────────────┘         │
-└──────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌──────────────────────────────────────────────────────────────────┐
-│  LAYER 3: Domain + Infrastructure                               │
-│                                                                  │
-│  ┌──────────────────────┐  ┌──────────────────────────┐         │
-│  │ StateMachineEngine    │  │ GuardEvaluator            │         │
-│  │ (src/domain/engine.ts)│  │ (src/guard-evaluator.ts)  │         │
-│  │                      │  │                          │         │
-│  │ - checkTransition()  │  │ - new Function() sandbox  │         │
-│  │ - canPerformAction() │  │ - timeout 500ms           │         │
-│  │ - tryApply-          │  │ - context: approved(),    │         │
-│  │   Transitions()      │  │   isExhausted(),          │         │
-│  │ - evaluateGuard()    │  │   hasPendingTasks()       │         │
-│  └──────────────────────┘  └──────────────────────────┘         │
-│                                                                  │
-│  ┌──────────────────────┐  ┌──────────────────────────┐         │
-│  │ ProfileResolver       │  │ SchemaLoader              │         │
-│  │ (src/profile-        │  │ (src/schema-loader.ts)    │         │
-│  │  resolver.ts)        │  │                          │         │
-│  │                      │  │ - loadSchemaFile()        │         │
-│  │ - resolve()          │  │ - mergeSchemas() deep     │         │
-│  │ - resolveExtends()   │  │ - loadSchemaFromPath()    │         │
-│  │ - resolveSchemas()   │  │                          │         │
-│  └──────────────────────┘  └──────────────────────────┘         │
-│                                                                  │
-│  ┌──────────────────────┐  ┌──────────────────────────┐         │
-│  │ WorkflowStore         │  │ SessionQueue              │         │
-│  │ (src/session/        │  │ (src/app/session-         │         │
-│  │  session-store.ts)   │  │  queue.ts)                │         │
-│  │                      │  │                          │         │
-│  │ - save() atomic write│  │ - enqueue() serialised    │         │
-│  │ - load() zod validate│  │ - resolveRoot() via       │         │
-│  │ - delete()           │  │   parentCache             │         │
-│  │ - list()             │  │ - withSession() helper    │         │
-│  └──────────────────────┘  └──────────────────────────┘         │
-└──────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│ Plugin entry                                                         │
+│ src/index.ts                                                         │
+│  ├─ SessionGuardPluginV1 (@opencode-ai/plugin, legacy server hooks)  │
+│  └─ SessionGuardPluginV2 (@opencode/plugin, setup/cleanup hooks)     │
+│                                                                      │
+│ Runtime / application                                                │
+│ src/app/runtime.ts                                                   │
+│  ├─ config: sm-status, sm-list, sm-session, sm-profile               │
+│  ├─ tools: workflow-*                                                │
+│  ├─ chat.message                                                      │
+│  ├─ tool.execute.before / after                                      │
+│  ├─ event                                                             │
+│  ├─ experimental.chat.system.transform                               │
+│  ├─ experimental.session.compacting                                  │
+│  ├─ experimental.chat.messages.transform                             │
+│  └─ dispose                                                           │
+└──────────────────────────────────────────────────────────────────────┘
+                                  │
+                                  ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│ Application services                                                  │
+│ SessionExecutor + SessionQueue + WorkflowStore                       │
+│ MutationOrchestrator + ConsentOrchestrator + TaskApi                  │
+│ guardrails + invariants + change-scope + profile-agent sync           │
+│ OpenCodeRulesRuntime                                                  │
+└──────────────────────────────────────────────────────────────────────┘
+                                  │
+                                  ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│ Domain / schema / infrastructure                                      │
+│ domain/*  schema/*  session/*  rules/*  dashboard/*                   │
+│ workflow schemas: profiles/*/*.yaml                                  │
+└──────────────────────────────────────────────────────────────────────┘
 ```
+
+`SessionExecutor` — текущая точка транзакционного доступа к сессии: разрешает
+корневую сессию, выполняет действие под файловой блокировкой и сохраняет новую
+ревизию. `SessionQueue` сериализует in-process вызовы по root session ID, а
+`WorkflowStore` отвечает за чтение, Zod-валидацию, атомарную запись и архив.
 
 ### Схема потоков данных
 
+До вызова инструмента runtime последовательно применяет guardrails, consent,
+допуск действий стадии и, для мутаций, lifecycle операции. После вызова он
+санитизирует результат, обрабатывает `<workflow-result>`, проверяет изменения и
+инварианты, закрывает операцию и пытается применить переходы. Отдельный
+`tool.execute.after` повторно не является «главным» источником перехода: итоговая
+сессия сохраняется через executor, после чего transition engine работает над
+актуальным состоянием.
+
 ```
-OpenCode Tool Call
-       │
-       ▼
-┌──────────────────────────────────────────────────┐
-│ StateMachineRuntime.handleToolBefore()            │
-│                                                   │
-│  1. GuardrailHandler.validateUserInput(args)      │
-│     → блокировка prompt injection, role override  │
-│                                                   │
-│  2. ConsentHandler (только Question tool)         │
-│     → парсинг <consent-request> тега              │
-│     → вычисление SHA-256 evidence плана           │
-│     → проверка HARNESS_AUTO_APPROVE               │
-│                                                   │
-│  3. TaskHandler (только task tool)                │
-│     → session.activeOperations[callId] = { agent }│
-│                                                   │
-│  4. CommitPermit (только Bash)                    │
-│     → hasForbiddenGitSubcommand() → block         │
-│     → isCommitTaskCommand() → deliveryPermit       │
-│                                                   │
-│  5. MutationHandler (только Bash/Write)           │
-│     → MutationOrchestrator.beginMutation()        │
-│     → releaseInterruptedLock() [P1-014]           │
-│     → beginMutation() domain                      │
-└──────────────────────────────────────────────────┘
-       │
-       ▼  [Tool executes: Bash/Write/Question/Task/...]
-       │
-       ▼
-┌──────────────────────────────────────────────────┐
-│ StateMachineRuntime.handleToolAfter()             │
-│                                                   │
-│  1. GuardrailHandler.sanitizeToolOutput()         │
-│     → замена блок-паттернов на [BLOCKED:RULE]     │
-│                                                   │
-│  2. WorkflowResult                               │
-│     → парсинг <workflow-result> тегов             │
-│     → session.verifications.push()                │
-│                                                   │
-│  3. FileHandler (только edit/write/apply_patch)   │
-│     → validateFilesForProfile()                   │
-│     → аппенд нарушений в output                   │
-│                                                   │
-│  4. CommitPermit (только Bash)                   │
-│     → git diff-tree → deliveryReceipt             │
-│     → сверка committed с expectedFiles            │
-│                                                   │
-│  5. ConsentAnswer (только Question)              │
-│     → classifyConsentAnswer() → grant/decline    │
-│     → verifyPlanEvidenceAtDecision()              │
-│     → applyTransitions() после approve            │
-│                                                   │
-│  6. MutationHandler (только Bash/Write)          │
-│     → MutationOrchestrator.finishMutation()       │
-│     → processScopeAndInvariants()                 │
-│     → computeChangeScope() [git status]           │
-│     → validateFiles() [invariants]                │
-│     → finishMutation() domain → gate update       │
-│     → tryApplyTransitions()                       │
-│     → post-factum transition validation           │
-│                                                   │
-│  7. TransitionHandler (всегда)                   │
-│     → tryApplyTransitions(session)                │
-└──────────────────────────────────────────────────┘
+OpenCode hook
+  │
+  ├─ chat.message → user-input guardrails + baseline для активной сессии
+  ├─ tool.execute.before
+  │   ├─ guardrails
+  │   ├─ workflow-consent для Question
+  │   ├─ workflow-task correlation/admission для Task
+  │   ├─ stage action admission
+  │   ├─ delivery permit для команды, помеченной delivers: true
+  │   └─ mutation begin для Bash/Write
+  │
+  ├─ tool executes
+  │
+  └─ tool.execute.after
+      ├─ sanitizeToolOutput
+      ├─ workflow-result и проверка stale/replayed/missing результата
+      ├─ file validation и change-scope
+      ├─ consent answer и проверка evidence на момент решения
+      ├─ mutation finish: checks, invariants, transitions
+      └─ commit receipt или отказ в delivery receipt
 ```
 
 ### Роли слоёв
 
-| Слой                   | Компоненты                                                                                                           | Отвечает за                                                                                                  |
-| ---------------------- | -------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| **Plugin Layer**       | `index.ts`, `runtime.ts`                                                                                             | Инициализация, регистрация хуков SDK, оркестрация вызовов, DI                                                |
-| **Orchestrator Layer** | `mutation-orchestrator.ts`, `consent-orchestrator.ts`, `invariants.ts`, `guardrails.ts`                              | Бизнес-логика — жизненный цикл мутации/консента/инвариантов/безопасности, точка координации доменных функций |
-| **Domain Layer**       | `engine.ts`, `session-store.ts`, `session-queue.ts`, `guard-evaluator.ts`, `profile-resolver.ts`, `schema-loader.ts` | Чистая логика — переходы фаз, guard-выражения, персистентность, сериализация, профили                        |
+| Слой                     | Текущие компоненты                                                                                                      | Ответственность                                                                  |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| **Plugin layer**         | `src/index.ts`, `src/app/runtime.ts`                                                                                    | Регистрация двух SDK-вариантов плагина, hooks, tools, cleanup                    |
+| **Application layer**    | `src/app/session-executor.ts`, `session-queue.ts`, `mutation-orchestrator.ts`, `consent-orchestrator.ts`, `task-api.ts` | Транзакции сессии, lifecycle операций, согласие, задачи и координация            |
+| **Domain layer**         | `src/domain/*`, `src/schema/*`, `src/session/*`                                                                         | Переходы, guards, approvals, evidence, task movement, схема и persistence-модель |
+| **Rules / presentation** | `src/rules/*`, `src/tui/*`, `src/dashboard/*`                                                                           | Доставка правил, TUI-панели, read-only dashboard и SSE/API                       |
 
 ### Внешние сервисы (опционально)
 
-```
-┌──────────────────────────────────────────────────────┐
-│  Dashboard Server (отдельный процесс)                 │
-│  src/dashboard/dashboard-server.ts                    │
-│                                                      │
-│  HTTP + SSE на порту 3456                            │
-│  - GET /api/schema — контракт стейт-машины            │
-│  - GET /api/session/:id — сессия + фаза               │
-│  - GET /api/session/:id/timeline — события            │
-│  - GET /api/session/:id/invariants — нарушения        │
-│  - GET /api/metrics — агрегированные метрики          │
-│  - GET /events — SSE с инкрементальными обновлениями  │
-│  - fs.watch + polling 500ms → diff → push            │
-└──────────────────────────────────────────────────────┘
-
-┌──────────────────────────────────────────────────────┐
-│  Task Provider (опционально, плагин для bd/gh/jira)  │
-│  src/app/provider.ts + beads-bridge.ts                │
-│                                                      │
-│  TaskProvider интерфейс:                              │
-│  - getTask(id), getReadyTasks(), postComment()        │
-│  - InMemoryProvider (тесты)                           │
-│  - createCliProvider() via Bun.spawn                  │
-│  - Beads Bridge: обёртка над bd CLI с кешем 30s       │
-└──────────────────────────────────────────────────────┘
+Dashboard не загружается как часть plugin hooks: это отдельный Bun-процесс
+`src/dashboard/dashboard-server.ts`, который читает тот же session store и
+профили, что plugin и TUI. Task provider (`src/app/provider.ts`) — отдельная
+абстракция CLI/Beads для интеграций; workflow runtime не требует внешнего
+issue-tracker для базовой работы.
 
 ## Сессия (WorkflowSession)
 
-Zod-валидируемый JSON, сохраняемый на диск. Каждое поле сессии — бизнес-сущность.
+Zod-валидируемый JSON, сохраняемый на диск. Сессия запускает ровно одну схему
+профиля и хранит как состояние workflow, так и результаты проверок над ходами.
 
 ### Схема (src/session/session-schema.ts)
 
+Ключевые поля текущего `WorkflowSessionSchema`:
+
+```
+WorkflowSession
+├── sessionId, profileId, schemaId, schemaVersion, revision, title
+├── gates: Gate[]                         # сессионные gate-вердикты
+├── approvals: Approval[]                 # type/callId/status/evidence/files
+├── refs: Record<string, string>           # документы по типу approval
+├── tasks: Record<listKey, MutationTask[]>
+├── loopRuns: Record<runId, LoopRun>       # stage, gates, checks, round
+├── activeTaskContexts: ActiveTaskContext[]
+├── activeOperations: Record<callId, ActiveOperation>
+├── pendingDecisions: PendingDecision[]
+├── retryBudgets: Record<string, RetryBudget>
+├── deliveryPermit: DeliveryPermit | null
+├── deliveryReceipt: string | null
+├── verifications: Verification[]
+├── changedFiles: string[]
+├── currentStage: string
+├── checks: GateStatus | undefined          # verdict ядра вне loop
+├── outcome: WorkflowOutcome | undefined
+├── invariantViolations: ValidationRecord[]
+├── consentedCallIDs: string[]
+├── processedResultCallIDs: string[]
+└── updatedAt: string
 ```
 
-WorkflowSession (Zod-схема, src/session/session-schema.ts)
-├── sessionId — уникальный ID сессии
-├── profileId — привязанный профиль (base, android, harness)
-├── schemaId — какую из схем профиля выполняет сессия
-├── schemaVersion — версия формата (=2)
-├── revision — монотонный счётчик (инкремент на каждом save)
-├── title — заголовок сессии
-│
-├── currentStage — стадия; имена задаёт схема профиля, а не ядро
-├── gates — Gate[]: [{id, status, label?, resolvedAt?}] — только сессионные
-│ гейты; гейты задач живут на прогонах
-├── checks — вердикт ядра о последнем ходе ВНЕ цикла (см. ниже)
-├── outcome — чем и почему кончился workflow; пишется при входе в конец
-│
-├── approvals — Approval[]: [{type, callId, status, grantedAt?, evidence?}]
-│ тип — имя согласия из схемы: plan, deploy, любое
-├── refs — Record<string, string> — документ под именем своего согласия
-├── consentedCallIDs — string[] (защита от повторной обработки)
-│
-├── tasks — Record<listKey, MutationTask[]> — списки по имени цикла
-├── loopRuns — Record<runId, LoopRun> — прогон задачи: стадия, гейты, checks
-├── activeTaskContexts — открытые задачи для показа
-├── activeOperations — Record<callId, ActiveOperation> — открытые ходы;
-│ на стадии с гейтами их несколько сразу
-├── pendingDecisions — решения, переданные оператору при исчерпании бюджета
-├── retryBudgets — Record<string, {attempts, maximum}>
-│
-├── deliveryPermit — DeliveryPermit | null (preCommitHead, expectedFiles)
-├── deliveryReceipt — SHA коммита | null
-│
-├── verifications — Verification[]: [{stage, status: confirmed|rejected}]
-├── changedFiles — string[] — что накопила работа, сверено с HEAD
-├── invariantViolations — ValidationRecord[]
-├── processedResultCallIDs — string[] (защита от повторного вердикта)
-└── updatedAt — ISO timestamp
-
-````
+`schemaVersion` по умолчанию равен `2`. Статусы gate — `pending`, `running`,
+`passed`, `failed`, `skipped`; статусы task — `pending`, `running`, `completed`,
+`failed`, `cancelled`. Операции различают `kind: mutation | task`, а task имеет
+дополнительные `readScope`, `writeScope`, `editingAgents`, `round` и baseline.
 
 ### Гейты
 
-Сессия не несёт собственного списка гейтов. Гейт появляется в ней тогда, когда
-по нему приходит первый вердикт (`setGateStatus`), а гейт, о котором никто не
-говорил, отсутствует — и любой guard читает отсутствие как «не passed».
-
-Список объявляет профиль, а не код:
-
-```yaml
-# profiles/base/base.yaml
-gates:
-  - id: review
-    label: Code review
-  - id: qa
-    label: QA verification
-```
-
-Гейта `invariants` в этом списке нет намеренно. Вердикт ядра о ходе перестал
-быть гейтом: гейты пишет агент через `<workflow-result>` и любой объявленный
-стадией гейт может выставить себе сам, а этот вердикт ядро выносит, посмотрев
-на диск. Он живёт отдельным полем — `task.checks` на прогоне задачи внутри
-цикла и `session.checks` на сессии вне его.
-
-Компилятор (`src/schema/compile-workflow.ts`) сверяет `gates:` каждой стадии с
-этим объявлением, поэтому опечатка в имени гейта — ошибка компиляции, а не
-стадия, которая ждёт вечно. Профиль, не объявивший гейтов, сверять не с чем:
-проверка пропускается, а не выдумывает список за него.
+Сессия не содержит заранее созданного списка gate IDs. Gate появляется в
+`session.gates`, когда на него записан вердикт; объявление допустимых gate IDs
+находится в `gates:` workflow-схемы и проверяется компилятором. Внутри loop
+гейты принадлежат `LoopRun.gates`, потому что параллельные задачи не должны
+закрывать gate друг за друга. Вердикт ядра (`session.checks` или `run.checks`)
+отдельно от gate и показывает результат проверки хода, включая инструмент,
+scope, diff и invariants.
 
 ### SessionStore — файловое I/O (src/session/session-store.ts)
 
-- Сессии хранятся как `{storeDir}/{encodeURIComponent(sessionId)}.json`
-- `save()` — атомарная запись через tmp + rename, per-session цепочка блокировок
-- `load()` — чтение + Zod-валидация с `.passthrough()` для неизвестных полей
-- `list()` — сканирование директории, декодирование URI (подкаталог `archive/`
-  в перечисление не попадает: перечисляются только файлы)
-- `archive()` — перенос законченной сессии в `{storeDir}/archive/`,
-  `loadArchived()` — чтение оттуда
-- События: `onSave` (Set) + `onSessionSaved` (глобальный Set из session-events.ts)
+- Файл активной сессии: `{storeDir}/{encodeURIComponent(sessionId)}.json`.
+- `save()` использует атомарную запись и per-session lock; неизвестные поля
+  отбрасываются схемой (`.strip()`), а не сохраняются через `.passthrough()`.
+- `load()` читает и валидирует одну активную сессию; `list()` перечисляет только
+  файлы активного store.
+- Завершённые workflow переносятся в `{storeDir}/archive/`; для них есть
+  `loadArchived()` и отдельные helpers чтения файлов.
+- Текущая общая граница чтения для TUI и dashboard —
+  `src/session/session-files.ts` (`readSession`, `readAllSessions`, archive helpers).
 
-**Архив.** Дойдя до терминальной стадии — объявленной в схеме и не имеющей
-исходящих рёбер, — сессия уезжает из рантайма в `archive/` и перестаёт чем-либо
-управлять: `load()` её не находит, а «сессии нет» этот проект выражает ровно
-одним способом. Перенос, а не удаление: расписка о доставке, гейты, вердикты и
-одобрения — продукт работы. Архив читают TUI, dashboard и host-smoke.
-
-**parentCache**: кеш sessionId → rootSessionId, заполняемый при каждом save.
-Используется SessionQueue для разрешения корневой сессии.
+**parentCache и транзакции.** `SessionQueue` разрешает child session к root,
+а `SessionExecutor` повторно загружает состояние под lock и делает один
+согласованный save. Это важно для nested task cycles и конкурентных hooks.
 
 ## Фазы и Transition Engine
 
-### Декларативные переходы (profiles/state-machine.yaml)
+### Декларативные переходы (profiles/base/base.yaml)
 
 ```yaml
 transitions:
@@ -403,7 +256,7 @@ interface TransitionEffect {
 }
 ```
 
-### StateMachineEngine (src/domain/engine.ts)
+### SessionGuardEngine (src/domain/engine.ts)
 
 **checkTransition(from, to, transitions, session?, evaluateGuard?): TransitionCheck**
 
@@ -458,7 +311,7 @@ code:
 Этот метод вызывается **после каждого инструмента** (через `transitionAfter`)
 и **после approve плана** (в `ConsentOrchestrator`).
 
-### GuardEvaluator (src/guard-evaluator.ts)
+### GuardEvaluator (src/schema/guard-evaluator.ts)
 
 **Песочница для JS-выражений:**
 
@@ -496,28 +349,16 @@ interface SessionFacts {
 }
 ```
 
-## Session Events (src/session/session-events.ts)
+## Session Events (current persistence boundaries)
 
-Глобальный шина событий при сохранении сессии:
+Отдельного `src/session/session-events.ts` в текущем проекте нет. Событийная
+граница persistence находится в `WorkflowStore` и в API чтения файлов сессий;
+dashboard подписывается на собственный watcher/polling слой. Не импортируйте
+`onSessionSaved`: это описание старой реализации.
 
-```typescript
-export const onSessionSaved = new Set<() => void>();
-```
-
-Любой модуль может подписаться на сохранение любой сессии:
-
-```typescript
-import { onSessionSaved } from './session-events.ts';
-onSessionSaved.add(() => {
-  /* реакция на сохранение */
-});
-```
-
-Вызывается в `WorkflowStore.save()` после успешной записи на диск.
-Используется для внешних наблюдателей (например, дашборд или метрики).
-
-**WorkflowStore.onSave** — аналогичный per-instance Set на уровне store,
-в отличие от глобального `onSessionSaved`.
+Для чтения состояния используйте экспортируемые helpers из
+`src/session/session-files.ts`; для изменения — `WorkflowStore` через
+`SessionExecutor`/`SessionQueue`, а не прямую запись JSON.
 
 ## Session Helpers (src/session/helpers.ts)
 
@@ -541,43 +382,30 @@ function setInvariantViolations(session, violations): void; // присваив�
 
 ## SessionQueue (src/app/session-queue.ts)
 
-**Проблема:** конкурентные Bash/Write вызовы модифицируют одну сессию → race condition.
-
-**Решение:** per-root-session serialized execution queue.
+`SessionQueue` сейчас отвечает только за serialization по root session ID. Он
+не загружает и не сохраняет сессию: полный lifecycle (`resolve root → queue →
+load → snapshot → action → conditional save → deferred effects`) принадлежит
+`SessionExecutor`.
 
 ```typescript
 class SessionQueue {
-  // Сериализованное выполнение: action получает загруженную сессию,
-  // save() вызывается автоматически после завершения
-  enqueue<T>(
-    sessionID: string,
-    action: (session: WorkflowSession | null, rootSessionId: string) => Promise<T> | T
-  ): Promise<T>;
-
-  // Очистка всех очередей (dispose)
+  enqueue<T>(sessionID: string, action: () => Promise<T>): Promise<T>;
+  rootOf(sessionID: string): Promise<string>;
   clear(): void;
 }
 ```
 
-**Разрешение корневой сессии:**
-
-- `parentCache` заполняется при каждом `store.save()`
-- `resolveRoot(sessionID)` — walk по parentCache до корня, O(1) благодаря кешу
-- Дочерние сессии (subtask) блокируются на той же очереди, что и родитель
-
-**Обработка ошибок:** ошибка action'а логируется, но не блокирует последующие.
+Root разрешается обходом host parent chain и кешируется по каждому пройденному
+узлу. Вызов, вложенный в уже активную транзакцию того же root, исполняется
+reentrant inline через `AsyncLocalStorage`; независимый concurrent вызов ждёт в
+очереди. Ошибка одного действия не блокирует следующие, но исходный caller
+получает rejection.
 
 ### withSession (src/app/session-queue.ts)
 
-Вспомогательная функция для однократной загрузки + действия:
-
-```typescript
-async function withSession<T>(
-  store: WorkflowStore,
-  sessionID: string,
-  action: (session: WorkflowSession) => Promise<T> | T
-): Promise<T | null>;
-```
+Production helper `withSession` в текущем модуле отсутствует. Похожий helper
+есть только в `test/helpers.ts` и используется тестовыми fixtures; код runtime
+для persistence должен использовать `SessionExecutor`.
 
 ## Runtime Types (src/app/runtime-types.ts)
 
@@ -606,14 +434,14 @@ interface OpenCodeSessionClient {
 
 ## Data Flow (tool.execute lifecycle)
 
-### BEFORE — handleToolBefore (runtime.ts:281)
+### BEFORE — handleToolBefore
 
 ```
 Порядок вызова:
 
 1. Guardrails (guardrailBefore)
    ├── validateUserInput(args)
-   │   └── PROMT_INJECTION     (block)  — переопределение инструкций
+   │   └── PROMPT_INJECTION     (block)  — переопределение инструкций
    │   └── ROLE_OVERRIDE       (block)  — смена роли агента
    │   └── SYSTEM_EXTRACTION   (block)  — извлечение системного промпта
    │   └── CODE_INJECTION      (warn)   — eval, exec, rm -rf
@@ -673,7 +501,7 @@ interface OpenCodeSessionClient {
            │   └── liveMutations.set(callID, { rootSessionId, stageBefore })
 ```
 
-### AFTER — handleToolAfter (runtime.ts:382)
+### AFTER — handleToolAfter
 
 ```
 Порядок вызова:
@@ -684,7 +512,7 @@ interface OpenCodeSessionClient {
 2. Workflow result (handleWorkflowResult)
    └── parseWorkflowResult(output):
    │   └── Ищет последний <workflow-result>{JSON}</workflow-result>
-   │   └── Валидация: stage ∈ {review, qa, verify_bug}, status ∈ {pass, fail}
+   │   └── Валидация выполняется по текущей схеме и допускает только действительный результат verifier-а
    └── session.verifications.push({ stage, status, recordedAt })
    └── Совпадает activeOperation?.id == callID → clear
 
@@ -851,7 +679,7 @@ Approvals granted: plan
 ```
 [Agent] Bash/Write
   │
-  ├── StateMachineRuntime.handleToolBefore()
+  ├── SessionGuardRuntime.handleToolBefore()
   │   └── mutationBefore()
   │       └── MutationOrchestrator.beginMutation()
   │           ├── Queue.enqueue()
@@ -863,7 +691,7 @@ Approvals granted: plan
   │
   ├── [Bash/Write executes]
   │
-  └── StateMachineRuntime.handleToolAfter()
+  └── SessionGuardRuntime.handleToolAfter()
       └── mutationAfter()
           └── MutationOrchestrator.finishMutation()
               ├── liveMutations.delete(callID)
@@ -884,30 +712,38 @@ Approvals granted: plan
 ### Структура директории
 
 ```
-.opencode/profiles/
-  base/                          ← наследуется всеми
+<profilesDir>/
+  base/                          ← базовый workflow
     profile.json                 ← metadata: id, schemas, agents, invariants
-    state-machine.yaml           ← transitions, stages, guards
-    invariants.ts                ← EXPORT const INVARIANTS: InvariantCheck[]
+    base.yaml                    ← stages, loops, gates, transitions, guards
+    invariants.ts                ← INVARIANTS
+    agents/
 
   android/                       ← extends: base
-    profile.json                 ← schemas: [state-machine.yaml], agents: [code, review, ...],
-    state-machine.yaml                     invariants: [LF_ONLY, KOTLIN_STACK, ...]
+    profile.json
+    android.yaml                 ← delta над base/base.yaml
     invariants.ts                ← Android-specific проверки
+    agents/
 
   harness/                       ← extends: base
-    profile.json                 ← self-edit профиль для разработки самого плагина
+    profile.json
+    harness.yaml                  ← delta над base/base.yaml
     invariants.ts
+    agents/
 ```
 
-### profile.json — Профиль metadata (src/schema/profile-metadata.ts)
+В репозитории эти файлы лежат в `profiles/`. После развёртывания в целевой
+проект каталогом профилей по умолчанию является `<project>/.opencode/profiles`;
+`SESSION_GUARD_PROFILES_DIR` задаёт явное переопределение.
+
+### profile.json — метаданные профиля (src/schema/profile-metadata.ts)
 
 ```typescript
 interface ProfileMetadata {
   id: string;
   description?: string;
   extends?: string; // ID родительского профиля (base, android, ...)
-  schemas?: string[]; // Файлы YAML-схем (state-machine.yaml)
+  schemas?: string[]; // Файлы YAML-схем профиля (base.yaml, android.yaml, ...)
   agentsDir?: string; // Директория агентов (default: 'agents')
   skillsDir?: string; // Директория скиллов (default: 'skills')
   agents?: string[]; // Список агентов для профиля
@@ -916,7 +752,7 @@ interface ProfileMetadata {
 }
 ```
 
-### ProfileResolver (src/profile-resolver.ts)
+### ProfileResolver (src/app/profile-resolver.ts)
 
 **Цепочка extends:**
 
@@ -930,9 +766,9 @@ harness → base → (конец)
 3. `resolveSchemas(chain, schemaFiles)` — для каждого schemaFile:
    - Загрузка через `SchemaLoader.loadSchemaFile()`
    - Если есть `extends` в схеме — merge через `mergeSchemas()`
-4. Наследование полей: если у дочернего профиля поле не задано — берётся из первого родителя, у которого оно есть
+4. `agents` накапливаются по цепочке child-first; `skills`, `invariants` и каталоги берутся с приоритетом дочернего профиля и fallback к ближайшему родителю
 
-### ProfileResolver (src/profile-resolver.ts) — детали
+### ProfileResolver (src/app/profile-resolver.ts) — детали
 
 **resolve(profileId: string): ResolvedProfile**
 
@@ -947,7 +783,7 @@ interface ResolvedProfile {
 
 1. `loadAll()` — сканирует `profilesDir/*/profile.json`, парсит через `ProfileMetadataSchema`
 2. `resolveProfileExtends(id)` — обход цепочки `extends` с детектом циклов через `visited: Set<string>`
-3. Наследование скаляров: agents, skills, invariants берутся из первой записи в chain, где они заданы (дочерний приоритет)
+3. `agents` собираются из prompt-файлов всей extends-цепочки child-first; `skills` и `invariants` берутся с приоритетом дочерней записи и fallback к родителю
 4. `resolveSchemas(chain, schemaFiles)` — для каждого уникального schema-файла из всей цепочки
 5. `resolveSingleSchema(schemaFile, chain)` — загрузка файла + schema-level extends с merge
 
@@ -955,7 +791,7 @@ interface ResolvedProfile {
 
 Плоский список profile.json без разрешения extends. Кешируется после первого вызова.
 
-### SchemaLoader (src/schema-loader.ts) — детали
+### SchemaLoader (src/schema/schema-loader.ts) — детали
 
 **loadSchemaFile(profileId, schemaFilename): ProfileSchema | null**
 
@@ -969,14 +805,11 @@ interface ResolvedProfile {
 **mergeSchemas(base, extension): ResolvedSchema**
 
 ```typescript
-// Extension override:
-result.stages = extension.stages ?? base.stages;
-result.transitions = extension.transitions ?? base.transitions;
-result.settings = deepMerge(base.settings, extension.settings);
-
-// deepMerge — рекурсивный merge объектов:
-// - значения-объекты: рекурсивный merge
-// - значения-скаляры/массивы: extension приоритет
+// Current merge semantics:
+// - stages merge entry-by-entry, including nested stages and transitions
+// - transitions merge by from→to group; child replaces that group
+// - editingAgents, gates, taskControlAgents and stageAssignments use child priority
+// - missing fields are stripped from the resolved result
 ```
 
 **loadSchemaFromPath(dir, filename)**
@@ -989,8 +822,8 @@ result.settings = deepMerge(base.settings, extension.settings);
 {
   "id": "android",
   "extends": "base",
-  "schemas": ["state-machine.yaml"],
-  "agents": ["code", "architect", "review", "qa", "debug", "figma", "rag", "ask", "orchestrator"],
+  "schemas": ["android.yaml"],
+  "agents": ["code", "architect", "review", "qa", "debug", "figma", "rag", "ask", "orchestrator", "harness"],
   "skills": ["android-feature-implementation", "android-code-review", ...],
   "invariants": ["LF_ONLY", "KOTLIN_STACK", "NO_FQN", "NO_BANG_BANG", "NO_COMMENTED_CODE",
                  "NAMED_ARGS", "STRING_RES", "RAW_COLOR", "RAW_DP", "NO_BARE_DP", "USE_SPACER_FN"]
@@ -1174,77 +1007,51 @@ interface ShellExecutor {
 - Кеширование 30s
 - Graceful degradation: если `bd` CLI недоступен → `{ error, degraded: true }`
 
-## Manifest Presets (src/manifest-presets.ts)
+## Manifest Presets (legacy section)
 
-Предопределённые наборы стадий для задач:
-
-```typescript
-const TASK_MANIFEST_PRESETS = {
-  full: ['dev', 'test', 'review', 'qa'], // Полный цикл
-  fix: ['verify', 'dev', 'test', 'review'], // Багфикс
-  quick: ['dev'], // Быстрое редактирование
-};
-
-// Алиасы для обратной совместимости (P1-009):
-const PRESET_ALIASES = {
-  feature: 'full', // → ['dev', 'test', 'review', 'qa']
-  free_edit: 'quick', // → ['dev']
-};
-```
+Файла `src/manifest-presets.ts` и API `TASK_MANIFEST_PRESETS` в текущем проекте
+нет; этот раздел сохранён как историческая точка навигации, но описанные presets
+больше не являются runtime-контрактом. Текущий workflow объявляется YAML-схемой
+профиля, а задачи управляются tools `workflow-tasks-set`,
+`workflow-tasks-get`, `workflow-tasks-set-status` и
+`workflow-tasks-resolve-decision`.
 
 ### API
 
-```typescript
-function getManifest(preset: string): string[];
-// Возвращает массив стадий по preset'у
-// Автоматически разрешает алиасы
-// Возвращает [] для неизвестного preset'а
-
-function isValidManifestPreset(value: string): value is TaskManifestPreset;
-// Проверяет, является ли строка валидным preset-ключом или алиасом
-
-function resolvePresetAlias(value: string): string;
-// Разрешает алиас в канонический ключ
-// Возвращает исходное значение, если не алиас
-```
+Вместо preset-списка используйте `ProfileResolver` для выбора профиля/schema и
+`TaskApi` для декларативного списка задач. Это устраняет скрытую привязку к
+старым стадиям `dev`, `test`, `review`, `qa`.
 
 ## TUI (src/tui/tui.ts)
 
-Чистая логика для отображения workflow-секции в боковой панели OpenCode.
+TUI сейчас имеет два связанных, но отдельных слоя:
 
-### parseRuntimeState(raw: string): ParseResult
+- `src/tui.ts` — публичный entrypoint, экспортирующий `createStateSection`,
+  `createSessionGuardCoordinator` и `SectionApi`;
+- `src/tui/index.tsx` — JSX-монтаж workflow и rules sidebar, coordinator и
+  OpenCode `sidebar_content` lifecycle;
+- `src/tui/tui.ts` — чистая workflow-модель чтения и форматирования, без JSX;
+- `src/tui/slots/sidebar-content.tsx` и `src/tui/tui-panel/*` — общие панели и
+  slot-композиция;
+- `src/tui/data/*` — загрузка данных rules.
 
-```
-Tui {
-  rootSessionID: string;
-  stage: Stage;           // имя задаёт схема профиля
-  prevStage: Stage | null;
-  nextStage: Stage | null;
-  revision: number;
-  completedTasks: number;
-  totalTasks: number;
-  activeOperations: ActiveOperationInfo[];  // на стадии с гейтами их несколько
-  gates: GateInfo[];      // сессионные
-  taskGates: TaskGateInfo[];  // по прогону задачи: стадия, гейты, checks
-  retryBudgets: RetryInfo[];
-  raw: Record<string, unknown>;
-}
-```
+### parseRuntimeState(session: WorkflowSession): ParseResult
+
+Фактическая функция принимает уже валидированный `WorkflowSession`, а не raw
+JSON. Она строит `Tui` с `sessionId`, current stage, соседями базового графа,
+revision, количеством задач, active operations, session gates, task gates и
+retry budgets. Единственный отказ — пустой `currentStage` (`no_stage`).
 
 ### formatSectionLines(view: Tui): string[]
 
-Форматирует 3 строки для отображения в сайдбаре:
-
-```
-▶               code               ✕
-      ── tasks_ready ── ● code ▼ ── review → ──
-              ✓invariants  retry.cycles=1/5
-```
+Форматирует основную workflow-панель с текущей стадией, соседями, task gate/check
+статусами и retry budgets. Rules sidebar загружается отдельным coordinator-ом и
+не заменяется workflow widget.
 
 ### Formatting details (FR-011/FR-012)
 
-`formatDetailsLines(rawText)` — выводит поля сессии в формате key: value,
-коллекции (tasks, changedFiles) — с TOP_N=3 и `+N ещё`.
+`formatDetailsLines(rawText)` форматирует подробности сессии и ограничивает
+длинные коллекции. Точные rendering/lifecycle тесты находятся в `test/tui/`.
 
 ## Dashboard Server (src/dashboard/dashboard-server.ts)
 
@@ -1255,20 +1062,21 @@ Tui {
 
 ### API Endpoints
 
-| Метод | Путь                          | Описание                                              |
-| ----- | ----------------------------- | ----------------------------------------------------- |
-| GET   | `/`                           | HTML-интерфейс (dashboard.html)                       |
-| GET   | `/events`                     | SSE: snapshot + инкрементальные события               |
-| GET   | `/api/schema`                 | Контракт дашборда (DashboardSchema)                   |
-| GET   | `/api/dump`                   | Все сессии                                            |
-| GET   | `/api/session/:id`            | Одна сессия с `stage`                                 |
-| GET   | `/api/session/:id/timeline`   | TimelineEvent[] (transitions, gates)                  |
-| GET   | `/api/session/:id/invariants` | InvariantViolation[]                                  |
-| GET   | `/api/metrics`                | Агрегированные метрики из `.opencode/metrics.jsonl`   |
-| GET   | `/api/rag-eval`               | RAG evaluation из `.opencode/rag/eval-results.json`   |
-| GET   | `/api/agents/:id/prompt`      | Промпт агента (белый список: orchestrator, code, ...) |
-| GET   | `/api/beads/issue/:id`        | Задача из beads                                       |
-| POST  | `/api/beads/comment`          | Комментарий в beads                                   |
+| Метод | Путь                                 | Описание                                                      |
+| ----- | ------------------------------------ | ------------------------------------------------------------- |
+| GET   | `/`                                  | HTML-интерфейс                                                |
+| GET   | `/events`                            | SSE snapshot при подключении и инкрементальные session events |
+| GET   | `/api/schema`                        | Контракт workflow/schema для текущего профиля                 |
+| GET   | `/api/dump`                          | Все активные сессии                                           |
+| GET   | `/api/session/:id`                   | Одна сессия с вычисляемой стадией                             |
+| GET   | `/api/session/:id/timeline`          | Timeline transitions/gates                                    |
+| GET   | `/api/session/:id/invariants`        | `invariantViolations` сессии                                  |
+| GET   | `/api/metrics`                       | `.opencode/metrics.jsonl`, если файл существует               |
+| GET   | `/api/rag-eval`                      | `.opencode/rag/eval-results.json`, если файл существует       |
+| GET   | `/api/agents/:profile/:agent/prompt` | Prompt агента с явным profile ID                              |
+| GET   | `/api/agents/:agent/prompt`          | Prompt агента профиля текущей сессии                          |
+| GET   | `/api/beads/issue/:id`               | Issue через Beads Bridge                                      |
+| POST  | `/api/beads/comment`                 | Комментарий через Beads Bridge                                |
 
 ### Auth & CORS
 
@@ -1284,7 +1092,7 @@ Tui {
 interface DashboardSchema {
   states: DashboardState[]; // { id, label, description }
   transitions: DashboardTransition[]; // { from, to, kind, gate }
-  gates: DashboardGate[]; // { id, label, required }
+  gates: DashboardGate[]; // { id, label }
   profile: DashboardProfile; // { id, version, invariants, ... }
 }
 ```
@@ -1294,61 +1102,30 @@ interface DashboardSchema {
 ```typescript
 type SSESessionEvent =
   | { type: 'transition'; sessionId: string; from: string; to: string; ts: number }
-  | { type: 'gate'; sessionId: string; gate: string; status: string; ts: number }
-  | { type: 'metric'; ts: number; data: { updated: true } };
+  | { type: 'gate'; sessionId: string; gate: string; status: string; ts: number };
 ```
 
-- `diffSessions()` на каждый чендж — инкрементальные события
-- fs.watch + polling 500ms на SESSIONS_DIR
-- metrics.jsonl — polling 2s для mtime
+Сессии отслеживаются через `fs.watch` и polling с интервалом 500 ms.
+Изменение `metrics.jsonl` проверяется отдельным polling с интервалом 2 s и
+публикуется в dashboard UI, но не является типом `SSESessionEvent` из contract.
 
 ## АПИ
 
 ### Plugin Tools (SDK tools)
 
-**workflow-create**
+| Tool                              | Назначение                                                                                                                      |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `workflow-create`                 | Создать или повторно открыть workflow session; аргумент `schemaId` опционален, fallback — `HARNESS_SCHEMA_ID`/`HARNESS_PROFILE` |
+| `workflow-list`                   | Вывести `profilesDir` и metadata доступных профилей                                                                             |
+| `workflow-consent`                | Прочитать один или несколько файлов, вычислить evidence и вернуть `<consent-request>`                                           |
+| `workflow-tasks-set`              | Заменить список задач; `listKey` можно не указывать для однозначного workflow                                                   |
+| `workflow-tasks-get`              | Прочитать список задач по `listKey`                                                                                             |
+| `workflow-tasks-set-status`       | Изменить статус по глобальному `task-N`                                                                                         |
+| `workflow-tasks-resolve-decision` | Разрешить pending retry decision: `increase`, `failed` или `cancelled`                                                          |
 
-```typescript
-tool({
-  name: 'workflow-create',
-  args: { profileId?: string },
-  execute: () => { sessionId, profileId, schemaVersion, revision }
-})
-```
-
-- Проверка существующей сессии (idempotent)
-- `createSession(sessionId, profileId)` — начальная сессия с пустым списком гейтов
-
-**workflow-list**
-
-```typescript
-tool({
-  name: 'workflow-list',
-  args: {},
-  execute: () => profiles list
-})
-```
-
-- `listProfiles(profilesDir)` — загружает все profile.json из директории
-
-**workflow-consent**
-
-```typescript
-tool({
-  name: 'workflow-consent',
-  args: {
-    files: string[],     // [".opencode/plan/story-42/plan.md"]
-    summary: string,     // "Add login page"
-    grant?: string,      // "continue" (default)
-    decline?: string,    // "stop" (default)
-  },
-  execute: () => consentTag
-})
-```
-
-- Читает файлы с диска
-- canonicalizePlan → computeSha256 → evidence
-- Возвращает XML-тег <consent-request> для встраивания в вопрос
+`workflow-consent` принимает `files: string[] | string`, `summary`, необязательный
+`type` (имя из `consent:`), `grant` и `decline`. Evidence считается по всему
+набору файлов, а не только по первому.
 
 ### OpenCode Commands
 
@@ -1357,115 +1134,94 @@ tool({
 **sm-session** — создание/переключение/просмотр сессии
 **sm-profile** — переключение профиля
 
-Все команды маршрутизируются на subagent `state-machine` (color: #6366F1).
+Все команды маршрутизируются на subagent `session-guard` (color: #6366F1).
 
 ### Public API (src/public-api.ts) — для npm-потребителей
 
 ```typescript
 async function resolveConfig(profileId: string, profilesDir: string): Promise<ResolvedProfile>;
 async function listProfiles(profilesDir: string): Promise<ProfileMetadata[]>;
+// Также экспортируются session-file readers и listProfileAgents().
+// Они предназначены для read-only TUI/dashboard интеграций.
 ```
 
 ## Переменные окружения
 
-| Переменная                   | По умолчанию                         | Описание                                       |
-| ---------------------------- | ------------------------------------ | ---------------------------------------------- |
-| `STATE_MACHINE_STORE_DIR`    | `{harnessDir}/state-machine/runtime` | Директория session store                       |
-| `STATE_MACHINE_PROFILES_DIR` | `{harnessDir}/profiles`              | Директория профилей                            |
-| `STATE_MACHINE_LOG_LEVEL`    | `info`                               | Уровень логирования (debug, info, warn, error) |
-| `HARNESS_PROFILE`            | —                                    | Профиль по умолчанию (android, harness)        |
-| `HARNESS_AUTO_APPROVE`       | —                                    | Авто-одобрение плана (true/false)              |
-| `OPENCODE_HARNESS_DIR`       | `.opencode`                          | Базовый каталог харнесса                       |
-| `DASHBOARD_TOKEN`            | —                                    | Bearer token для дашборда                      |
-| `DASHBOARD_HOST`             | `127.0.0.1`                          | Хост дашборда                                  |
-| `ALLOWED_ORIGIN`             | —                                    | CORS origin для дашборда                       |
+| Переменная                   | По умолчанию                                    | Описание                                                |
+| ---------------------------- | ----------------------------------------------- | ------------------------------------------------------- |
+| `OPENCODE_HARNESS_DIR`       | `<project>/.opencode`                           | Корень project-local harness данных                     |
+| `SESSION_GUARD_PROFILES_DIR` | `$OPENCODE_HARNESS_DIR/profiles`                | Каталог profile.json/YAML/invariants                    |
+| `SESSION_GUARD_STORE_DIR`    | `$XDG_DATA_HOME/opencode/session-guard/runtime` | Активные session JSON и archive                         |
+| `SESSION_GUARD_LOG_LEVEL`    | `info`                                          | `debug`, `info`, `warn` или `error`                     |
+| `HARNESS_PROFILE`            | не задан                                        | Fallback profile/schema для workflow-create и dashboard |
+| `HARNESS_SCHEMA_ID`          | не задан                                        | Fallback schema ID для workflow-create                  |
+| `HARNESS_AUTO_APPROVE`       | не задан                                        | При `true` автоматически grant-ит запрошенное consent   |
+| `DASHBOARD_TOKEN`            | пусто                                           | Bearer token для dashboard API                          |
+| `DASHBOARD_HOST`             | `127.0.0.1`                                     | Bind host standalone dashboard                          |
+| `ALLOWED_ORIGIN`             | пусто                                           | CORS origin dashboard                                   |
 
 ## Структура проекта
 
 ```
 src/
-  index.ts                     — Plugin entry point: StateMachinePlugin
-  public-api.ts                — resolveConfig, listProfiles (npm API)
-  profile-resolver.ts          — Загрузка/наследование профилей
-  guard-evaluator.ts           — GuardEvaluator: sandboxed expression eval
-  schema-loader.ts             — YAML → ProfileSchema, mergeSchemas
-
-  schema/
-    types.ts                   — ProfileMetadata, TransitionDef, StageDef, ...
-    profile-metadata.ts        — Zod-схема profile.json
-    profile-schema.ts          — Zod-схема schema.yaml
-
-  session/
-    session-schema.ts          — Zod-схема WorkflowSession + типы
-    session-store.ts           — WorkflowStore: файловое I/O, блокировки
-    session-events.ts          — onSessionSaved (глобальные колбеки)
-    helpers.ts                 — getGate, setGateStatus, bumpRetry, ...
-
-  domain/
-    engine.ts                  — StateMachineEngine, checkTransition, tryApplyTransitions
-    session-facts.ts           — SessionFacts проекция
-    operation-lifecycle.ts      — beginMutation, finishMutation, clearActiveMutation
-    approvals.ts               — approve, decline
-    verifications.ts           — confirm, reject
-    session-queries.ts         — shellSegments, hasForbiddenGitSubcommand,
-                                 isReadOnlyBashCommand
-    workflow-result.ts         — парсинг <workflow-result>
-
+  index.ts                     — два plugin entrypoint-а: V1 server + V2 setup
+  public-api.ts                — resolveConfig, listProfiles, session file API, agents
   app/
-    runtime.ts                 — StateMachineRuntime: hooks + orchestration
-    runtime-types.ts           — PromiseChain, OpenCodeSessionClient
-    mutation-orchestrator.ts   — begin/finishMutation, scope, invariants
-    consent-orchestrator.ts    — before/after consent lifecycle
-    consent.ts                 — XML-тег: parseConsentRequest, evidenceOf
-    consent-parser.ts          — YAML-блоки: parseConsentRequest, classifyConsentAnswer
-    invariants.ts              — Загрузка и прогон InvariantCheck
-    guardrails.ts              — validateUserInput, sanitizeToolOutput
-    sdd-artifacts.ts           — canonicalizePlan, computeSha256
-    change-scope.ts            — computeChangeScope, captureBaseline
-    session-queue.ts           — SessionQueue, withSession
-    logger.ts                  — LogFn, createLogFn
-    provider.ts                — TaskProvider, InMemoryProvider, createCliProvider
-
-  dashboard/
-    dashboard-server.ts        — HTTP/SSE сервер
-    dashboard-contract.ts      — DashboardSchema, SSESessionEvent
-    beads-bridge.ts            — Интеграция с beads issue tracker
-
-  tui/
-    tui.ts                     — parseRuntimeState, formatSectionLines
-
-  manifest-presets.ts          — TASK_MANIFEST_PRESETS (full, fix, quick)
+    runtime.ts                 — hooks, workflow tools, orchestration
+    session-executor.ts        — transaction-scoped load/lock/save
+    session-queue.ts           — serialization по root session
+    mutation-orchestrator.ts  — mutation lifecycle, scope, invariants
+    consent-orchestrator.ts   — consent lifecycle и evidence
+    task-api.ts                — управление workflow task lists
+    profile-resolver.ts        — profile metadata и extends
+    invariants.ts              — загрузка и запуск profile invariants
+    guardrails.ts              — input/output guardrails
+    change-scope.ts            — baseline и changed files
+    provider.ts                — TaskProvider, InMemoryProvider, CLI provider
+  domain/
+    engine.ts, action-admission.ts, approvals.ts, evidence.ts
+    operation-lifecycle.ts, session-facts.ts, session-queries.ts, task-movement.ts
+  schema/
+    profile-schema.ts, profile-metadata.ts, schema-loader.ts
+    compile-workflow.ts, guard-ast.ts, guard-evaluator.ts, types.ts
+  session/
+    session-schema.ts, session-store.ts, session-files.ts, helpers.ts
+  rules/                       — discovery, matching, delivery и runtime hooks
+  tui.ts                       — public TUI entrypoint
+  tui/                         — JSX sidebar, panels и data coordinators
+  dashboard/                   — standalone HTTP/SSE server и contract
 
 profiles/
-  base/
-    profile.json               — Базовая конфигурация (extends)
-    invariants.ts              — LF_ONLY
-  android/
-    profile.json               — Android-специфичная конфигурация
-    invariants.ts              — 11 инвариантов для Kotlin/Compose
-  harness/
-    profile.json               — Self-edit профиль
-    invariants.ts              — 5 инвариантов для TypeScript
-  state-machine.yaml           — Базовая схема (фазы, переходы, guards)
+  base/base.yaml, profile.json, invariants.ts, agents/
+  android/android.yaml, profile.json, invariants.ts, agents/
+  harness/harness.yaml, profile.json, invariants.ts, agents/
 
-test/                          — vitest-тесты
-docs/                          — roadmap, usage, plugin-architecture, ...
+scripts/
+  build-tui.ts, build-schema.ts, verify-build.ts
+  host-smoke/                  — smoke suite против живого OpenCode
+
+test/                          — domain, app, schema, session, rules, TUI, e2e, dashboard
+
+dist/                          — generated runtime, TUI, declarations и JSON schemas
 ```
 
 ## Development
 
-| Команда                                     | Описание                                       |
-| ------------------------------------------- | ---------------------------------------------- |
-| `mise run build`                            | Сборка `src/index.ts` + `tui.ts` + JSON-schema |
-| `mise run test`                             | Все тесты (bun test)                           |
-| `mise run test-coverage`                    | Тесты с покрытием                              |
-| `mise run lint`                             | ESLint                                         |
-| `mise run lint-fix`                         | Автофикс                                       |
-| `mise run format`                           | Prettier                                       |
-| `mise run typecheck`                        | tsc --noEmit                                   |
-| `mise run check`                            | typecheck + lint + тесты                       |
-| `mise run smoke`                            | Прогон против живого opencode                  |
-| `mise run dashboard`                        | Запуск дашборда (порт 3456)                    |
+Источник истины для команд — `.mise/tasks/*`; `package.json` намеренно не
+содержит `scripts`.
+
+| Команда                               | Описание                                                                 |
+| ------------------------------------- | ------------------------------------------------------------------------ |
+| `mise run setup`                      | Установить зависимости и подготовить окружение                           |
+| `mise run check`                      | `typecheck` + `lint` + полный test suite                                 |
+| `mise run typecheck`                  | `tsc --noEmit`                                                           |
+| `mise run test`                       | Все тесты через `bun test`                                               |
+| `mise run test-coverage`              | Тесты с coverage                                                         |
+| `mise run lint` / `mise run lint-fix` | ESLint / ESLint с автофиксом                                             |
+| `mise run build`                      | Bun runtime + TUI + declarations + JSON schemas в `dist/` и verify-build |
+| `mise run dev`                        | Development build с sourcemaps и vendor splitting                        |
+| `mise run smoke`                      | Host smoke suite против живого OpenCode                                  |
+| `mise run dashboard`                  | Запуск standalone read-only dashboard на порту 3456                      |
 
 ---
 
@@ -1484,4 +1240,3 @@ Contributions are welcome! Please file issues or submit pull requests on the Git
 ## License
 
 See the [LICENSE](LICENSE) file for details.
-````

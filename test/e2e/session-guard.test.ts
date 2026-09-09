@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { WorkflowStore, createSession } from '../../src/session/session-store.ts';
 import { setGateStatus, bumpRetry, isExhausted, resetRetry } from '../../src/session/helpers.ts';
-import { StateMachineEngine } from '../../src/domain/engine.ts';
+import { SessionGuardEngine } from '../../src/domain/engine.ts';
 import {
   beginMutation,
   finishMutation,
@@ -24,7 +24,7 @@ import type { EngineConfig } from '../../src/domain/engine.ts';
 import type { WorkflowSession } from '../../src/session/session-schema.ts';
 import { createTask } from '../support/task-factory.ts';
 
-// ─── Config — mirrors profiles/base/state-machine.yaml behaviour ──────────
+// ─── Config — mirrors profiles/base/session-guard.yaml behaviour ──────────
 
 const ENGINE_CONFIG: EngineConfig = {
   stageAssignments: [
@@ -88,8 +88,8 @@ afterEach(() => {
 
 function makeStore(): WorkflowStore {
   dir = mkdtempSync(join(tmpdir(), 'sm-e2e-'));
-  mkdirSync(join(dir, '.opencode', 'state-machine', 'sessions'), { recursive: true });
-  return new WorkflowStore(join(dir, '.opencode', 'state-machine', 'sessions'));
+  mkdirSync(join(dir, '.opencode', 'session-guard', 'sessions'), { recursive: true });
+  return new WorkflowStore(join(dir, '.opencode', 'session-guard', 'sessions'));
 }
 
 function baseSession(): WorkflowSession {
@@ -124,6 +124,8 @@ function setActiveOperation(session: WorkflowSession, callId: string, startedAt:
     ancestry: [],
     stage: 'mutation',
     status: 'running',
+    gates: {},
+    round: 0,
   };
   session.activeOperations[callId] = {
     callId,
@@ -132,6 +134,8 @@ function setActiveOperation(session: WorkflowSession, callId: string, startedAt:
     agent: 'code',
     startedAt,
     status: 'running',
+    round: 0,
+    kind: 'task',
   };
 }
 
@@ -153,7 +157,7 @@ describe('E2E: Full state machine flow', () => {
     store = makeStore();
     let session = baseSession();
     await store.save(session);
-    const engine = new StateMachineEngine(ENGINE_CONFIG);
+    const engine = new SessionGuardEngine(ENGINE_CONFIG);
 
     // 1. PLANNING
     expect(engine.deriveStage(session)).toBe('PLANNING');
@@ -210,7 +214,7 @@ describe('E2E: Full state machine flow', () => {
   test('TC2: the edge into COMMIT is closed while gates are pending', () => {
     store = makeStore();
     const session = baseSession();
-    const engine = new StateMachineEngine(ENGINE_CONFIG);
+    const engine = new SessionGuardEngine(ENGINE_CONFIG);
 
     approve(session, 'plan', 'ev', 'c1');
     addImplementationTask(session);
@@ -230,7 +234,7 @@ describe('E2E: Full state machine flow', () => {
   test('TC3: rejects COMMIT when one required gate is not passed', () => {
     store = makeStore();
     const session = baseSession();
-    const engine = new StateMachineEngine(ENGINE_CONFIG);
+    const engine = new SessionGuardEngine(ENGINE_CONFIG);
 
     approve(session, 'plan', 'ev', 'c1');
     addImplementationTask(session);
@@ -249,7 +253,7 @@ describe('E2E: Full state machine flow', () => {
   test('TC4: EXECUTION → COMMIT passes when all gates are passed', () => {
     store = makeStore();
     const session = baseSession();
-    const engine = new StateMachineEngine(ENGINE_CONFIG);
+    const engine = new SessionGuardEngine(ENGINE_CONFIG);
 
     approve(session, 'plan', 'ev', 'c1');
     addImplementationTask(session);
@@ -270,7 +274,7 @@ describe('E2E: Full state machine flow', () => {
   test('TC5: COMMIT → DONE blocks when deliveryReceipt is not set', () => {
     store = makeStore();
     const session = baseSession();
-    const engine = new StateMachineEngine(ENGINE_CONFIG);
+    const engine = new SessionGuardEngine(ENGINE_CONFIG);
 
     approve(session, 'plan', 'ev', 'c1');
     addImplementationTask(session);
@@ -293,7 +297,7 @@ describe('E2E: Full state machine flow', () => {
   test('TC7: EXECUTION → EXECUTION (auto loop) is always allowed', () => {
     store = makeStore();
     const session = baseSession();
-    const engine = new StateMachineEngine(ENGINE_CONFIG);
+    const engine = new SessionGuardEngine(ENGINE_CONFIG);
 
     approve(session, 'plan', 'ev', 'c1');
     addImplementationTask(session);
@@ -307,7 +311,7 @@ describe('E2E: Full state machine flow', () => {
   test('TC8: failed mutation retry then full cycle', () => {
     store = makeStore();
     const session = baseSession();
-    const engine = new StateMachineEngine(ENGINE_CONFIG);
+    const engine = new SessionGuardEngine(ENGINE_CONFIG);
 
     approve(session, 'plan', 'ev', 'c1');
     addImplementationTask(session);
@@ -386,7 +390,7 @@ describe('E2E: Full state machine flow', () => {
   test('TC11: clear approvals reverts stage to PLANNING', () => {
     store = makeStore();
     const session = baseSession();
-    const engine = new StateMachineEngine(ENGINE_CONFIG);
+    const engine = new SessionGuardEngine(ENGINE_CONFIG);
 
     approve(session, 'plan', 'ev', 'c1');
     expect(engine.deriveStage(session)).toBe('TASKS_READY');
@@ -427,7 +431,7 @@ describe('E2E: Full state machine flow', () => {
       stageAssignments: [{ id: 'always', priority: 0, condition: 'true', result: 'TASKS_READY' }],
       transitions: [{ from: 'TASKS_READY', to: 'EXECUTION' }],
     };
-    const engine = new StateMachineEngine(config);
+    const engine = new SessionGuardEngine(config);
 
     const result = engine.tryApplyTransitions(session);
     expect(result.applied).toBe(true);
@@ -439,7 +443,7 @@ describe('E2E: Full state machine flow', () => {
   test('TC14: illegal transition returns blocked with reason', () => {
     store = makeStore();
     const session = baseSession();
-    const engine = new StateMachineEngine(ENGINE_CONFIG);
+    const engine = new SessionGuardEngine(ENGINE_CONFIG);
 
     const result = engine.checkTransition('PLANNING', 'DONE', session);
     expect(result.allowed).toBe(false);
@@ -489,7 +493,7 @@ describe('E2E: Full state machine flow', () => {
   test('TC17: double approve same type+callId updates existing', () => {
     store = makeStore();
     const session = baseSession();
-    const engine = new StateMachineEngine(ENGINE_CONFIG);
+    const engine = new SessionGuardEngine(ENGINE_CONFIG);
 
     approve(session, 'plan', 'ev-1', 'call-1');
     expect(session.approvals).toHaveLength(1);
@@ -519,7 +523,7 @@ describe('E2E: Full state machine flow', () => {
   test('TC19: beginMutation throws when active operation exists and not expired', () => {
     store = makeStore();
     const session = baseSession();
-    const engine = new StateMachineEngine(ENGINE_CONFIG);
+    const engine = new SessionGuardEngine(ENGINE_CONFIG);
 
     approve(session, 'plan', 'ev', 'c1');
     addImplementationTask(session);
@@ -535,7 +539,7 @@ describe('E2E: Full state machine flow', () => {
   test('TC20: two consecutive mutations are allowed', () => {
     store = makeStore();
     const session = baseSession();
-    const engine = new StateMachineEngine(ENGINE_CONFIG);
+    const engine = new SessionGuardEngine(ENGINE_CONFIG);
 
     approve(session, 'plan', 'ev', 'c1');
     addImplementationTask(session);
@@ -559,7 +563,7 @@ describe('E2E: Full state machine flow', () => {
   test('TC21: a budget exhausts on the attempts that are spent, not on verdicts', () => {
     store = makeStore();
     const session = baseSession();
-    const engine = new StateMachineEngine(ENGINE_CONFIG);
+    const engine = new SessionGuardEngine(ENGINE_CONFIG);
 
     approve(session, 'plan', 'ev', 'c1');
     addImplementationTask(session);
@@ -749,6 +753,8 @@ describe('E2E: Full state machine flow', () => {
       ancestry: [],
       stage: 'mutation',
       status: 'running',
+      gates: {},
+      round: 0,
     };
     session.activeOperations['m-1'] = {
       callId: 'm-1',
@@ -757,6 +763,8 @@ describe('E2E: Full state machine flow', () => {
       agent: 'code',
       startedAt: new Date().toISOString(),
       status: 'running',
+      round: 0,
+      kind: 'mutation',
     };
 
     const progress = getExecutionProgress(session);
@@ -785,7 +793,7 @@ describe('E2E: Full state machine flow', () => {
   test('TC39: multiple approval types coexist', () => {
     store = makeStore();
     const session = baseSession();
-    const engine = new StateMachineEngine(ENGINE_CONFIG);
+    const engine = new SessionGuardEngine(ENGINE_CONFIG);
 
     approve(session, 'plan', 'ev-1', 'c1');
     approve(session, 'review', 'ev-2', 'c2');
@@ -876,7 +884,7 @@ describe('E2E: Full state machine flow', () => {
   test('TC45: session without tasks never reaches TASKS_READY→EXECUTION', () => {
     store = makeStore();
     const session = baseSession();
-    const engine = new StateMachineEngine(ENGINE_CONFIG);
+    const engine = new SessionGuardEngine(ENGINE_CONFIG);
 
     approve(session, 'plan', 'ev', 'c1');
     // No tasks added — stays in TASKS_READY
@@ -892,7 +900,7 @@ describe('E2E: Full state machine flow', () => {
   test('TC46: all tasks completed keeps stage in TASKS_READY', () => {
     store = makeStore();
     const session = baseSession();
-    const engine = new StateMachineEngine(ENGINE_CONFIG);
+    const engine = new SessionGuardEngine(ENGINE_CONFIG);
 
     approve(session, 'plan', 'ev', 'c1');
     addImplementationTask(session, 'completed');
@@ -921,7 +929,7 @@ describe('E2E: Full state machine flow', () => {
         },
       ],
     };
-    const engine = new StateMachineEngine(strictConfig);
+    const engine = new SessionGuardEngine(strictConfig);
 
     approve(session, 'plan', 'ev', 'c1');
     addImplementationTask(session);
@@ -948,7 +956,7 @@ describe('E2E: Full state machine flow', () => {
       ],
       transitions: [],
     };
-    const engine = new StateMachineEngine(priorityConfig);
+    const engine = new SessionGuardEngine(priorityConfig);
 
     expect(engine.deriveStage(session)).toBe('HIGH');
   });
@@ -991,7 +999,7 @@ describe('E2E: Full state machine flow', () => {
         },
       ],
     };
-    const strictEngine = new StateMachineEngine(customConfig);
+    const strictEngine = new SessionGuardEngine(customConfig);
 
     const validation = strictEngine.checkTransition('EXECUTION', 'COMMIT', session);
     // Гейта нет в карте → читается как не пройденный → закрыто.

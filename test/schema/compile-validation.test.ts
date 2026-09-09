@@ -20,7 +20,11 @@ import { createTask } from '../support/task-factory.ts';
  */
 
 /** What the fixture profile declares, so a stage's `gates:` has a list to be wrong about. */
-const DECLARED_GATES = [{ id: 'invariants' }, { id: 'review' }, { id: 'qa' }];
+const DECLARED_GATES = [
+  { id: 'invariants', status: 'pending' },
+  { id: 'review', status: 'pending' },
+  { id: 'qa', status: 'pending' },
+];
 
 function schema(
   stages: ResolvedSchema['stages'],
@@ -194,12 +198,12 @@ function pluginInput(): PluginInput {
 }
 
 beforeEach(async () => {
-  previousStore = process.env.STATE_MACHINE_STORE_DIR;
-  previousProfiles = process.env.STATE_MACHINE_PROFILES_DIR;
+  previousStore = process.env.SESSION_GUARD_STORE_DIR;
+  previousProfiles = process.env.SESSION_GUARD_PROFILES_DIR;
   storeDirectory = await mkdtemp(join(tmpdir(), 'compile-store-'));
   profilesDirectory = await mkdtemp(join(tmpdir(), 'compile-profiles-'));
-  process.env.STATE_MACHINE_STORE_DIR = storeDirectory;
-  process.env.STATE_MACHINE_PROFILES_DIR = profilesDirectory;
+  process.env.SESSION_GUARD_STORE_DIR = storeDirectory;
+  process.env.SESSION_GUARD_PROFILES_DIR = profilesDirectory;
 
   const profileDirectory = join(profilesDirectory, 'broken');
   await mkdir(profileDirectory, { recursive: true });
@@ -241,10 +245,10 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  if (previousStore === undefined) delete process.env.STATE_MACHINE_STORE_DIR;
-  else process.env.STATE_MACHINE_STORE_DIR = previousStore;
-  if (previousProfiles === undefined) delete process.env.STATE_MACHINE_PROFILES_DIR;
-  else process.env.STATE_MACHINE_PROFILES_DIR = previousProfiles;
+  if (previousStore === undefined) delete process.env.SESSION_GUARD_STORE_DIR;
+  else process.env.SESSION_GUARD_STORE_DIR = previousStore;
+  if (previousProfiles === undefined) delete process.env.SESSION_GUARD_PROFILES_DIR;
+  else process.env.SESSION_GUARD_PROFILES_DIR = previousProfiles;
   await rm(storeDirectory, { recursive: true, force: true });
   await rm(profilesDirectory, { recursive: true, force: true });
 });

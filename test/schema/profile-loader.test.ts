@@ -41,7 +41,7 @@ describe('ProfileResolver', () => {
       expect(base!.agents).toEqual(['code', 'architect']);
       expect(base!.skills).toEqual(['code-review', 'testing']);
       expect(base!.invariants).toEqual(['no-console', 'strict-null']);
-      expect(base!.schemas).toEqual(['state-machine.yaml']);
+      expect(base!.schemas).toEqual(['session-guard.yaml']);
     });
 
     it('resolves default agentsDir and skillsDir for profiles without them', async () => {

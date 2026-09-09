@@ -17,7 +17,7 @@ function makeSession(overrides: Record<string, unknown> = {}): WorkflowSession {
   return WorkflowSessionSchema.parse({
     sessionId: 'ses_root',
     profileId: 'base',
-    schemaId: 'state-machine',
+    schemaId: 'session-guard',
     revision: 1,
     updatedAt: '2026-08-23T00:00:00.000Z',
     gates: [

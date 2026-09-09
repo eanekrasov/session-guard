@@ -1,7 +1,7 @@
 /**
  * Android profile invariants.
  *
- * Адаптировано из state-machine/profiles/android/invariants.ts.
+ * Адаптировано из session-guard/profiles/android/invariants.ts.
  * Отличия:
  * - Типы импортируются из src/app/invariants.ts (вместо @harness/types/invariants)
  * - Все проверки и функции идентичны оригиналу

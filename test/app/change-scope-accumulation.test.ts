@@ -52,7 +52,7 @@ describe('the move being judged and the work being delivered are different lists
     // The permit is built from session.changedFiles, so it has to be
     // everything the work produced. Replacing it left the permit expecting
     // only the last move's files.
-    const session = createSession('accum', 'base', 'state-machine', 'planning');
+    const session = createSession('accum', 'base', 'session-guard', 'planning');
 
     await mkdir(join(repo, 'src'), { recursive: true });
     let frame = await captureBaseline(repo);
@@ -72,7 +72,7 @@ describe('the move being judged and the work being delivered are different lists
     // different scope, counted as this task's violation. The host smoke run
     // showed it as 'invariants gate is failed' on three scenarios that had
     // been green.
-    const session = createSession('scoped', 'base', 'state-machine', 'planning');
+    const session = createSession('scoped', 'base', 'session-guard', 'planning');
     session.tasks.implementation = [createTask({ id: 'task-1', writeScope: ['docs/**'] })];
 
     // An earlier move left a file outside what the current task may write.
@@ -101,7 +101,7 @@ describe('a change that was undone is not part of the delivery', () => {
     // put it back, edit b.ts, and the permit still expected both — so a
     // correct commit carrying only b.ts was refused, deliveryReceipt stayed
     // null and the workflow sat in `commit`.
-    const session = createSession('undone', 'base', 'state-machine', 'planning');
+    const session = createSession('undone', 'base', 'session-guard', 'planning');
     await mkdir(join(repo, 'src'), { recursive: true });
     await writeFile(join(repo, 'src/a.ts'), 'export const a = 1;\n', 'utf-8');
     await writeFile(join(repo, 'src/b.ts'), 'export const b = 1;\n', 'utf-8');

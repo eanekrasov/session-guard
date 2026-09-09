@@ -150,19 +150,19 @@ async function load(store: WorkflowStore): Promise<WorkflowSession> {
 }
 
 beforeEach(async () => {
-  previousStoreDirectory = process.env.STATE_MACHINE_STORE_DIR;
-  previousProfilesDirectory = process.env.STATE_MACHINE_PROFILES_DIR;
+  previousStoreDirectory = process.env.SESSION_GUARD_STORE_DIR;
+  previousProfilesDirectory = process.env.SESSION_GUARD_PROFILES_DIR;
   storeDirectory = await mkdtemp(join(tmpdir(), 'task-retry-store-'));
   profilesDirectory = await mkdtemp(join(tmpdir(), 'task-retry-profiles-'));
-  process.env.STATE_MACHINE_STORE_DIR = storeDirectory;
-  process.env.STATE_MACHINE_PROFILES_DIR = profilesDirectory;
+  process.env.SESSION_GUARD_STORE_DIR = storeDirectory;
+  process.env.SESSION_GUARD_PROFILES_DIR = profilesDirectory;
 });
 
 afterEach(async () => {
-  if (previousStoreDirectory === undefined) delete process.env.STATE_MACHINE_STORE_DIR;
-  else process.env.STATE_MACHINE_STORE_DIR = previousStoreDirectory;
-  if (previousProfilesDirectory === undefined) delete process.env.STATE_MACHINE_PROFILES_DIR;
-  else process.env.STATE_MACHINE_PROFILES_DIR = previousProfilesDirectory;
+  if (previousStoreDirectory === undefined) delete process.env.SESSION_GUARD_STORE_DIR;
+  else process.env.SESSION_GUARD_STORE_DIR = previousStoreDirectory;
+  if (previousProfilesDirectory === undefined) delete process.env.SESSION_GUARD_PROFILES_DIR;
+  else process.env.SESSION_GUARD_PROFILES_DIR = previousProfilesDirectory;
   await rm(storeDirectory, { recursive: true, force: true });
   await rm(profilesDirectory, { recursive: true, force: true });
 });
@@ -343,6 +343,8 @@ describe('task-cycle retry and recovery', () => {
       ancestry: [],
       stage: 'dev',
       status: 'awaiting_decision',
+      gates: {},
+      round: 0,
     };
     loaded.retryBudgets['task-2'] = { attempts: 1, maximum: 1 };
     await store.save(loaded);
@@ -393,6 +395,8 @@ describe('task-cycle retry and recovery', () => {
       ancestry: [],
       stage: 'dev',
       status: 'awaiting_decision',
+      gates: {},
+      round: 0,
     };
     loaded.retryBudgets['task-2'] = { attempts: 1, maximum: 1 };
     await store.save(loaded);
@@ -493,6 +497,8 @@ describe('task-cycle retry and recovery', () => {
       ancestry: [],
       stage: 'dev',
       status: 'awaiting_decision',
+      gates: {},
+      round: 0,
     };
     loaded.retryBudgets['task-2'] = { attempts: 1, maximum: 1 };
     await store.save(loaded);

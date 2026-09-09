@@ -57,8 +57,8 @@ Circular extends SHALL be detected and handled by the **first-encounter wins** r
 profile.json SHALL support an optional `schemas` field listing YAML schema filenames available in the profile directory. Each entry is a filename (without path) resolved relative to the profile directory. The schemas define the state machine structure (phases, transitions, gate mapping, settings, etc.).
 
 #### Scenario: Profile with one schema
-- **WHEN** profile.json contains `"schemas": ["state-machine.yaml"]`
-- **THEN** the loader resolves `profiles/<id>/state-machine.yaml` as the profile's schema
+- **WHEN** profile.json contains `"schemas": ["session-guard.yaml"]`
+- **THEN** the loader resolves `profiles/<id>/session-guard.yaml` as the profile's schema
 
 #### Scenario: Profile with multiple schemas
 - **WHEN** profile.json contains `"schemas": ["workflow.yaml", "review.yaml"]`

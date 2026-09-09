@@ -1,15 +1,15 @@
 import { describe, it, expect } from 'vitest';
 import type { WorkflowSession } from '../../src/session/session-schema.ts';
 import { baseGates } from '../support/task-factory.ts';
-import { StateMachineEngine, type EngineConfig } from '../../src/domain/engine.ts';
+import { SessionGuardEngine, type EngineConfig } from '../../src/domain/engine.ts';
 import { compileWorkflow, type CompiledWorkflow } from '../../src/schema/compile-workflow.ts';
 import type { ResolvedSchema } from '../../src/schema/types.ts';
 
 function createSession(overrides: Partial<WorkflowSession> = {}): WorkflowSession {
-  return {
+  const session: WorkflowSession = {
     sessionId: 'ctrl-test',
     profileId: 'base',
-    schemaId: 'state-machine',
+    schemaId: 'session-guard',
     schemaVersion: 1,
     revision: 0,
     title: 'Control flow test',
@@ -18,21 +18,26 @@ function createSession(overrides: Partial<WorkflowSession> = {}): WorkflowSessio
     refs: {},
     tasks: { implementation: [] },
     activeOperations: {},
+    activeTaskContexts: [],
+    loopRuns: {},
     deliveryReceipt: null,
     deliveryPermit: null,
     retryBudgets: {},
+    pendingDecisions: [],
     updatedAt: new Date().toISOString(),
     verifications: [],
     changedFiles: [],
     currentStage: 'PLANNING',
     invariantViolations: [],
     consentedCallIDs: [],
-    ...overrides,
+    processedResultCallIDs: [],
   };
+  Object.assign(session, overrides);
+  return session;
 }
 
-function engineFromCompiled(cw: CompiledWorkflow): StateMachineEngine {
-  return new StateMachineEngine({
+function engineFromCompiled(cw: CompiledWorkflow): SessionGuardEngine {
+  return new SessionGuardEngine({
     stageAssignments: [],
     transitions: cw.transitions.map((t) => ({
       from: t.from,
@@ -51,7 +56,7 @@ function engineFromCompiled(cw: CompiledWorkflow): StateMachineEngine {
   });
 }
 
-function engineFromSchema(schema: ResolvedSchema): StateMachineEngine {
+function engineFromSchema(schema: ResolvedSchema): SessionGuardEngine {
   const { workflow, errors } = compileWorkflow(schema);
   expect(errors).toHaveLength(0);
   return engineFromCompiled(workflow);

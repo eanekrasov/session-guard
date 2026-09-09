@@ -16,7 +16,7 @@ import { WorkflowSessionSchema } from '../../src/session/session-schema.ts';
 const TEST_DIR = path.join('/tmp', 'session-files-test-' + randomUUID());
 
 async function writeSession(id: string): Promise<void> {
-  const session = WorkflowSessionSchema.parse(createSession(id, 'android', 'state-machine'));
+  const session = WorkflowSessionSchema.parse(createSession(id, 'android', 'session-guard'));
   await writeFile(path.join(TEST_DIR, sessionFileName(id)), JSON.stringify(session));
 }
 

@@ -45,8 +45,8 @@ Agents, skills, and invariants SHALL be inherited from the extends chain. If the
 For each entry in the profile's `schemas` array, the loader SHALL read and parse the corresponding YAML file from the profile directory. Each YAML schema SHALL be validated against the profile-schema Zod schema.
 
 #### Scenario: Loader loads single schema
-- **WHEN** profile.json contains `"schemas": ["state-machine.yaml"]`
-- **THEN** the loader parses `profiles/<id>/state-machine.yaml` and validates it
+- **WHEN** profile.json contains `"schemas": ["session-guard.yaml"]`
+- **THEN** the loader parses `profiles/<id>/session-guard.yaml` and validates it
 
 #### Scenario: Loader loads multiple schemas
 - **WHEN** profile.json contains `"schemas": ["workflow.yaml", "review.yaml"]`
@@ -65,8 +65,8 @@ For each entry in the profile's `schemas` array, the loader SHALL read and parse
 When a YAML schema declares `extends`, the loader SHALL load the referenced schema from `<profile-id>/<schema-filename>`. The referenced profile SHALL be resolved through the profile extends chain (an extended profile's schemas are available to the extending profile).
 
 #### Scenario: Schema extends schema from extended profile
-- **WHEN** profile `"android"` extends `"base"` and its schema contains `extends: "base/state-machine.yaml"`
-- **THEN** the loader resolves `profiles/base/state-machine.yaml` as the base schema
+- **WHEN** profile `"android"` extends `"base"` and its schema contains `extends: "base/session-guard.yaml"`
+- **THEN** the loader resolves `profiles/base/session-guard.yaml` as the base schema
 
 ### Requirement: Loader SHALL load guards.ts when present
 

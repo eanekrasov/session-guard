@@ -85,12 +85,12 @@ function makeApi(tree: SessionTree): SectionApi {
 let projectDir: string | null = null;
 
 function enterProject(): string {
-  delete process.env.STATE_MACHINE_STORE_DIR;
-  delete process.env.STATE_MACHINE_PROFILES_DIR;
+  delete process.env.SESSION_GUARD_STORE_DIR;
+  delete process.env.SESSION_GUARD_PROFILES_DIR;
   projectDir = mkdtempSync(join(tmpdir(), 'sidebar-e2e-'));
   const sessions = join(projectDir, RUNTIME_SUBDIR);
   mkdirSync(sessions, { recursive: true });
-  process.env.STATE_MACHINE_STORE_DIR = sessions;
+  process.env.SESSION_GUARD_STORE_DIR = sessions;
   process.chdir(projectDir);
   return sessions;
 }
@@ -304,7 +304,7 @@ describe('sidebar-state: видимость секции', () => {
     expect(section.open()).toBe(true);
     section.toggleOpen();
     expect(section.open()).toBe(false);
-    expect(api.kv.get<boolean>('state-machine.sidebar.section_open')).toBe(false);
+    expect(api.kv.get<boolean>('session-guard.sidebar.section_open')).toBe(false);
     expect(renders).toBe(1);
   });
 });

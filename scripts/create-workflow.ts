@@ -11,19 +11,19 @@ async function main() {
   const profilesDir = resolve(import.meta.dir!, '../test/fixtures/profiles');
 
   // Пишем туда же, куда смотрит TUI
-  const runtimeDir = resolve(import.meta.dir!, '..', '.opencode', 'state-machine', 'runtime');
+  const runtimeDir = resolve(import.meta.dir!, '..', '.opencode', 'session-guard', 'runtime');
   mkdirSync(runtimeDir, { recursive: true });
 
-  process.env.STATE_MACHINE_STORE_DIR = runtimeDir;
-  process.env.STATE_MACHINE_PROFILES_DIR = profilesDir;
+  process.env.SESSION_GUARD_STORE_DIR = runtimeDir;
+  process.env.SESSION_GUARD_PROFILES_DIR = profilesDir;
 
   const { createRuntime } = await import('../src/app/runtime.ts');
 
   const hooks = createRuntime({
     client: {} as never,
     project: {
-      id: 'state-machine',
-      name: 'state-machine',
+      id: 'session-guard',
+      name: 'session-guard',
       directory: resolve(import.meta.dir!, '..'),
       worktree: resolve(import.meta.dir!, '..'),
       time: { created: Date.now() },

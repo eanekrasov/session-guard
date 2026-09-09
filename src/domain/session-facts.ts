@@ -1,5 +1,5 @@
 import type {
-  WorkflowSessionRead,
+  WorkflowSession,
   GateStatus,
   TaskStatus,
   Verification,
@@ -33,7 +33,7 @@ export interface SessionFacts {
   /** Used in guard: `session.deliveryReceipt exists`, `session.deliveryReceipt != null`.
    *  Always null until delivery model is implemented. */
   deliveryReceipt: string | null;
-  deliveryPermit?: WorkflowSessionRead['deliveryPermit'];
+  deliveryPermit?: WorkflowSession['deliveryPermit'];
   /** Document references (plan, spec, etc.) for guard expressions.
    *  Check with `session.refs.plan != null`. */
   refs: Record<string, string>;
@@ -54,7 +54,7 @@ export interface SessionFacts {
 
 // ─── Projection function ───────────────────────────────────────────────────────
 
-export function toSessionFacts(session: WorkflowSessionRead): SessionFacts {
+export function toSessionFacts(session: WorkflowSession): SessionFacts {
   const tasks = session.tasks ?? {};
   const activeOperations = session.activeOperations ?? {};
   const retryBudgets = session.retryBudgets ?? {};

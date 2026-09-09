@@ -54,10 +54,10 @@ function pluginInput(): PluginInput {
 beforeEach(async () => {
   projectDir = mkdtempSync(join(tmpdir(), 'consent-roundtrip-project-'));
   storeDir = mkdtempSync(join(tmpdir(), 'consent-roundtrip-store-'));
-  process.env.STATE_MACHINE_STORE_DIR = storeDir;
+  process.env.SESSION_GUARD_STORE_DIR = storeDir;
   writeFileSync(join(projectDir, 'plan.md'), '# Plan\n\nDo the thing.\n', 'utf-8');
   store = new WorkflowStore(storeDir);
-  const session = createSession('s1', 'base', 'state-machine');
+  const session = createSession('s1', 'base', 'session-guard');
   await store.save(session);
   // A few saves, so the revision is well past zero and a stale read is visible.
   await store.save((await store.load('s1'))!);

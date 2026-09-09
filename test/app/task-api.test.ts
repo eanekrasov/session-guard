@@ -125,6 +125,8 @@ describe('TaskApi', () => {
       ancestry: [],
       stage: 'code',
       status: 'running',
+      gates: {},
+      round: 0,
     };
     await store.save(session!);
 

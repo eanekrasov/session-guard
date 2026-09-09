@@ -40,12 +40,12 @@ function pluginInput(): PluginInput {
 }
 
 beforeEach(async () => {
-  previousStore = process.env.STATE_MACHINE_STORE_DIR;
-  previousProfiles = process.env.STATE_MACHINE_PROFILES_DIR;
+  previousStore = process.env.SESSION_GUARD_STORE_DIR;
+  previousProfiles = process.env.SESSION_GUARD_PROFILES_DIR;
   storeDirectory = await mkdtemp(join(tmpdir(), 'mutating-store-'));
   profilesDirectory = await mkdtemp(join(tmpdir(), 'mutating-profiles-'));
-  process.env.STATE_MACHINE_STORE_DIR = storeDirectory;
-  process.env.STATE_MACHINE_PROFILES_DIR = profilesDirectory;
+  process.env.SESSION_GUARD_STORE_DIR = storeDirectory;
+  process.env.SESSION_GUARD_PROFILES_DIR = profilesDirectory;
 
   // `mutation-guarded` admits nothing until a plan is approved.
   setFixtureProfilesDir();
@@ -57,10 +57,10 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  if (previousStore === undefined) delete process.env.STATE_MACHINE_STORE_DIR;
-  else process.env.STATE_MACHINE_STORE_DIR = previousStore;
-  if (previousProfiles === undefined) delete process.env.STATE_MACHINE_PROFILES_DIR;
-  else process.env.STATE_MACHINE_PROFILES_DIR = previousProfiles;
+  if (previousStore === undefined) delete process.env.SESSION_GUARD_STORE_DIR;
+  else process.env.SESSION_GUARD_STORE_DIR = previousStore;
+  if (previousProfiles === undefined) delete process.env.SESSION_GUARD_PROFILES_DIR;
+  else process.env.SESSION_GUARD_PROFILES_DIR = previousProfiles;
   await rm(storeDirectory, { recursive: true, force: true });
   await rm(profilesDirectory, { recursive: true, force: true });
 });

@@ -23,7 +23,7 @@ describe('resolveConfig', () => {
 
     // Schemas
     expect(profile.schemas).toHaveLength(1);
-    expect(profile.schemas[0].source).toBe('android/state-machine.yaml');
+    expect(profile.schemas[0].source).toBe('android/session-guard.yaml');
   });
 
   it('resolves base profile directly (no extends)', async () => {
@@ -97,6 +97,6 @@ describe('listProfiles', () => {
 
     expect(base).toBeDefined();
     expect(base!.agents).toEqual(['code', 'architect']);
-    expect(base!.schemas).toContain('state-machine.yaml');
+    expect(base!.schemas).toContain('session-guard.yaml');
   });
 });

@@ -39,7 +39,7 @@ function setTaskAdmissionFixtureProfilesDir(
   strategy: DispatchStrategy,
   options: { maxConcurrent?: number; allowedAgents?: string[] } = {}
 ): void {
-  process.env.STATE_MACHINE_PROFILES_DIR = resolve(import.meta.dir, '../../test/fixtures/profiles');
+  process.env.SESSION_GUARD_PROFILES_DIR = resolve(import.meta.dir, '../../test/fixtures/profiles');
   if (strategy === 'serial_with_overlap') taskAdmissionProfileId = 'cycle-overlap-2';
   else if (strategy === 'parallel' && options.maxConcurrent === 1)
     taskAdmissionProfileId = 'cycle-parallel-1';
@@ -117,19 +117,19 @@ async function load(store: WorkflowStore): Promise<WorkflowSession> {
 }
 
 beforeEach(async () => {
-  previousStoreDirectory = process.env.STATE_MACHINE_STORE_DIR;
-  previousProfilesDirectory = process.env.STATE_MACHINE_PROFILES_DIR;
+  previousStoreDirectory = process.env.SESSION_GUARD_STORE_DIR;
+  previousProfilesDirectory = process.env.SESSION_GUARD_PROFILES_DIR;
   storeDirectory = await mkdtemp(join(tmpdir(), 'task-admission-store-'));
   profilesDirectory = await mkdtemp(join(tmpdir(), 'task-admission-profiles-'));
-  process.env.STATE_MACHINE_STORE_DIR = storeDirectory;
-  process.env.STATE_MACHINE_PROFILES_DIR = profilesDirectory;
+  process.env.SESSION_GUARD_STORE_DIR = storeDirectory;
+  process.env.SESSION_GUARD_PROFILES_DIR = profilesDirectory;
 });
 
 afterEach(async () => {
-  if (previousStoreDirectory === undefined) delete process.env.STATE_MACHINE_STORE_DIR;
-  else process.env.STATE_MACHINE_STORE_DIR = previousStoreDirectory;
-  if (previousProfilesDirectory === undefined) delete process.env.STATE_MACHINE_PROFILES_DIR;
-  else process.env.STATE_MACHINE_PROFILES_DIR = previousProfilesDirectory;
+  if (previousStoreDirectory === undefined) delete process.env.SESSION_GUARD_STORE_DIR;
+  else process.env.SESSION_GUARD_STORE_DIR = previousStoreDirectory;
+  if (previousProfilesDirectory === undefined) delete process.env.SESSION_GUARD_PROFILES_DIR;
+  else process.env.SESSION_GUARD_PROFILES_DIR = previousProfilesDirectory;
   await rm(storeDirectory, { recursive: true, force: true });
   await rm(profilesDirectory, { recursive: true, force: true });
 });
@@ -152,7 +152,7 @@ describe('task-cycle admission', () => {
       agent: 'code',
       status: 'running',
     });
-    const runId = session.activeOperations['call-1'].runId;
+    const runId = session.activeOperations['call-1'].runId!;
     expect(session.loopRuns[runId]).toEqual({
       id: runId,
       taskId: 'task-1',

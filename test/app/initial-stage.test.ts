@@ -36,18 +36,18 @@ type ToolMap = Record<
 >;
 
 beforeEach(() => {
-  previousStore = process.env.STATE_MACHINE_STORE_DIR;
-  previousProfiles = process.env.STATE_MACHINE_PROFILES_DIR;
+  previousStore = process.env.SESSION_GUARD_STORE_DIR;
+  previousProfiles = process.env.SESSION_GUARD_PROFILES_DIR;
   storeDirectory = mkdtempSync(join(tmpdir(), 'initial-stage-'));
-  process.env.STATE_MACHINE_STORE_DIR = storeDirectory;
+  process.env.SESSION_GUARD_STORE_DIR = storeDirectory;
   setFixtureProfilesDir();
 });
 
 afterEach(() => {
-  if (previousStore === undefined) delete process.env.STATE_MACHINE_STORE_DIR;
-  else process.env.STATE_MACHINE_STORE_DIR = previousStore;
-  if (previousProfiles === undefined) delete process.env.STATE_MACHINE_PROFILES_DIR;
-  else process.env.STATE_MACHINE_PROFILES_DIR = previousProfiles;
+  if (previousStore === undefined) delete process.env.SESSION_GUARD_STORE_DIR;
+  else process.env.SESSION_GUARD_STORE_DIR = previousStore;
+  if (previousProfiles === undefined) delete process.env.SESSION_GUARD_PROFILES_DIR;
+  else process.env.SESSION_GUARD_PROFILES_DIR = previousProfiles;
   rmSync(storeDirectory, { recursive: true, force: true });
 });
 
@@ -79,7 +79,7 @@ describe("a session starts in its own workflow's first stage", () => {
     const store = new WorkflowStore(storeDirectory);
 
     await hooks.tool!['workflow-create']!.execute(
-      { schemaId: 'base/state-machine' },
+      { schemaId: 'base/session-guard' },
       { sessionID: 'starts-at-planning' }
     );
 

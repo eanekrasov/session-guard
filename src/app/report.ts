@@ -5,7 +5,7 @@ import type { LogFn } from './logger.ts';
  * One funnel for every error the plugin reports.
  *
  * The three channels existed and were used once each, wired independently:
- * a toast gated on `DEBUG_TUI`, a log gated on `STATE_MACHINE_LOG_LEVEL`, and
+ * a toast gated on `DEBUG_TUI`, a log gated on `SESSION_GUARD_LOG_LEVEL`, and
  * a refusal carried by `WorkflowBlockedError`. Two switches for one idea of
  * "debug", and what the operator saw depended on which tool they happened to
  * call — the same `ProfileConfigurationError` became tool output in
@@ -20,7 +20,7 @@ export type Reporter = (_message: string, _extra?: Record<string, unknown>) => v
 /** The one debug switch. `DEBUG_TUI` is honoured only to turn toasts off. */
 export function toastsEnabled(): boolean {
   if (process.env.DEBUG_TUI === '0') return false;
-  return process.env.STATE_MACHINE_LOG_LEVEL === 'debug';
+  return process.env.SESSION_GUARD_LOG_LEVEL === 'debug';
 }
 
 type ToastClient = {

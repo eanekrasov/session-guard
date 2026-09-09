@@ -14,13 +14,13 @@ All guard, condition, and expression fields (`guard`, `entryGuards`, `exitGuards
 
 ### Requirement: Schema SHALL support extends field
 
-Each YAML schema SHALL support an optional `extends` field referencing another schema. The reference format SHALL be `<profile-id>/<schema-filename>` (e.g., `"base/state-machine.yaml"`). When present, the resolver SHALL load the referenced schema from the extended profile and merge its fields as the base. When absent, the schema is standalone.
+Each YAML schema SHALL support an optional `extends` field referencing another schema. The reference format SHALL be `<profile-id>/<schema-filename>` (e.g., `"base/session-guard.yaml"`). When present, the resolver SHALL load the referenced schema from the extended profile and merge its fields as the base. When absent, the schema is standalone.
 
 Circular extends SHALL be detected and handled by the **first-encounter wins** rule.
 
 #### Scenario: Schema extends another schema
-- **WHEN** schema file contains `extends: "base/state-machine.yaml"`
-- **THEN** the resolver loads `profiles/base/state-machine.yaml` as the base before applying overrides
+- **WHEN** schema file contains `extends: "base/session-guard.yaml"`
+- **THEN** the resolver loads `profiles/base/session-guard.yaml` as the base before applying overrides
 
 #### Scenario: Schema without extends is standalone
 - **WHEN** schema has no `extends` field
@@ -39,7 +39,7 @@ A phase definition MAY contain:
 - **THEN** these phases are available in the resolved config
 
 #### Scenario: Schema with extends replaces base phases
-- **WHEN** schema extends `"base/state-machine.yaml"` and specifies its own `phases`
+- **WHEN** schema extends `"base/session-guard.yaml"` and specifies its own `phases`
 - **THEN** the base phases are fully replaced by the extending schema's phases
 
 ### Requirement: Schema SHALL support transitions list

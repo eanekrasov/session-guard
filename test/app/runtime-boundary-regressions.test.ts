@@ -34,20 +34,20 @@ function pluginInput(): PluginInput {
 }
 
 beforeEach(() => {
-  previousStore = process.env.STATE_MACHINE_STORE_DIR;
-  previousProfiles = process.env.STATE_MACHINE_PROFILES_DIR;
+  previousStore = process.env.SESSION_GUARD_STORE_DIR;
+  previousProfiles = process.env.SESSION_GUARD_PROFILES_DIR;
   storeDirectory = mkdtempSync(join(tmpdir(), 'probe-store-'));
   projectDirectory = mkdtempSync(join(tmpdir(), 'probe-project-'));
   outsideDirectory = mkdtempSync(join(tmpdir(), 'probe-outside-'));
-  process.env.STATE_MACHINE_STORE_DIR = storeDirectory;
+  process.env.SESSION_GUARD_STORE_DIR = storeDirectory;
   setFixtureProfilesDir();
 });
 
 afterEach(() => {
-  if (previousStore === undefined) delete process.env.STATE_MACHINE_STORE_DIR;
-  else process.env.STATE_MACHINE_STORE_DIR = previousStore;
-  if (previousProfiles === undefined) delete process.env.STATE_MACHINE_PROFILES_DIR;
-  else process.env.STATE_MACHINE_PROFILES_DIR = previousProfiles;
+  if (previousStore === undefined) delete process.env.SESSION_GUARD_STORE_DIR;
+  else process.env.SESSION_GUARD_STORE_DIR = previousStore;
+  if (previousProfiles === undefined) delete process.env.SESSION_GUARD_PROFILES_DIR;
+  else process.env.SESSION_GUARD_PROFILES_DIR = previousProfiles;
   for (const dir of [storeDirectory, projectDirectory, outsideDirectory]) {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -140,7 +140,7 @@ describe('reading tasks changes nothing', () => {
     // unconditionally, so a single read bumped the revision — a version nobody
     // asked for, and a conflict waiting for a second writer.
     const store = new WorkflowStore(storeDirectory);
-    const session = createSession('reader', 'base', 'state-machine', 'planning');
+    const session = createSession('reader', 'base', 'session-guard', 'planning');
     session.tasks.implementation = [createTask()];
     await store.save(session);
     const before = (await store.load('reader'))!.revision;
@@ -163,7 +163,7 @@ describe('a guard is evaluated with the context it was given', () => {
     // `allTasksCompleted()` with no argument lost `currentLoopListKey` and
     // answered `false` where a direct evaluation answered `true`.
     const { GuardEvaluator } = await import('../../src/schema/guard-evaluator.ts');
-    const { StateMachineEngine, toGuardContext } = await import('../../src/domain/engine.ts');
+    const { SessionGuardEngine, toGuardContext } = await import('../../src/domain/engine.ts');
     const { MutationOrchestrator } = await import('../../src/app/mutation-orchestrator.ts');
     const { SessionExecutor } = await import('../../src/app/session-executor.ts');
     const { fixtureProfilesDir } = await import('../support/fixture-profiles.ts');
@@ -184,7 +184,7 @@ describe('a guard is evaluated with the context it was given', () => {
       projectDirectory,
       fixtureProfilesDir('profiles')
     );
-    const engine: InstanceType<typeof StateMachineEngine> = await orchestrator.resolveEngine(
+    const engine: InstanceType<typeof SessionGuardEngine> = await orchestrator.resolveEngine(
       'jobs-loop',
       'flow'
     );

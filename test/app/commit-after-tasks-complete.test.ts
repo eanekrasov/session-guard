@@ -40,11 +40,11 @@ function pluginInput(): PluginInput {
 }
 
 beforeEach(async () => {
-  previousStoreDir = process.env.STATE_MACHINE_STORE_DIR;
-  previousProfilesDir = process.env.STATE_MACHINE_PROFILES_DIR;
+  previousStoreDir = process.env.SESSION_GUARD_STORE_DIR;
+  previousProfilesDir = process.env.SESSION_GUARD_PROFILES_DIR;
   storeDirectory = await mkdtemp(join(tmpdir(), 'commit-done-store-'));
   repoDirectory = await mkdtemp(join(tmpdir(), 'commit-done-repo-'));
-  process.env.STATE_MACHINE_STORE_DIR = storeDirectory;
+  process.env.SESSION_GUARD_STORE_DIR = storeDirectory;
   git(repoDirectory, ['init', '-q']);
   git(repoDirectory, ['config', 'user.email', 'test@example.com']);
   git(repoDirectory, ['config', 'user.name', 'test']);
@@ -55,10 +55,10 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  if (previousStoreDir === undefined) delete process.env.STATE_MACHINE_STORE_DIR;
-  else process.env.STATE_MACHINE_STORE_DIR = previousStoreDir;
-  if (previousProfilesDir === undefined) delete process.env.STATE_MACHINE_PROFILES_DIR;
-  else process.env.STATE_MACHINE_PROFILES_DIR = previousProfilesDir;
+  if (previousStoreDir === undefined) delete process.env.SESSION_GUARD_STORE_DIR;
+  else process.env.SESSION_GUARD_STORE_DIR = previousStoreDir;
+  if (previousProfilesDir === undefined) delete process.env.SESSION_GUARD_PROFILES_DIR;
+  else process.env.SESSION_GUARD_PROFILES_DIR = previousProfilesDir;
   await rm(storeDirectory, { recursive: true, force: true });
   await rm(repoDirectory, { recursive: true, force: true });
 });
@@ -71,7 +71,7 @@ describe('the commit step on a session whose work is finished', () => {
     // workflow task run for mutation": the commit required completed tasks,
     // and the handler behind it required an unfinished one.
     const store = new WorkflowStore(storeDirectory);
-    const session = createSession('commit-done', 'base', 'state-machine');
+    const session = createSession('commit-done', 'base', 'session-guard');
     session.currentStage = 'commit';
     session.tasks.implementation = [createTask({ status: 'completed' })];
     for (const gate of ['invariants', 'review', 'qa']) setGateStatus(session, gate, 'passed');
@@ -103,7 +103,7 @@ describe('a bash call that only reads', () => {
     // had no runnable task.
     const store = new WorkflowStore(storeDirectory);
     // Fresh session: no plan approval, no tasks — both refusal paths armed.
-    await store.save(createSession('read-only', 'base', 'state-machine'));
+    await store.save(createSession('read-only', 'base', 'session-guard'));
     const hooks = await createRuntime(pluginInput());
 
     for (const command of ['git status --short', 'ls -la', 'rg -n TODO src']) {
@@ -122,7 +122,7 @@ describe('a bash call that only reads', () => {
 
   it('still refuses a write on the same session', async () => {
     const store = new WorkflowStore(storeDirectory);
-    await store.save(createSession('read-only-guard', 'base', 'state-machine'));
+    await store.save(createSession('read-only-guard', 'base', 'session-guard'));
     const hooks = await createRuntime(pluginInput());
 
     await expect(
@@ -146,7 +146,7 @@ describe('what a dispatched task changed reaches the delivery permit', () => {
     const { writeFile } = await import('node:fs/promises');
     const { approve } = await import('../../src/domain/approvals.ts');
     const store = new WorkflowStore(storeDirectory);
-    const session = createSession('delegated', 'base', 'state-machine', 'planning');
+    const session = createSession('delegated', 'base', 'session-guard', 'planning');
     // The stage is derived from the facts, not from what we write here: the
     // fixture's `uncommitted` rule needs an approved plan and an unfinished
     // task before it puts the session in `execution`.
@@ -188,7 +188,7 @@ describe('a commit after an intermediate change was undone', () => {
     // the workflow sat in `commit`.
     const { writeFile, mkdir } = await import('node:fs/promises');
     const store = new WorkflowStore(storeDirectory);
-    const session = createSession('undone', 'base', 'state-machine', 'planning');
+    const session = createSession('undone', 'base', 'session-guard', 'planning');
     session.currentStage = 'commit';
     session.tasks.implementation = [createTask({ status: 'completed' })];
     for (const gate of ['invariants', 'review', 'qa']) setGateStatus(session, gate, 'passed');

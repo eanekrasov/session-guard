@@ -19,7 +19,7 @@ import {
 } from '../schema/types.ts';
 import { nextTaskStage, TASK_DONE } from '../domain/task-movement.ts';
 import { approve } from '../domain/approvals.ts';
-import { toGuardContext, type StateMachineEngine } from '../domain/engine.ts';
+import { toGuardContext, type SessionGuardEngine } from '../domain/engine.ts';
 import { admitAction, commandMatches, type AdmissionRequest } from '../domain/action-admission.ts';
 import type { ActionEntry } from '../schema/profile-schema.ts';
 import { SessionExecutor } from './session-executor.ts';
@@ -95,7 +95,7 @@ function tool<A extends Record<string, unknown>>(def: {
   return toolFn(def as never);
 }
 
-// ─── StateMachineRuntime ─────────────────────────────────────────────────────
+// ─── SessionGuardRuntime ─────────────────────────────────────────────────────
 
 /** A tool part as it arrives on the event stream, in either host shape. */
 interface EventPart {
@@ -116,7 +116,7 @@ interface EventEnvelope {
   };
 }
 
-class StateMachineRuntime {
+class SessionGuardRuntime {
   private store: WorkflowStore;
   private queue: SessionQueue;
   private executor: SessionExecutor;
@@ -549,7 +549,7 @@ class StateMachineRuntime {
       if (profiles.length === 0) {
         const message =
           `No workflow profiles found in ${this.profilesDir}. ` +
-          `Set STATE_MACHINE_PROFILES_DIR or create a profile to use workflow tools.`;
+          `Set SESSION_GUARD_PROFILES_DIR or create a profile to use workflow tools.`;
         this.report(message, { profilesDir: this.profilesDir });
         return { output: message };
       }
@@ -569,7 +569,7 @@ class StateMachineRuntime {
     }
 
     let resolvedSchemaId: string;
-    let engine: StateMachineEngine;
+    let engine: SessionGuardEngine;
     try {
       const resolved = await resolveConfig(resolvedProfileId, this.profilesDir);
       resolvedSchemaId = selectSchema(resolvedProfileId, resolved.schemas, requestedSchemaId).id;
@@ -1000,7 +1000,7 @@ class StateMachineRuntime {
       const stageMayEdit =
         editors.length > 0 &&
         (roster === undefined ||
-          roster.some((candidate) => agentIsAllowed(candidate, editors, tx.session.profileId)));
+          roster.some((candidate) => agentIsAllowed(candidate, editors, tx.session!.profileId)));
 
       if (
         stageMayEdit &&
@@ -1121,7 +1121,7 @@ class StateMachineRuntime {
         agent,
         stage: stageId,
         displayDescription:
-          typeof description === 'string' ? description.slice(match[0].length).trimStart() : '',
+          typeof description === 'string' ? description.slice(match![0].length).trimStart() : '',
       });
     });
   }
@@ -1794,7 +1794,7 @@ class StateMachineRuntime {
     }
 
     const operation = session.activeOperations[callID];
-    const run = operation ? session.loopRuns[operation.runId] : undefined;
+    const run = operation && operation.runId ? session.loopRuns[operation.runId] : undefined;
     const task = operation ? findTask(session, operation.taskId) : undefined;
 
     if (
@@ -2292,13 +2292,17 @@ class StateMachineRuntime {
       tool: string;
       sessionID: string;
       callID: string;
-      args?: { filePath?: string; path?: string; file?: string };
+      args?: unknown;
     },
     output: { title: string; output: string; metadata: unknown }
   ): Promise<void> {
     if (!this.fileTools.has(tool)) return;
 
-    const candidate = input.args?.filePath ?? input.args?.path ?? input.args?.file;
+    const args =
+      input.args && typeof input.args === 'object'
+        ? (input.args as { filePath?: unknown; path?: unknown; file?: unknown })
+        : undefined;
+    const candidate = args?.filePath ?? args?.path ?? args?.file;
     if (typeof candidate !== 'string') return;
 
     const absolute = resolve(this.context.directory, candidate);
@@ -2403,7 +2407,7 @@ class StateMachineRuntime {
    * действий не объявила — тот же `??`, которым разрешается `allowedAgents`.
    */
   private async actingStageActions(session: WorkflowSession): Promise<ActionEntry[] | undefined> {
-    let engine: StateMachineEngine;
+    let engine: SessionGuardEngine;
     try {
       engine = await this.mutationOrchestrator.resolveEngine(session.profileId, session.schemaId);
     } catch {
@@ -2483,7 +2487,7 @@ class StateMachineRuntime {
         tool,
         reason: verdict.reason,
       });
-      throw new WorkflowBlockedError(verdict.reason);
+      throw new WorkflowBlockedError(verdict.reason ?? 'Action refused by the stage');
     }
   }
 
@@ -2858,7 +2862,7 @@ class StateMachineRuntime {
     const stage = moved.to;
     if (!stage) return;
 
-    let engine: StateMachineEngine;
+    let engine: SessionGuardEngine;
     try {
       engine = await this.mutationOrchestrator.resolveEngine(session.profileId, session.schemaId);
     } catch {
@@ -2889,7 +2893,7 @@ class StateMachineRuntime {
   }
 
   private async archiveIfFinished(session: WorkflowSession): Promise<void> {
-    let engine: StateMachineEngine;
+    let engine: SessionGuardEngine;
     try {
       engine = await this.mutationOrchestrator.resolveEngine(session.profileId, session.schemaId);
     } catch {
@@ -2922,42 +2926,42 @@ class StateMachineRuntime {
   async handleDispose(): Promise<void> {
     this.queue.clear();
     this.mutationOrchestrator.dispose();
-    void this.log('info', 'StateMachineRuntime disposed');
+    void this.log('info', 'SessionGuardRuntime disposed');
   }
 
   /**
-   * Handle config — register sm-* commands and state-machine agent.
+   * Handle config — register sm-* commands and session-guard agent.
    */
   async handleConfig(config: Config): Promise<void> {
     config.command = config.command || {};
     config.agent = config.agent || {};
     config.command['sm-status'] = {
-      template: 'tell the user the current state-machine workflow status for this session',
-      description: 'Show the current state-machine workflow session status',
-      agent: 'state-machine',
+      template: 'tell the user the current session-guard workflow status for this session',
+      description: 'Show the current session-guard workflow session status',
+      agent: 'session-guard',
       subtask: true,
     };
     config.command['sm-list'] = {
-      template: 'list all state-machine workflow sessions and their stages',
+      template: 'list all session-guard workflow sessions and their stages',
       description: 'List all active workflow sessions',
-      agent: 'state-machine',
+      agent: 'session-guard',
       subtask: true,
     };
     config.command['sm-session'] = {
-      template: 'manage the state-machine workflow session: create, switch, or show details',
+      template: 'manage the session-guard workflow session: create, switch, or show details',
       description: 'Create, switch, or inspect a workflow session',
-      agent: 'state-machine',
+      agent: 'session-guard',
       subtask: true,
     };
     config.command['sm-profile'] = {
       template:
-        'switch the state-machine profile: shows available profiles or switches to a given profile ID',
+        'switch the session-guard profile: shows available profiles or switches to a given profile ID',
       description: 'Switch the active workflow profile',
-      agent: 'state-machine',
+      agent: 'session-guard',
       subtask: true,
     };
 
-    config.agent['state-machine'] = {
+    config.agent['session-guard'] = {
       model: config.model,
       description:
         'State machine workflow agent — manages sessions, profiles, stages, and gates. Use for sm-* commands.',
@@ -3004,7 +3008,7 @@ class StateMachineRuntime {
       tool: {
         // Compatibility alias for the original public tool name.
         'workflow-create': tool({
-          description: 'Create a new state-machine workflow session',
+          description: 'Create a new session-guard workflow session',
           args: {
             schemaId: z.string().optional().describe('Schema ID without .yaml (e.g., android)'),
           },
@@ -3170,12 +3174,12 @@ class StateMachineRuntime {
 // ─── Factory ──────────────────────────────────────────────────────────────────
 
 /**
- * Create a new StateMachineRuntime and return its Hooks.
+ * Create a new SessionGuardRuntime and return its Hooks.
  */
 /**
  * Directories this instance works in, passed rather than exported.
  *
- * `STATE_MACHINE_PROFILES_DIR` / `STATE_MACHINE_STORE_DIR` remain the
+ * `SESSION_GUARD_PROFILES_DIR` / `SESSION_GUARD_STORE_DIR` remain the
  * operator's override, read by `paths.ts`; what must not happen is a plugin
  * instance *writing* them, which turns one project's local default into every
  * later instance's global override.
@@ -3186,6 +3190,6 @@ export interface RuntimePaths {
 }
 
 export function createRuntime(context: PluginInput, paths?: RuntimePaths): Hooks {
-  const runtime = new StateMachineRuntime(context, paths);
+  const runtime = new SessionGuardRuntime(context, paths);
   return runtime.hooks;
 }

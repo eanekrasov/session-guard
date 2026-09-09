@@ -65,7 +65,8 @@ export function nextLoopRunId(session: WorkflowSession): string {
   return `run-${sequence}`;
 }
 
-export function findTask(session: WorkflowSession, taskId: string): MutationTask | undefined {
+export function findTask(session: WorkflowSession, taskId?: string): MutationTask | undefined {
+  if (taskId === undefined) return undefined;
   return Object.values(session.tasks ?? {})
     .flat()
     .find((task) => task.id === taskId);

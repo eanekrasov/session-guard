@@ -2,6 +2,6 @@
   "id": "ios",
   "extends": "base",
   "description": "iOS development profile",
-  "schemas": ["state-machine.yaml"],
+  "schemas": ["session-guard.yaml"],
   "guardsTs": "guards.ts"
 }

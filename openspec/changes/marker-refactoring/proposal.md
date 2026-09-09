@@ -24,7 +24,7 @@
 - `src/guard-evaluator.ts` — Proxy (approved, confirmed вместо granted)
 - `src/domain/derive-phase.ts`, `src/domain/engine.ts` — импорты
 - `src/index.ts`, `src/domain/index.ts` — публичный API
-- `profiles/state-machine.yaml` — guard-выражения
+- `profiles/session-guard.yaml` — guard-выражения
 
 **Не затрагивает**: application layer (`src/app/runtime.ts`, `session-queue.ts`) — только импорты.
 
@@ -95,7 +95,7 @@
 | `session.granted(type)` | `session.approved(type)` |
 | (отсутствует) | `session.confirmed(stage)` |
 
-### 10. YAML guard-выражения (profiles/state-machine.yaml)
+### 10. YAML guard-выражения (profiles/session-guard.yaml)
 
 | Было | Стало |
 |------|-------|
@@ -118,7 +118,7 @@
 2. **plugin-runtime imports**: runtime.ts импортирует approvePlan, markBugVerified — нужно
    обновить импорты.
 3. **Guard-выражения в сохранённых профилях**: если пользователь написал свой YAML
-   со старыми именами — сломается. Хотя на данном этапе это только `profiles/state-machine.yaml`.
+   со старыми именами — сломается. Хотя на данном этапе это только `profiles/session-guard.yaml`.
 
 ## Recommendation
 

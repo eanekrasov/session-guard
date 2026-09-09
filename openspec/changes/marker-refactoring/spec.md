@@ -62,7 +62,7 @@
 - **R7.2**: В Proxy добавить `approved(type)` и `confirmed(stage)`
 - **R7.3**: `granted(type)` — удалить
 
-### R8. profiles/state-machine.yaml
+### R8. profiles/session-guard.yaml
 
 - **R8.1**: `session.granted('plan')` → `session.approved('plan')`
 - **R8.2**: `session.commitPermit exists` → `session.approved('commit')`
@@ -122,7 +122,7 @@
 
 ### S8. YAML consistency
 
-**Given** profiles/state-machine.yaml
+**Given** profiles/session-guard.yaml
 **Then** Все guard-выражения используют `session.approved('')` и `session.confirmed('')`
 **Then** Нет вхождений `granted`, `commitPermit`, `commitHash`, `planDeclined`
 

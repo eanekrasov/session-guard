@@ -24,7 +24,7 @@ describe('SchemaLoader', () => {
     it('loads and parses an existing YAML schema file', async () => {
       const loader = new SchemaLoader(fixturesDir);
 
-      const result = await loader.loadSchemaFile('base', 'state-machine.yaml');
+      const result = await loader.loadSchemaFile('base', 'session-guard.yaml');
 
       expect(result).not.toBeNull();
       expect(result!.stages).toBeDefined();
@@ -39,7 +39,7 @@ describe('SchemaLoader', () => {
     });
 
     it('wraps schema diagnostics with the profile, file, and issue path', async () => {
-      const profilesDir = await mkdtemp(path.join(tmpdir(), 'state-machine-invalid-profile-'));
+      const profilesDir = await mkdtemp(path.join(tmpdir(), 'session-guard-invalid-profile-'));
       const profileDir = path.join(profilesDir, 'invalid');
       await mkdir(profileDir);
       await writeFile(

@@ -1,7 +1,7 @@
 /**
  * Интеграционные тесты прохождения lifecycle через YAML-схему.
  *
- * Проверяют все определённые в profiles/state-machine.yaml траектории:
+ * Проверяют все определённые в profiles/session-guard.yaml траектории:
  *   Нормальный путь: planning → tasks_ready → code → review → qa → commit → done
  *   QA failed → code (доработка) → review → qa → commit → done
  *   QA exhausted → failed
@@ -12,12 +12,12 @@ import { describe, it, expect } from 'vitest';
 import type { WorkflowSession } from '../../src/session/session-schema.ts';
 import { baseGates } from '../support/task-factory.ts';
 import type { EngineConfig } from '../../src/domain/engine.ts';
-import { StateMachineEngine } from '../../src/domain/engine.ts';
+import { SessionGuardEngine } from '../../src/domain/engine.ts';
 import { createTask } from '../support/task-factory.ts';
 import { approve } from '../../src/domain/approvals.ts';
 import { setGateStatus } from '../../src/session/helpers.ts';
 
-// ─── YAML-схема из profiles/state-machine.yaml (транзиции) ────────────────────
+// ─── YAML-схема из profiles/session-guard.yaml (транзиции) ────────────────────
 
 const SCHEMA_TRANSITIONS: EngineConfig['transitions'] = [
   { from: 'planning', to: 'tasks_ready', guard: 'session.refs.plan != null', consent: 'plan' },
@@ -43,10 +43,10 @@ const SCHEMA_TRANSITIONS: EngineConfig['transitions'] = [
 // ─── Помощник: создать fresh-сессию ─────────────────────────────────────────────
 
 function createSession(overrides: Partial<WorkflowSession> = {}): WorkflowSession {
-  return {
+  const session: WorkflowSession = {
     sessionId: 'lifecycle-test',
     profileId: 'base',
-    schemaId: 'state-machine',
+    schemaId: 'session-guard',
     schemaVersion: 1,
     revision: 0,
     title: 'Lifecycle test',
@@ -55,22 +55,26 @@ function createSession(overrides: Partial<WorkflowSession> = {}): WorkflowSessio
     refs: {},
     tasks: { implementation: [] },
     activeOperations: {},
+    activeTaskContexts: [],
+    loopRuns: {},
     deliveryReceipt: null,
     deliveryPermit: null,
     retryBudgets: {},
+    pendingDecisions: [],
     updatedAt: new Date().toISOString(),
     verifications: [],
     changedFiles: [],
     currentStage: 'planning',
     invariantViolations: [],
     consentedCallIDs: [],
-
-    ...overrides,
+    processedResultCallIDs: [],
   };
+  Object.assign(session, overrides);
+  return session;
 }
 
-function createEngine(): StateMachineEngine {
-  return new StateMachineEngine({
+function createEngine(): SessionGuardEngine {
+  return new SessionGuardEngine({
     stageAssignments: [],
     transitions: SCHEMA_TRANSITIONS,
     stages: {},
@@ -83,7 +87,7 @@ function createEngine(): StateMachineEngine {
  */
 function advanceTo(
   session: WorkflowSession,
-  engine: StateMachineEngine,
+  engine: SessionGuardEngine,
   expectedStage: string
 ): void {
   const result = engine.tryApplyTransitions(session);
@@ -107,7 +111,7 @@ function advanceTo(
  */
 function assertStaysAt(
   session: WorkflowSession,
-  engine: StateMachineEngine,
+  engine: SessionGuardEngine,
   expectedStage: string
 ): void {
   const currentBefore = session.currentStage;
@@ -301,7 +305,7 @@ describe('QA exhausted path: qa → failed', () => {
 
 describe('Guard contracts — каждый тип guard-выражения из YAML', () => {
   it("session.gates.invariants == 'passed'", () => {
-    const engine = new StateMachineEngine({
+    const engine = new SessionGuardEngine({
       stageAssignments: [],
       transitions: [
         { from: 'planning', to: 'code', guard: "session.gates.invariants == 'passed'" },
@@ -316,7 +320,7 @@ describe('Guard contracts — каждый тип guard-выражения из 
   });
 
   it('session.refs.plan != null', () => {
-    const engine = new StateMachineEngine({
+    const engine = new SessionGuardEngine({
       stageAssignments: [],
       transitions: [{ from: 'planning', to: 'code', guard: 'session.refs.plan != null' }],
     });
@@ -329,7 +333,7 @@ describe('Guard contracts — каждый тип guard-выражения из 
   });
 
   it('hasPendingTasks()', () => {
-    const engine = new StateMachineEngine({
+    const engine = new SessionGuardEngine({
       stageAssignments: [],
       transitions: [{ from: 'planning', to: 'code', guard: 'hasPendingTasks()' }],
     });
@@ -342,7 +346,7 @@ describe('Guard contracts — каждый тип guard-выражения из 
   });
 
   it("isExhausted('cycles')", () => {
-    const engine = new StateMachineEngine({
+    const engine = new SessionGuardEngine({
       stageAssignments: [],
       transitions: [{ from: 'planning', to: 'failed', guard: "isExhausted('cycles')" }],
     });
@@ -357,7 +361,7 @@ describe('Guard contracts — каждый тип guard-выражения из 
   });
 
   it('session.deliveryReceipt != null', () => {
-    const engine = new StateMachineEngine({
+    const engine = new SessionGuardEngine({
       stageAssignments: [],
       transitions: [{ from: 'planning', to: 'done', guard: 'session.deliveryReceipt != null' }],
     });
@@ -370,7 +374,7 @@ describe('Guard contracts — каждый тип guard-выражения из 
   });
 
   it("Составной guard: session.gates.qa == 'failed' && !isExhausted('cycles')", () => {
-    const engine = new StateMachineEngine({
+    const engine = new SessionGuardEngine({
       stageAssignments: [],
       transitions: [
         {

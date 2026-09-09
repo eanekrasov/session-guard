@@ -3,7 +3,7 @@ import path from 'node:path';
 
 import { resolveConfig } from '../../src/public-api.ts';
 import { schemaToEngineConfig, selectSchema } from '../../src/app/mutation-orchestrator.ts';
-import { StateMachineEngine, toGuardContext } from '../../src/domain/engine.ts';
+import { SessionGuardEngine, toGuardContext } from '../../src/domain/engine.ts';
 import { admitAction, commandMatches } from '../../src/domain/action-admission.ts';
 import { isCommitTaskCommand } from '../../src/domain/session-queries.ts';
 import { approve } from '../../src/domain/approvals.ts';
@@ -207,7 +207,7 @@ describe('base carries the former canCommit on the delivering bash entry', () =>
 
   it('refuses the commit while a task is still open, even with review and qa passed', async () => {
     const { config } = await engineConfigFor('base');
-    const engine = new StateMachineEngine(config);
+    const engine = new SessionGuardEngine(config);
     const session = sessionInValidation('running');
     const verdict = admitAction(
       await commitActions(),
@@ -220,7 +220,7 @@ describe('base carries the former canCommit on the delivering bash entry', () =>
 
   it('allows the commit once every task is completed', async () => {
     const { config } = await engineConfigFor('base');
-    const engine = new StateMachineEngine(config);
+    const engine = new SessionGuardEngine(config);
     const session = sessionInValidation('completed');
     const verdict = admitAction(
       await commitActions(),
@@ -238,7 +238,7 @@ describe('base carries the former canCommit on the delivering bash entry', () =>
     expect(delivery?.guard).toContain("allTasksCompleted('implementation')");
 
     const { config } = await engineConfigFor(id);
-    const engine = new StateMachineEngine(config);
+    const engine = new SessionGuardEngine(config);
     const session = sessionInValidation('running', id);
     const verdict = admitAction(
       await commitActions(id),
@@ -254,7 +254,7 @@ describe('base carries the former canCommit on the delivering bash entry', () =>
     const edit = code?.actions?.find((entry) => entry.action === 'edit');
     expect(edit?.guard).toBe("session.approved('plan')");
 
-    const engine = new StateMachineEngine(config);
+    const engine = new SessionGuardEngine(config);
     const session = createSession('sp-android-code', 'android', 'android', 'execution');
     const refused = admitAction(
       code?.actions,
@@ -289,7 +289,7 @@ describe('base carries the former canCommit on the delivering bash entry', () =>
     '%s refuses an edit on `code` until the plan is approved',
     async (id) => {
       const { config } = await engineConfigFor(id);
-      const engine = new StateMachineEngine(config);
+      const engine = new SessionGuardEngine(config);
       const code = config.stages?.execution?.stages?.code;
 
       // Каждый профиль обязан нести `edit` в своём списке: `actions` заменяет
@@ -351,7 +351,7 @@ describe('base carries the former canCommit on the delivering bash entry', () =>
       const execution = config.stages?.execution;
       expect(execution?.actions, `${id}: execution declares no actions`).toBeDefined();
 
-      const engine = new StateMachineEngine(config);
+      const engine = new SessionGuardEngine(config);
       const session = createSession(`sp-${id}-outer`, id, id, 'execution');
       approve(session, 'plan', 'evidence', 'call-1');
       const verdict = admitAction(

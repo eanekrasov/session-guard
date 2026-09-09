@@ -263,9 +263,9 @@ export type EvaluateGuardFn = (
   evaluationContext?: GuardEvaluationContext
 ) => boolean;
 
-// ─── StateMachineEngine ────────────────────────────────────────────────────────
+// ─── SessionGuardEngine ────────────────────────────────────────────────────────
 
-export class StateMachineEngine {
+export class SessionGuardEngine {
   private readonly config: EngineConfig;
   private readonly evaluateGuardFn: EvaluateGuardFn;
 

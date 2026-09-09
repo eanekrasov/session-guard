@@ -2,7 +2,7 @@
 
 ## Workflow не создаётся
 
-Проверьте выбранный профиль и `STATE_MACHINE_PROFILES_DIR`. Если каталог пуст,
+Проверьте выбранный профиль и `SESSION_GUARD_PROFILES_DIR`. Если каталог пуст,
 создайте или подключите profile metadata и schema.
 
 ## Schema не загружается

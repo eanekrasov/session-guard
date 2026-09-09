@@ -15,7 +15,7 @@
 
 ```
 src/app/
-├── runtime.ts             # StateMachineRuntime class + createRuntime factory
+├── runtime.ts             # SessionGuardRuntime class + createRuntime factory
 ├── runtime-types.ts       # Internal runtime types (not SDK types)
 ├── dashboard.ts           # Minimal SSE dashboard server
 ├── session-queue.ts       # Per-root serial queue utility
@@ -26,7 +26,7 @@ src/app/
 └── index.ts               # Barrel export
 
 plugins/
-└── state-machine.js       # Bridge file — imports createRuntime
+└── session-guard.js       # Bridge file — imports createRuntime
 
 test/app/
 ├── runtime.test.ts
@@ -44,7 +44,7 @@ test/app/
 ┌──────────────────────────────────────────────────────────────┐
 │                   Application Layer (NEW)                     │
 │                                                              │
-│  plugins/state-machine.js                                    │
+│  plugins/session-guard.js                                    │
 │       │                                                      │
 │       ▼                                                      │
 │  src/app/runtime.ts  ── createRuntime(ctx) → Hooks           │
@@ -59,7 +59,7 @@ test/app/
 │       ▼  uses                                                │
 ├──────────────────────────────────────────────────────────────┤
 │                   Domain Layer (EXISTING)                     │
-│  StateMachineEngine, workflow functions, dispatch functions   │
+│  SessionGuardEngine, workflow functions, dispatch functions   │
 ├──────────────────────────────────────────────────────────────┤
 │                   Data Layer (EXISTING)                       │
 │  WorkflowStore, resolveConfig, evaluateGuard                  │
@@ -78,7 +78,7 @@ createRuntime(ctx)
     ├── creates sessionQueues Map<rootId, PromiseChain>
     ├── creates liveMutations Map<callId, rootId>
     ├── resolves profilesDir (env `HARNESS_PROFILES_DIR` or default `profiles/`)
-    ├── creates engineCache Map<profileId, StateMachineEngine>
+    ├── creates engineCache Map<profileId, SessionGuardEngine>
     └── optionally starts dashboard server
     │
     ▼
@@ -100,7 +100,7 @@ Hooks {
 
 | Option | Description |
 |--------|-------------|
-| **Chosen: Factory + internal class** | `createRuntime(ctx)` creates a `StateMachineRuntime` instance internally, returns `Hooks` that close over it |
+| **Chosen: Factory + internal class** | `createRuntime(ctx)` creates a `SessionGuardRuntime` instance internally, returns `Hooks` that close over it |
 | Rejected: Class alone | Outer factory matches parent pattern and OpenCode plugin convention |
 
 **Rationale**: The parent uses `createRuntime(context)`, and plugin bridge expects `Plugin = (input) => Promise<Hooks>`. The internal class encapsulates mutable state (queues, maps, engine cache) cleanly.
@@ -109,7 +109,7 @@ Hooks {
 
 | Option | Description |
 |--------|-------------|
-| **Chosen: Map<profileId, StateMachineEngine>** | Engine is created once per profileId and reused across sessions |
+| **Chosen: Map<profileId, SessionGuardEngine>** | Engine is created once per profileId and reused across sessions |
 | Rejected: Fresh per enqueue | Parent creates fresh every enqueue for preset change detection |
 
 **Rationale**: Plugin doesn't have the parent's preset-switching model. Profiles are static per session. Creating an engine once is cheaper.
@@ -119,7 +119,7 @@ On first access of a profileId, `resolveEngine()` SHALL:
 1. Call `resolveConfig(profileId, profilesDir)` from the Data Layer
 2. Extract `phaseAssignments`, `transitions`, `actionGuards` from all `ResolvedSchema[]`
 3. Merge phaseAssignments by concat + dedup by `id`, apply full override for transitions and actionGuards
-4. Construct `EngineConfig` and pass to `new StateMachineEngine(config, evaluateGuard)`
+4. Construct `EngineConfig` and pass to `new SessionGuardEngine(config, evaluateGuard)`
 
 This satisfies domain-layer AD12 (config merge is Application Layer responsibility) and data-layer resolve-config spec (resolveConfig produces ResolvedProfile with schemas).
 
@@ -209,7 +209,7 @@ If config hot-reload is needed later, add a `clearEngineCache()` method.
 
 **Rationale**: `captureBaseline` runs in `tool.execute.before` where latency matters (it blocks tool execution). `spawnSync` is fast for local git operations. `computeChangeScope` runs in `tool.execute.after` where latency is less critical.
 
-**Cross-cutting**: File hashing uses `computeSha256` from `sdd-artifacts.ts` directly (consistent hash format). The `moduleRoot` parameter filters change scope to a subdirectory (e.g., `"state-machine"`), matching the parent's pattern for plugin-scoped changes.
+**Cross-cutting**: File hashing uses `computeSha256` from `sdd-artifacts.ts` directly (consistent hash format). The `moduleRoot` parameter filters change scope to a subdirectory (e.g., `"session-guard"`), matching the parent's pattern for plugin-scoped changes.
 
 **Session integration**: `session.baselineHashes` is populated in `tool.execute.before` and consumed in `tool.execute.after`. This field must be added to `WorkflowSession` type.
 
@@ -244,23 +244,23 @@ import type { PluginInput, Hooks, ToolContext } from '@opencode-ai/plugin';
 import { tool } from '@opencode-ai/plugin';
 import { z } from 'zod';
 import { WorkflowStore, createSession } from '../session/session-store.ts';
-import { StateMachineEngine } from '../domain/engine.ts';
+import { SessionGuardEngine } from '../domain/engine.ts';
 import type { WorkflowSession } from '../session/types.ts';
 
 export function createRuntime(context: PluginInput): Hooks;
 
-// Internal: StateMachineRuntime class (not exported)
-class StateMachineRuntime {
+// Internal: SessionGuardRuntime class (not exported)
+class SessionGuardRuntime {
   private store: WorkflowStore;
   private queue: SessionQueue;
   private liveMutations: Map<string, string>;
-  private engineCache: Map<string, StateMachineEngine>;
+  private engineCache: Map<string, SessionGuardEngine>;
   private dashboardPort: number | null;
 
   constructor(context: PluginInput);
 
   // Internal helpers (wired into Hooks)
-  private resolveEngine(profileId: string): StateMachineEngine;
+  private resolveEngine(profileId: string): SessionGuardEngine;
   private handleCreateWorkflow(args: { profileId: string }, toolCtx: ToolContext): Promise<string>;
   private handleChatMessage(sessionID: string): Promise<void>;
   private handleToolBefore(tool: string, sessionID: string, callID: string): Promise<void>;
@@ -277,7 +277,7 @@ class StateMachineRuntime {
 
 ```typescript
 export function startDashboard(
-  runtime: StateMachineRuntime,
+  runtime: SessionGuardRuntime,
 ): Bun.Server | null;
 ```
 
@@ -602,7 +602,7 @@ Every import from another change's module:
 | `../session/session-store.ts` | session-store | `WorkflowStore` | runtime.ts | class |
 | `../session/session-store.ts` | session-store | `createSession` | runtime.ts | function |
 | `../session/types.ts` | session-store | `WorkflowSession` | runtime.ts, session-queue.ts | interface |
-| `../domain/engine.ts` | domain-layer | `StateMachineEngine` | runtime.ts | class |
+| `../domain/engine.ts` | domain-layer | `SessionGuardEngine` | runtime.ts | class |
 | `../domain/engine.ts` | domain-layer | `EvaluateGuardFn` | runtime.ts | type |
 | `../domain/types.ts` | domain-layer | `EngineConfig` | runtime.ts | interface |
 | `../domain/workflow.ts` (dynamic) | domain-layer | `beginMutation` | runtime.ts | function |
@@ -618,7 +618,7 @@ Every import from another change's module:
 ┌──────────┐     ┌──────────────┐     ┌──────────────┐     ┌────────────────┐
 │ data-layer│────▶│ session-store│────▶│ domain-layer  │────▶│ plugin-runtime │
 │           │     │              │     │              │     │                │
-│ resolveConfig│  │ WorkflowStore│     │ StateMachine  │     │ createRuntime  │
+│ resolveConfig│  │ WorkflowStore│     │ SessionGuard  │     │ createRuntime  │
 │ GuardEvaluator│  │ createSession│     │  Engine       │     │ Hooks wiring   │
 │ ResolvedSchema│ │ WorkflowSession│   │ beginMutation │     │ Dashboard      │
 └──────────┘     └──────────────┘     │ finishMutation │     └────────────────┘

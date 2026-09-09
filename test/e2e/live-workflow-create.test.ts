@@ -12,10 +12,10 @@ mkdirSync(TEST_DIR, { recursive: true });
 console.log('📁 Test directory:', TEST_DIR);
 
 // Setup env before importing runtime
-process.env.STATE_MACHINE_STORE_DIR = TEST_DIR;
+process.env.SESSION_GUARD_STORE_DIR = TEST_DIR;
 process.env.HARNESS_PROFILE = 'android';
-if (!process.env.STATE_MACHINE_PROFILES_DIR) {
-  process.env.STATE_MACHINE_PROFILES_DIR = resolve(import.meta.dir, '..', 'profiles');
+if (!process.env.SESSION_GUARD_PROFILES_DIR) {
+  process.env.SESSION_GUARD_PROFILES_DIR = resolve(import.meta.dir, '..', 'profiles');
 }
 
 async function main() {

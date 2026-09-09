@@ -526,7 +526,7 @@ operator's decision.
   clean.
 - **One rule, one switch** (`src/app/report.ts`): an error reaches the operator
   as readable text, always goes to the log, and shows as a toast when
-  `STATE_MACHINE_LOG_LEVEL=debug`. `DEBUG_TUI=0` only turns toasts off. A
+  `SESSION_GUARD_LOG_LEVEL=debug`. `DEBUG_TUI=0` only turns toasts off. A
   refused tool call is reported as well as thrown, and the task-control
   authority check returns a broken profile's own failure as text instead of
   letting `ProfileConfigurationError` escape raw.
@@ -1099,8 +1099,8 @@ mutation-tested: reverting the chain, the `indexOf` guard, or the operations
 read fails a test that names what broke.
 
 **The fixtures taught the same dead field, and now do not.**
-`presets/medium.yaml`, `profiles/ios/state-machine.yaml`,
-`profiles/android/state-machine.yaml` and `profiles/ios/guards.ts` all guarded
+`presets/medium.yaml`, `profiles/ios/session-guard.yaml`,
+`profiles/android/session-guard.yaml` and `profiles/ios/guards.ts` all guarded
 on `session.activeMutation?.outputReady`. The replacement is
 `session.activeOperations.some(o => o.result == 'output_ready')`: `toSessionFacts`
 already exposes `activeOperations` as an array (`src/domain/session-facts.ts:67`)
@@ -1114,7 +1114,7 @@ false / false / true across no operation, a running one and one that is
 `deriveStageRules` block is written in a condition language this project does
 not have — `exists`, `agentIs`, `equals`, `contains:status:false`, none of them
 operators in the guard DSL — and the file's own header says it was "adapted
-from parent state-machine/config/presets". Nothing reads `deriveStageRules`:
+from parent session-guard/config/presets". Nothing reads `deriveStageRules`:
 `presets.test.ts` asserts only on `stages`. Renaming one field inside a block
 that cannot parse would make it look maintained. Decide whether these fixtures
 earn their keep before repairing them; they also still name stages in
@@ -1196,14 +1196,14 @@ wrong on purpose and are the test's input, not duplication.
 over a literal. That is the call production makes, and the difference is not
 stylistic: the gate check sat dead in production for a day precisely because
 both tests over it passed their own `gates` to the pure function. A test that
-points `STATE_MACHINE_PROFILES_DIR` at a fixture gets the whole chain —
+points `SESSION_GUARD_PROFILES_DIR` at a fixture gets the whole chain —
 resolution, the field projections, merging, compilation.
 
 The idiom for a scenario that needs a variation is a selector, not a flag:
 
 ```ts
 function writeProfile(strategy, options) {
-  process.env.STATE_MACHINE_PROFILES_DIR = resolve(import.meta.dir, '.../fixtures/profiles');
+  process.env.SESSION_GUARD_PROFILES_DIR = resolve(import.meta.dir, '.../fixtures/profiles');
   if (options.loop === '$currentTask.id') profileId = 'task-retry-current-task';
   else if (strategy === 'parallel') profileId = 'task-retry-parallel-1';
   ...

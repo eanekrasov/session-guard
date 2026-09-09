@@ -39,11 +39,11 @@ function seedProfile(projectDir: string, profileId: string): void {
 }
 
 beforeEach(() => {
-  previousStore = process.env.STATE_MACHINE_STORE_DIR;
-  previousProfiles = process.env.STATE_MACHINE_PROFILES_DIR;
+  previousStore = process.env.SESSION_GUARD_STORE_DIR;
+  previousProfiles = process.env.SESSION_GUARD_PROFILES_DIR;
   previousHarness = process.env.OPENCODE_HARNESS_DIR;
-  delete process.env.STATE_MACHINE_STORE_DIR;
-  delete process.env.STATE_MACHINE_PROFILES_DIR;
+  delete process.env.SESSION_GUARD_STORE_DIR;
+  delete process.env.SESSION_GUARD_PROFILES_DIR;
   delete process.env.OPENCODE_HARNESS_DIR;
   alpha = mkdtempSync(join(tmpdir(), 'iso-alpha-'));
   beta = mkdtempSync(join(tmpdir(), 'iso-beta-'));
@@ -52,10 +52,10 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  if (previousStore === undefined) delete process.env.STATE_MACHINE_STORE_DIR;
-  else process.env.STATE_MACHINE_STORE_DIR = previousStore;
-  if (previousProfiles === undefined) delete process.env.STATE_MACHINE_PROFILES_DIR;
-  else process.env.STATE_MACHINE_PROFILES_DIR = previousProfiles;
+  if (previousStore === undefined) delete process.env.SESSION_GUARD_STORE_DIR;
+  else process.env.SESSION_GUARD_STORE_DIR = previousStore;
+  if (previousProfiles === undefined) delete process.env.SESSION_GUARD_PROFILES_DIR;
+  else process.env.SESSION_GUARD_PROFILES_DIR = previousProfiles;
   if (previousHarness === undefined) delete process.env.OPENCODE_HARNESS_DIR;
   else process.env.OPENCODE_HARNESS_DIR = previousHarness;
   rmSync(alpha, { recursive: true, force: true });
@@ -76,10 +76,10 @@ describe('two projects in one process', () => {
     // Initialisation used to write the computed profiles directory into
     // process.env, so the second instance found it already set — with the
     // first project's path — and listed the first project's profiles.
-    const { StateMachinePlugin } = await import('../../src/index.ts');
+    const { SessionGuardPluginV1 } = await import('../../src/index.ts');
 
-    const first = (await StateMachinePlugin(makeCtx(alpha) as never)) as Record<string, unknown>;
-    const second = (await StateMachinePlugin(makeCtx(beta) as never)) as Record<string, unknown>;
+    const first = (await SessionGuardPluginV1(makeCtx(alpha) as never)) as Record<string, unknown>;
+    const second = (await SessionGuardPluginV1(makeCtx(beta) as never)) as Record<string, unknown>;
 
     const alphaOutput = await listProfilesThrough(first);
     const betaOutput = await listProfilesThrough(second);

@@ -99,6 +99,8 @@ function resolveMutationRun(
     ancestry: [],
     stage,
     status: 'running',
+    gates: {},
+    round: 0,
   };
   session.loopRuns[runId] = run;
   task.status = 'running';
@@ -160,6 +162,7 @@ export function beginMutation(
     kind: 'mutation',
     startedAt: new Date().toISOString(),
     status: 'running',
+    round: run?.round ?? 0,
   };
 
   // Правка делает прежние вердикты вердиктами о коде, которого больше нет, —

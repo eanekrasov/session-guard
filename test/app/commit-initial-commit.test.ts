@@ -39,11 +39,11 @@ function pluginInput(): PluginInput {
 }
 
 beforeEach(async () => {
-  previousStore = process.env.STATE_MACHINE_STORE_DIR;
-  previousProfiles = process.env.STATE_MACHINE_PROFILES_DIR;
+  previousStore = process.env.SESSION_GUARD_STORE_DIR;
+  previousProfiles = process.env.SESSION_GUARD_PROFILES_DIR;
   storeDirectory = await mkdtemp(join(tmpdir(), 'first-commit-store-'));
   repoDirectory = await mkdtemp(join(tmpdir(), 'first-commit-repo-'));
-  process.env.STATE_MACHINE_STORE_DIR = storeDirectory;
+  process.env.SESSION_GUARD_STORE_DIR = storeDirectory;
   git(repoDirectory, ['init', '-q']);
   git(repoDirectory, ['config', 'user.email', 'test@example.com']);
   git(repoDirectory, ['config', 'user.name', 'test']);
@@ -51,10 +51,10 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  if (previousStore === undefined) delete process.env.STATE_MACHINE_STORE_DIR;
-  else process.env.STATE_MACHINE_STORE_DIR = previousStore;
-  if (previousProfiles === undefined) delete process.env.STATE_MACHINE_PROFILES_DIR;
-  else process.env.STATE_MACHINE_PROFILES_DIR = previousProfiles;
+  if (previousStore === undefined) delete process.env.SESSION_GUARD_STORE_DIR;
+  else process.env.SESSION_GUARD_STORE_DIR = previousStore;
+  if (previousProfiles === undefined) delete process.env.SESSION_GUARD_PROFILES_DIR;
+  else process.env.SESSION_GUARD_PROFILES_DIR = previousProfiles;
   await rm(storeDirectory, { recursive: true, force: true });
   await rm(repoDirectory, { recursive: true, force: true });
 });

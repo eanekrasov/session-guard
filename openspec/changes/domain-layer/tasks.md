@@ -22,7 +22,7 @@ Chain strategy: pending
 |------|------|-----------|----------------------|-----------------|-------------------|
 | 1 | `types.ts` + `session-facts.ts` + barrel | PR 1 | `bun test domain/types.test.ts domain/session-facts.test.ts` | `SessionFacts` projection — construct `WorkflowSession`, call `toSessionFacts()`, assert fields | `git revert HEAD` — no downstream dependents |
 | 2 | `derive-phase.ts` + `validate-transition.ts` | PR 2 | `bun test domain/derive-phase.test.ts domain/validate-transition.test.ts` | Guard expressions evaluated against `SessionFacts` with `evaluateGuard` | `git revert HEAD` — independent of PR 3 |
-| 3 | `engine.ts` + `workflow.ts` + `dispatch.ts` + `index.ts` + `src/index.ts` patch | PR 3 | `bun test domain/engine.test.ts domain/workflow.test.ts domain/dispatch.test.ts` | Full engine flow: construct `StateMachineEngine`, derive phase, validate transition, perform workflow ops | `git revert HEAD` — no upstream callers yet |
+| 3 | `engine.ts` + `workflow.ts` + `dispatch.ts` + `index.ts` + `src/index.ts` patch | PR 3 | `bun test domain/engine.test.ts domain/workflow.test.ts domain/dispatch.test.ts` | Full engine flow: construct `SessionGuardEngine`, derive phase, validate transition, perform workflow ops | `git revert HEAD` — no upstream callers yet |
 
 ## Phase 1: Foundation — Types + SessionFacts Projection
 
@@ -41,7 +41,7 @@ Chain strategy: pending
 ## Phase 3: Engine + Workflow + Dispatch (TDD)
 
 - [ ] 3.1 Write RED test `src/domain/engine.test.ts` — derivePhase, canPerformAction (no guards / pass / fail / short-circuit), checkTransition, custom evaluateGuardFn
-- [ ] 3.2 Create `src/domain/engine.ts` — `StateMachineEngine` class + `EvaluateGuardFn` type
+- [ ] 3.2 Create `src/domain/engine.ts` — `SessionGuardEngine` class + `EvaluateGuardFn` type
 - [ ] 3.3 Write RED test `src/domain/workflow.test.ts` — beginMutation (fresh/expired/throws), canCommit, approvePlan, declinePlan, markBugVerified, finishMutation, parseWorkflowResult, isExpiredMutation, hasLiveVerifier
 - [ ] 3.4 Create `src/domain/workflow.ts` — 9 workflow functions with session-schema helpers
 - [ ] 3.5 Write RED test `src/domain/dispatch.test.ts` — markOutputReady, clearActiveMutation, getExecutionProgress, canExitExecution

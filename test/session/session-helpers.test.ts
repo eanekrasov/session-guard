@@ -12,7 +12,7 @@ import { setInvariantViolations } from '../../test/helpers.ts';
 
 describe('createSession', () => {
   it('returns a session with correct defaults', () => {
-    const session = createSession('session-123', 'android', 'state-machine');
+    const session = createSession('session-123', 'android', 'session-guard');
 
     expect(session.sessionId).toBe('session-123');
     expect(session.profileId).toBe('android');
@@ -34,21 +34,21 @@ describe('createSession', () => {
   });
 
   it('carries no gates — they are created by the first verdict about them', () => {
-    const session = createSession('session-123', 'android', 'state-machine');
+    const session = createSession('session-123', 'android', 'session-guard');
 
     expect(session.gates).toEqual([]);
   });
 
   it('does not share gate state between sessions', () => {
-    const session = createSession('session-123', 'android', 'state-machine');
+    const session = createSession('session-123', 'android', 'session-guard');
     setGateStatus(session, 'invariants', 'passed');
 
-    const other = createSession('session-456', 'ios', 'state-machine');
+    const other = createSession('session-456', 'ios', 'session-guard');
     expect(other.gates).toEqual([]);
   });
 
   it('initializes retryBudgets without a legacy global default', () => {
-    const session = createSession('session-123', 'android', 'state-machine');
+    const session = createSession('session-123', 'android', 'session-guard');
 
     expect(session.retryBudgets).toEqual({});
   });
@@ -56,7 +56,7 @@ describe('createSession', () => {
 
 describe('getGate', () => {
   it('returns a gate by its id', () => {
-    const session = createSession('session-123', 'android', 'state-machine');
+    const session = createSession('session-123', 'android', 'session-guard');
     setGateStatus(session, 'invariants', 'pending');
 
     const gate = getGate(session, 'invariants');
@@ -67,7 +67,7 @@ describe('getGate', () => {
   });
 
   it('returns undefined for unknown gate id', () => {
-    const session = createSession('session-123', 'android', 'state-machine');
+    const session = createSession('session-123', 'android', 'session-guard');
 
     const gate = getGate(session, 'nonexistent');
 
@@ -77,7 +77,7 @@ describe('getGate', () => {
 
 describe('setGateStatus', () => {
   it('mutates session in-place', () => {
-    const session = createSession('session-123', 'android', 'state-machine');
+    const session = createSession('session-123', 'android', 'session-guard');
 
     setGateStatus(session, 'invariants', 'passed');
 
@@ -86,7 +86,7 @@ describe('setGateStatus', () => {
   });
 
   it('sets resolvedAt when status is passed', () => {
-    const session = createSession('session-123', 'android', 'state-machine');
+    const session = createSession('session-123', 'android', 'session-guard');
 
     setGateStatus(session, 'invariants', 'passed');
 
@@ -97,7 +97,7 @@ describe('setGateStatus', () => {
   });
 
   it('sets resolvedAt when status is failed', () => {
-    const session = createSession('session-123', 'android', 'state-machine');
+    const session = createSession('session-123', 'android', 'session-guard');
 
     setGateStatus(session, 'invariants', 'failed');
 
@@ -107,7 +107,7 @@ describe('setGateStatus', () => {
   });
 
   it('does NOT set resolvedAt for pending status', () => {
-    const session = createSession('session-123', 'android', 'state-machine');
+    const session = createSession('session-123', 'android', 'session-guard');
 
     setGateStatus(session, 'invariants', 'pending');
 
@@ -117,7 +117,7 @@ describe('setGateStatus', () => {
   });
 
   it('does NOT set resolvedAt for skipped status', () => {
-    const session = createSession('session-123', 'android', 'state-machine');
+    const session = createSession('session-123', 'android', 'session-guard');
 
     setGateStatus(session, 'invariants', 'skipped');
 
@@ -127,7 +127,7 @@ describe('setGateStatus', () => {
   });
 
   it('creates a gate the session does not carry yet', () => {
-    const session = createSession('session-123', 'android', 'state-machine');
+    const session = createSession('session-123', 'android', 'session-guard');
 
     setGateStatus(session, 'deploy_done', 'passed');
 
@@ -138,7 +138,7 @@ describe('setGateStatus', () => {
   });
 
   it('records a second verdict on the gate it already created, not a duplicate', () => {
-    const session = createSession('session-123', 'android', 'state-machine');
+    const session = createSession('session-123', 'android', 'session-guard');
 
     setGateStatus(session, 'review', 'failed');
     setGateStatus(session, 'review', 'passed');
@@ -148,7 +148,7 @@ describe('setGateStatus', () => {
   });
 
   it('ignores an empty gate id rather than storing an unnameable gate', () => {
-    const session = createSession('session-123', 'android', 'state-machine');
+    const session = createSession('session-123', 'android', 'session-guard');
 
     setGateStatus(session, '', 'passed');
 
@@ -158,7 +158,7 @@ describe('setGateStatus', () => {
 
 describe('bumpRetry', () => {
   it('increments attempts for an existing budget key', () => {
-    const session = createSession('session-123', 'android', 'state-machine');
+    const session = createSession('session-123', 'android', 'session-guard');
 
     bumpRetry(session, 'task-1');
 
@@ -166,7 +166,7 @@ describe('bumpRetry', () => {
   });
 
   it('creates a budget key if missing with attempt=1 after bump', () => {
-    const session = createSession('session-123', 'android', 'state-machine');
+    const session = createSession('session-123', 'android', 'session-guard');
 
     bumpRetry(session, 'task-1');
 
@@ -178,7 +178,7 @@ describe('bumpRetry', () => {
 
 describe('isExhausted', () => {
   it('returns false when attempts are below maximum', () => {
-    const session = createSession('session-123', 'android', 'state-machine');
+    const session = createSession('session-123', 'android', 'session-guard');
 
     const result = isExhausted(session, 'task-1');
 
@@ -186,7 +186,7 @@ describe('isExhausted', () => {
   });
 
   it('returns true when attempts reach maximum', () => {
-    const session = createSession('session-123', 'android', 'state-machine');
+    const session = createSession('session-123', 'android', 'session-guard');
     bumpRetry(session, 'task-1');
     bumpRetry(session, 'task-1');
     bumpRetry(session, 'task-1');
@@ -197,7 +197,7 @@ describe('isExhausted', () => {
   });
 
   it('returns false for unknown key', () => {
-    const session = createSession('session-123', 'android', 'state-machine');
+    const session = createSession('session-123', 'android', 'session-guard');
 
     const result = isExhausted(session, 'nonexistent');
 
@@ -207,7 +207,7 @@ describe('isExhausted', () => {
 
 describe('resetRetry', () => {
   it('resets attempts to 0 for an existing key', () => {
-    const session = createSession('session-123', 'android', 'state-machine');
+    const session = createSession('session-123', 'android', 'session-guard');
     bumpRetry(session, 'task-1');
     bumpRetry(session, 'task-1');
 
@@ -218,7 +218,7 @@ describe('resetRetry', () => {
   });
 
   it('creates a default budget key if missing', () => {
-    const session = createSession('session-123', 'android', 'state-machine');
+    const session = createSession('session-123', 'android', 'session-guard');
 
     resetRetry(session, 'task-1');
 
@@ -230,7 +230,7 @@ describe('resetRetry', () => {
 
 describe('setInvariantViolations', () => {
   it('replaces violations with sequentially assigned evidence IDs', () => {
-    const session = createSession('session-123', 'android', 'state-machine');
+    const session = createSession('session-123', 'android', 'session-guard');
 
     setInvariantViolations(session, [
       { severity: 'critical', message: 'Violation 1', status: 'open' },
@@ -260,7 +260,7 @@ describe('setInvariantViolations', () => {
   });
 
   it('clears previous invariant violations when setting new ones', () => {
-    const session = createSession('session-123', 'android', 'state-machine');
+    const session = createSession('session-123', 'android', 'session-guard');
     setInvariantViolations(session, [{ severity: 'critical', message: 'Old', status: 'open' }]);
 
     setInvariantViolations(session, [{ severity: 'info', message: 'New', status: 'resolved' }]);

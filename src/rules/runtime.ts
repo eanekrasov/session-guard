@@ -181,7 +181,7 @@ export class OpenCodeRulesRuntime {
     }
   }
 
-  /** Called from StateMachineRuntime on `event` hook. */
+  /** Called from SessionGuardRuntime on `event` hook. */
   async handleEvent(input: { event?: { type?: unknown; properties?: unknown } }): Promise<void> {
     if (input.event?.type !== 'message.removed') return;
     const properties = input.event.properties;
@@ -199,7 +199,7 @@ export class OpenCodeRulesRuntime {
     this.sessionWorkingContext.workingContext.invalidateHistoryReads(properties.sessionID);
   }
 
-  /** Called from StateMachineRuntime on `tool.execute.before` hook. */
+  /** Called from SessionGuardRuntime on `tool.execute.before` hook. */
   async handleToolExecuteBefore(
     input: { tool?: string; sessionID?: string; callID?: string },
     output: { args?: unknown }
@@ -218,7 +218,7 @@ export class OpenCodeRulesRuntime {
     await this.evaluateAndQueueHooks('PreToolUse', sessionID, toolName, args);
   }
 
-  /** Called from StateMachineRuntime on `tool.execute.after` hook. */
+  /** Called from SessionGuardRuntime on `tool.execute.after` hook. */
   async handleToolExecuteAfter(
     input: {
       tool?: string;
@@ -282,7 +282,7 @@ export class OpenCodeRulesRuntime {
     }
   }
 
-  /** Called from StateMachineRuntime on `experimental.chat.messages.transform` hook. */
+  /** Called from SessionGuardRuntime on `experimental.chat.messages.transform` hook. */
   async handleMessagesTransform(
     _input: Record<string, never>,
     output: MessagesTransformOutput
@@ -409,7 +409,7 @@ export class OpenCodeRulesRuntime {
     }));
   }
 
-  /** Called from StateMachineRuntime on `chat.message` hook. */
+  /** Called from SessionGuardRuntime on `chat.message` hook. */
   async handleChatMessage(input: ChatMessageInput, output: ChatMessageOutput): Promise<void> {
     try {
       if (output.parts?.some((part) => isRuleAdmissionPart(part))) return;
@@ -505,7 +505,7 @@ export class OpenCodeRulesRuntime {
     return Array.from(ids);
   }
 
-  /** Called from StateMachineRuntime on `experimental.session.compacting` hook. */
+  /** Called from SessionGuardRuntime on `experimental.session.compacting` hook. */
   async handleSessionCompacting(
     input: { sessionID?: string },
     output: { context?: string[] }

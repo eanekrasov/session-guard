@@ -85,13 +85,13 @@ function commit(files: Record<string, string>, message: string): string {
 
 beforeEach(async () => {
   previousCwd = process.cwd();
-  previousStoreDirectory = process.env.STATE_MACHINE_STORE_DIR;
-  previousProfilesDirectory = process.env.STATE_MACHINE_PROFILES_DIR;
+  previousStoreDirectory = process.env.SESSION_GUARD_STORE_DIR;
+  previousProfilesDirectory = process.env.SESSION_GUARD_PROFILES_DIR;
   storeDirectory = await mkdtemp(join(tmpdir(), 'commit-cwd-store-'));
   profilesDirectory = await mkdtemp(join(tmpdir(), 'commit-cwd-profiles-'));
   repoDirectory = await mkdtemp(join(tmpdir(), 'commit-cwd-repo-'));
-  process.env.STATE_MACHINE_STORE_DIR = storeDirectory;
-  process.env.STATE_MACHINE_PROFILES_DIR = profilesDirectory;
+  process.env.SESSION_GUARD_STORE_DIR = storeDirectory;
+  process.env.SESSION_GUARD_PROFILES_DIR = profilesDirectory;
   git(['init', '-q']);
   git(['config', 'user.email', 'test@example.com']);
   git(['config', 'user.name', 'test']);
@@ -104,10 +104,10 @@ beforeEach(async () => {
 
 afterEach(async () => {
   process.chdir(previousCwd);
-  if (previousStoreDirectory === undefined) delete process.env.STATE_MACHINE_STORE_DIR;
-  else process.env.STATE_MACHINE_STORE_DIR = previousStoreDirectory;
-  if (previousProfilesDirectory === undefined) delete process.env.STATE_MACHINE_PROFILES_DIR;
-  else process.env.STATE_MACHINE_PROFILES_DIR = previousProfilesDirectory;
+  if (previousStoreDirectory === undefined) delete process.env.SESSION_GUARD_STORE_DIR;
+  else process.env.SESSION_GUARD_STORE_DIR = previousStoreDirectory;
+  if (previousProfilesDirectory === undefined) delete process.env.SESSION_GUARD_PROFILES_DIR;
+  else process.env.SESSION_GUARD_PROFILES_DIR = previousProfilesDirectory;
   await rm(storeDirectory, { recursive: true, force: true });
   await rm(profilesDirectory, { recursive: true, force: true });
   await rm(repoDirectory, { recursive: true, force: true });

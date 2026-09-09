@@ -48,7 +48,7 @@ export interface GateInfo {
 /** One open call, as the sidebar needs it. */
 export interface ActiveOperationInfo {
   callId: string;
-  taskId: string;
+  taskId?: string;
   agent: string;
   outputReady: boolean;
 }

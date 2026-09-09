@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Defines the Application Layer — P0 Plugin Runtime for the state-machine plugin. The Application Layer sits on top of the Domain Layer (pure business logic) and Data Layer (config loading, session persistence). It connects OpenCode plugin SDK hooks to domain functions, manages session lifecycle, and provides runtime infrastructure (startup, shutdown, serial queue, mutation tracking, optional dashboard server).
+Defines the Application Layer — P0 Plugin Runtime for the session-guard plugin. The Application Layer sits on top of the Domain Layer (pure business logic) and Data Layer (config loading, session persistence). It connects OpenCode plugin SDK hooks to domain functions, manages session lifecycle, and provides runtime infrastructure (startup, shutdown, serial queue, mutation tracking, optional dashboard server).
 
 ## ADDED Requirements
 
@@ -30,11 +30,11 @@ On call, `createRuntime` SHALL:
  2. Resolve the profiles directory:
     - Use `process.env.HARNESS_PROFILES_DIR` if set, relative to `context.directory`
     - Default: `profiles/` relative to project root
- 3. Create `WorkflowStore` instance pointing to `${harnessDir}/state-machine/sessions/`
+ 3. Create `WorkflowStore` instance pointing to `${harnessDir}/session-guard/sessions/`
  4. Prepare empty state:
     - `sessionQueues: Map<string, Promise<void>>` — per-root-session serial queue
     - `liveMutations: Map<string, string>` — `callId → rootSessionId`
-    - `engineCache: Map<string, StateMachineEngine>` — `profileId → engine`
+    - `engineCache: Map<string, SessionGuardEngine>` — `profileId → engine`
     - `profilesDir: string` — resolved profiles directory path
     - Optional: start dashboard server skeleton on port from env `DASHBOARD_PORT` or skip if unset
 
@@ -56,7 +56,7 @@ On call, `createRuntime` SHALL:
 - **WHEN** a hook requires an engine for `profileId: "android"`
 - **THEN** `resolveConfig("android", profilesDir)` is called
 - **THEN** the resolved schemas are merged into `EngineConfig`
-- **THEN** a `StateMachineEngine` is created and cached in `engineCache`
+- **THEN** a `SessionGuardEngine` is created and cached in `engineCache`
 - **THEN** subsequent accesses for the same profileId use the cached engine
 
 #### Scenario: HARNESS_PROFILE env provides fallback profileId
@@ -124,7 +124,7 @@ The runtime SHALL provide a `workflow.create` tool for creating new workflow ses
 ```typescript
 "tool": {
   "workflow.create": tool({
-    description: "Create a new state-machine workflow session",
+    description: "Create a new session-guard workflow session",
     args: {
       profileId: tool.schema.string().describe("Profile ID to use (e.g., 'android', 'web')")
     },
@@ -177,7 +177,7 @@ The runtime SHALL implement the `chat.message` hook to derive current phase from
 1. Call `withSession(input.sessionID, ...)` to load session
 2. If session is null, do nothing (no-op — no session yet)
 3. If session exists:
-   a. Resolve or create `StateMachineEngine` for `session.profileId` (cached in `engineCache`)
+   a. Resolve or create `SessionGuardEngine` for `session.profileId` (cached in `engineCache`)
    b. Call `engine.derivePhase(session)` to compute current phase
    c. Optionally log phase info (no return value — `chat.message` is fire-and-forget)
 
@@ -214,7 +214,7 @@ The runtime SHALL implement the `tool.execute.before` hook to enforce action gua
        - If not cached, call `resolveConfig(profileId, profilesDir)` from Data Layer
        - Extract `phaseAssignments`, `transitions`, `actionGuards` from all `ResolvedSchema[]`
        - Merge: concat + dedup by `id` for phaseAssignments, full override for transitions/actionGuards
-       - Construct `EngineConfig` → `new StateMachineEngine(config, evaluateGuard)`
+       - Construct `EngineConfig` → `new SessionGuardEngine(config, evaluateGuard)`
        - Cache in `engineCache.set(profileId, engine)`
     b. For `input.tool === "Bash"` or `"Write"`, call `engine.canPerformAction(session, "beginMutation")`
     c. If not allowed, set `output.args = null` or signal rejection
@@ -383,13 +383,13 @@ A lightweight Bun HTTP server that:
 
 The bridge file SHALL load `createRuntime` from the app layer and return the result.
 
-**Location**: `plugins/state-machine.js`
+**Location**: `plugins/session-guard.js`
 
 #### R10.1: Bridge file
 
 ```javascript
 // Minimal JS bridge — runtime loads as Plugin type for OpenCode
-export const StateMachinePlugin = async (ctx) => {
+export const SessionGuardPluginV1 = async (ctx) => {
   const harnessDir = process.env.OPENCODE_HARNESS_DIR
     ? join(ctx.directory, process.env.OPENCODE_HARNESS_DIR)
     : join(ctx.directory, ".opencode");
@@ -400,7 +400,7 @@ export const StateMachinePlugin = async (ctx) => {
     return {};
   }
 };
-export default StateMachinePlugin;
+export default SessionGuardPluginV1;
 ```
 
 #### R10.2: Error handling
@@ -409,9 +409,9 @@ If the import or `createRuntime` call fails, the bridge SHALL return an empty ob
 
 #### Scenario: Bridge file is a valid plugin module
 
-- **GIVEN** the bridge file at `plugins/state-machine.js`
+- **GIVEN** the bridge file at `plugins/session-guard.js`
 - **WHEN** imported by OpenCode plugin loader
-- **THEN** it exports `StateMachinePlugin` as a default export, conforming to `(PluginInput) => Promise<Hooks>`
+- **THEN** it exports `SessionGuardPluginV1` as a default export, conforming to `(PluginInput) => Promise<Hooks>`
 
 ---
 
@@ -435,12 +435,12 @@ SHALL add re-export of `createRuntime` from `./app/runtime.ts`.
 
 ---
 
-### Requirement: R12: StateMachinePluginOptions SHALL define plugin configuration
+### Requirement: R12: SessionGuardPluginV1Options SHALL define plugin configuration
 
-The `StateMachinePluginOptions` interface SHALL define configuration options for the plugin:
+The `SessionGuardPluginV1Options` interface SHALL define configuration options for the plugin:
 
 ```typescript
-interface StateMachinePluginOptions extends BasePluginOptions {
+interface SessionGuardPluginV1Options extends BasePluginOptions {
   /** Directory containing profile.json configurations */
   profilesDir?: string;
   /** Directory for session storage */
@@ -449,13 +449,13 @@ interface StateMachinePluginOptions extends BasePluginOptions {
 ```
 
 Options are set via environment variables before `createRuntime` reads them:
-- `profilesDir` → `STATE_MACHINE_PROFILES_DIR`
-- `storeDir` → `STATE_MACHINE_STORE_DIR`
+- `profilesDir` → `SESSION_GUARD_PROFILES_DIR`
+- `storeDir` → `SESSION_GUARD_STORE_DIR`
 
 #### Scenario: Plugin options propagate to runtime
-- **GIVEN** `StateMachinePluginOptions` with `{ profilesDir: "/custom/profiles" }`
-- **WHEN** `StateMachinePlugin(ctx, options)` is called
-- **THEN** `process.env.STATE_MACHINE_PROFILES_DIR` is set to `"/custom/profiles"`
+- **GIVEN** `SessionGuardPluginV1Options` with `{ profilesDir: "/custom/profiles" }`
+- **WHEN** `SessionGuardPluginV1(ctx, options)` is called
+- **THEN** `process.env.SESSION_GUARD_PROFILES_DIR` is set to `"/custom/profiles"`
 - **THEN** runtime uses this directory for profile resolution
 
 ---
@@ -482,7 +482,7 @@ The following APIs from the domain-layer change are used:
 
 | API | Used in | Purpose |
 |-----|---------|---------|
-| `StateMachineEngine` class | runtime.ts (engineCache) | Phase derivation, guard evaluation |
+| `SessionGuardEngine` class | runtime.ts (engineCache) | Phase derivation, guard evaluation |
 | `EvaluateGuardFn` type | runtime.ts | Guard evaluator function type |
 | `EngineConfig` type | runtime.ts resolveEngine() | Engine configuration |
 | `beginMutation()` (dynamic import) | runtime.ts handleToolBefore | Start mutation on session |
@@ -843,7 +843,7 @@ export type BaselineHashes = Record<string, string | null>;
 #### R16.2: `captureBaseline(cwd: string, moduleRoot?: string): Promise<BaselineHashes>`
 
 1. Runs `git status --porcelain --untracked-files=all` in `cwd`
-2. Filters dirty files by `moduleRoot` if provided (e.g., `"state-machine"`)
+2. Filters dirty files by `moduleRoot` if provided (e.g., `"session-guard"`)
 3. For each dirty file, computes `sha256` of the file content (via `node:crypto` `createHash('sha256')`)
 4. Returns `Record<path, hash | null>` — `null` for deleted files
 

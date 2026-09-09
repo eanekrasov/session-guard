@@ -1,4 +1,4 @@
-# Proposal: Domain Layer — pure business logic for state-machine plugin
+# Proposal: Domain Layer — pure business logic for session-guard plugin
 
 ## 1. Change Overview
 
@@ -18,7 +18,7 @@ Six source modules + one barrel export + one modified barrel:
 | 2 | SessionFacts + projection | `src/domain/session-facts.ts` | `SessionFacts` interface (read-model projection from `WorkflowSession`) + `toSessionFacts(session: WorkflowSession): SessionFacts` transformer. Domain only ever sees `SessionFacts`, never raw `WorkflowSession`. |
 | 3 | Phase derivation | `src/domain/derive-phase.ts` | `derivePhase(facts: SessionFacts, rules: PhaseAssignmentRule[]): PhaseId` — priority-ordered matching against config-driven rule set. Phase is derived, never stored. |
 | 4 | Transition validation | `src/domain/validate-transition.ts` | `checkTransition(from: PhaseId, to: PhaseId, transitions: Transition[], session?: SessionFacts): string \| null` — lookup `from→to` pair in transitions array, evaluate optional guard expression via `evaluateGuard()`. Returns error message or null. |
-| 5 | StateMachineEngine | `src/domain/engine.ts` | Class wrapping a `StateMachineConfig`-like merged config object + guard evaluator. Public methods: `derivePhase(session)`, `canPerformAction(session, action)`, `checkTransition(from, to, session?)`. The Application Layer constructs the engine once per session with the merged config. |
+| 5 | SessionGuardEngine | `src/domain/engine.ts` | Class wrapping a `SessionGuardConfig`-like merged config object + guard evaluator. Public methods: `derivePhase(session)`, `canPerformAction(session, action)`, `checkTransition(from, to, session?)`. The Application Layer constructs the engine once per session with the merged config. |
 | 6 | Workflow orchestration | `src/domain/workflow.ts` | Pure functions that mutate a `WorkflowSession` directly: `beginMutation()`, `canCommit()`, `approvePlan()`, `declinePlan()`, `markBugVerified()`, `finishMutation()`, `parseWorkflowResult()`, `isExpiredMutation()`, `hasLiveVerifier()`. These are business operations that read and write session state — same pattern as the parent `workflow.ts`. |
 | 7 | Barrel export | `src/domain/index.ts` | Re-exports all domain types and functions from the six modules above. |
 | 8 | Main index update | `src/index.ts` | Adds re-exports of domain symbols alongside existing Data Layer and Session Store exports. |
@@ -75,21 +75,21 @@ Six source modules + one barrel export + one modified barrel:
 
 **Constraint**: Workflow functions must use `setGateStatus()`, `bumpRetry()`, etc. from `session-schema.ts` (Data Layer) to mutate gates and retry budgets — they should not manipulate those fields directly.
 
-### D6. StateMachineEngine wraps config + guard evaluator
+### D6. SessionGuardEngine wraps config + guard evaluator
 
-**Decision**: `StateMachineEngine` class receives a `StateMachineConfig`-like merged object at construction time and internally calls `toSessionFacts()` + `derivePhase()` + `evaluateGuard()`.
+**Decision**: `SessionGuardEngine` class receives a `SessionGuardConfig`-like merged object at construction time and internally calls `toSessionFacts()` + `derivePhase()` + `evaluateGuard()`.
 
 **API**:
 ```
-class StateMachineEngine {
-  constructor(config: StateMachineConfig)
+class SessionGuardEngine {
+  constructor(config: SessionGuardConfig)
   derivePhase(session: WorkflowSession): PhaseId
   canPerformAction(session: WorkflowSession, action: ActionId): { allowed: boolean; reason?: string }
   checkTransition(from: PhaseId, to: PhaseId, session?: WorkflowSession): string | null
 }
 ```
 
-**Rationale**: Mirror of parent `ConfigDrivenStateMachine`. The engine is a thin convenience layer — calls `toSessionFacts()` internally, then delegates to pure functions. `canPerformAction()` checks profile-level and phase-level guards against the session.
+**Rationale**: Mirror of parent `ConfigDrivenSessionGuard`. The engine is a thin convenience layer — calls `toSessionFacts()` internally, then delegates to pure functions. `canPerformAction()` checks profile-level and phase-level guards against the session.
 
 ### D7. Reuses existing evaluateGuard()
 
@@ -99,7 +99,7 @@ class StateMachineEngine {
 
 ### D8. Config merge happens outside domain
 
-**Decision**: Domain receives a plain merged config object (`StateMachineConfig`). The Application Layer (or future runtime adaptor) is responsible for merging `ResolvedSchema[]` into a single config with all `phaseAssignments`, `transitions`, `gateMapping`, `actionGuards`, etc.
+**Decision**: Domain receives a plain merged config object (`SessionGuardConfig`). The Application Layer (or future runtime adaptor) is responsible for merging `ResolvedSchema[]` into a single config with all `phaseAssignments`, `transitions`, `gateMapping`, `actionGuards`, etc.
 
 **Rationale**: Config merging belongs in the Data Layer (schema resolution) or Application Layer (runtime setup). Domain should not know about schema inheritance, `extends` chains, or file paths. This keeps the domain testable without loading real config files.
 
@@ -124,11 +124,11 @@ class StateMachineEngine {
 Application Layer
     │
     │  1. resolveConfig(profileId) → ResolvedProfile
-    │  2. Merge ResolvedSchema[] → StateMachineConfig
-    │  3. Create engine = new StateMachineEngine(config)
+    │  2. Merge ResolvedSchema[] → SessionGuardConfig
+    │  3. Create engine = new SessionGuardEngine(config)
     │
     ▼
-StateMachineEngine (src/domain/engine.ts)
+SessionGuardEngine (src/domain/engine.ts)
     │
     ├── derivePhase(session):
     │     toSessionFacts(session) → SessionFacts
@@ -218,15 +218,15 @@ The following are explicitly **NOT** in this MVP:
 | `evaluateGuard()` expects `session: object` but domain passes `SessionFacts` — type mismatch in guard expressions | Low | Guard expressions reference `session` context. Plugin guards will be written against `SessionFacts` fields. The runtime type is compatible (`object` is permissive). |
 | Workflow functions mutate WorkflowSession but domain imports session-schema helpers — dependency coupling | Low | This is intentional and follows the parent pattern. `session-schema.ts` is a utility layer, not business logic. It provides field-level accessors that domain can safely call. |
 | Config merge logic not yet defined — how PhaseAssignmentRule[] from multiple ResolvedSchema entries are combined | Medium | MVP assumes a single merged array. The Application Layer (or a future config-merging step) concatenates and deduplicates by `id`. Clarify in Implementation Design phase. |
-| No existing `StateMachineConfig` interface in the plugin — needs to be defined in engine.ts | Low | Define a minimal `StateMachineConfig` as a TypeScript interface. Keep it in `engine.ts` or `src/domain/types.ts`. Accept that it will grow as P1/P2 features are added. |
+| No existing `SessionGuardConfig` interface in the plugin — needs to be defined in engine.ts | Low | Define a minimal `SessionGuardConfig` as a TypeScript interface. Keep it in `engine.ts` or `src/domain/types.ts`. Accept that it will grow as P1/P2 features are added. |
 
 ## 8. Open Questions
 
 1. **Config merge strategy**: How exactly should `PhaseAssignmentRule[]` and `Transition[]` from multiple `ResolvedSchema` entries be merged? Simple concatenation? By ID dedup? Should a schema with higher priority override lower priority transitions? **Proposal**: For MVP, concatenate arrays with the last-writer-wins rule for duplicate IDs. Formalize in the Spec phase.
 
-2. **StateMachineConfig structure**: Should `StateMachineConfig` be defined in `src/domain/types.ts` or in a separate config-type file in `src/schema/`? The parent defines it in `config-driven.ts`. **Proposal**: Define the domain-facing `StateMachineConfig` interface in `src/domain/types.ts` since it's a domain contract — the Data Layer shapes configs to match it, but the interface belongs with its consumer.
+2. **SessionGuardConfig structure**: Should `SessionGuardConfig` be defined in `src/domain/types.ts` or in a separate config-type file in `src/schema/`? The parent defines it in `config-driven.ts`. **Proposal**: Define the domain-facing `SessionGuardConfig` interface in `src/domain/types.ts` since it's a domain contract — the Data Layer shapes configs to match it, but the interface belongs with its consumer.
 
-3. **canPerformAction guards**: The parent `ConfigDrivenStateMachine.canPerformAction()` checks profile-level `actionGuards` then phase-level `entryGuards`/`exitGuards`. The plugin's `ResolvedSchema` has `actionGuards?: string[]` — flat array, not per-action. Should we expand it to `actionGuards?: Record<ActionId, string>`? **Proposal**: Keep the same flat `string[]` for MVP (check all action guards), expand to per-action `Record<ActionId, string>` in P1 if needed.
+3. **canPerformAction guards**: The parent `ConfigDrivenSessionGuard.canPerformAction()` checks profile-level `actionGuards` then phase-level `entryGuards`/`exitGuards`. The plugin's `ResolvedSchema` has `actionGuards?: string[]` — flat array, not per-action. Should we expand it to `actionGuards?: Record<ActionId, string>`? **Proposal**: Keep the same flat `string[]` for MVP (check all action guards), expand to per-action `Record<ActionId, string>` in P1 if needed.
 
 4. **workflow.ts guard check**: The parent `beginMutation()` checks `resolveConfig(session).actionGuards["beginMutation"]`. The plugin doesn't have `resolveConfig()` in the workflow module — should workflow functions also check action guards, or should that be the Engine's responsibility? **Proposal**: Workflow functions are thin mutators — guard checking is the Engine's job. Workflow functions assume all guards have passed before being called.
 

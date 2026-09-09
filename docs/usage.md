@@ -10,7 +10,7 @@
 
 ## Требования
 
-opencode `>= 0.15.0` (объявлено в `engines`) и [bun](https://bun.sh) для сборки
+opencode `>= 1.18.29` (объявлено в `engines`) и [bun](https://bun.sh) для сборки
 и тестов.
 
 ---
@@ -22,11 +22,11 @@ opencode `>= 0.15.0` (объявлено в `engines`) и [bun](https://bun.sh) 
 
 ```typescript
 // src/index.ts
-export const StateMachinePlugin: Plugin = async (ctx: PluginInput) => {
+export const SessionGuardPluginV1: Plugin = async (ctx: PluginInput) => {
   return createRuntime(ctx, { storeDir, profilesDir });
 };
 
-export default { id: 'state-machine', server: StateMachinePlugin };
+export default { id: 'session-guard', server: SessionGuardPluginV1 };
 ```
 
 Подключается он как обычный плагин opencode — путём к собранному пакету либо к
@@ -69,11 +69,11 @@ mise run build
 ## Где лежат данные
 
 **Профили** — `<project>/.opencode/profiles`, переопределяется
-`STATE_MACHINE_PROFILES_DIR`. Корень `.opencode` меняется через
+`SESSION_GUARD_PROFILES_DIR`. Корень `.opencode` меняется через
 `OPENCODE_HARNESS_DIR`.
 
 **Сессии** — `<XDG_DATA_HOME>/opencode/session-guard/runtime/<sessionId>.json`,
-переопределяется `STATE_MACHINE_STORE_DIR`. Законченные сессии переезжают в
+переопределяется `SESSION_GUARD_STORE_DIR`. Законченные сессии переезжают в
 подкаталог `archive/` и перестают чем-либо управлять, оставаясь читаемыми.
 
 Каталоги создаются при инициализации плагина. Значения вычисляются **на

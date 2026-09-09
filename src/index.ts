@@ -1,9 +1,11 @@
-import { type Plugin, type PluginInput } from '@opencode-ai/plugin';
+import { type Hooks, type Plugin as PluginV1, type PluginInput } from '@opencode-ai/plugin';
+import { Plugin } from '@opencode/plugin';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { harnessDir, opencodeStateDir, profilesDir, sessionsDir } from './app/paths.ts';
+import { opencodeStateDir, profilesDir, sessionsDir } from './app/paths.ts';
+import type { Cleanup, Context } from '@opencode/plugin/promise/plugin';
 
-export const StateMachinePlugin: Plugin = async (ctx: PluginInput) => {
-  console.error('[state-machine] StateMachinePlugin');
+export const SessionGuardPluginV1: PluginV1 = async (ctx: PluginInput): Promise<Hooks> => {
+  console.error('[session-guard] plugin v1');
 
   const projectDir = ctx.directory;
   const baseDir = opencodeStateDir();
@@ -31,7 +33,7 @@ export const StateMachinePlugin: Plugin = async (ctx: PluginInput) => {
     const { createRuntime } = await import('./app/runtime.ts');
     return createRuntime(ctx, { storeDir: runtime, profilesDir: profiles });
   } catch (e) {
-    console.error('[state-machine] init error:', process.env.OPENCODE_HARNESS_DIR);
+    console.error('[session-guard] init error:', process.env.OPENCODE_HARNESS_DIR);
     writeFileSync(
       `${runtime}/sm-init-error.json`,
       JSON.stringify({
@@ -44,9 +46,24 @@ export const StateMachinePlugin: Plugin = async (ctx: PluginInput) => {
   }
 };
 
-const plugin = {
-  id: 'state-machine',
-  server: StateMachinePlugin,
+export const SessionGuardPluginV2 = async (ctx: Context): Promise<Cleanup> => {
+  await ctx.tool.hook('execute.before', () => {
+    console.error('A tool is about to run');
+  });
+
+  return () => {
+    console.error('unloaded');
+  };
 };
 
-export default plugin;
+export default {
+  ...Plugin.define({
+    id: 'session-guard',
+    async setup(ctx: Context): Promise<Cleanup | void> {
+      return await SessionGuardPluginV2(ctx);
+    },
+  }),
+  async server(ctx: PluginInput): Promise<Hooks> {
+    return await SessionGuardPluginV1(ctx);
+  },
+};

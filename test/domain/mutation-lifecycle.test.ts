@@ -21,15 +21,19 @@ function createSession(): WorkflowSession {
       implementation: [createTask()],
     },
     activeOperations: {},
+    activeTaskContexts: [],
     loopRuns: {},
     deliveryPermit: null,
+    deliveryReceipt: null,
     retryBudgets: {},
     updatedAt: new Date().toISOString(),
     verifications: [],
     changedFiles: [],
     invariantViolations: [],
     consentedCallIDs: [],
+    processedResultCallIDs: [],
     pendingDecisions: [],
+    currentStage: 'planning',
   };
 }
 

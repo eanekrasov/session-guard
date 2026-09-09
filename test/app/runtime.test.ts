@@ -15,23 +15,23 @@ let prevProfilesDir: string | undefined;
 const cleanupDirs: string[] = [];
 
 beforeEach(() => {
-  prevStoreDir = process.env.STATE_MACHINE_STORE_DIR;
-  prevProfilesDir = process.env.STATE_MACHINE_PROFILES_DIR;
-  process.env.STATE_MACHINE_STORE_DIR =
-    '/tmp/state-machine-test-' + Math.random().toString(36).slice(2);
-  delete process.env.STATE_MACHINE_PROFILES_DIR;
+  prevStoreDir = process.env.SESSION_GUARD_STORE_DIR;
+  prevProfilesDir = process.env.SESSION_GUARD_PROFILES_DIR;
+  process.env.SESSION_GUARD_STORE_DIR =
+    '/tmp/session-guard-test-' + Math.random().toString(36).slice(2);
+  delete process.env.SESSION_GUARD_PROFILES_DIR;
 });
 
 afterEach(() => {
   if (prevStoreDir !== undefined) {
-    process.env.STATE_MACHINE_STORE_DIR = prevStoreDir;
+    process.env.SESSION_GUARD_STORE_DIR = prevStoreDir;
   } else {
-    delete process.env.STATE_MACHINE_STORE_DIR;
+    delete process.env.SESSION_GUARD_STORE_DIR;
   }
   if (prevProfilesDir !== undefined) {
-    process.env.STATE_MACHINE_PROFILES_DIR = prevProfilesDir;
+    process.env.SESSION_GUARD_PROFILES_DIR = prevProfilesDir;
   } else {
-    delete process.env.STATE_MACHINE_PROFILES_DIR;
+    delete process.env.SESSION_GUARD_PROFILES_DIR;
   }
   for (const directory of cleanupDirs.splice(0)) {
     rmSync(directory, { recursive: true, force: true });
@@ -70,7 +70,7 @@ async function createTestSession(
   profileId: string = 'test-profile',
   overrides?: Partial<import('../../src/session/session-schema.ts').WorkflowSession>
 ): Promise<import('../../src/session/session-schema.ts').WorkflowSession> {
-  const store = new WorkflowStore(process.env.STATE_MACHINE_STORE_DIR!);
+  const store = new WorkflowStore(process.env.SESSION_GUARD_STORE_DIR!);
   const session = createSession(sessionId, profileId, 'cycle');
   if (overrides) {
     Object.assign(session, overrides);
@@ -82,7 +82,7 @@ async function createTestSession(
 async function loadSession(
   sessionId: string
 ): Promise<import('../../src/session/session-schema.ts').WorkflowSession | null> {
-  const store = new WorkflowStore(process.env.STATE_MACHINE_STORE_DIR!);
+  const store = new WorkflowStore(process.env.SESSION_GUARD_STORE_DIR!);
   return store.load(sessionId);
 }
 
@@ -118,6 +118,8 @@ function activeOperation(
         ancestry: [],
         stage: 'dev',
         status: 'running',
+        gates: {},
+        round: 0,
       },
     },
     activeOperations: {
@@ -128,6 +130,8 @@ function activeOperation(
         agent,
         startedAt: new Date().toISOString(),
         status: 'running',
+        round: 0,
+        kind: 'task',
       },
     },
     currentStage: 'EXECUTION',
@@ -135,7 +139,7 @@ function activeOperation(
 }
 
 function setExecutableProfilesDir(): void {
-  process.env.STATE_MACHINE_PROFILES_DIR = resolve(import.meta.dir, '../../test/fixtures/profiles');
+  process.env.SESSION_GUARD_PROFILES_DIR = resolve(import.meta.dir, '../../test/fixtures/profiles');
 }
 
 // ─── handleWorkflowResult ────────────────────────────────────────────────────
@@ -610,8 +614,8 @@ const REAL_PROFILES_DIR = join(import.meta.dirname, '../../profiles');
 
 describe('generic tool blocking', () => {
   test('forbidden git command is blocked', async () => {
-    const prevProfiles = process.env.STATE_MACHINE_PROFILES_DIR;
-    process.env.STATE_MACHINE_PROFILES_DIR = REAL_PROFILES_DIR;
+    const prevProfiles = process.env.SESSION_GUARD_PROFILES_DIR;
+    process.env.SESSION_GUARD_PROFILES_DIR = REAL_PROFILES_DIR;
 
     const hooks = await createRuntime();
     const sessionId = 'forbidden-git';
@@ -625,7 +629,7 @@ describe('generic tool blocking', () => {
       )
     ).rejects.toThrow(/git commit\/push is blocked/);
 
-    process.env.STATE_MACHINE_PROFILES_DIR = prevProfiles;
+    process.env.SESSION_GUARD_PROFILES_DIR = prevProfiles;
   });
 });
 
@@ -659,8 +663,8 @@ describe('handleFileToolAfter with real file on disk', () => {
     const hooks = mod.createRuntime(input);
     await createTestSession(sessionId, 'base');
 
-    const stateDir = process.env.STATE_MACHINE_PROFILES_DIR;
-    process.env.STATE_MACHINE_PROFILES_DIR = REAL_PROFILES_DIR;
+    const stateDir = process.env.SESSION_GUARD_PROFILES_DIR;
+    process.env.SESSION_GUARD_PROFILES_DIR = REAL_PROFILES_DIR;
 
     const output = { title: 'edit', output: 'file edited', metadata: {} };
     await hooks['tool.execute.after']!(
@@ -676,7 +680,7 @@ describe('handleFileToolAfter with real file on disk', () => {
     const session = await loadSession(sessionId);
     expect(session).not.toBeNull();
 
-    process.env.STATE_MACHINE_PROFILES_DIR = stateDir;
+    process.env.SESSION_GUARD_PROFILES_DIR = stateDir;
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -723,7 +727,7 @@ describe('handleFileToolAfter with real file on disk', () => {
       $: {} as PluginInput['$'],
     };
 
-    // Don't set STATE_MACHINE_PROFILES_DIR — profiles dir defaults to <directory>/profiles
+    // Don't set SESSION_GUARD_PROFILES_DIR — profiles dir defaults to <directory>/profiles
     // which doesn't exist. Still should not throw.
     const hooks = mod.createRuntime(input);
     await createTestSession(sessionId, 'nonexistent-profile');
@@ -747,10 +751,10 @@ describe('handleFileToolAfter with real file on disk', () => {
 
 // ─── handleFileToolAfter — строка 577, правая ветка ?? ─────────────────────
 
-describe('handleFileToolAfter default profiles dir (no STATE_MACHINE_PROFILES_DIR)', () => {
-  test('uses default profiles dir when STATE_MACHINE_PROFILES_DIR is not set', async () => {
+describe('handleFileToolAfter default profiles dir (no SESSION_GUARD_PROFILES_DIR)', () => {
+  test('uses default profiles dir when SESSION_GUARD_PROFILES_DIR is not set', async () => {
     const tmpDir = mkdtempSync(join(tmpdir(), 'file-def-'));
-    delete process.env.STATE_MACHINE_PROFILES_DIR;
+    delete process.env.SESSION_GUARD_PROFILES_DIR;
 
     const testFileDir = join(tmpDir, 'src');
     execSync(`mkdir -p ${testFileDir}`, { encoding: 'utf-8' });
@@ -873,7 +877,7 @@ describe('handleDispose, handleConfig, listSessions', () => {
     // dispose should not throw
   });
 
-  test('handleConfig registers sm-* commands and state-machine agent', async () => {
+  test('handleConfig registers sm-* commands and session-guard agent', async () => {
     const hooks = await createRuntime();
     const config: Record<string, unknown> = {
       model: 'test-model',
@@ -885,7 +889,7 @@ describe('handleDispose, handleConfig, listSessions', () => {
     expect((config.command as Record<string, unknown>)['sm-session']).toBeDefined();
     expect((config.command as Record<string, unknown>)['sm-profile']).toBeDefined();
     expect(config.agent).toBeDefined();
-    expect((config.agent as Record<string, unknown>)['state-machine']).toBeDefined();
+    expect((config.agent as Record<string, unknown>)['session-guard']).toBeDefined();
   });
 });
 
@@ -1234,7 +1238,7 @@ describe('handleFileToolAfter tool-name normalisation', () => {
       worktree: tmpDir,
     } as PluginInput);
 
-    process.env.STATE_MACHINE_PROFILES_DIR = REAL_PROFILES_DIR;
+    process.env.SESSION_GUARD_PROFILES_DIR = REAL_PROFILES_DIR;
     await createTestSession('file-case-lower', 'base');
     await createTestSession('file-case-upper', 'base');
 
@@ -1375,8 +1379,8 @@ describe('opt-in session gate', () => {
   });
 
   test('forbidden git command is not blocked when no session exists', async () => {
-    const prevProfiles = process.env.STATE_MACHINE_PROFILES_DIR;
-    process.env.STATE_MACHINE_PROFILES_DIR = REAL_PROFILES_DIR;
+    const prevProfiles = process.env.SESSION_GUARD_PROFILES_DIR;
+    process.env.SESSION_GUARD_PROFILES_DIR = REAL_PROFILES_DIR;
 
     const hooks = await createRuntime();
     const output = { args: { command: 'git commit -m "test"' } };
@@ -1387,7 +1391,7 @@ describe('opt-in session gate', () => {
 
     expect(output.args).toEqual({ command: 'git commit -m "test"' });
 
-    process.env.STATE_MACHINE_PROFILES_DIR = prevProfiles;
+    process.env.SESSION_GUARD_PROFILES_DIR = prevProfiles;
   });
 
   test('tool output is not sanitised when no session exists', async () => {

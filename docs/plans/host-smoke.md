@@ -15,6 +15,6 @@
 | 6 | commit-task is refused while the gates have not passed | **PASS** | 1 | the delivery guard refused the call and no receipt was written |
 | 7 | An approved plan moves the session out of planning | **PASS** | 1 | consent recorded the plan reference and the guard released planning → tasks_ready |
 | 8 | A commit that matches the permit is receipted | **PASS** | 1 | the permit was issued, the commit moved HEAD, and the receipt records that commit |
-| 9 | A commit that sweeps in an unrelated file is not receipted | **PASS** | 8 | HEAD moved but the commit carried unrelated.txt: no receipt, permit dropped, refusal surfaced |
+| 9 | A commit that sweeps in an unrelated file is not receipted | **PASS** | 10 | HEAD moved but the commit carried unrelated.txt: no receipt, permit dropped, refusal surfaced |
 | 10 | Full CI/CD pipeline: init → checkout → build → test(unit+integration) → deploy → smoke → done | **PASS** | 10 | full CI/CD pipeline passed: init → consent → setup → build → unit → integration → deploy (consent) → smoke → done |
 | 11 | A live subagent closes a gate with its own workflow-result | **PASS** | 6 | two live subagents each closed their own gate with a workflow-result; the stage held for the first and completed the task on the second |

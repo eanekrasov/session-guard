@@ -4,5 +4,5 @@
   "agents": ["code", "architect"],
   "skills": ["code-review", "testing"],
   "invariants": ["no-console", "strict-null"],
-  "schemas": ["state-machine.yaml"]
+  "schemas": ["session-guard.yaml"]
 }

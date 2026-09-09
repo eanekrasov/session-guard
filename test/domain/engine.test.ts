@@ -1,13 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import type { WorkflowSession } from '../../src/session/session-schema.ts';
 import type { EngineConfig } from '../../src/domain/engine.ts';
-import { StateMachineEngine } from '../../src/domain/engine.ts';
+import { SessionGuardEngine } from '../../src/domain/engine.ts';
 
 function makeSession(overrides: Partial<WorkflowSession> = {}): WorkflowSession {
-  return {
+  const session: WorkflowSession = {
     sessionId: 'test-session',
     profileId: 'android',
-    schemaId: 'state-machine',
+    schemaId: 'session-guard',
     schemaVersion: 1,
     revision: 0,
     title: '',
@@ -20,6 +20,7 @@ function makeSession(overrides: Partial<WorkflowSession> = {}): WorkflowSession 
     refs: {},
     tasks: {},
     activeOperations: {},
+    activeTaskContexts: [],
     loopRuns: {},
     deliveryReceipt: null,
     deliveryPermit: null,
@@ -30,8 +31,10 @@ function makeSession(overrides: Partial<WorkflowSession> = {}): WorkflowSession 
     changedFiles: [],
     invariantViolations: [],
     consentedCallIDs: [],
-    ...overrides,
+    processedResultCallIDs: [],
   };
+  Object.assign(session, overrides);
+  return session;
 }
 
 function makeConfig(overrides: Partial<EngineConfig> = {}): EngineConfig {
@@ -42,12 +45,12 @@ function makeConfig(overrides: Partial<EngineConfig> = {}): EngineConfig {
   };
 }
 
-describe('StateMachineEngine', () => {
+describe('SessionGuardEngine', () => {
   it('derives PLANNING stage through engine', () => {
     const config = makeConfig({
       stageAssignments: [{ id: 'always', priority: 0, condition: 'true', result: 'PLANNING' }],
     });
-    const engine = new StateMachineEngine(config);
+    const engine = new SessionGuardEngine(config);
     const session = makeSession();
 
     const stage = engine.deriveStage(session);
@@ -62,7 +65,7 @@ describe('StateMachineEngine', () => {
         { id: 'fallback', priority: 0, condition: 'true', result: 'PLANNING' },
       ],
     });
-    const engine = new StateMachineEngine(config);
+    const engine = new SessionGuardEngine(config);
     const session = makeSession({
       approvals: [{ type: 'plan', callId: 'c1', status: 'granted' }],
     });
@@ -76,7 +79,7 @@ describe('StateMachineEngine', () => {
     const config = makeConfig({
       transitions: [{ from: 'PLANNING', to: 'EXECUTION' }],
     });
-    const engine = new StateMachineEngine(config);
+    const engine = new SessionGuardEngine(config);
 
     const result = engine.checkTransition('PLANNING', 'EXECUTION');
 
@@ -84,7 +87,7 @@ describe('StateMachineEngine', () => {
   });
 
   it('tryApplyTransitions enforces external stage exit and entry guards', () => {
-    const engine = new StateMachineEngine(
+    const engine = new SessionGuardEngine(
       makeConfig({
         stageAssignments: [{ id: 'always', priority: 0, condition: 'true', result: 'a' }],
         stages: {
@@ -104,7 +107,7 @@ describe('StateMachineEngine', () => {
     const config = makeConfig({
       transitions: [{ from: 'PLANNING', to: 'EXECUTION' }],
     });
-    const engine = new StateMachineEngine(config);
+    const engine = new SessionGuardEngine(config);
 
     const result = engine.checkTransition('PLANNING', 'COMMIT');
 
@@ -114,7 +117,7 @@ describe('StateMachineEngine', () => {
 
   it('uses custom evaluateGuardFn when provided', () => {
     const mockGuard = () => false;
-    const engine = new StateMachineEngine(makeConfig(), mockGuard);
+    const engine = new SessionGuardEngine(makeConfig(), mockGuard);
     const session = makeSession();
 
     expect(engine.evaluateGuard('true', session)).toBe(false);
@@ -124,7 +127,7 @@ describe('StateMachineEngine', () => {
     const config = makeConfig({
       transitions: [{ from: 'PLANNING', to: 'EXECUTION' }],
     });
-    const engine = new StateMachineEngine(config);
+    const engine = new SessionGuardEngine(config);
     const session = makeSession();
 
     const result = engine.tryApplyTransitions(session);
@@ -141,7 +144,7 @@ describe('StateMachineEngine', () => {
         { from: 'PLANNING', to: 'EXECUTION', guard: "session.gates.review == 'passed'" },
       ],
     });
-    const engine = new StateMachineEngine(config);
+    const engine = new SessionGuardEngine(config);
     const session = makeSession({ currentStage: 'planning' });
 
     const result = engine.tryApplyTransitions(session);
@@ -155,7 +158,7 @@ describe('StateMachineEngine', () => {
     const config = makeConfig({
       transitions: [{ from: 'PLANNING', to: 'EXECUTION', guard: "session.approved('plan')" }],
     });
-    const engine = new StateMachineEngine(config);
+    const engine = new SessionGuardEngine(config);
 
     // Session without plan approval — guard should block
     const session = makeSession({ approvals: [] });
@@ -173,7 +176,7 @@ describe('StateMachineEngine', () => {
     const config = makeConfig({
       transitions: [{ from: 'PLANNING', to: 'EXECUTION' }],
     });
-    const engine = new StateMachineEngine(config);
+    const engine = new SessionGuardEngine(config);
     const session = makeSession();
 
     engine.tryApplyTransitions(session);
@@ -187,7 +190,7 @@ describe('StateMachineEngine', () => {
     const config = makeConfig({
       stageAssignments: [{ id: 'always', priority: 0, condition: 'true', result: 'PLANNING' }],
     });
-    const engine = new StateMachineEngine(config);
+    const engine = new SessionGuardEngine(config);
     // stageOverride on the session object has no effect on deriveStage
     const session = makeSession({ stageOverride: 'COMMIT' } as never);
 
@@ -206,7 +209,7 @@ describe('StateMachineEngine', () => {
         },
       ],
     });
-    const engine = new StateMachineEngine(config);
+    const engine = new SessionGuardEngine(config);
 
     // Session that already has currentStage=EXECUTION (simulating reload)
     const session = makeSession({
@@ -234,7 +237,7 @@ describe('StateMachineEngine', () => {
         { from: 'PLANNING', to: 'EXECUTION', guard: "session.approved('plan')" },
       ],
     });
-    const engine = new StateMachineEngine(config);
+    const engine = new SessionGuardEngine(config);
 
     const session = makeSession({
       approvals: [{ type: 'plan', callId: 'c1', status: 'granted' }],
@@ -254,8 +257,8 @@ describe('onFailure: retry', () => {
   // gives up. `onFailure` is what tells them apart — the field was accepted,
   // compiled and read by nobody, so both profiles declaring it described
   // behaviour that did not exist.
-  function retryingEngine(maximum?: number): StateMachineEngine {
-    return new StateMachineEngine({
+  function retryingEngine(maximum?: number): SessionGuardEngine {
+    return new SessionGuardEngine({
       stages: {
         execution: maximum === undefined ? {} : { retryBudget: { maximum } },
         failed: {},
@@ -337,7 +340,7 @@ describe('alternative transitions between the same two stages', () => {
     });
 
   it('takes the alternative whose guard holds', () => {
-    const engine = new StateMachineEngine(config());
+    const engine = new SessionGuardEngine(config());
     const session = makeSession();
 
     const result = engine.tryApplyTransitions(session);
@@ -347,7 +350,7 @@ describe('alternative transitions between the same two stages', () => {
   });
 
   it('stays put when no alternative holds', () => {
-    const engine = new StateMachineEngine(
+    const engine = new SessionGuardEngine(
       makeConfig({
         stageAssignments: [{ id: 'always', priority: 0, condition: 'true', result: 'a' }],
         transitions: [
@@ -363,7 +366,7 @@ describe('alternative transitions between the same two stages', () => {
 
   it('applies the effects of the alternative that was taken, not the first', () => {
     // The effect proves which edge ran: the blocked one grants nothing.
-    const engine = new StateMachineEngine(
+    const engine = new SessionGuardEngine(
       makeConfig({
         stageAssignments: [{ id: 'always', priority: 0, condition: 'true', result: 'a' }],
         transitions: [

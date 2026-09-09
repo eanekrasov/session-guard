@@ -1,5 +1,5 @@
 /**
- * PR 2: Refactor helpers in runtime.ts to use tx.session from the enclosing
+ * SessionExecutor persistence semantics: runtime helpers use tx.session from the enclosing
  * executor transaction instead of loading their own session copies and doing
  * their own queue.enqueue() + store.save().
  *
@@ -17,6 +17,7 @@ import { tmpdir } from 'node:os';
 import { execSync } from 'node:child_process';
 import type { PluginInput } from '@opencode-ai/plugin';
 import { createSession, WorkflowStore } from '../../src/session/session-store.ts';
+import type { WorkflowSession } from '../../src/session/session-schema.ts';
 import { createTask } from '../support/task-factory.ts';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -26,23 +27,23 @@ let prevProfilesDir: string | undefined;
 const cleanupDirs: string[] = [];
 
 beforeEach(() => {
-  prevStoreDir = process.env.STATE_MACHINE_STORE_DIR;
-  prevProfilesDir = process.env.STATE_MACHINE_PROFILES_DIR;
-  process.env.STATE_MACHINE_STORE_DIR =
-    '/tmp/state-machine-test-' + Math.random().toString(36).slice(2);
-  delete process.env.STATE_MACHINE_PROFILES_DIR;
+  prevStoreDir = process.env.SESSION_GUARD_STORE_DIR;
+  prevProfilesDir = process.env.SESSION_GUARD_PROFILES_DIR;
+  process.env.SESSION_GUARD_STORE_DIR =
+    '/tmp/session-guard-test-' + Math.random().toString(36).slice(2);
+  delete process.env.SESSION_GUARD_PROFILES_DIR;
 });
 
 afterEach(() => {
   if (prevStoreDir !== undefined) {
-    process.env.STATE_MACHINE_STORE_DIR = prevStoreDir;
+    process.env.SESSION_GUARD_STORE_DIR = prevStoreDir;
   } else {
-    delete process.env.STATE_MACHINE_STORE_DIR;
+    delete process.env.SESSION_GUARD_STORE_DIR;
   }
   if (prevProfilesDir !== undefined) {
-    process.env.STATE_MACHINE_PROFILES_DIR = prevProfilesDir;
+    process.env.SESSION_GUARD_PROFILES_DIR = prevProfilesDir;
   } else {
-    delete process.env.STATE_MACHINE_PROFILES_DIR;
+    delete process.env.SESSION_GUARD_PROFILES_DIR;
   }
   for (const directory of cleanupDirs.splice(0)) {
     rmSync(directory, { recursive: true, force: true });
@@ -81,7 +82,7 @@ async function createTestSession(
   profileId: string = 'test-profile',
   overrides?: Partial<import('../../src/session/session-schema.ts').WorkflowSession>
 ): Promise<import('../../src/session/session-schema.ts').WorkflowSession> {
-  const store = new WorkflowStore(process.env.STATE_MACHINE_STORE_DIR!);
+  const store = new WorkflowStore(process.env.SESSION_GUARD_STORE_DIR!);
   const session = createSession(sessionId, profileId, 'cycle');
   if (overrides) {
     Object.assign(session, overrides);
@@ -93,7 +94,7 @@ async function createTestSession(
 async function loadSession(
   sessionId: string
 ): Promise<import('../../src/session/session-schema.ts').WorkflowSession | null> {
-  const store = new WorkflowStore(process.env.STATE_MACHINE_STORE_DIR!);
+  const store = new WorkflowStore(process.env.SESSION_GUARD_STORE_DIR!);
   return store.load(sessionId);
 }
 
@@ -103,15 +104,15 @@ import { vi } from 'vitest';
 
 function createMockStore() {
   const loadCalls: Array<string> = [];
-  const saveCalls: Array<unknown> = [];
-  let loadResult: import('../../src/session/session-schema.ts').WorkflowSession | null = null;
+  const saveCalls: WorkflowSession[] = [];
+  let loadResult: WorkflowSession | null = null;
 
   const store = {
     load: vi.fn(async (id: string) => {
       loadCalls.push(id);
       return loadResult;
     }),
-    save: vi.fn(async (sess: unknown) => {
+    save: vi.fn(async (sess: WorkflowSession) => {
       saveCalls.push(sess);
     }),
   } as unknown as WorkflowStore;
@@ -120,16 +121,13 @@ function createMockStore() {
     store,
     loadCalls,
     saveCalls,
-    setLoadResult(s: import('../../src/session/session-schema.ts').WorkflowSession | null) {
+    setLoadResult(s: WorkflowSession | null) {
       loadResult = s;
     },
   };
 }
 
-function makeSession(
-  sessionId: string,
-  overrides?: Partial<import('../../src/session/session-schema.ts').WorkflowSession>
-): import('../../src/session/session-schema.ts').WorkflowSession {
+function makeSession(sessionId: string, overrides?: Partial<WorkflowSession>): WorkflowSession {
   return {
     schemaVersion: 2,
     sessionId,
@@ -161,7 +159,7 @@ function makeSession(
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
-describe('PR 2 — tx.session refactor', () => {
+describe('SessionExecutor persistence semantics', () => {
   describe('save count correctness', () => {
     test('single save per write hook call (handleToolAfter)', async () => {
       const { store, saveCalls, setLoadResult } = createMockStore();
@@ -308,9 +306,9 @@ describe('PR 2 — tx.session refactor', () => {
   });
 });
 
-describe('PR 2 — real store integration', () => {
+describe('Real WorkflowStore persistence integration', () => {
   test('executor single save with real WorkflowStore', async () => {
-    const store = new WorkflowStore(process.env.STATE_MACHINE_STORE_DIR!);
+    const store = new WorkflowStore(process.env.SESSION_GUARD_STORE_DIR!);
     const session = createSession('pr2-real-save', 'test', 'cycle');
     await store.save(session);
 
@@ -342,7 +340,7 @@ describe('PR 2 — real store integration', () => {
   });
 
   test('read-only hook with real store produces zero saves', async () => {
-    const store = new WorkflowStore(process.env.STATE_MACHINE_STORE_DIR!);
+    const store = new WorkflowStore(process.env.SESSION_GUARD_STORE_DIR!);
     const session = createSession('pr2-real-readonly', 'test', 'cycle');
     await store.save(session);
 

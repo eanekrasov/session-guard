@@ -13,10 +13,10 @@ import { parseWorkflowResult, MUTATION_TTL_MS } from '../../src/domain/evidence.
 import { createTask } from '../support/task-factory.ts';
 
 function makeSession(overrides: Partial<WorkflowSession> = {}): WorkflowSession {
-  return {
+  const session: WorkflowSession = {
     sessionId: 'test-session',
     profileId: 'android',
-    schemaId: 'state-machine',
+    schemaId: 'session-guard',
     schemaVersion: 2,
     revision: 0,
     title: '',
@@ -25,6 +25,7 @@ function makeSession(overrides: Partial<WorkflowSession> = {}): WorkflowSession 
     refs: {},
     tasks: {},
     activeOperations: {},
+    activeTaskContexts: [],
     loopRuns: {},
     deliveryReceipt: null,
     deliveryPermit: null,
@@ -35,8 +36,11 @@ function makeSession(overrides: Partial<WorkflowSession> = {}): WorkflowSession 
     invariantViolations: [],
     consentedCallIDs: [],
     pendingDecisions: [],
-    ...overrides,
+    currentStage: 'planning',
+    processedResultCallIDs: [],
   };
+  Object.assign(session, overrides);
+  return session;
 }
 
 function taskList(
@@ -58,6 +62,8 @@ function loopRun(
       ancestry: [],
       stage: 'mutation',
       status,
+      gates: {},
+      round: 0,
     },
   };
 }
@@ -75,6 +81,8 @@ function activeOperation(
       agent: 'code',
       startedAt,
       status,
+      round: 0,
+      kind: 'mutation',
     },
   };
 }

@@ -85,14 +85,14 @@ async function load(store: WorkflowStore): Promise<WorkflowSession> {
 
 beforeEach(async () => {
   previousCwd = process.cwd();
-  previousStoreDir = process.env.STATE_MACHINE_STORE_DIR;
-  previousProfilesDir = process.env.STATE_MACHINE_PROFILES_DIR;
+  previousStoreDir = process.env.SESSION_GUARD_STORE_DIR;
+  previousProfilesDir = process.env.SESSION_GUARD_PROFILES_DIR;
   storeDirectory = await mkdtemp(join(tmpdir(), 'commit-cwd-store-'));
   profilesDirectory = await mkdtemp(join(tmpdir(), 'commit-cwd-profiles-'));
   repoDirectory = await mkdtemp(join(tmpdir(), 'commit-cwd-repo-'));
   otherRepo = await mkdtemp(join(tmpdir(), 'commit-cwd-other-'));
-  process.env.STATE_MACHINE_STORE_DIR = storeDirectory;
-  process.env.STATE_MACHINE_PROFILES_DIR = profilesDirectory;
+  process.env.SESSION_GUARD_STORE_DIR = storeDirectory;
+  process.env.SESSION_GUARD_PROFILES_DIR = profilesDirectory;
 
   // Инициализируем основной репозиторий проекта
   git(repoDirectory, ['init', '-q']);
@@ -117,10 +117,10 @@ beforeEach(async () => {
 
 afterEach(async () => {
   process.chdir(previousCwd);
-  if (previousStoreDir === undefined) delete process.env.STATE_MACHINE_STORE_DIR;
-  else process.env.STATE_MACHINE_STORE_DIR = previousStoreDir;
-  if (previousProfilesDir === undefined) delete process.env.STATE_MACHINE_PROFILES_DIR;
-  else process.env.STATE_MACHINE_PROFILES_DIR = previousProfilesDir;
+  if (previousStoreDir === undefined) delete process.env.SESSION_GUARD_STORE_DIR;
+  else process.env.SESSION_GUARD_STORE_DIR = previousStoreDir;
+  if (previousProfilesDir === undefined) delete process.env.SESSION_GUARD_PROFILES_DIR;
+  else process.env.SESSION_GUARD_PROFILES_DIR = previousProfilesDir;
   await rm(storeDirectory, { recursive: true, force: true });
   await rm(profilesDirectory, { recursive: true, force: true });
   await rm(repoDirectory, { recursive: true, force: true });

@@ -23,18 +23,18 @@ Chain strategy: stacked-to-main
 
 ## Phase 2: Core Runtime
 
-- [ ] 2.1 Create `src/app/runtime.ts` — `StateMachineRuntime` class + `createRuntime` factory
+- [ ] 2.1 Create `src/app/runtime.ts` — `SessionGuardRuntime` class + `createRuntime` factory
 - [ ] 2.2 RED: write `test/app/session-queue.test.ts` — promise chaining, per-root isolation, error propagation, clear()
 - [ ] 2.3 GREEN: implement SessionQueue to pass tests
 - [ ] 2.4 RED: write `test/app/runtime.test.ts` — createRuntime returns Hooks, session creation, mutation lifecycle, dispose cleanup
-- [ ] 2.5 GREEN: implement createRuntime + StateMachineRuntime to pass tests
+- [ ] 2.5 GREEN: implement createRuntime + SessionGuardRuntime to pass tests
 
 ## Phase 3: Dashboard & Bridge
 
 - [ ] 3.1 Create `src/app/dashboard.ts` — `startDashboard()` Bun.serve with `/status` endpoint
 - [ ] 3.2 RED: write `test/app/dashboard.test.ts` — server responds, port conflict is non-fatal
 - [ ] 3.3 GREEN: implement dashboard to pass tests
-- [ ] 3.4 Create `plugins/state-machine.js` — bridge file importing createRuntime, inert fallback
+- [ ] 3.4 Create `plugins/session-guard.js` — bridge file importing createRuntime, inert fallback
 
 ## Phase 4: Integration & Wiring
 

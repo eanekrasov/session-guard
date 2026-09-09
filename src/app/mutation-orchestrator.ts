@@ -2,7 +2,7 @@ import { resolve, join } from 'node:path';
 import type { WorkflowSession } from '../session/session-schema.ts';
 import { WorkflowStore } from '../session/session-store.ts';
 import { findTask } from '../session/helpers.ts';
-import { StateMachineEngine, type EvaluateGuardFn, type EngineConfig } from '../domain/engine.ts';
+import { SessionGuardEngine, type EvaluateGuardFn, type EngineConfig } from '../domain/engine.ts';
 import { resolveConfig } from '../public-api.ts';
 import { compileWorkflow } from '../schema/compile-workflow.ts';
 import { mergeStages } from '../schema/schema-loader.ts';
@@ -248,7 +248,7 @@ export async function processScopeAndInvariants(
  * and clearing a mutation when its tool call errors out.
  */
 export class MutationOrchestrator {
-  private engineCache = new Map<string, StateMachineEngine>();
+  private engineCache = new Map<string, SessionGuardEngine>();
   // callId → mutationInfo
   private liveMutations = new Map<string, { rootSessionId: string; stageBefore: string }>();
   private logNoop: LogFn;
@@ -281,14 +281,14 @@ export class MutationOrchestrator {
   /**
    * Resolve (lazy-init) an engine for the given profileId.
    */
-  async resolveEngine(profileId: string, schemaId?: string): Promise<StateMachineEngine> {
+  async resolveEngine(profileId: string, schemaId?: string): Promise<SessionGuardEngine> {
     // The engine depends on the directory as much as on the id, and the
     // directory is read from the environment on every call. Keying on the id
     // alone returns the first directory's engine for every later one — which
     // production never notices, because its directory does not move, and a
     // test suite that points the same profile id at two fixture directories
     // does not notice either: it just silently gets the first.
-    const profilesDir = process.env.STATE_MACHINE_PROFILES_DIR ?? this.profilesDir;
+    const profilesDir = process.env.SESSION_GUARD_PROFILES_DIR ?? this.profilesDir;
     const cacheKey = `${profilesDir}\u0000${profileId}\u0000${schemaId ?? ''}`;
     const cached = this.engineCache.get(cacheKey);
     if (cached) {
@@ -298,7 +298,7 @@ export class MutationOrchestrator {
     await this.log('info', 'resolveEngine: resolving profile', {
       profileId,
       profilesDir,
-      envProfilesDir: process.env.STATE_MACHINE_PROFILES_DIR ?? '(not set)',
+      envProfilesDir: process.env.SESSION_GUARD_PROFILES_DIR ?? '(not set)',
     });
     const resolved = await resolveConfig(profileId, profilesDir);
 
@@ -357,7 +357,7 @@ export class MutationOrchestrator {
       );
       return evaluator.evaluate(expression);
     };
-    const engine = new StateMachineEngine(engineConfig, evaluateGuardFn);
+    const engine = new SessionGuardEngine(engineConfig, evaluateGuardFn);
 
     this.engineCache.set(cacheKey, engine);
     return engine;
@@ -376,7 +376,7 @@ export class MutationOrchestrator {
     input: { sessionID: string; callID: string },
     output: { args: unknown }
   ): Promise<void> {
-    let engine: StateMachineEngine;
+    let engine: SessionGuardEngine;
     try {
       // The hook's id may be a dispatched subagent's; the workflow session is
       // the root's. Loading by the raw id found nothing and the mutation went
@@ -433,7 +433,7 @@ export class MutationOrchestrator {
         beginMutation(
           tx.session,
           input.callID,
-          'state-machine',
+          'session-guard',
           (listKey) => {
             const loopStage = engine.getLoopStage(listKey);
             return loopStage ? (firstNestedStageId(loopStage) ?? null) : null;

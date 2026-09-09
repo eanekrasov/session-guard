@@ -222,12 +222,12 @@ describe('ProfileSchemaSchema', () => {
   describe('extends', () => {
     it('accepts optional extends field', () => {
       const input = {
-        extends: 'base/state-machine.yaml',
+        extends: 'base/session-guard.yaml',
       };
 
       const result = ProfileSchemaSchema.parse(input);
 
-      expect(result.extends).toBe('base/state-machine.yaml');
+      expect(result.extends).toBe('base/session-guard.yaml');
     });
 
     it('accepts schema without extends', () => {

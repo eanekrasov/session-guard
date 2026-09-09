@@ -24,7 +24,7 @@ describe('WorkflowStore optimistic concurrency', () => {
     // two writers each loaded revision N, each wrote N+1, and the later one
     // erased the earlier one's work in silence.
     const store = new WorkflowStore(storeDir);
-    await store.save(createSession('conflict', 'base', 'state-machine'));
+    await store.save(createSession('conflict', 'base', 'session-guard'));
 
     const first = await store.load('conflict');
     const second = await store.load('conflict');
@@ -43,7 +43,7 @@ describe('WorkflowStore optimistic concurrency', () => {
 
   it('leaves the refused session reloadable, with its revision unbumped', async () => {
     const store = new WorkflowStore(storeDir);
-    await store.save(createSession('retry', 'base', 'state-machine'));
+    await store.save(createSession('retry', 'base', 'session-guard'));
 
     const stale = (await store.load('retry'))!;
     const staleRevision = stale.revision;
@@ -61,7 +61,7 @@ describe('WorkflowStore optimistic concurrency', () => {
 
   it('saves the same object repeatedly without a false conflict', async () => {
     const store = new WorkflowStore(storeDir);
-    const session = createSession('repeat', 'base', 'state-machine');
+    const session = createSession('repeat', 'base', 'session-guard');
 
     await store.save(session);
     await store.save(session);
@@ -79,7 +79,7 @@ describe("the shipped profile's validation-failure edge", () => {
     // budget and no repetition that could help.
     const { bumpRetry } = await import('../../src/session/helpers.ts');
     const store = new WorkflowStore(storeDir);
-    const session = createSession('cycles', 'base', 'state-machine');
+    const session = createSession('cycles', 'base', 'session-guard');
 
     bumpRetry(session, 'cycles');
     await store.save(session);
@@ -96,7 +96,7 @@ describe('two stores over one directory', () => {
     // each wrote. Both reported success and one update vanished.
     const first = new WorkflowStore(storeDir);
     const second = new WorkflowStore(storeDir);
-    await first.save(createSession('race', 'base', 'state-machine'));
+    await first.save(createSession('race', 'base', 'session-guard'));
 
     const a = (await first.load('race'))!;
     const b = (await second.load('race'))!;
@@ -120,7 +120,7 @@ describe('two stores over one directory', () => {
   it('leaves no lock file behind, so the next save is not blocked', async () => {
     const { readdirSync } = await import('node:fs');
     const store = new WorkflowStore(storeDir);
-    await store.save(createSession('lockless', 'base', 'state-machine'));
+    await store.save(createSession('lockless', 'base', 'session-guard'));
     const again = (await store.load('lockless'))!;
     again.title = 'second write';
     await store.save(again);

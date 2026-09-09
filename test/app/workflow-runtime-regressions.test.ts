@@ -37,18 +37,18 @@ type ToolMap = Record<
 >;
 
 beforeEach(() => {
-  previousStore = process.env.STATE_MACHINE_STORE_DIR;
-  previousProfiles = process.env.STATE_MACHINE_PROFILES_DIR;
+  previousStore = process.env.SESSION_GUARD_STORE_DIR;
+  previousProfiles = process.env.SESSION_GUARD_PROFILES_DIR;
   storeDirectory = mkdtempSync(join(tmpdir(), 'four-probe-'));
-  process.env.STATE_MACHINE_STORE_DIR = storeDirectory;
+  process.env.SESSION_GUARD_STORE_DIR = storeDirectory;
   setFixtureProfilesDir();
 });
 
 afterEach(() => {
-  if (previousStore === undefined) delete process.env.STATE_MACHINE_STORE_DIR;
-  else process.env.STATE_MACHINE_STORE_DIR = previousStore;
-  if (previousProfiles === undefined) delete process.env.STATE_MACHINE_PROFILES_DIR;
-  else process.env.STATE_MACHINE_PROFILES_DIR = previousProfiles;
+  if (previousStore === undefined) delete process.env.SESSION_GUARD_STORE_DIR;
+  else process.env.SESSION_GUARD_STORE_DIR = previousStore;
+  if (previousProfiles === undefined) delete process.env.SESSION_GUARD_PROFILES_DIR;
+  else process.env.SESSION_GUARD_PROFILES_DIR = previousProfiles;
   rmSync(storeDirectory, { recursive: true, force: true });
 });
 
@@ -288,7 +288,7 @@ describe('reading a task list from a dispatched subagent', () => {
     const { SessionExecutor } = await import('../../src/app/session-executor.ts');
 
     const store = new WorkflowStore(storeDirectory);
-    const session = createSession('root', 'base', 'state-machine', 'planning');
+    const session = createSession('root', 'base', 'session-guard', 'planning');
     session.tasks.implementation = [createTask()];
     await store.save(session);
 

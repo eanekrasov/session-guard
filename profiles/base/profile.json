@@ -1,21 +1,10 @@
 {
   "id": "base",
-  "description": "\u0411\u0430\u0437\u043e\u0432\u044b\u0439 \u043f\u0440\u043e\u0444\u0438\u043b\u044c state-machine. \u0412\u0441\u0435 \u043f\u0440\u043e\u0444\u0438\u043b\u0438 \u043d\u0430\u0441\u043b\u0435\u0434\u0443\u044e\u0442 \u043e\u0442 \u043d\u0435\u0433\u043e.",
-  "schemas": [
-    "base.yaml"
-  ],
+  "description": "\u0411\u0430\u0437\u043e\u0432\u044b\u0439 \u043f\u0440\u043e\u0444\u0438\u043b\u044c session-guard. \u0412\u0441\u0435 \u043f\u0440\u043e\u0444\u0438\u043b\u0438 \u043d\u0430\u0441\u043b\u0435\u0434\u0443\u044e\u0442 \u043e\u0442 \u043d\u0435\u0433\u043e.",
+  "schemas": ["base.yaml"],
   "agentsDir": "agents",
   "skillsDir": "skills",
-  "agents": [
-    "architect",
-    "code",
-    "debug",
-    "review",
-    "qa",
-    "orchestrator"
-  ],
+  "agents": ["architect", "code", "debug", "review", "qa", "orchestrator"],
   "skills": [],
-  "invariants": [
-    "LF_ONLY"
-  ]
+  "invariants": ["LF_ONLY"]
 }

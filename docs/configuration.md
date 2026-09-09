@@ -13,23 +13,23 @@ schema. В текущем репозитории есть:
 
 ## Переменные окружения
 
-| Переменная | Назначение |
-|---|---|
-| `STATE_MACHINE_PROFILES_DIR` | Каталог профилей; по умолчанию `<project>/.opencode/profiles` |
-| `STATE_MACHINE_STORE_DIR` | Каталог session state; переопределяет стандартный runtime-каталог |
-| `OPENCODE_HARNESS_DIR` | Корень harness; по умолчанию `.opencode` |
-| `HARNESS_PROFILE` | Профиль по умолчанию |
-| `STATE_MACHINE_LOG_LEVEL` | Уровень логирования: `debug`, `info`, `warn`, `error` |
-| `DASHBOARD_TOKEN` | Включает Bearer-аутентификацию dashboard |
-| `DASHBOARD_HOST` | Адрес dashboard; по умолчанию `127.0.0.1` |
-| `ALLOWED_ORIGIN` | Разрешённый CORS origin |
+| Переменная                   | Назначение                                                        |
+| ---------------------------- | ----------------------------------------------------------------- |
+| `SESSION_GUARD_PROFILES_DIR` | Каталог профилей; по умолчанию `<project>/.opencode/profiles`     |
+| `SESSION_GUARD_STORE_DIR`    | Каталог session state; переопределяет стандартный runtime-каталог |
+| `OPENCODE_HARNESS_DIR`       | Корень harness; по умолчанию `.opencode`                          |
+| `HARNESS_PROFILE`            | Профиль по умолчанию                                              |
+| `SESSION_GUARD_LOG_LEVEL`    | Уровень логирования: `debug`, `info`, `warn`, `error`             |
+| `DASHBOARD_TOKEN`            | Включает Bearer-аутентификацию dashboard                          |
+| `DASHBOARD_HOST`             | Адрес dashboard; по умолчанию `127.0.0.1`                         |
+| `ALLOWED_ORIGIN`             | Разрешённый CORS origin                                           |
 
 Пути можно задавать абсолютными или относительными; относительные пути
 разрешаются относительно соответствующего корня проекта.
 
 ## Подключение
 
-Плагин экспортирует `StateMachinePlugin` из `src/index.ts` и должен быть подключён
+Плагин экспортирует `SessionGuardPluginV1` из `src/index.ts` и должен быть подключён
 через конфигурацию OpenCode или локальный путь установки. Точный путь подключения
 проверяйте в конфигурации конкретного OpenCode checkout.
 

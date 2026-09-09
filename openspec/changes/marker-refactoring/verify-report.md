@@ -66,7 +66,7 @@ Finished in 104.8ms
 | S5 | Guard Evaluator `session.approved('plan')` in Proxy | **PASS** | `test/guard-evaluator.test.ts` lines 47-84 — `evaluator.evaluate("session.approved('plan')")` returns `true` when approval exists and is granted; `false` when denied or nonexistent. Source `src/guard-evaluator.ts:57-63`. |
 | S6 | Guard Evaluator `session.confirmed('bug')` in Proxy | **PASS** | `test/guard-evaluator.test.ts` lines 87-133 — `evaluator.evaluate("session.confirmed('bug')")` returns `true` when verification exists and is confirmed; `false` when failed or nonexistent. Source `src/guard-evaluator.ts:65-71`. |
 | S7 | `reject(session, 'bug')` sets failed status | **PASS** | `test/domain/workflow.test.ts` lines 249-273 — `reject(session, 'bug')` adds `{ stage: 'bug', status: 'failed' }`. Source `src/domain/workflow.ts:129-138`. |
-| S8 | YAML uses `approved()`/`confirmed()` only, no old names | **PASS** | `profiles/state-machine.yaml` — all guard expressions use `session.approved('plan')`, `session.approved('commit')`, `session.deliveryReceipt exists`, `not session.approved('plan')`. Zero occurrences of `granted`, `commitPermit`, `commitHash`, `planDeclined`. |
+| S8 | YAML uses `approved()`/`confirmed()` only, no old names | **PASS** | `profiles/session-guard.yaml` — all guard expressions use `session.approved('plan')`, `session.approved('commit')`, `session.deliveryReceipt exists`, `not session.approved('plan')`. Zero occurrences of `granted`, `commitPermit`, `commitHash`, `planDeclined`. |
 | S9 | Schema strips old fields via `.strip()` | **PASS** | `test/session/session-schema.test.ts` lines 68-79 — `.strip()` test confirms unknown fields are stripped. Source `src/session/session-schema.ts:86` — `WorkflowSessionSchema` ends with `.strip()`. Schema defaults use new field names. |
 
 ## Old Marker Names Cleanup
@@ -108,7 +108,7 @@ None are production code; all are intentional backward-compatibility or regressi
 | R5.1-R5.7 | Workflow updates (7 items) | ✅ PASS | `workflow.ts` verified |
 | R6.1-R6.3 | SessionFacts (3 items) | ✅ PASS | `session-facts.ts` verified |
 | R7.1-R7.3 | GuardEvaluator (3 items) | ✅ PASS | `guard-evaluator.ts` verified |
-| R8.1-R8.4 | YAML (4 items) | ✅ PASS | `profiles/state-machine.yaml` verified |
+| R8.1-R8.4 | YAML (4 items) | ✅ PASS | `profiles/session-guard.yaml` verified |
 | R9.1-R9.4 | Public API (4 items) | ✅ PASS | `index.ts` + `domain/index.ts` verified |
 
 ## Design Coherence

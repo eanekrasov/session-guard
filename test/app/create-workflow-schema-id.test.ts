@@ -13,19 +13,19 @@ let previousProfilesDir: string | undefined;
 let storeDir: string;
 
 beforeEach(() => {
-  previousStoreDir = process.env.STATE_MACHINE_STORE_DIR;
-  previousProfilesDir = process.env.STATE_MACHINE_PROFILES_DIR;
+  previousStoreDir = process.env.SESSION_GUARD_STORE_DIR;
+  previousProfilesDir = process.env.SESSION_GUARD_PROFILES_DIR;
   storeDir = '/tmp/create-workflow-schema-' + Math.random().toString(36).slice(2);
-  process.env.STATE_MACHINE_STORE_DIR = storeDir;
-  process.env.STATE_MACHINE_PROFILES_DIR = fixtureProfilesDir('profiles');
+  process.env.SESSION_GUARD_STORE_DIR = storeDir;
+  process.env.SESSION_GUARD_PROFILES_DIR = fixtureProfilesDir('profiles');
 });
 
 afterEach(() => {
-  if (previousStoreDir !== undefined) process.env.STATE_MACHINE_STORE_DIR = previousStoreDir;
-  else delete process.env.STATE_MACHINE_STORE_DIR;
+  if (previousStoreDir !== undefined) process.env.SESSION_GUARD_STORE_DIR = previousStoreDir;
+  else delete process.env.SESSION_GUARD_STORE_DIR;
   if (previousProfilesDir !== undefined)
-    process.env.STATE_MACHINE_PROFILES_DIR = previousProfilesDir;
-  else delete process.env.STATE_MACHINE_PROFILES_DIR;
+    process.env.SESSION_GUARD_PROFILES_DIR = previousProfilesDir;
+  else delete process.env.SESSION_GUARD_PROFILES_DIR;
 });
 
 async function create(sessionID: string, schemaId: string | undefined): Promise<string> {

@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 /**
  * The dashboard must read the store the plugin writes.
  *
- * `SESSIONS_DIR` was hardcoded to `<repo>/.opencode/state-machine/sessions`, a
+ * `SESSIONS_DIR` was hardcoded to `<repo>/.opencode/session-guard/sessions`, a
  * path nothing has written since the store moved out of the project, so the
  * dashboard listed an empty directory while the plugin was running.
  *
@@ -17,13 +17,13 @@ import { describe, expect, it } from 'vitest';
 describe('the dashboard reads the plugin store', () => {
   it('resolves the store by the same rule as the plugin runtime', async () => {
     const { sessionsDir, opencodeStateDir } = await import('../../src/app/paths.ts');
-    const previous = process.env.STATE_MACHINE_STORE_DIR;
+    const previous = process.env.SESSION_GUARD_STORE_DIR;
     try {
-      process.env.STATE_MACHINE_STORE_DIR = '/tmp/an-operator-override';
+      process.env.SESSION_GUARD_STORE_DIR = '/tmp/an-operator-override';
       expect(sessionsDir(opencodeStateDir())).toBe('/tmp/an-operator-override');
     } finally {
-      if (previous === undefined) delete process.env.STATE_MACHINE_STORE_DIR;
-      else process.env.STATE_MACHINE_STORE_DIR = previous;
+      if (previous === undefined) delete process.env.SESSION_GUARD_STORE_DIR;
+      else process.env.SESSION_GUARD_STORE_DIR = previous;
     }
   });
 
@@ -34,6 +34,6 @@ describe('the dashboard reads the plugin store', () => {
       'utf-8'
     );
     expect(source).toContain('sessionsDir(opencodeStateDir())');
-    expect(source).not.toContain("'.opencode', 'state-machine', 'sessions'");
+    expect(source).not.toContain("'.opencode', 'session-guard', 'sessions'");
   });
 });

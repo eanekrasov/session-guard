@@ -1,4 +1,4 @@
-# Design: Domain Layer — pure business logic for state-machine plugin
+# Design: Domain Layer — pure business logic for session-guard plugin
 
 | Field | Value |
 |-------|-------|
@@ -20,7 +20,7 @@ src/domain/
 ├── session-facts.ts       # SessionFacts interface + toSessionFacts(WorkflowSession): SessionFacts
 ├── derive-phase.ts        # derivePhase(facts, rules): PhaseId
 ├── validate-transition.ts # checkTransition(from, to, transitions, session?): string | null
-├── engine.ts              # StateMachineEngine class (wraps config + guard evaluator)
+├── engine.ts              # SessionGuardEngine class (wraps config + guard evaluator)
 ├── workflow.ts            # 9 workflow mutation functions
 ├── dispatch.ts            # 4 dispatch lifecycle functions
 └── index.ts               # Barrel re-export
@@ -35,7 +35,7 @@ A flat structure is chosen over nested directories (see AD1 below). Each file is
 │                     Application Layer (future)                      │
 │  Plugin runtime, dashboard, bridges — config merge, error handling  │
 └───────────────────────────┬─────────────────────────────────────────┘
-                            │ calls StateMachineEngine methods
+                            │ calls SessionGuardEngine methods
                             │ calls toSessionFacts / workflow / dispatch
                             ▼
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -109,7 +109,7 @@ types.ts ───────────────────────�
 | Option | Description |
 |--------|-------------|
 | **Chosen: Flat** (`src/domain/*.ts`) | All 8 source files co-located in one directory |
-| Rejected: Nested (`src/domain/session/facts.ts`, `src/domain/engine/state-machine.ts`) | Sub-directories for logical grouping |
+| Rejected: Nested (`src/domain/session/facts.ts`, `src/domain/engine/session-guard.ts`) | Sub-directories for logical grouping |
 
 **Rationale**: The domain layer has exactly 8 source files — small enough that nested directories add ceremony without benefit. Every module can import from another with `./types.ts` or `./engine.ts`. Flat structure matches the parent project's layout (`state.ts`, `workflow.ts`, `dispatch.ts` at top level). If the domain grows beyond 15 files, we can split into sub-directories.
 
@@ -208,21 +208,21 @@ The `TransitionDef.kind` field is consumed directly inside `checkTransition`:
 
 The `requiredGates` array comes from `EngineConfig.requiredGates` (injected by the engine layer) and defaults to `['invariants']`.
 
-### AD8: StateMachineEngine — class with config + guardFn (vs plain functions)
+### AD8: SessionGuardEngine — class with config + guardFn (vs plain functions)
 
 | Option | Description |
 |--------|-------------|
-| **Chosen: Class** | `StateMachineEngine` with constructor(config, evaluateGuardFn?) |
+| **Chosen: Class** | `SessionGuardEngine` with constructor(config, evaluateGuardFn?) |
 | Rejected: Plain functions | Export `derivePhase()`, `canPerformAction()`, `checkTransition()` as standalone functions |
 | Rejected: Factory function | Create engine via `createEngine(config, guardFn)` returning an object |
 
-**Rationale**: A class encapsulates shared config state and the guard evaluator, avoiding repeated parameter passing. The optional `evaluateGuardFn` parameter enables test injection (A mock can always return `false` to test guard rejection). This mirrors the parent `ConfigDrivenStateMachine` pattern. A class makes future lifecycle (e.g., config reload) trivial to add.
+**Rationale**: A class encapsulates shared config state and the guard evaluator, avoiding repeated parameter passing. The optional `evaluateGuardFn` parameter enables test injection (A mock can always return `false` to test guard rejection). This mirrors the parent `ConfigDrivenSessionGuard` pattern. A class makes future lifecycle (e.g., config reload) trivial to add.
 
 ### AD9: canPerformAction — checks flat actionGuards only (no stage guards)
 
 **Decision**: `engine.canPerformAction()` iterates over `this.config.actionGuards` (a flat `string[]`), evaluates each against `SessionFacts`, and returns `{ allowed: false, reason }` on the first failure. No per-action guard lookup, no phase-level `entryGuards`/`exitGuards`.
 
-**Rationale**: MVP scope boundary per D9/D10 in the proposal. The parent `ConfigDrivenStateMachine.canPerformAction()` checks per-action `Record<ActionId, string>` and phase-level `entryGuards`/`exitGuards`. The plugin's `ResolvedSchema` currently has `actionGuards?: string[]` — a flat array. Per-action guards and phase-level guards are deferred to P1.
+**Rationale**: MVP scope boundary per D9/D10 in the proposal. The parent `ConfigDrivenSessionGuard.canPerformAction()` checks per-action `Record<ActionId, string>` and phase-level `entryGuards`/`exitGuards`. The plugin's `ResolvedSchema` currently has `actionGuards?: string[]` — a flat array. Per-action guards and phase-level guards are deferred to P1.
 
 ### AD10: Workflow functions as session mutators — immutable vs mutable
 
@@ -280,7 +280,7 @@ This replaces `session.planApproved == true` in guard expressions, which was cou
 
 ### AD13: autoProceed — automatic phase transitions via kind: auto
 
-**Decision**: `StateMachineEngine.autoProceed(session)` scans the current phase's transitions for one with `kind: 'auto'`, evaluates its guard, and if allowed — sets `session.phaseOverride` to the target phase. This is called from the runtime after every `tool.execute.after` / `finishMutation`.
+**Decision**: `SessionGuardEngine.autoProceed(session)` scans the current phase's transitions for one with `kind: 'auto'`, evaluates its guard, and if allowed — sets `session.phaseOverride` to the target phase. This is called from the runtime after every `tool.execute.after` / `finishMutation`.
 
 **Rationale**: Common workflow patterns (PLANNING → EXECUTION after plan approval) should not require explicit user action. The `kind` field on the transition definition declares this intent declaratively in the schema.
 
@@ -410,7 +410,7 @@ export type EvaluateGuardFn = (
   guards: Record<string, (...args: unknown[]) => unknown>,
 ) => boolean;
 
-export class StateMachineEngine {
+export class SessionGuardEngine {
   constructor(
     config: EngineConfig,
     evaluateGuardFn?: EvaluateGuardFn,
@@ -503,7 +503,7 @@ export function canExitExecution(session: WorkflowSession): boolean;
 
 ## 4. Data Flow
 
-### 4.1 `StateMachineEngine.derivePhase()`
+### 4.1 `SessionGuardEngine.derivePhase()`
 
 ```
 session: WorkflowSession
@@ -533,7 +533,7 @@ derivePhase(facts, config.phaseAssignments)
 PhaseId (string)
 ```
 
-### 4.2 `StateMachineEngine.canPerformAction()`
+### 4.2 `SessionGuardEngine.canPerformAction()`
 
 ```
 session: WorkflowSession, action: ActionId
@@ -555,7 +555,7 @@ for each guardExpr in config.actionGuards[]:
     └── all guards passed → return { allowed: true }
 ```
 
-### 4.3 `StateMachineEngine.checkTransition()`
+### 4.3 `SessionGuardEngine.checkTransition()`
 
 ```
 from: PhaseId, to: PhaseId, session?: WorkflowSession
@@ -730,7 +730,7 @@ src/domain/
 | kind=fail — no gate failed | kind=fail, no requiredGate is 'failed' | Returns `{ allowed: false, kind: 'fail' }` |
 | kind=auto bypasses gate checks | kind=auto, gates pending | Returns `{ allowed: true, kind: 'auto' }` |
 
-### 6.5 `StateMachineEngine` — integration of all three methods
+### 6.5 `SessionGuardEngine` — integration of all three methods
 
 | Test | Scenario | Expectation |
 |------|----------|-------------|

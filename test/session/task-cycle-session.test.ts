@@ -26,7 +26,7 @@ async function createStore(): Promise<{ directory: string; store: WorkflowStore 
 describe('task-cycle session persistence', () => {
   it('preserves multiple simultaneous operations through save and load', async () => {
     const { directory, store } = await createStore();
-    const session = createSession('multiple-operations', 'android', 'state-machine');
+    const session = createSession('multiple-operations', 'android', 'session-guard');
     session.tasks = {
       implementation: [
         createTask({ status: 'running' }),
@@ -97,7 +97,7 @@ describe('task-cycle session persistence', () => {
 
   it('initializes collection fields for created and newly persisted sessions', async () => {
     const { directory, store } = await createStore();
-    const created = createSession('created', 'android', 'state-machine');
+    const created = createSession('created', 'android', 'session-guard');
     expect(created.tasks).toEqual({});
     expect(created.activeOperations).toEqual({});
     expect(created.loopRuns).toEqual({});
@@ -109,7 +109,7 @@ describe('task-cycle session persistence', () => {
       JSON.stringify({
         sessionId: 'new-form',
         profileId: 'android',
-        schemaId: 'state-machine',
+        schemaId: 'session-guard',
       }),
       'utf-8'
     );
@@ -126,7 +126,7 @@ describe('task-cycle session persistence', () => {
       WorkflowSessionSchema.parse({
         sessionId: 'invalid-id',
         profileId: 'android',
-        schemaId: 'state-machine',
+        schemaId: 'session-guard',
         tasks: {
           implementation: [{ id: 'invalid', status: 'pending' }],
         },
@@ -137,7 +137,7 @@ describe('task-cycle session persistence', () => {
       WorkflowSessionSchema.parse({
         sessionId: 'duplicate-id',
         profileId: 'android',
-        schemaId: 'state-machine',
+        schemaId: 'session-guard',
         tasks: {
           implementation: [createTask()],
           review: [createTask()],
@@ -151,7 +151,7 @@ describe('task-cycle session persistence', () => {
       WorkflowSessionSchema.parse({
         sessionId: 'mismatched-run-key',
         profileId: 'android',
-        schemaId: 'state-machine',
+        schemaId: 'session-guard',
         loopRuns: {
           'other-key': {
             id: 'run-1',

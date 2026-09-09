@@ -20,6 +20,7 @@ function runAt(stage: string, gates: LoopRun['gates'] = {}): LoopRun {
     stage,
     status: 'running',
     gates,
+    round: 0,
   };
 }
 

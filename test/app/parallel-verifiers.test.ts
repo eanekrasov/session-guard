@@ -49,7 +49,7 @@ function setVerifyFixtureProfilesDir(
   selfLoop = false,
   approveOnMove = false
 ): void {
-  process.env.STATE_MACHINE_PROFILES_DIR = resolve(import.meta.dir, '../../test/fixtures/profiles');
+  process.env.SESSION_GUARD_PROFILES_DIR = resolve(import.meta.dir, '../../test/fixtures/profiles');
   if (transitions) verifyProfileId = 'verify-transitions';
   else if (guardInvariants) verifyProfileId = 'verify-guard-invariants';
   else if (consentToFinish) verifyProfileId = 'verify-consent-to-finish';
@@ -114,20 +114,20 @@ function run(session: WorkflowSession) {
 }
 
 beforeEach(async () => {
-  previousStore = process.env.STATE_MACHINE_STORE_DIR;
-  previousProfiles = process.env.STATE_MACHINE_PROFILES_DIR;
+  previousStore = process.env.SESSION_GUARD_STORE_DIR;
+  previousProfiles = process.env.SESSION_GUARD_PROFILES_DIR;
   storeDirectory = await mkdtemp(join(tmpdir(), 'verify-store-'));
   profilesDirectory = await mkdtemp(join(tmpdir(), 'verify-profiles-'));
-  process.env.STATE_MACHINE_STORE_DIR = storeDirectory;
-  process.env.STATE_MACHINE_PROFILES_DIR = profilesDirectory;
+  process.env.SESSION_GUARD_STORE_DIR = storeDirectory;
+  process.env.SESSION_GUARD_PROFILES_DIR = profilesDirectory;
   setVerifyFixtureProfilesDir();
 });
 
 afterEach(async () => {
-  if (previousStore === undefined) delete process.env.STATE_MACHINE_STORE_DIR;
-  else process.env.STATE_MACHINE_STORE_DIR = previousStore;
-  if (previousProfiles === undefined) delete process.env.STATE_MACHINE_PROFILES_DIR;
-  else process.env.STATE_MACHINE_PROFILES_DIR = previousProfiles;
+  if (previousStore === undefined) delete process.env.SESSION_GUARD_STORE_DIR;
+  else process.env.SESSION_GUARD_STORE_DIR = previousStore;
+  if (previousProfiles === undefined) delete process.env.SESSION_GUARD_PROFILES_DIR;
+  else process.env.SESSION_GUARD_PROFILES_DIR = previousProfiles;
   await rm(storeDirectory, { recursive: true, force: true });
   await rm(profilesDirectory, { recursive: true, force: true });
 });
@@ -604,7 +604,7 @@ describe('an effect on a transition inside a loop', () => {
 
   it('grants an approval declared on the edge that ends the task', async () => {
     // `to: done` is a departure like any other, so it carries its effects too.
-    process.env.STATE_MACHINE_PROFILES_DIR = resolve(
+    process.env.SESSION_GUARD_PROFILES_DIR = resolve(
       import.meta.dir,
       '../../test/fixtures/profiles'
     );

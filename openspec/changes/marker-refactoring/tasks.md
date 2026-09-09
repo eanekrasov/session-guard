@@ -125,9 +125,9 @@
 
 ## Phase 6: Configuration
 
-### Task 6.1 — profiles/state-machine.yaml: Update guard expressions ✅
+### Task 6.1 — profiles/session-guard.yaml: Update guard expressions ✅
 
-**Files**: `profiles/state-machine.yaml`
+**Files**: `profiles/session-guard.yaml`
 
 **Changes**:
 1. `session.granted()` → `session.approved()`

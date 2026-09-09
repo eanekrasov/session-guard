@@ -1,4 +1,4 @@
-# profiles/state-machine.yaml — базовая конфигурация state-machine для плагина.
+# profiles/session-guard.yaml — базовая конфигурация session-guard для плагина.
 #
 # Фазы: planning → tasks_ready → code → review → qa → commit → done.
 # Каждый переход: guard (JS-выражение) + опциональный consent или effects.
@@ -25,12 +25,12 @@ stages:
 transitions:
   - from: planning
     to: tasks_ready
-    guard: "session.refs.plan != null"
+    guard: 'session.refs.plan != null'
     consent: plan
 
   - from: tasks_ready
     to: code
-    guard: "hasPendingTasks()"
+    guard: 'hasPendingTasks()'
 
   # code → review: invariants прошёл — на ревью
   - from: code
@@ -67,7 +67,7 @@ transitions:
   # leaves it set and must not advance the workflow.
   - from: commit
     to: done
-    guard: "session.deliveryReceipt != null"
+    guard: 'session.deliveryReceipt != null'
 
 # ─── Action Guards ─────────────────────────────────────────────────────────────
 

@@ -61,13 +61,13 @@ function run(cmd: string, args: string[], cwd: string): string {
  * `file://` spec, which is itself worth knowing before anyone ships that way.
  */
 export function buildPlugin(): string {
-  run('bun', ['run', 'build'], REPO_ROOT);
+  run('mise', ['run', 'build'], REPO_ROOT);
   return join(REPO_ROOT, 'dist');
 }
 
 /** Build and pack the plugin into a tarball. Kept for packaging checks. */
 export function packPlugin(): string {
-  run('bun', ['run', 'build'], REPO_ROOT);
+  run('mise', ['run', 'build'], REPO_ROOT);
   const destination = join(tmpdir(), 'host-smoke-pack');
   const out = run('bun', ['pm', 'pack', '--destination', destination], REPO_ROOT);
   // `bun pm pack` prints a file list and a summary; the tarball path is the one

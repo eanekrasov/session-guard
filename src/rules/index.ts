@@ -2,7 +2,7 @@
  * OpenCode Rules — test utilities export.
  *
  * This module is no longer a plugin entry point. The rules subsystem
- * is instantiated inside StateMachineRuntime.
+ * is instantiated inside SessionGuardRuntime.
  */
 
 import { SessionStore, type SessionState } from './session-store.js';

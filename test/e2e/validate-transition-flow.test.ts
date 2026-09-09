@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { WorkflowStore, createSession } from '../../src/session/session-store.ts';
 import { setGateStatus } from '../../src/session/helpers.ts';
-import { StateMachineEngine } from '../../src/domain/engine.ts';
+import { SessionGuardEngine } from '../../src/domain/engine.ts';
 import type { EngineConfig } from '../../src/domain/engine.ts';
 import type { WorkflowSession } from '../../src/session/session-schema.ts';
 import { createTask } from '../support/task-factory.ts';
@@ -63,9 +63,9 @@ async function createWorkflowSession(
 describe('E2E: checkTransition — engine.checkTransition integration', () => {
   test('engine.checkTransition without session refuses a conditional edge', async () => {
     directory = await mkdtemp(join(tmpdir(), 'sm-e2e-no-session'));
-    store = new WorkflowStore(join(directory, '.opencode/state-machine/sessions'));
+    store = new WorkflowStore(join(directory, '.opencode/session-guard/sessions'));
 
-    const engine = new StateMachineEngine(makeConfig());
+    const engine = new SessionGuardEngine(makeConfig());
     const result = engine.checkTransition('EXECUTION', 'COMMIT');
 
     // Без сессии guard прочитать не на чём, а невычисленное условие — не
@@ -76,13 +76,13 @@ describe('E2E: checkTransition — engine.checkTransition integration', () => {
 
   test('engine.checkTransition with a session reads the gate the edge names', async () => {
     directory = await mkdtemp(join(tmpdir(), 'sm-e2e-inject'));
-    store = new WorkflowStore(join(directory, '.opencode/state-machine/sessions'));
+    store = new WorkflowStore(join(directory, '.opencode/session-guard/sessions'));
     const session = await createWorkflowSession('root', 'test');
 
     // invariants ещё pending — ребро закрыто
     await store.save(session);
 
-    const engine = new StateMachineEngine(makeConfig());
+    const engine = new SessionGuardEngine(makeConfig());
     const result = engine.checkTransition('EXECUTION', 'COMMIT', session);
 
     expect(result.allowed).toBe(false);
@@ -91,9 +91,9 @@ describe('E2E: checkTransition — engine.checkTransition integration', () => {
 
   test('illegal transition returns allowed: false', async () => {
     directory = await mkdtemp(join(tmpdir(), 'sm-e2e-illegal'));
-    store = new WorkflowStore(join(directory, '.opencode/state-machine/sessions'));
+    store = new WorkflowStore(join(directory, '.opencode/session-guard/sessions'));
 
-    const engine = new StateMachineEngine(makeConfig());
+    const engine = new SessionGuardEngine(makeConfig());
     const result = engine.checkTransition('PLANNING', 'DONE');
 
     expect(result.allowed).toBe(false);

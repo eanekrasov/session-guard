@@ -14,7 +14,7 @@ describe('WorkflowSessionSchema', () => {
     const input = {
       sessionId: 'session-123',
       profileId: 'android',
-      schemaId: 'state-machine',
+      schemaId: 'session-guard',
     };
 
     const result = WorkflowSessionSchema.parse(input);
@@ -27,7 +27,7 @@ describe('WorkflowSessionSchema', () => {
     const input = {
       sessionId: 'session-123',
       profileId: 'android',
-      schemaId: 'state-machine',
+      schemaId: 'session-guard',
     };
 
     const result = WorkflowSessionSchema.parse(input);
@@ -53,7 +53,7 @@ describe('WorkflowSessionSchema', () => {
     const input = {
       sessionId: '',
       profileId: 'android',
-      schemaId: 'state-machine',
+      schemaId: 'session-guard',
     };
 
     expect(() => WorkflowSessionSchema.parse(input)).toThrow();
@@ -73,7 +73,7 @@ describe('WorkflowSessionSchema', () => {
     const input = {
       sessionId: 'session-123',
       profileId: 'android',
-      schemaId: 'state-machine',
+      schemaId: 'session-guard',
       unknownField: 'should be stripped',
     };
 
@@ -87,7 +87,7 @@ describe('WorkflowSessionSchema', () => {
     const input = {
       sessionId: 'session-123',
       profileId: 'android',
-      schemaId: 'state-machine',
+      schemaId: 'session-guard',
       futureField: 'should be preserved',
     };
 
@@ -101,7 +101,7 @@ describe('WorkflowSessionSchema', () => {
     const input = {
       sessionId: 'session-123',
       profileId: 'android',
-      schemaId: 'state-machine',
+      schemaId: 'session-guard',
       retryBudgets: {
         'task-1': { attempts: 2, maximum: 5 },
       },
@@ -119,7 +119,7 @@ describe('WorkflowSessionSchema', () => {
     const result = WorkflowSessionSchema.parse({
       sessionId: 'session-123',
       profileId: 'android',
-      schemaId: 'state-machine',
+      schemaId: 'session-guard',
       retryBudgets: {
         cycles: { attempts: 0, maximum: 3 },
         'task-1': { attempts: 1, maximum: 3 },
@@ -135,7 +135,7 @@ describe('WorkflowSessionSchema', () => {
       WorkflowSessionSchema.parse({
         sessionId: 'session-123',
         profileId: 'android',
-        schemaId: 'state-machine',
+        schemaId: 'session-guard',
         retryBudgets: {
           'Not A Key': { attempts: 0, maximum: 3 },
         },

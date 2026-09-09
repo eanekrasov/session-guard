@@ -4,10 +4,10 @@ import { toSessionFacts } from '../../src/domain/session-facts.ts';
 import { createTask } from '../support/task-factory.ts';
 
 function makeSession(overrides: Partial<WorkflowSession> = {}): WorkflowSession {
-  return {
+  const session: WorkflowSession = {
     sessionId: 'test-session',
     profileId: 'android',
-    schemaId: 'state-machine',
+    schemaId: 'session-guard',
     schemaVersion: 2,
     revision: 0,
     title: 'Test',
@@ -16,6 +16,7 @@ function makeSession(overrides: Partial<WorkflowSession> = {}): WorkflowSession 
     refs: {},
     tasks: {},
     activeOperations: {},
+    activeTaskContexts: [],
     loopRuns: {},
     deliveryReceipt: null,
     deliveryPermit: null,
@@ -26,8 +27,11 @@ function makeSession(overrides: Partial<WorkflowSession> = {}): WorkflowSession 
     invariantViolations: [],
     consentedCallIDs: [],
     pendingDecisions: [],
-    ...overrides,
+    currentStage: 'planning',
+    processedResultCallIDs: [],
   };
+  Object.assign(session, overrides);
+  return session;
 }
 
 describe('toSessionFacts', () => {
@@ -47,6 +51,8 @@ describe('toSessionFacts', () => {
           agent: 'code',
           startedAt: '2024-01-01T00:00:00.000Z',
           status: 'running',
+          round: 0,
+          kind: 'task',
         },
       },
       tasks: {
@@ -73,6 +79,8 @@ describe('toSessionFacts', () => {
         agent: 'code',
         startedAt: '2024-01-01T00:00:00.000Z',
         status: 'running',
+        round: 0,
+        kind: 'task',
       },
     ]);
     expect(facts.verified('bug', 'confirmed')).toBe(true);

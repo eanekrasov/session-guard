@@ -105,7 +105,7 @@ function everyExpression(): Expression[] {
 
 /** A session with something of everything, so a guard has facts to read. */
 function probeContext(): Record<string, unknown> {
-  const session = createSession('guard-probe', 'base', 'state-machine', 'planning');
+  const session = createSession('guard-probe', 'base', 'session-guard', 'planning');
   approve(session, 'plan', 'evidence', 'call-1');
   session.refs.plan = '.opencode/plan/x/plan.md';
   session.tasks.implementation = [createTask({ status: 'pending' })];

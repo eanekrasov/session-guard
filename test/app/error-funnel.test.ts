@@ -81,22 +81,22 @@ function seedBrokenProfile(): void {
 beforeEach(() => {
   logged = [];
   toasted = [];
-  previousStore = process.env.STATE_MACHINE_STORE_DIR;
-  previousProfiles = process.env.STATE_MACHINE_PROFILES_DIR;
-  previousLevel = process.env.STATE_MACHINE_LOG_LEVEL;
+  previousStore = process.env.SESSION_GUARD_STORE_DIR;
+  previousProfiles = process.env.SESSION_GUARD_PROFILES_DIR;
+  previousLevel = process.env.SESSION_GUARD_LOG_LEVEL;
   previousDebugTui = process.env.DEBUG_TUI;
   storeDirectory = mkdtempSync(join(tmpdir(), 'funnel-store-'));
   profilesDirectory = mkdtempSync(join(tmpdir(), 'funnel-profiles-'));
   projectDirectory = mkdtempSync(join(tmpdir(), 'funnel-project-'));
-  process.env.STATE_MACHINE_STORE_DIR = storeDirectory;
-  process.env.STATE_MACHINE_PROFILES_DIR = profilesDirectory;
+  process.env.SESSION_GUARD_STORE_DIR = storeDirectory;
+  process.env.SESSION_GUARD_PROFILES_DIR = profilesDirectory;
 });
 
 afterEach(() => {
   for (const [key, value] of [
-    ['STATE_MACHINE_STORE_DIR', previousStore],
-    ['STATE_MACHINE_PROFILES_DIR', previousProfiles],
-    ['STATE_MACHINE_LOG_LEVEL', previousLevel],
+    ['SESSION_GUARD_STORE_DIR', previousStore],
+    ['SESSION_GUARD_PROFILES_DIR', previousProfiles],
+    ['SESSION_GUARD_LOG_LEVEL', previousLevel],
     ['DEBUG_TUI', previousDebugTui],
   ] as const) {
     if (value === undefined) delete process.env[key];
@@ -152,7 +152,7 @@ describe('every error the plugin reports takes one path', () => {
   });
 
   it('shows a toast only when debug is on, through the one switch', async () => {
-    delete process.env.STATE_MACHINE_LOG_LEVEL;
+    delete process.env.SESSION_GUARD_LOG_LEVEL;
     await seedBrokenSession();
     const quiet = createRuntime(pluginInput()) as Hooks & {
       tool?: Record<string, { execute: (a: unknown, c: unknown) => Promise<{ output: string }> }>;
@@ -163,7 +163,7 @@ describe('every error the plugin reports takes one path', () => {
     );
     expect(toasted).toEqual([]);
 
-    process.env.STATE_MACHINE_LOG_LEVEL = 'debug';
+    process.env.SESSION_GUARD_LOG_LEVEL = 'debug';
     const loud = createRuntime(pluginInput()) as Hooks & {
       tool?: Record<string, { execute: (a: unknown, c: unknown) => Promise<{ output: string }> }>;
     };
@@ -175,7 +175,7 @@ describe('every error the plugin reports takes one path', () => {
   });
 
   it('reports a refused tool call as well as throwing it', async () => {
-    process.env.STATE_MACHINE_LOG_LEVEL = 'debug';
+    process.env.SESSION_GUARD_LOG_LEVEL = 'debug';
     await seedBrokenSession();
     const hooks = createRuntime(pluginInput());
 

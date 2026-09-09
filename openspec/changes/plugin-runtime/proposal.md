@@ -8,10 +8,10 @@ Connect the Domain Layer and Data Layer into a working OpenCode plugin. Currentl
 
 ### In Scope
 - `createRuntime(context: PluginInput): Hooks` — factory entry point
-- `plugin-runtime.js` — bridge file for the OpenCode plugin loader (`plugins/state-machine.js`)
+- `plugin-runtime.js` — bridge file for the OpenCode plugin loader (`plugins/session-guard.js`)
 - Hooks: `tool.workflow.create`, `chat.message`, `tool.execute.before`, `tool.execute.after`, `event`, `dispose`
 - Session enqueue (serial per-root-session queue)
-- `StateMachineRuntime` — internal class with state (store, engine cache, liveMutations map, sessionQueue map)
+- `SessionGuardRuntime` — internal class with state (store, engine cache, liveMutations map, sessionQueue map)
 - SSE Dashboard server skeleton (Bun HTTP, `/status` endpoint)
 - Graceful startup/shutdown
 
@@ -31,18 +31,18 @@ Connect the Domain Layer and Data Layer into a working OpenCode plugin. Currentl
 
 ## Approach
 
-`createRuntime(ctx)` creates a `StateMachineRuntime` with:
-1. `WorkflowStore` + lazy `StateMachineEngine` cache by `profileId`
+`createRuntime(ctx)` creates a `SessionGuardRuntime` with:
+1. `WorkflowStore` + lazy `SessionGuardEngine` cache by `profileId`
 2. `sessionQueues: Map<string, PromiseChain>` — serial enqueue per rootSessionId
 3. `liveMutations: Map<callId, rootSessionId>` — tracking active mutations
 4. Hooks are registered and returned as a `Hooks` object
 
 **File structure:**
-- `src/app/runtime.ts` — StateMachineRuntime class + createRuntime
+- `src/app/runtime.ts` — SessionGuardRuntime class + createRuntime
 - `src/app/runtime-types.ts` — types for runtime (Hooks-compatible)
 - `src/app/dashboard.ts` — SSE Dashboard server skeleton
 - `src/app/index.ts` — barrel export
-- `plugins/state-machine.js` — bridge file
+- `plugins/session-guard.js` — bridge file
 
 ### Hook wiring (MVP)
 | Hook | Response |
@@ -62,7 +62,7 @@ Connect the Domain Layer and Data Layer into a working OpenCode plugin. Currentl
 | `src/app/runtime-types.ts` | New | Type definitions |
 | `src/app/dashboard.ts` | New | SSE server skeleton |
 | `src/app/index.ts` | New | Barrel export |
-| `plugins/state-machine.js` | New | Bridge file |
+| `plugins/session-guard.js` | New | Bridge file |
 | `src/index.ts` | Modified | Export createRuntime |
 | `package.json` | Modified | Possibly exports entry |
 
@@ -76,7 +76,7 @@ Connect the Domain Layer and Data Layer into a working OpenCode plugin. Currentl
 
 ## Rollback Plan
 
-- Delete `plugins/state-machine.js`
+- Delete `plugins/session-guard.js`
 - Remove `createRuntime` export from `src/index.ts`
 - Revert `package.json`
 

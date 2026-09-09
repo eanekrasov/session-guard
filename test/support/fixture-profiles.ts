@@ -5,5 +5,5 @@ export function fixtureProfilesDir(...segments: string[]): string {
 }
 
 export function setFixtureProfilesDir(): void {
-  process.env.STATE_MACHINE_PROFILES_DIR = fixtureProfilesDir('profiles');
+  process.env.SESSION_GUARD_PROFILES_DIR = fixtureProfilesDir('profiles');
 }

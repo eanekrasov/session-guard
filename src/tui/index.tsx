@@ -26,8 +26,8 @@ const SLOT_ORDER = 350;
 const DETAILS_COMMAND = 'harness.workflow.details';
 const DETAILS_TITLE = 'Workflow: full state';
 const TOGGLE_COMMAND = 'harness.toggle_sidebar';
-const KV_SIDEBAR_ENABLED = 'state-machine.sidebar.enabled.v4';
-const KV_SECTION_OPEN = 'state-machine.sidebar.section_open';
+const KV_SIDEBAR_ENABLED = 'session-guard.sidebar.enabled.v4';
+const KV_SECTION_OPEN = 'session-guard.sidebar.section_open';
 
 /** Строка-заглушка, когда нет активного FSM-состояния. */
 type SessionLike = { id?: string; parentID?: string };
@@ -61,7 +61,7 @@ async function readRuntimeSession(
 
 function runtimeDirs(baseDir: string): string[] {
   const live: string[] = [
-    process.env.STATE_MACHINE_STORE_DIR,
+    process.env.SESSION_GUARD_STORE_DIR,
     sessionsDir(baseDir),
     sessionsDir(opencodeStateDir()),
     join(opencodeStateDir(), 'session-guard'),
@@ -214,7 +214,7 @@ export function createStateSection(api: SectionApi, baseDir: string) {
         ? `No active workflow session.\nAvailable profiles:\n${profiles
             .map((pr) => `  · ${pr.id}${pr.description ? ` — ${pr.description}` : ''}`)
             .join('\n')}`
-        : 'No active workflow session.\nSet STATE_MACHINE_PROFILES_DIR or create a profile.';
+        : 'No active workflow session.\nSet SESSION_GUARD_PROFILES_DIR or create a profile.';
   }
 
   function showDetails(msg: string): void {

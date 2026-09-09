@@ -41,7 +41,7 @@ function make(overrides: Partial<Parameters<typeof createDashboard>[0]> = {}): D
 
 async function writeSession(id: string, overrides: Record<string, unknown> = {}): Promise<void> {
   const session = {
-    ...WorkflowSessionSchema.parse(createSession(id, 'android', 'state-machine')),
+    ...WorkflowSessionSchema.parse(createSession(id, 'android', 'session-guard')),
     ...overrides,
   };
   await writeFile(path.join(SESSIONS, sessionFileName(id)), JSON.stringify(session));

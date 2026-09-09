@@ -6,10 +6,10 @@ import { markOutputReady, getExecutionProgress, canExitExecution } from '../../t
 import { createTask } from '../support/task-factory.ts';
 
 function makeSession(overrides: Partial<WorkflowSession> = {}): WorkflowSession {
-  return {
+  const session: WorkflowSession = {
     sessionId: 'test-session',
     profileId: 'android',
-    schemaId: 'state-machine',
+    schemaId: 'session-guard',
     schemaVersion: 2,
     revision: 0,
     title: '',
@@ -18,6 +18,7 @@ function makeSession(overrides: Partial<WorkflowSession> = {}): WorkflowSession 
     refs: {},
     tasks: {},
     activeOperations: {},
+    activeTaskContexts: [],
     loopRuns: {},
     deliveryReceipt: null,
     deliveryPermit: null,
@@ -28,8 +29,11 @@ function makeSession(overrides: Partial<WorkflowSession> = {}): WorkflowSession 
     invariantViolations: [],
     consentedCallIDs: [],
     pendingDecisions: [],
-    ...overrides,
+    currentStage: 'planning',
+    processedResultCallIDs: [],
   };
+  Object.assign(session, overrides);
+  return session;
 }
 
 function taskList(tasks: WorkflowSession['tasks'][string]): WorkflowSession['tasks'] {
@@ -45,6 +49,8 @@ function activeOperation(callId = 'm-1'): WorkflowSession['activeOperations'] {
       agent: 'code',
       startedAt: '2024-01-01T00:00:00.000Z',
       status: 'running',
+      round: 0,
+      kind: 'task',
     },
   };
 }

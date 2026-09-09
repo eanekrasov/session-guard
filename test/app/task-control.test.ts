@@ -48,7 +48,7 @@ function toolContext(agent: string | undefined): ToolContext {
 }
 
 function setFixtureProfilesDir(profileId = 'cycle-minimal'): void {
-  process.env.STATE_MACHINE_PROFILES_DIR = resolve(import.meta.dir, '../../test/fixtures/profiles');
+  process.env.SESSION_GUARD_PROFILES_DIR = resolve(import.meta.dir, '../../test/fixtures/profiles');
   taskControlProfileId = profileId;
 }
 
@@ -74,20 +74,20 @@ function setStatus(hooks: Hooks, agent: string | undefined) {
 }
 
 beforeEach(async () => {
-  previousStoreDirectory = process.env.STATE_MACHINE_STORE_DIR;
-  previousProfilesDirectory = process.env.STATE_MACHINE_PROFILES_DIR;
+  previousStoreDirectory = process.env.SESSION_GUARD_STORE_DIR;
+  previousProfilesDirectory = process.env.SESSION_GUARD_PROFILES_DIR;
   storeDirectory = await mkdtemp(join(tmpdir(), 'task-control-store-'));
   profilesDirectory = await mkdtemp(join(tmpdir(), 'task-control-profiles-'));
-  process.env.STATE_MACHINE_STORE_DIR = storeDirectory;
-  process.env.STATE_MACHINE_PROFILES_DIR = profilesDirectory;
+  process.env.SESSION_GUARD_STORE_DIR = storeDirectory;
+  process.env.SESSION_GUARD_PROFILES_DIR = profilesDirectory;
   taskControlProfileId = 'cycle-minimal';
 });
 
 afterEach(async () => {
-  if (previousStoreDirectory === undefined) delete process.env.STATE_MACHINE_STORE_DIR;
-  else process.env.STATE_MACHINE_STORE_DIR = previousStoreDirectory;
-  if (previousProfilesDirectory === undefined) delete process.env.STATE_MACHINE_PROFILES_DIR;
-  else process.env.STATE_MACHINE_PROFILES_DIR = previousProfilesDirectory;
+  if (previousStoreDirectory === undefined) delete process.env.SESSION_GUARD_STORE_DIR;
+  else process.env.SESSION_GUARD_STORE_DIR = previousStoreDirectory;
+  if (previousProfilesDirectory === undefined) delete process.env.SESSION_GUARD_PROFILES_DIR;
+  else process.env.SESSION_GUARD_PROFILES_DIR = previousProfilesDirectory;
   await rm(storeDirectory, { recursive: true, force: true });
   await rm(profilesDirectory, { recursive: true, force: true });
 });

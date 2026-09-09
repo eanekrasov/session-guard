@@ -92,7 +92,7 @@ describe('checkTransition', () => {
   });
 
   it('allows transition with null guard', () => {
-    const transitions: TransitionDef[] = [{ from: 'PLANNING', to: 'EXECUTION', guard: null }];
+    const transitions: TransitionDef[] = [{ from: 'PLANNING', to: 'EXECUTION' }];
 
     const result = checkTransition('PLANNING', 'EXECUTION', transitions);
 

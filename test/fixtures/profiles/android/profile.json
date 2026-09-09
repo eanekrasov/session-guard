@@ -4,5 +4,5 @@
   "description": "Android development profile",
   "agentsDir": "custom-agents",
   "skillsDir": "custom-skills",
-  "schemas": ["state-machine.yaml"]
+  "schemas": ["session-guard.yaml"]
 }

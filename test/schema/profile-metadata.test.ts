@@ -59,7 +59,7 @@ describe('ProfileMetadataSchema', () => {
       id: 'android',
       description: 'Android dev profile',
       extends: 'base',
-      schemas: ['state-machine.yaml'],
+      schemas: ['session-guard.yaml'],
       agentsDir: 'custom-agents',
       skillsDir: 'custom-skills',
       agents: ['code', 'architect'],
@@ -72,7 +72,7 @@ describe('ProfileMetadataSchema', () => {
     expect(result.id).toBe('android');
     expect(result.description).toBe('Android dev profile');
     expect(result.extends).toBe('base');
-    expect(result.schemas).toEqual(['state-machine.yaml']);
+    expect(result.schemas).toEqual(['session-guard.yaml']);
     expect(result.agentsDir).toBe('custom-agents');
     expect(result.skillsDir).toBe('custom-skills');
     expect(result.agents).toEqual(['code', 'architect']);

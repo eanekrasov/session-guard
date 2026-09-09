@@ -1027,7 +1027,7 @@ async function main(): Promise<void> {
         const relevant = host
           .logs()
           .split('\n')
-          .filter((line) => /state-machine|consent|DIAG|workflow/i.test(line));
+          .filter((line) => /session-guard|consent|DIAG|workflow/i.test(line));
         console.error(`  host log:\n    ${relevant.slice(-25).join('\n    ')}`);
       }
       results.push({ id: scenario.id, title: scenario.title, ...outcome });

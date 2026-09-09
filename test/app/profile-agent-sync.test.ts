@@ -55,7 +55,7 @@ async function createFixtureLayout(opts: {
   }
 
   // Set up env so paths.ts resolves correctly
-  process.env.STATE_MACHINE_PROFILES_DIR = profilesDir;
+  process.env.SESSION_GUARD_PROFILES_DIR = profilesDir;
   process.env.OPENCODE_HARNESS_DIR = path.join(root, '.opencode');
 
   return root;

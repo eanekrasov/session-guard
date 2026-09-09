@@ -45,11 +45,11 @@ async function runBash(hooks: Hooks, command: string): Promise<void> {
 }
 
 beforeEach(async () => {
-  previousStoreDir = process.env.STATE_MACHINE_STORE_DIR;
-  previousProfilesDir = process.env.STATE_MACHINE_PROFILES_DIR;
+  previousStoreDir = process.env.SESSION_GUARD_STORE_DIR;
+  previousProfilesDir = process.env.SESSION_GUARD_PROFILES_DIR;
   storeDirectory = await mkdtemp(join(tmpdir(), 'commit-schema-store-'));
   repoDirectory = await mkdtemp(join(tmpdir(), 'commit-schema-repo-'));
-  process.env.STATE_MACHINE_STORE_DIR = storeDirectory;
+  process.env.SESSION_GUARD_STORE_DIR = storeDirectory;
 
   git(repoDirectory, ['init', '-q']);
   git(repoDirectory, ['config', 'user.email', 'test@example.com']);
@@ -61,10 +61,10 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  if (previousStoreDir === undefined) delete process.env.STATE_MACHINE_STORE_DIR;
-  else process.env.STATE_MACHINE_STORE_DIR = previousStoreDir;
-  if (previousProfilesDir === undefined) delete process.env.STATE_MACHINE_PROFILES_DIR;
-  else process.env.STATE_MACHINE_PROFILES_DIR = previousProfilesDir;
+  if (previousStoreDir === undefined) delete process.env.SESSION_GUARD_STORE_DIR;
+  else process.env.SESSION_GUARD_STORE_DIR = previousStoreDir;
+  if (previousProfilesDir === undefined) delete process.env.SESSION_GUARD_PROFILES_DIR;
+  else process.env.SESSION_GUARD_PROFILES_DIR = previousProfilesDir;
   await rm(storeDirectory, { recursive: true, force: true });
   await rm(repoDirectory, { recursive: true, force: true });
 });
@@ -126,7 +126,7 @@ describe('the schema, not the core, says which command delivers a commit', () =>
 describe('the first edit of a task is judged by the stage its run will open on', () => {
   async function editOnExecution(approved: boolean): Promise<{ threw: boolean; message: string }> {
     // Настоящий `base`, а не фикстура: проверяется поведение shipped-профиля.
-    process.env.STATE_MACHINE_PROFILES_DIR = resolve(import.meta.dir, '../../profiles');
+    process.env.SESSION_GUARD_PROFILES_DIR = resolve(import.meta.dir, '../../profiles');
     const store = new WorkflowStore(storeDirectory);
     const session = createSession('s1', 'base', 'base', 'execution');
     session.tasks = { implementation: [{ id: 'task-1', title: 't', status: 'pending' }] };

@@ -336,7 +336,7 @@ describe('GuardAST', () => {
   });
 
   describe('profile expression compatibility', () => {
-    it('parses and evaluates all profile expressions from base state-machine yaml', () => {
+    it('parses and evaluates all profile expressions from base session-guard yaml', () => {
       const approvals = [{ type: 'plan', status: 'granted' }];
       const session: Record<string, unknown> = {
         deliveries: [],

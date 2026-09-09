@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { WorkflowStore, createSession } from '../../src/session/session-store.ts';
 import { SessionQueue } from '../../src/app/session-queue.ts';
 import { SessionExecutor } from '../../src/app/session-executor.ts';
-import { StateMachineEngine, type EvaluateGuardFn } from '../../src/domain/engine.ts';
+import { SessionGuardEngine, type EvaluateGuardFn } from '../../src/domain/engine.ts';
 import type { WorkflowSession } from '../../src/session/session-schema.ts';
 import type { EngineConfig } from '../../src/domain/engine.ts';
 import { createTask } from '../support/task-factory.ts';
@@ -15,8 +15,8 @@ const NOOP_ENGINE_CONFIG: EngineConfig = {
 
 const NOOP_EVALUATE_GUARD: EvaluateGuardFn = () => true;
 
-function createNoopEngine(): StateMachineEngine {
-  return new StateMachineEngine(NOOP_ENGINE_CONFIG, NOOP_EVALUATE_GUARD);
+function createNoopEngine(): SessionGuardEngine {
+  return new SessionGuardEngine(NOOP_ENGINE_CONFIG, NOOP_EVALUATE_GUARD);
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────
@@ -27,7 +27,7 @@ let queue: SessionQueue;
 let executor: SessionExecutor;
 
 beforeEach(() => {
-  storeDir = '/tmp/state-machine-test-' + Math.random().toString(36).slice(2);
+  storeDir = '/tmp/session-guard-test-' + Math.random().toString(36).slice(2);
   store = new WorkflowStore(storeDir);
   queue = new SessionQueue();
   executor = new SessionExecutor(store);
@@ -41,7 +41,7 @@ function mockLogFn() {
   return vi.fn();
 }
 
-async function makeOrchestrator(engine?: StateMachineEngine, log?: ReturnType<typeof vi.fn>) {
+async function makeOrchestrator(engine?: SessionGuardEngine, log?: ReturnType<typeof vi.fn>) {
   const { MutationOrchestrator } = await import('../../src/app/mutation-orchestrator.ts');
 
   // Create orchestrator but override resolveEngine to return our noop engine
@@ -63,7 +63,7 @@ async function makeOrchestrator(engine?: StateMachineEngine, log?: ReturnType<ty
 }
 
 function sessionWithTaskCycle(sid: string): WorkflowSession {
-  const s = createSession(sid, 'base', 'state-machine');
+  const s = createSession(sid, 'base', 'session-guard');
   s.tasks.implementation = [createTask({ status: 'running' })];
   s.loopRuns['run-1'] = {
     id: 'run-1',
@@ -72,6 +72,8 @@ function sessionWithTaskCycle(sid: string): WorkflowSession {
     ancestry: [],
     stage: 'mutation',
     status: 'running',
+    gates: {},
+    round: 0,
   };
   return s;
 }
@@ -85,6 +87,8 @@ function sessionWithActiveOp(sid: string, callId: string, startedAt?: string): W
     agent: 'code',
     startedAt: startedAt ?? new Date().toISOString(),
     status: 'running',
+    round: 0,
+    kind: 'mutation',
   };
   return s;
 }

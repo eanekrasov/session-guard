@@ -10,7 +10,7 @@ let storeDir: string;
 let store: WorkflowStore;
 
 beforeEach(() => {
-  storeDir = '/tmp/state-machine-test-' + Math.random().toString(36).slice(2);
+  storeDir = '/tmp/session-guard-test-' + Math.random().toString(36).slice(2);
   store = new WorkflowStore(storeDir);
 });
 

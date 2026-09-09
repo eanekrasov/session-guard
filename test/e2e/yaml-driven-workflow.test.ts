@@ -5,7 +5,7 @@ import YAML from 'yaml';
 
 import { createSession } from '../../src/session/session-store.ts';
 import { setGateStatus, isExhausted } from '../../src/session/helpers.ts';
-import { StateMachineEngine } from '../../src/domain/engine.ts';
+import { SessionGuardEngine } from '../../src/domain/engine.ts';
 import { schemaToEngineConfig } from '../../src/app/mutation-orchestrator.ts';
 import type { ResolvedSchema, ProfileSchema } from '../../src/schema/types.ts';
 import type { WorkflowSession } from '../../src/session/session-schema.ts';
@@ -17,7 +17,7 @@ import { createTask } from '../support/task-factory.ts';
 // author's machine.
 const PROFILES_DIR = path.resolve(import.meta.dirname, '../../profiles');
 
-function loadEngine(): StateMachineEngine {
+function loadEngine(): SessionGuardEngine {
   // Exercise the schema that actually ships, not a sample copy.
   const filePath = path.join(PROFILES_DIR, 'base', 'base.yaml');
   const content = fs.readFileSync(filePath, 'utf-8');
@@ -43,7 +43,7 @@ function loadEngine(): StateMachineEngine {
     throw new Error('EngineConfig has zero transitions after merge');
   }
 
-  return new StateMachineEngine(config);
+  return new SessionGuardEngine(config);
 }
 
 const ENGINE = loadEngine();
@@ -53,14 +53,14 @@ const ENGINE = loadEngine();
 function freshSession(): WorkflowSession {
   return createSession(
     `test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    'state-machine',
+    'session-guard',
     'base'
   );
 }
 
 /** Assert a transition was applied and the session landed on the named stage. */
 function expectApplied(
-  result: ReturnType<StateMachineEngine['tryApplyTransitions']>,
+  result: ReturnType<SessionGuardEngine['tryApplyTransitions']>,
   session: WorkflowSession,
   expectedStage: string
 ) {
@@ -70,7 +70,7 @@ function expectApplied(
 
 /** Assert a transition was NOT applied and the session did not move. */
 function expectNotApplied(
-  result: ReturnType<StateMachineEngine['tryApplyTransitions']>,
+  result: ReturnType<SessionGuardEngine['tryApplyTransitions']>,
   session: WorkflowSession,
   expectedStage: string
 ) {

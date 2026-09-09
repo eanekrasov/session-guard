@@ -17,7 +17,7 @@ import type { LogFn } from '../app/logger.ts';
  * profile's first stage written into the core. A schema declaring
  * `start → done` produced a session in a stage it does not have: no outgoing
  * edge, no admission, and nothing said so. Production passes the compiled
- * initial stage (`StateMachineEngine.getInitialStage`); the default is a
+ * initial stage (`SessionGuardEngine.getInitialStage`); the default is a
  * convenience for fixtures whose first stage is `planning`, and a caller that
  * relies on it for anything else gets the same defect back.
  */
@@ -55,6 +55,7 @@ export function createSession(
     currentStage: initialStage,
     invariantViolations: [],
     consentedCallIDs: [],
+    processedResultCallIDs: [],
   };
 }
 
@@ -289,7 +290,7 @@ export class WorkflowStore {
       profileId: data.profileId,
       directory: this.directory,
       filePath,
-      storeDir: process.env.STATE_MACHINE_STORE_DIR ?? '(not set)',
+      storeDir: process.env.SESSION_GUARD_STORE_DIR ?? '(not set)',
     });
     return data;
   }

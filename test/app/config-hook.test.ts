@@ -34,19 +34,19 @@ let prevStoreDir: string | undefined;
 
 beforeEach(() => {
   prevHarnessProfile = process.env.HARNESS_PROFILE;
-  prevStoreDir = process.env.STATE_MACHINE_STORE_DIR;
-  process.env.STATE_MACHINE_STORE_DIR = '/tmp/state-machine-test-sessions';
+  prevStoreDir = process.env.SESSION_GUARD_STORE_DIR;
+  process.env.SESSION_GUARD_STORE_DIR = '/tmp/session-guard-test-sessions';
 });
 
 afterEach(() => {
   if (prevHarnessProfile === undefined) delete process.env.HARNESS_PROFILE;
   else process.env.HARNESS_PROFILE = prevHarnessProfile;
-  if (prevStoreDir === undefined) delete process.env.STATE_MACHINE_STORE_DIR;
-  else process.env.STATE_MACHINE_STORE_DIR = prevStoreDir;
+  if (prevStoreDir === undefined) delete process.env.SESSION_GUARD_STORE_DIR;
+  else process.env.SESSION_GUARD_STORE_DIR = prevStoreDir;
 });
 
 describe('config hook', () => {
-  it('registers sm-* commands and state-machine agent via config hook', async () => {
+  it('registers sm-* commands and session-guard agent via config hook', async () => {
     const { createRuntime } = await import('../../src/app/runtime.ts');
     const hooks = createRuntime(createPluginInput());
 
@@ -61,26 +61,26 @@ describe('config hook', () => {
     // Check commands
     expect(config.command).toBeDefined();
     expect(config.command!['sm-status']).toBeDefined();
-    expect(config.command!['sm-status']!.template).toContain('state-machine workflow status');
-    expect(config.command!['sm-status']!.agent).toBe('state-machine');
+    expect(config.command!['sm-status']!.template).toContain('session-guard workflow status');
+    expect(config.command!['sm-status']!.agent).toBe('session-guard');
     expect(config.command!['sm-status']!.subtask).toBe(true);
 
     expect(config.command!['sm-list']).toBeDefined();
-    expect(config.command!['sm-list']!.template).toContain('list all state-machine');
-    expect(config.command!['sm-list']!.agent).toBe('state-machine');
+    expect(config.command!['sm-list']!.template).toContain('list all session-guard');
+    expect(config.command!['sm-list']!.agent).toBe('session-guard');
 
     expect(config.command!['sm-session']).toBeDefined();
     expect(config.command!['sm-session']!.template).toContain(
-      'manage the state-machine workflow session'
+      'manage the session-guard workflow session'
     );
-    expect(config.command!['sm-session']!.agent).toBe('state-machine');
+    expect(config.command!['sm-session']!.agent).toBe('session-guard');
 
     expect(config.command!['sm-profile']).toBeDefined();
-    expect(config.command!['sm-profile']!.template).toContain('switch the state-machine profile');
-    expect(config.command!['sm-profile']!.agent).toBe('state-machine');
+    expect(config.command!['sm-profile']!.template).toContain('switch the session-guard profile');
+    expect(config.command!['sm-profile']!.agent).toBe('session-guard');
   });
 
-  it('registers state-machine agent with correct config', async () => {
+  it('registers session-guard agent with correct config', async () => {
     const { createRuntime } = await import('../../src/app/runtime.ts');
     const hooks = createRuntime(createPluginInput());
 
@@ -88,10 +88,10 @@ describe('config hook', () => {
     await hooks.config!(config);
 
     expect(config.agent).toBeDefined();
-    expect(config.agent!['state-machine']).toBeDefined();
-    expect(config.agent!['state-machine']!.description).toContain('State machine workflow agent');
-    expect(config.agent!['state-machine']!.mode).toBe('subagent');
-    expect(config.agent!['state-machine']!.color).toBe('#6366F1');
+    expect(config.agent!['session-guard']).toBeDefined();
+    expect(config.agent!['session-guard']!.description).toContain('State machine workflow agent');
+    expect(config.agent!['session-guard']!.mode).toBe('subagent');
+    expect(config.agent!['session-guard']!.color).toBe('#6366F1');
   });
 
   it('preserves existing commands when extending', async () => {
@@ -129,7 +129,7 @@ describe('config hook', () => {
     expect(config.agent!['existing-agent']).toBeDefined();
 
     // New agent added
-    expect(config.agent!['state-machine']).toBeDefined();
+    expect(config.agent!['session-guard']).toBeDefined();
   });
 
   it('derives agent model from config.model', async () => {
@@ -141,6 +141,6 @@ describe('config hook', () => {
 
     await hooks.config!(config);
 
-    expect(config.agent!['state-machine']!.model).toBe('openai/gpt-4o');
+    expect(config.agent!['session-guard']!.model).toBe('openai/gpt-4o');
   });
 });

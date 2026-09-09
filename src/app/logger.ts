@@ -10,13 +10,13 @@ const LOG_LEVELS: Record<LogLevel, number> = {
 };
 
 const EFFECTIVE_LEVEL: LogLevel =
-  process.env.STATE_MACHINE_LOG_LEVEL === 'debug'
+  process.env.SESSION_GUARD_LOG_LEVEL === 'debug'
     ? 'debug'
-    : process.env.STATE_MACHINE_LOG_LEVEL === 'info'
+    : process.env.SESSION_GUARD_LOG_LEVEL === 'info'
       ? 'info'
-      : process.env.STATE_MACHINE_LOG_LEVEL === 'warn'
+      : process.env.SESSION_GUARD_LOG_LEVEL === 'warn'
         ? 'warn'
-        : process.env.STATE_MACHINE_LOG_LEVEL === 'error'
+        : process.env.SESSION_GUARD_LOG_LEVEL === 'error'
           ? 'error'
           : 'info';
 
@@ -28,7 +28,7 @@ export type LogFn = (
 
 /**
  * Create a LogFn backed by client.app.log().
- * Respects STATE_MACHINE_LOG_LEVEL env var — messages below the threshold
+ * Respects SESSION_GUARD_LOG_LEVEL env var — messages below the threshold
  * are silently dropped.
  */
 export function createLogFn(client: PluginInput['client']): LogFn {
@@ -37,7 +37,7 @@ export function createLogFn(client: PluginInput['client']): LogFn {
 
     try {
       await client.app.log({
-        body: { service: 'state-machine', level, message, extra: extra ?? {} },
+        body: { service: 'session-guard', level, message, extra: extra ?? {} },
       });
     } catch {
       // ignore — logging must never throw

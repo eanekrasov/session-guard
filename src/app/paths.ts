@@ -30,15 +30,15 @@ export function harnessDir(projectDir: string): string {
  * Директория профилей — конфигурация проекта.
  */
 export function profilesDir(projectDir: string): string {
-  return process.env.STATE_MACHINE_PROFILES_DIR ?? `${harnessDir(projectDir)}/profiles`;
+  return process.env.SESSION_GUARD_PROFILES_DIR ?? `${harnessDir(projectDir)}/profiles`;
 }
 
 /**
  * Директория рантайма.
  * baseDir — базовая директория (например, ~/.local/share/opencode или testRoot).
- * Переопределяется STATE_MACHINE_STORE_DIR.
+ * Переопределяется SESSION_GUARD_STORE_DIR.
  */
 export function sessionsDir(baseDir: string): string {
-  if (process.env.STATE_MACHINE_STORE_DIR) return process.env.STATE_MACHINE_STORE_DIR;
+  if (process.env.SESSION_GUARD_STORE_DIR) return process.env.SESSION_GUARD_STORE_DIR;
   return `${baseDir}/session-guard/runtime`;
 }

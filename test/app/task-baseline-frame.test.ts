@@ -60,7 +60,7 @@ function makeGitDir(): string {
 }
 
 function setFixtureProfilesDir(): void {
-  process.env.STATE_MACHINE_PROFILES_DIR = resolve(import.meta.dir, '../../test/fixtures/profiles');
+  process.env.SESSION_GUARD_PROFILES_DIR = resolve(import.meta.dir, '../../test/fixtures/profiles');
 }
 
 async function seed(): Promise<WorkflowStore> {
@@ -74,18 +74,18 @@ async function seed(): Promise<WorkflowStore> {
 let previousStore: string | undefined;
 
 beforeEach(async () => {
-  previousStore = process.env.STATE_MACHINE_STORE_DIR;
+  previousStore = process.env.SESSION_GUARD_STORE_DIR;
   storeDirectory = await mkdtemp(join(tmpdir(), 'invariants-rollup-store-'));
   profilesDirectory = await mkdtemp(join(tmpdir(), 'invariants-rollup-profiles-'));
   gitDir = makeGitDir();
-  process.env.STATE_MACHINE_STORE_DIR = storeDirectory;
-  process.env.STATE_MACHINE_PROFILES_DIR = profilesDirectory;
+  process.env.SESSION_GUARD_STORE_DIR = storeDirectory;
+  process.env.SESSION_GUARD_PROFILES_DIR = profilesDirectory;
 });
 
 afterEach(async () => {
-  if (previousStore === undefined) delete process.env.STATE_MACHINE_STORE_DIR;
-  else process.env.STATE_MACHINE_STORE_DIR = previousStore;
-  delete process.env.STATE_MACHINE_PROFILES_DIR;
+  if (previousStore === undefined) delete process.env.SESSION_GUARD_STORE_DIR;
+  else process.env.SESSION_GUARD_STORE_DIR = previousStore;
+  delete process.env.SESSION_GUARD_PROFILES_DIR;
   await rm(storeDirectory, { recursive: true, force: true });
   await rm(profilesDirectory, { recursive: true, force: true });
   await rm(gitDir, { recursive: true, force: true });
@@ -143,7 +143,7 @@ describe('a missing baseline frame leaves no gate (D5)', () => {
  * diff is computed independently against the outer's own, older frame.
  */
 function setNestedRollupFixtureProfilesDir(): void {
-  process.env.STATE_MACHINE_PROFILES_DIR = resolve(import.meta.dir, '../../test/fixtures/profiles');
+  process.env.SESSION_GUARD_PROFILES_DIR = resolve(import.meta.dir, '../../test/fixtures/profiles');
 }
 
 async function seedTwoTasks(): Promise<WorkflowStore> {

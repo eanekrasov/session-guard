@@ -191,4 +191,4 @@ private enhanceSession(session: Record<string, unknown>): Record<string, unknown
 
 ### Integration: YAML
 
-- `profiles/state-machine.yaml` — все guard-выражения обновлены
+- `profiles/session-guard.yaml` — все guard-выражения обновлены

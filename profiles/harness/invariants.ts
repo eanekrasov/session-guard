@@ -1,7 +1,7 @@
 /**
  * Harness profile invariants.
  *
- * Адаптировано из state-machine/profiles/harness/invariants.ts.
+ * Адаптировано из session-guard/profiles/harness/invariants.ts.
  * Отличия:
  * - Типы импортируются из src/app/invariants.ts (вместо @harness/types/invariants)
  * - Все проверки и функции идентичны оригиналу

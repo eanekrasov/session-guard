@@ -23,8 +23,8 @@ permission:
 
 ## Область работы
 
-- `.opencode/state-machine/` — ядро: переходы (`state.ts`, `workflow.ts`), инварианты (`invariants.ts`), guard-правила (`guardrails.ts`), хранилище (`store.ts`), runtime (`runtime.ts`) и тесты (`*.test.ts`)
-- `.opencode/plugins/` — runtime-плагины (например, `state-machine.js`)
+- `.opencode/session-guard/` — ядро: переходы (`state.ts`, `workflow.ts`), инварианты (`invariants.ts`), guard-правила (`guardrails.ts`), хранилище (`store.ts`), runtime (`runtime.ts`) и тесты (`*.test.ts`)
+- `.opencode/plugins/` — runtime-плагины (например, `session-guard.js`)
 - `.opencode/scripts/` — скрипты (например, `commit-task.ts`)
 - `.opencode/agent/` — промпты агентов (`*.md`)
 - `.opencode/skills/` — скиллы (`<name>/SKILL.md`)
@@ -65,20 +65,20 @@ permission:
 2. Реализуй задачу — строго в scope.
 3. **Обязательно проверь себя** после правки `.ts` (из `.opencode/`):
    - `mise run typecheck`
-   - `bun test --max-concurrency=1 state-machine scripts`
-   Исправь все ошибки типов и упавшие тесты.
+   - `bun test --max-concurrency=1 session-guard scripts`
+     Исправь все ошибки типов и упавшие тесты.
 4. Не выполняй commit: его разрешит Координатор после review.
 
 ## Жёсткие границы (НЕ трогай без явного подтверждения человека)
 
-- `.opencode/state-machine/guardrails.ts` — guard-правила безопасности (защита от инъекций промптов, переопределения роли и т.п.). Изменение — только по явному запросу человека.
+- `.opencode/session-guard/guardrails.ts` — guard-правила безопасности (защита от инъекций промптов, переопределения роли и т.п.). Изменение — только по явному запросу человека.
 - `permission`-секция в `opencode.jsonc` — модель разрешений агентов. Ослабление прав — только с явным подтверждением человека.
 
 Если задача требует править эти файлы, а явного подтверждения нет — остановись и спроси.
 
 ## Предупреждение о перезапуске
 
-Правки `.ts`-ядра (`.opencode/state-machine/`, `.opencode/plugins/`) вступают в силу **только после перезапуска OpenCode**: плагин грузится при старте. После таких правок явно сообщи: «Ядро изменено — нужен перезапуск OpenCode».
+Правки `.ts`-ядра (`.opencode/session-guard/`, `.opencode/plugins/`) вступают в силу **только после перезапуска OpenCode**: плагин грузится при старте. После таких правок явно сообщи: «Ядро изменено — нужен перезапуск OpenCode».
 
 ## Стиль
 
@@ -90,7 +90,7 @@ permission:
 
 ## Автоматические проверки (harness-инварианты)
 
-Правки харнесса прогоняются через инварианты из `.opencode/state-machine/invariants.ts`:
+Правки харнесса прогоняются через инварианты из `.opencode/session-guard/invariants.ts`:
 
 - `BROKEN_IMPORT` — нерезолвимый относительный импорт в `.ts` (error)
 - `CONSOLE_LOG` — `console.log` в production `.ts`, кроме тестов (warning)

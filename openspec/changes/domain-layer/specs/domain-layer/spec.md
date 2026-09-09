@@ -1,6 +1,6 @@
 ## Purpose
 
-Defines the Domain Layer — pure business logic for the state-machine plugin. The domain layer sits between the Data Layer (config loading, session persistence) and the Application Layer (plugin runtime, dashboard). It contains no I/O, no file access, and no plugin SDK dependencies. It receives resolved config objects and `SessionFacts` read-models, never raw `WorkflowSession`, except where pragmatically required (workflow orchestration functions that mutate session state directly).
+Defines the Domain Layer — pure business logic for the session-guard plugin. The domain layer sits between the Data Layer (config loading, session persistence) and the Application Layer (plugin runtime, dashboard). It contains no I/O, no file access, and no plugin SDK dependencies. It receives resolved config objects and `SessionFacts` read-models, never raw `WorkflowSession`, except where pragmatically required (workflow orchestration functions that mutate session state directly).
 
 ## ADDED Requirements
 
@@ -313,12 +313,12 @@ interface TransitionDef {
 
 ---
 
-### Requirement: R5: The `StateMachineEngine` class SHALL wrap config + guard evaluator
+### Requirement: R5: The `SessionGuardEngine` class SHALL wrap config + guard evaluator
 
 Defined in `src/domain/engine.ts`.
 
 ```typescript
-class StateMachineEngine {
+class SessionGuardEngine {
   constructor(
     config: EngineConfig,
     evaluateGuardFn?: EvaluateGuardFn,
@@ -779,14 +779,14 @@ SHALL re-export from:
 - `./session-facts.ts` — `toSessionFacts` function
 - `./derive-phase.ts` — `derivePhase` function
 - `./validate-transition.ts` — `checkTransition` function
-- `./engine.ts` — `StateMachineEngine` class and `EvaluateGuardFn` type
+- `./engine.ts` — `SessionGuardEngine` class and `EvaluateGuardFn` type
 - `./workflow.ts` — all workflow functions
 - `./dispatch.ts` — all dispatch functions
 
 #### Scenario: Barrel re-exports all domain symbols
 - **GIVEN** `import * as Domain from './domain/index.ts'`
 - **WHEN** inspecting exports
-- **THEN** `Domain.StateMachineEngine` is available
+- **THEN** `Domain.SessionGuardEngine` is available
 - **THEN** `Domain.derivePhase` is available
 - **THEN** `Domain.checkTransition` is available
 - **THEN** `Domain.toSessionFacts` is available
@@ -803,7 +803,7 @@ SHALL re-export from:
 The existing `src/index.ts` SHALL add a domain section that re-exports all domain symbols from `src/domain/index.ts`.
 
 #### Scenario: Domain symbols are accessible from main entry
-- **GIVEN** `import { StateMachineEngine, derivePhase, toSessionFacts } from './src/index.ts'`
+- **GIVEN** `import { SessionGuardEngine, derivePhase, toSessionFacts } from './src/index.ts'`
 - **WHEN** resolving the imports
 - **THEN** they resolve without error
 - **THEN** they refer to the implementations in `src/domain/`

@@ -1,13 +1,14 @@
 {
-  "name": "opencode-state-machine",
+  "name": "opencode-session-guard",
   "version": "0.1.0",
   "description": "State machine library for OpenCode plugins — gives schema-based workflow with strict validation between steps",
   "keywords": [
     "opencode",
     "opencode-plugin",
-    "state-machine",
+    "session-guard",
     "workflow",
-    "agent"
+    "agent",
+    "tui"
   ],
   "license": "MIT",
   "author": {
@@ -36,7 +37,7 @@
   },
   "homepage": "https://github.com/opencode-ai/profile-config#readme",
   "engines": {
-    "opencode": ">=0.15.0"
+    "opencode": ">=1.18.29"
   },
   "publishConfig": {
     "access": "public"
@@ -47,7 +48,8 @@
     "README.md"
   ],
   "dependencies": {
-    "@opencode-ai/plugin": "^1.18.25",
+    "@opencode-ai/plugin": "^1.18.29",
+    "@opencode/plugin": "beta",
     "@opentui/core": "^0.5.9",
     "@opentui/keymap": "^0.5.9",
     "@opentui/solid": "^0.5.9",

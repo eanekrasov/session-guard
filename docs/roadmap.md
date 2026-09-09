@@ -1,162 +1,135 @@
-# Roadmap
+# Roadmap: доработка харнесса
 
-> **Исторический документ.** Он описывает перенос плагина из репозитория
-> `harness`, где рядом жила встроенная версия движка. Переноса больше нет, как
-> нет и встроенной версии: этот репозиторий и есть плагин. Сравнительные
-> таблицы и фазы 1–3 ниже давно выполнены, а перечисленные там «недостающие»
-> поля сессии (`commitPermit`, `baselineHashes`) либо появились под другими
-> именами, либо не нужны. Держится ради истории решений; текущее устройство —
-> [architecture-overview.md](architecture-overview.md).
-> : State-Machine Plugin — Gap Analysis & Plan
+Документ-памятка о текущем статусе и плане развития ИИ-системы. Обновляется по мере продвижения.
 
-> Сравнение плагина `plugins/state-machine/` со встроенным `state-machine/`
-> в корне харнесса. Статус на 2026-08-30.
+## Выполнено
 
-## Executive Summary
+### Фаза 1 — контур self-edit
 
-Плагин реализует ядро state-machine (Clean Architecture: data-layer,
-session-store, domain-layer, plugin-runtime). Встроенный `state-machine/`
-имеет ряд дополнительных компонентов и интеграций, которые плагин пока не
-покрывает.
+Харнесс умеет править сам себя:
 
-**Общий охват плагина: ~60%** функциональности встроенной версии.
-Ключевые пробелы — hooks-интеграции (guardrails, consent, change-scope),
-preset/config-driven ядро, profiles/инварианты, Beads-интеграция.
+- `commit-task.ts` — pre-commit по расширениям (`.ts` -> typecheck+test, `.json` -> JSON, `.md` -> ссылки), формат коммита `harness:`.
+- `invariants.ts` — `HARNESS_INVARIANTS` (BROKEN_IMPORT, CONSOLE_LOG, INVALID_JSON, ANGLICISM) + маршрутизация по расширению.
+- `runtime.ts` — убраны `.kt`-фильтры, harness-инварианты подключены.
+- `agent/harness.md`, `rules/harness.md`, `skills/harness-code-review`.
+- `README.md`, `INTEGRATION.md` документированы.
 
----
+### Багфиксы ядра (все закрыты)
 
-## 1. Компоненты плагина (уже есть)
+- [x] П1 — сброс `failedCycles` на каждом сообщении (коммит `ae57fa0`).
+- [x] П4 — guardrails не сканировал вложения (коммит `89d36a9`).
+- [x] П2 — `verifierOperations` без TTL, блокировал повтор (TTL 30 мин, коммит `78074b8`).
+- [x] Тупик `failedCycles >= 3` — добавлен сброс по подтверждению через question (коммит `49faeb3`).
+- [x] П3 — rename в `change-scope.ts`: НЕ баг (git `-z` выводит destination первым), снят.
 
-| Компонент              | Встроенный           | Плагин                              | Статус       |
-| ---------------------- | -------------------- | ----------------------------------- | ------------ |
-| `WorkflowSession` типы | `store.ts`           | `src/session/types.ts`              | ✅ (упрощён) |
-| `WorkflowStore`        | `store.ts`           | `src/session/session-store.ts`      | ✅           |
-| `createSession()`      | `store.ts`           | `src/session/session-store.ts`      | ✅           |
-| `derivePhase()`        | `state.ts`           | `src/domain/engine.ts`              | ✅           |
-| `StateMachineEngine`   | `config-driven.ts`   | `src/domain/engine.ts`              | ✅           |
-| `checkTransition()`    | `state.ts`           | `src/domain/validate-transition.ts` | ✅           |
-| `GuardEvaluator`       | `guard-evaluator.ts` | `src/guard-evaluator.ts`            | ✅           |
-| `SessionQueue`         | (встроен в runtime)  | `src/app/session-queue.ts`          | ✅           |
-| Plugin entry point     | —                    | `src/plugin.ts`                     | ✅           |
-| Profiles loader        | `profiles-loader.ts` | `src/profile-loader.ts`             | ✅           |
-| Schema loader          | —                    | `src/schema-loader.ts`              | ✅ (экстра)  |
-| Public API             | `preset-config.ts`   | `src/public-api.ts`                 | ✅           |
+### Документы
 
----
+- `rules/harness.md` — правило эмпирической проверки гипотез о багах.
+- `docs/permission-fix-plan.md` — план исправления permission-дыр (отложено).
+- `docs/session-guard-redesign.md` — дизайн v2-final эволюционируемой стейт-машины (спроектировано).
+- `docs/upstream/` — донорские спецификации переработанной версии (6 фич) + upstream-ideas.md.
 
-## 2. Недостающие компоненты
+## Отложено (после текущего фокуса)
 
-### 🔴 High Priority — блокируют замену
+- Permission-дыры (`pwsh *`/`bun *`/`Get-Content *` обходят deny) — см. `docs/permission-fix-plan.md`.
+- `crpt_confluence` vs `confluence` + рассинхрон Confluence API в `rag.md`/`architect.md`/`AGENTS.md`.
+- `PATH_CONFIG.md` устарел, дубль README, мёртвые артефакты (`qdrant-repository-indexing/`).
 
-#### 2.1 Guardrails (безопасность)
+## Текущий фокус: переработка стейт-машины
 
-**Встроенный:** `state-machine/guardrails.ts` — 6 категорий защит.
-**Плагин:** отсутствует.
-**Нужно:** порт `guardrails.ts` → `src/app/guardrails.ts`, интеграция в
-`handleChatMessage` и `handleToolAfter`.
+- Дизайн v2-final — `docs/session-guard-redesign.md`.
+- Многоцикловая (ПЛАН -> РАЗРАБОТКА -> ТЕСТЫ -> ВЕРИФИКАЦИЯ -> КОММИТ), 10 состояний, плоские циклы + 8 эволюционных швов.
+- Статус: шаг 1 (data-driven граф) ВЫПОЛНЕН — стейт-машина работает end-to-end (полный цикл до DONE, гейт canCommit, дашборд). Шаги 2-5 впереди.
+- Целевая архитектура — `session-guard/schemas/` v3 (event-sourcing, пер-задачная гранулярность, evidence) — это reference-цель, НЕ мусор.
 
-#### 2.2 Consent (согласие на план)
+## План (порядок)
 
-**Встроенный:** `state-machine/consent.ts` — парсинг `<consent-request>`,
-SHA-256 evidence, классификация.
-**Плагин:** отсутствует.
-**Нужно:** порт `consent.ts`, интеграция в question-хуки.
+1. Реализация стейт-машины (v2-final, декомпозиция по слоям).
+2. Командные профили (см. ниже).
+3. Дашборд реального времени (метрики, граф, timeline, control panel).
+4. Консистентность правок харнесса (инварианты связей).
 
-#### 2.3 Change Scope (область изменений)
+## Командные профили (актуальные решения)
 
-**Встроенный:** `state-machine/change-scope.ts` — git diff-based baseline.
-**Плагин:** отсутствует.
-**Нужно:** порт `change-scope.ts`, интеграция в `handleToolAfter`.
+- Мульти-командность: analytics, iOS, android, backend, PWA, qa + AI (команда разработки самого харнесса).
+- Вариант A: профиль поставляет наборы инвариантов, механизм их работы — в ядре.
+- Активация: `OPENCODE_CONFIG_DIR` (профиль = каталог со структурой `.opencode`), НЕ копирование.
+- Структура: `core` = `.opencode/` (профиль-агностичное ядро), `profiles/<команда>/` = доменное (агенты, скиллы, правила, инварианты).
+- `profiles/harness` — симметрично другим профилям.
+- Профиль: `id: string` (generic), контракт НЕ трогает граф переходов и гейты коммита.
 
-#### 2.4 SDD Artifacts (чтение/запись планов)
+## Консистентность правок харнесса (задача)
 
-**Встроенный:** `state-machine/sdd-artifacts.ts` — `readPlanFile()`,
-`computeSha256()`, `canonicalizePlan()`.
-**Плагин:** отсутствует.
-**Нужно:** порт в `src/app/sdd-artifacts.ts`.
+Проблема: при правке харнесса агент часто забывает проверить связанные артефакты (промпты, скрипты, скиллы, документацию) на согласованность.
 
-#### 2.5 Invariants (валидация файлов)
+Решение — три слоя (комбинация, не «или-или»):
 
-**Встроенный:** `state-machine/invariants.ts` + профили.
-**Плагин:** отсутствует.
-**Нужно:** порт, интеграция в `handleFileToolAfter`.
+1. Правила агента (`agent/harness.md`): чек-лист «что затронуть» ДО правки (проактивно).
+2. Скилл ревью (`harness-code-review`): чек-лист «что проверить» ПОСЛЕ правки (реактивно).
+3. Инварианты консистентности (`invariants.ts`): детерминированные автопроверки —
+   `BROKEN_MD_REF` (битые ссылки в .md), `SKILL_REF_EXISTS` (имя скилла ↔ папка),
+   `MARKER_CONSISTENCY` (маркер в коде ↔ промпты/скиллы), `SCRIPT_REF_EXISTS` (пути скриптов),
+   `NO_STALE_PATH` (устаревшие пути).
 
-### 🟡 Medium Priority
+Плюс «манифест связей» — единый файл «что с чем связано» (`rules/harness-consistency.md`),
+на который ссылаются и агент, и инварианты, и ревью.
 
-- **Манифесты задач** — `manifest.ts`
-- ~~**Config-driven State Machine**~~ — сделано: YAML-схемы, `actions:` на стадии (бывший `actionGuards`), гейты объявляются профилем
-- **Preset Config** — `resolveConfig()` с кешированием и мержем YAML
-- **Beads Bridge** — `bd` CLI обёртка
+Реализация skill registry — спецификация docs/upstream/features/skill-registry.md (независима от стейт-машины).
 
-### 🟢 Low Priority
+Статус: спроектировано, не реализовано. Приоритет — после реализации стейт-машины.
 
-- Config Schema, YAML-пресеты, пути
+## Дашборд реального времени (задача)
 
----
+Текущее состояние: standalone-сервер (`bun serve`, порт 3456) + HTML. Читает `runtime/*.json`,
+SSE, граф (статичный), timeline переходов, scope, инварианты (только статус), multi-session.
+Хардкодит состояния/переходы/поля сессии -> станет несовместим со стейт-машиной v2-final.
 
-## 3. Отличия API и схем данных
+Ключевое требование: дашборд должен быть generic — читать граф из `TRANSITIONS`, гейты из
+`GATES`, поля сессии динамически (не хардкодить). Это требование к реализации стейт-машины
+(экспорт контракта графа/гейтов).
 
-### Runtime hooks
+Безопасность (прежде любых фич): XSS через `innerHTML`, CORS `*`, bind на всех интерфейсах.
 
-| Hook                  | Встроенный                                   | Плагин                       |
-| --------------------- | -------------------------------------------- | ---------------------------- |
-| `workflow-create`     | ✅ + preset                                  | ✅ + profileId               |
-| `chat.message`        | ✅ guardrails                                | ✅ (логирование)             |
-| `tool.execute.before` | ✅ guardrails + consent + git + task         | ✅ (Bash/Write guard только) |
-| `tool.execute.after`  | ✅ consent + file val. + mutation + verifier | ✅ (finishMutation только)   |
-| `event`               | ✅ live mutation cleanup                     | ✅                           |
-| `dispose`             | ✅ dashboard + cleanup                       | ✅                           |
+Фаза 1 (после стейт-машины, минимум инфраструктуры):
 
-### WorkflowSession
+- generic граф/гейты/поля;
+- чек-лист инвариантов (детализация: имя, строки, diff-превью);
+- timeline переходов с fail/pass/warn;
+- control panel write-API (`force-transition`, `reset-mutex`) — только после закрытия дыр безопасности;
+- доработка multi-session (связи между сессиями).
 
-Плагин использует упрощённую модель — без `commitPermit`, `baselineHashes`,
-`changedFiles`, `invariantViolations`.
+Фаза 2 (после event-sourcing/evidence, шаги 3-4 эволюции):
 
----
+- timeline событий (`chat.message`/`tool.execute`);
+- retrospective-отчёт;
+- replay mode (JSONL-журнал).
 
-## 4. Приоритеты реализации
+Фаза 3 (интеграции, по потребности):
 
-### Фаза 1 (Core Parity) — ~2-3 дня
+- Prometheus-endpoint (только если есть Grafana);
+- webhook на события.
 
-1. **Guardrails** — prompt injection защита (блокирующий компонент)
-2. **SDD Artifacts** — нужен для Consent
-3. **Consent** — блокирует workflow approval
-4. **Change Scope** — нужен для mutation validation
+Зависит от event-sourcing (шаги 3-4), НЕ планировать раньше: токен-бюджет, сравнение runs,
+OpenTelemetry, аномалии.
 
-### Фаза 2 (Session Model) — ~1-2 дня
+Не вносим: тепловая карта scope (низкая ценность), breakpoints (покрывается force-transition),
+dry-run (ослабляет guardrails), предсказание откатов и авто-предложение инвариантов (незрело).
 
-5. Расширение `WorkflowSession` — `commitPermit`, `baselineHashes`,
-   `changedFiles`, `invariantViolations`
-6. Полный `toSessionFacts()`
+Статус: спроектировано, не реализовано.
 
-### Фаза 3 (Config & Profiles) — ~2-3 дня
+## Follow-up: стейт-машина (выявлено при smoke-тесте)
 
-7. Порт `preset-config.ts` с YAML-пресетами
-8. Порт `config-driven.ts`
-9. Инварианты
+1. Недетерминированный canCommit для субагентов: rootSessionID субагента резолвится нестабильно
+   (зависит, в какую сессию opencode поместил субагента) — гейт коммита можно обойти.
+   Нужно: стабильная привязка субагента к родительской root-сессии.
+2. Эфемерный DONE: сброс `if (state === DONE) createSession(...)` в chat.message срабатывает
+   на сообщениях ассистента/субагента, а не только на новом сообщении пользователя — DONE и
+   commitHash теряются через секунды. Нужно: гейтить сброс по «есть текст пользователя».
+3. Плагин грузится как .js (автозагрузка из .opencode/plugins/), исполняется в Node.js
+   (не bun): в ядре не использовать Bun API; импорты — с явными .ts-расширениями.
 
-### Фаза 4 (Integration) — ~2 дня
+## Методология
 
-10. Beads Bridge
-11. Интеграция всех хуков
-12. E2E тестирование
-
----
-
-## 5. Тесты
-
-Встроенная версия — **24 тестовых файла**. Плагин — тесты в
-`plugins/state-machine/test/` (291 тест, >99% покрытие).
-
-**Нужно добавить:**
-
-- `test/app/guardrails.test.ts`
-- `test/app/consent.test.ts`
-- `test/app/change-scope.test.ts`
-- `test/app/sdd-artifacts.test.ts`
-- E2E тесты (плагин + harness)
-
----
-
-_См. также: [plugin-architecture.md](./plugin-architecture.md) — описание
-entry point, [usage.md](./usage.md) — подключение и настройка._
+- Гипотезы — не факты; перед правкой бага — эмпирическое подтверждение (см. `rules/harness.md`).
+- Правки `.ts`-ядра вступают в силу после перезапуска OpenCode.
+- Коммиты харнесса — формат `harness: <глагол в прош. вр.> <описание>`.

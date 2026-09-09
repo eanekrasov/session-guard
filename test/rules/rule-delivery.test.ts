@@ -339,7 +339,7 @@ describe('RuleDelivery durable turns', () => {
       ],
     });
     const delivery: RuleDelivery = createRuleDelivery({ rawHistory: history });
-    const output = { parts: [] };
+    const output: { parts: DeliveryPart[] } = { parts: [] };
 
     await expect(
       delivery.deliverDurableTurn({
@@ -438,7 +438,7 @@ describe('RuleDelivery durable turns', () => {
     expect(deferred).toBe('deferred');
     expect(deferredOutput.parts).toEqual([{ type: 'text', text: 'Prompt.' }]);
 
-    const acceptedOutput = { parts: [] };
+    const acceptedOutput: { parts: DeliveryPart[] } = { parts: [] };
     const accepted = await delivery.deliverDurableTurn({
       sessionID: 'ses_hooks',
       messageID: 'msg_hooks',
@@ -704,7 +704,7 @@ describe('RuleDelivery matched Hook queueing', () => {
       buildTransientDeliveryMessage([], deliveredHooks, {}).parts[0]!.text,
     ]);
 
-    const durableOutput = { parts: [] };
+    const durableOutput: { parts: DeliveryPart[] } = { parts: [] };
     await delivery.deliverDurableTurn({
       sessionID: 'ses_hook_queue',
       messageID: 'msg_durable_hook',
@@ -839,7 +839,7 @@ describe('RuleDelivery matched Hook queueing', () => {
       matchedRules: [],
       messages,
     });
-    const output = { parts: [] };
+    const output: { parts: DeliveryPart[] } = { parts: [] };
     await delivery.deliverDurableTurn({
       sessionID: 'ses_recovered_owner',
       messageID: 'msg_recovered_hook',

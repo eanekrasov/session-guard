@@ -1,0 +1,13 @@
+// Copy this file to hk.local.pkl to enable personal-only hooks.
+amends "./hk.pkl"
+
+hooks {
+    ["pre-commit"] {
+        steps {
+            // Replace this no-op with a personal check, if needed.
+            ["personal-check"] {
+                check = "true"
+            }
+        }
+    }
+}

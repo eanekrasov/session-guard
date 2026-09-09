@@ -1,29 +1,30 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 
 describe('plugin entry point (R10)', () => {
-  const prevStoreDir = process.env.STATE_MACHINE_STORE_DIR;
+  const prevStoreDir = process.env.SESSION_GUARD_STORE_DIR;
 
   beforeEach(() => {
-    process.env.STATE_MACHINE_STORE_DIR =
-      '/tmp/state-machine-test-bridge-' + Math.random().toString(36).slice(2);
+    process.env.SESSION_GUARD_STORE_DIR =
+      '/tmp/session-guard-test-bridge-' + Math.random().toString(36).slice(2);
   });
 
   afterEach(() => {
     if (prevStoreDir !== undefined) {
-      process.env.STATE_MACHINE_STORE_DIR = prevStoreDir;
+      process.env.SESSION_GUARD_STORE_DIR = prevStoreDir;
     } else {
-      delete process.env.STATE_MACHINE_STORE_DIR;
+      delete process.env.SESSION_GUARD_STORE_DIR;
     }
   });
 
-  it('imports StateMachinePlugin as named and exposes the v1 module from src/index.ts', async () => {
+  it('imports SessionGuardPluginV1 as named and exposes the v1 module from src/index.ts', async () => {
     const mod = await import('../../src/index.ts');
 
     expect(mod).toBeDefined();
-    expect(mod.StateMachinePlugin).toBeDefined();
-    expect(typeof mod.StateMachinePlugin).toBe('function');
+    expect(mod.SessionGuardPluginV1).toBeDefined();
+    expect(typeof mod.SessionGuardPluginV1).toBe('function');
     expect(mod.default).toBeDefined();
-    expect(mod.default.server).toBe(mod.StateMachinePlugin);
+    expect(typeof mod.default.server).toBe('function');
+    expect(typeof mod.default.setup).toBe('function');
   });
 
   it('default export returns an object with Hooks shape', async () => {

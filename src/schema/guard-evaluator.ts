@@ -126,10 +126,11 @@ export class GuardEvaluator {
 
     // Builtins — callable by name in guard expressions
     this.builtins = {
-      approved: approvedFn,
-      isExhausted: isExhaustedFn,
-      hasPendingTasks: hasPendingTasksFn,
-      allTasksCompleted: allTasksCompletedFn,
+      approved: (...args: unknown[]) => approvedFn(String(args[0])),
+      isExhausted: (...args: unknown[]) => isExhaustedFn(String(args[0])),
+      hasPendingTasks: () => hasPendingTasksFn(),
+      allTasksCompleted: (...args: unknown[]) =>
+        allTasksCompletedFn(typeof args[0] === 'string' ? args[0] : undefined),
     };
 
     this.guards = (guards ?? {}) as Record<string, (...args: unknown[]) => unknown>;

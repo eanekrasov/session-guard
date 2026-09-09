@@ -47,7 +47,7 @@ The merge between a base schema (from schema extends) and an extending schema SH
 - `transitions`: full override when present
 
 #### Scenario: Schema mixed merge with extends
-- **WHEN** schema extends `"base/state-machine.yaml"` and specifies only `gateMapping` and `phaseAssignments` with one replacement and one addition
+- **WHEN** schema extends `"base/session-guard.yaml"` and specifies only `gateMapping` and `phaseAssignments` with one replacement and one addition
 - **THEN** the resulting resolved schema has base settings inherited, base phases inherited, base transitions inherited, gateMapping fully from extending schema, phaseAssignments as base + replacement + addition
 
 ### Requirement: resolveConfig SHALL return ResolvedProfile with metadata and schemas
