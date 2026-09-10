@@ -20,6 +20,7 @@ import { buildDashboardSchema } from './dashboard-contract.ts';
 import { getIssue, postComment } from './beads-bridge.ts';
 import {
   archiveDirOf,
+  getCurrentStageGates,
   listProfileAgents,
   readAllSessions,
   readSession,
@@ -27,6 +28,18 @@ import {
 } from '../public-api.ts';
 import { selectSchema, schemaToEngineConfig } from '../app/mutation-orchestrator.ts';
 import { compileWorkflow } from '../schema/compile-workflow.ts';
+import type { StageDef } from '../schema/profile-schema.ts';
+import type { WorkflowSession } from '../session/session-schema.ts';
+
+function gateIdsFromStages(stages: Record<string, StageDef> | undefined): string[] {
+  const ids = new Set<string>();
+  const visit = (stage: StageDef): void => {
+    for (const gate of stage.gates ?? []) ids.add(gate);
+    for (const nested of Object.values(stage.stages ?? {})) visit(nested);
+  };
+  for (const stage of Object.values(stages ?? {})) visit(stage);
+  return [...ids];
+}
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
@@ -108,8 +121,8 @@ export function stageOf(session: Record<string, unknown>): string {
 }
 
 export function gatesOf(session: Record<string, unknown>): Record<string, string> {
-  const gates = Array.isArray(session['gates'])
-    ? (session['gates'] as Array<Record<string, unknown>>)
+  const gates = Array.isArray(session['stageGateResults'])
+    ? (session['stageGateResults'] as Array<Record<string, unknown>>)
     : [];
   const result: Record<string, string> = {};
   for (const g of gates) {
@@ -281,7 +294,7 @@ export function createDashboard(config: DashboardConfig): Dashboard {
     };
   }
 
-  async function loadSession(id: string): Promise<unknown | null> {
+  async function loadSession(id: string): Promise<WorkflowSession | null> {
     return (await readSession(sessionsDir, id)) ?? readSession(archiveDirOf(sessionsDir), id);
   }
 
@@ -341,7 +354,7 @@ export function createDashboard(config: DashboardConfig): Dashboard {
       return buildDashboardSchema({
         stages: Object.keys(workflow.stages),
         transitions: workflow.transitions.map((t) => ({ from: t.from, to: t.to })),
-        gates: (selected.gates ?? []).map((gate) => ({ id: gate.id })),
+        gates: gateIdsFromStages(selected.stages).map((id) => ({ id })),
         profile: {
           id: resolved.metadata.id,
           // A profile carries no version of its own; the schema it runs names it.
@@ -638,7 +651,19 @@ export function createDashboard(config: DashboardConfig): Dashboard {
     if (sessionMatch) {
       const session = await loadSession(sessionId(sessionMatch[1]!));
       if (!session) return json({ error: 'Session not found' }, req, 404);
-      return json(enrichSession(session), req);
+      let stageGateResults = session.stageGateResults;
+      try {
+        stageGateResults = await getCurrentStageGates(session, profilesDir);
+      } catch {
+        // Keep serving persisted session data when its profile is unavailable.
+      }
+      return json(
+        enrichSession({
+          ...session,
+          stageGateResults,
+        }),
+        req
+      );
     }
 
     // HTML dashboard (same-origin, no CORS)

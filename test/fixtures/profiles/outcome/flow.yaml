@@ -6,9 +6,6 @@
 #
 # Без `stageAssignments` намеренно: правила выводят стадию по состоянию, и
 # сессия тогда не стоит там, где её поставили.
-gates:
-  - id: review
-
 stages:
   work:
     gates: [review]

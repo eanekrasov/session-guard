@@ -1,8 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { resolve } from 'node:path';
-import { resolveConfig, listProfiles } from '../src/public-api.ts';
+import { getCurrentStageGates, resolveConfig, listProfiles } from '../src/public-api.ts';
+import { createSession } from '../src/session/session-store.ts';
 
 const FIXTURES_DIR = resolve(import.meta.dirname, 'fixtures', 'profiles');
+const PROJECT_PROFILES_DIR = resolve(import.meta.dirname, '..', 'profiles');
 
 describe('resolveConfig', () => {
   it('resolves android profile with base inheritance (agents, skills, invariants)', async () => {
@@ -37,6 +39,21 @@ describe('resolveConfig', () => {
 
     // base has no extends — 1 source schema
     expect(profile.schemas).toHaveLength(1);
+  });
+});
+
+describe('getCurrentStageGates', () => {
+  it('keeps visited outer results and adds only current-stage gates', async () => {
+    const session = createSession('session-1', 'base', 'base', 'validation');
+    session.stageGateResults.push(
+      { stage: 'verify', id: 'invariants', status: 'passed' },
+      { stage: 'validation', id: 'review', status: 'passed' }
+    );
+
+    await expect(getCurrentStageGates(session, PROJECT_PROFILES_DIR)).resolves.toEqual([
+      { stage: 'validation', id: 'review', status: 'passed' },
+      { stage: 'validation', id: 'qa', status: 'pending' },
+    ]);
   });
 });
 

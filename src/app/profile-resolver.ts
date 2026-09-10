@@ -294,7 +294,6 @@ export class ProfileResolver {
       stages: qualifyStageAgents(chain[0].id, currentSchema.stages),
       transitions: currentSchema.transitions,
       editingAgents: currentSchema.editingAgents,
-      gates: currentSchema.gates,
       taskControlAgents: currentSchema.taskControlAgents,
       stageAssignments: currentSchema.stageAssignments,
     };

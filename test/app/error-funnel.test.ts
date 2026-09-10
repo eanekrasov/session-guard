@@ -49,7 +49,7 @@ function pluginInput(): PluginInput {
   };
 }
 
-/** A profile whose schema compiles with an error: a gate nobody declared. */
+/** A profile whose schema compiles with an error: a loop has no stages. */
 function seedBrokenProfile(): void {
   const dir = join(profilesDirectory, 'broken');
   mkdirSync(dir, { recursive: true });
@@ -61,14 +61,9 @@ function seedBrokenProfile(): void {
   writeFileSync(
     join(dir, 'cycle.yaml'),
     [
-      'gates:',
-      '  - id: invariants',
       'stages:',
       '  execution:',
       '    loop: implementation',
-      '    stages:',
-      '      code:',
-      "        gates: ['nobody-declared-this']",
       '    transitions:',
       '      - from: code',
       '        to: done',
@@ -134,7 +129,7 @@ describe('every error the plugin reports takes one path', () => {
     );
 
     expect(result.output).toContain('workflow-tasks-set is refused');
-    expect(result.output).toContain('nobody-declared-this');
+    expect(result.output).toContain('declares no stages to run');
   });
 
   it('logs every refusal at error level', async () => {
@@ -171,7 +166,7 @@ describe('every error the plugin reports takes one path', () => {
       { tasks: [] },
       { sessionID: 's1', agent: 'orchestrator' }
     );
-    expect(toasted.map((t) => t.message).join('\n')).toContain('nobody-declared-this');
+    expect(toasted.map((t) => t.message).join('\n')).toContain('declares no stages to run');
   });
 
   it('reports a refused tool call as well as throwing it', async () => {

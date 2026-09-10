@@ -75,7 +75,7 @@ export function toSessionFacts(session: WorkflowSession): SessionFacts {
     verified(stage: string, status: 'confirmed' | 'rejected') {
       return this.verifications.some((v) => v.stage === stage && v.status === status);
     },
-    gates: Object.fromEntries(session.gates.map((g) => [g.id, g.status])),
+    gates: Object.fromEntries(session.stageGateResults.map((g) => [g.id, g.status])),
     profileId: session.profileId,
     revision: session.revision,
     deliveryReceipt: session.deliveryReceipt ?? null,

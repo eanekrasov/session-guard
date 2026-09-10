@@ -20,9 +20,9 @@ function makeSession(overrides: Record<string, unknown> = {}): WorkflowSession {
     schemaId: 'session-guard',
     revision: 1,
     updatedAt: '2026-08-23T00:00:00.000Z',
-    gates: [
-      { id: 'review', status: 'pending' },
-      { id: 'qa', status: 'pending' },
+    stageGateResults: [
+      { stage: 'planning', id: 'review', status: 'pending' },
+      { stage: 'planning', id: 'qa', status: 'pending' },
     ],
     retryBudgets: { cycles: { attempts: 0, maximum: 3 } },
     title: 'Test Task',
@@ -251,9 +251,9 @@ describe('formatSectionLines', () => {
   test('third line shows gates and retry budgets', () => {
     const view = parse({
       tasks: makeTasks(1),
-      gates: [
-        { id: 'invariants', status: 'passed' },
-        { id: 'tests', status: 'pending' },
+      stageGateResults: [
+        { stage: 'planning', id: 'invariants', status: 'passed' },
+        { stage: 'planning', id: 'tests', status: 'pending' },
       ],
       retryBudgets: { code: { attempts: 2, maximum: 3 } },
     });
@@ -267,12 +267,12 @@ describe('formatSectionLines', () => {
   test('third line overflows — shows +N more', () => {
     const view = parse({
       tasks: makeTasks(1),
-      gates: [
-        { id: 'invariants', status: 'pending' },
-        { id: 'review', status: 'running' },
-        { id: 'qa', status: 'pending' },
-        { id: 'extra_check', status: 'pending' },
-        { id: 'security_audit', status: 'pending' },
+      stageGateResults: [
+        { stage: 'planning', id: 'invariants', status: 'pending' },
+        { stage: 'planning', id: 'review', status: 'running' },
+        { stage: 'planning', id: 'qa', status: 'pending' },
+        { stage: 'planning', id: 'extra_check', status: 'pending' },
+        { stage: 'planning', id: 'security_audit', status: 'pending' },
       ],
       retryBudgets: { code: { attempts: 2, maximum: 3 }, infra: { attempts: 1, maximum: 3 } },
     });
@@ -287,9 +287,9 @@ describe('formatSectionLines', () => {
   test('third line overflows heavily — truncated with …', () => {
     const view = parse({
       tasks: makeTasks(1),
-      gates: [
-        { id: 'very_long_gate_name_that_takes_space', status: 'pending' },
-        { id: 'another_really_long_one', status: 'running' },
+      stageGateResults: [
+        { stage: 'planning', id: 'very_long_gate_name_that_takes_space', status: 'pending' },
+        { stage: 'planning', id: 'another_really_long_one', status: 'running' },
       ],
       retryBudgets: { code: { attempts: 2, maximum: 3 }, infra: { attempts: 1, maximum: 3 } },
     });
@@ -302,7 +302,7 @@ describe('formatSectionLines', () => {
     const r = parseRuntimeState(
       makeSession({
         currentStage: 'planning',
-        gates: [],
+        stageGateResults: [],
         retryBudgets: {},
       })
     );
@@ -439,10 +439,10 @@ describe('formatDetailsLines', () => {
   test('gates summary shows status per gate', () => {
     const lines = formatDetailsLines(
       makeSession({
-        gates: [
-          { id: 'invariants', status: 'passed' },
-          { id: 'review', status: 'pending' },
-          { id: 'qa', status: 'running' },
+        stageGateResults: [
+          { stage: 'planning', id: 'invariants', status: 'passed' },
+          { stage: 'planning', id: 'review', status: 'pending' },
+          { stage: 'planning', id: 'qa', status: 'running' },
         ],
       })
     );

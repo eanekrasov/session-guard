@@ -72,7 +72,7 @@ describe('WorkflowStore', () => {
       expect(loaded!.sessionId).toBe('test-session-1');
       expect(loaded!.profileId).toBe('android');
       expect(loaded!.title).toBe('Test Session');
-      expect(loaded!.gates).toEqual([]);
+      expect(loaded!.stageGateResults).toEqual([]);
     });
 
     it('increments revision on save', async () => {

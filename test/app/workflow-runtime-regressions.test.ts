@@ -317,7 +317,9 @@ describe('исход workflow записывается при входе в те
     const store = new WorkflowStore(storeDirectory);
     const session = createSession(sessionId, 'outcome', 'flow', 'work');
     session.currentStage = 'work';
-    session.gates = [{ id: 'review', status: reviewStatus }];
+    session.stageGateResults = [
+      { stage: session.currentStage, id: 'review', status: reviewStatus },
+    ];
     if (reviewStatus === 'failed') {
       session.retryBudgets = { cycles: { attempts: 3, maximum: 3 } };
     }

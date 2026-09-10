@@ -179,7 +179,7 @@ describe('a replayed result is not a verdict about the whole body of work', () =
     await report(hooks, 'call-1', 'pass');
 
     const afterFirst = await store.load('s1');
-    const gatesAfterFirst = JSON.stringify(afterFirst?.gates);
+    const gatesAfterFirst = JSON.stringify(afterFirst?.stageGateResults);
 
     const tag = `<workflow-result>${JSON.stringify({
       stage: 'code',
@@ -195,6 +195,6 @@ describe('a replayed result is not a verdict about the whole body of work', () =
 
     expect(output.output).toContain('[workflow-result-replayed]');
     const afterReplay = await store.load('s1');
-    expect(JSON.stringify(afterReplay?.gates)).toBe(gatesAfterFirst);
+    expect(JSON.stringify(afterReplay?.stageGateResults)).toBe(gatesAfterFirst);
   });
 });

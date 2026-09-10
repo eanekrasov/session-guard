@@ -50,7 +50,7 @@ function createSession(overrides: Partial<WorkflowSession> = {}): WorkflowSessio
     schemaVersion: 1,
     revision: 0,
     title: 'Lifecycle test',
-    gates: baseGates(),
+    stageGateResults: baseGates(),
     approvals: [],
     refs: {},
     tasks: { implementation: [] },

@@ -33,10 +33,10 @@ export const ApprovalSchema = z.object({
   files: z.array(z.string()).optional(),
 });
 
-export const GateSchema = z.object({
+export const StageGateResultSchema = z.object({
+  stage: z.string().min(1),
   id: z.string().min(1),
   status: z.enum(GATE_STATUS),
-  label: z.string().optional(),
   resolvedAt: z.string().optional(),
 });
 
@@ -328,7 +328,7 @@ export const WorkflowSessionSchema = z
     schemaVersion: z.number().int().positive().default(2),
     revision: z.number().int().min(0).default(0),
     title: z.string().default(''),
-    gates: z.array(GateSchema).default([]),
+    stageGateResults: z.array(StageGateResultSchema).default([]),
     approvals: z.array(ApprovalSchema).default([]),
     refs: z.record(z.string()).default({}),
     tasks: TasksSchema.default({}),
@@ -383,7 +383,7 @@ export type ApprovalStatus = z.output<typeof ApprovalSchema>['status'];
 export type Severity = z.output<typeof InvariantViolationRecordSchema>['severity'];
 export type ViolationStatus = z.output<typeof InvariantViolationRecordSchema>['status'];
 
-export type Gate = z.output<typeof GateSchema>;
+export type StageGateResult = z.output<typeof StageGateResultSchema>;
 export type Approval = z.output<typeof ApprovalSchema>;
 export type ActiveOperation = z.output<typeof ActiveOperationSchema>;
 export type ActiveTaskContext = z.output<typeof ActiveTaskContextSchema>;

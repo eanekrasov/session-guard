@@ -34,11 +34,7 @@ export function createSession(
     schemaId,
     revision: 0,
     title: '',
-    // Gates are created on demand by the first verdict about them. A gate
-    // nobody has spoken about is absent, and every reader already treats
-    // absent as pending — so a seeded list would only be a copy of the
-    // profile's declaration that can drift from it.
-    gates: [],
+    stageGateResults: [],
     approvals: [],
     refs: {},
     tasks: {},

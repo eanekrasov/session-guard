@@ -26,10 +26,10 @@ function stateJson(overrides: Record<string, unknown> = {}): string {
     profileId: 'test',
     schemaId: 'cycle',
     currentStage: 'planning',
-    gates: [
-      { id: 'invariants', status: 'pending' },
-      { id: 'review', status: 'pending' },
-      { id: 'qa', status: 'pending' },
+    stageGateResults: [
+      { stage: 'planning', id: 'invariants', status: 'pending' },
+      { stage: 'planning', id: 'review', status: 'pending' },
+      { stage: 'planning', id: 'qa', status: 'pending' },
     ],
     ...overrides,
   });
@@ -147,11 +147,17 @@ describe('sidebar-state: проводка плагина', () => {
     writeState(
       'ses_root',
       JSON.stringify({
-        schemaVersion: 1,
+        schemaVersion: 2,
         sessionId: 'ses_root',
+        profileId: 'test',
+        schemaId: 'cycle',
         currentStage: 'code',
-        gates: { invariants: 'pending', review: 'pending', qa: 'pending' },
-        processedEventIds: ['evt_1', 'evt_2'],
+        stageGateResults: [
+          { stage: 'code', id: 'invariants', status: 'pending' },
+          { stage: 'code', id: 'review', status: 'pending' },
+          { stage: 'code', id: 'qa', status: 'pending' },
+        ],
+        processedResultCallIDs: ['evt_1', 'evt_2'],
       })
     );
     const layers: Array<{

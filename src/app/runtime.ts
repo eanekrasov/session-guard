@@ -744,7 +744,7 @@ class SessionGuardRuntime {
     }
 
     const stage = session.currentStage;
-    const activeGates = session.gates
+    const activeGates = session.stageGateResults
       .filter((g) => g.status !== 'pending')
       .map((g) => `${g.id}=${g.status}`);
     const grantedApprovals = session.approvals
@@ -1492,7 +1492,7 @@ class SessionGuardRuntime {
     const stage = session.currentStage;
     lines.push(`[workflow stage: ${stage}]`);
 
-    const gateLines = session.gates
+    const gateLines = session.stageGateResults
       .filter((g) => g.status !== 'pending')
       .map((g) => `${g.id}=${g.status}`);
     if (gateLines.length > 0) {
@@ -2868,7 +2868,7 @@ class SessionGuardRuntime {
       stage,
       from: moved.from ?? session.currentStage,
       guard: moved.guard ?? null,
-      failedGates: (session.gates ?? [])
+      failedGates: (session.stageGateResults ?? [])
         .filter((gate) => gate.status === 'failed')
         .map((gate) => gate.id),
       exhaustedBudgets: Object.entries(session.retryBudgets ?? {})

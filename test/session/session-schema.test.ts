@@ -4,7 +4,7 @@ import { describe, it, expect } from 'vitest';
 import {
   WorkflowSessionSchema,
   ApprovalSchema,
-  GateSchema,
+  StageGateResultSchema,
   MutationTaskSchema,
   ActiveOperationSchema,
 } from '../../src/session/session-schema.ts';
@@ -35,7 +35,7 @@ describe('WorkflowSessionSchema', () => {
     expect(result.schemaVersion).toBe(2);
     expect(result.revision).toBe(0);
     expect(result.title).toBe('');
-    expect(result.gates).toEqual([]);
+    expect(result.stageGateResults).toEqual([]);
     expect(result.approvals).toEqual([]);
     expect(result.tasks).toEqual({});
     expect(result.activeOperations).toEqual({});
@@ -243,26 +243,26 @@ describe('ApprovalSchema', () => {
   });
 });
 
-describe('GateSchema', () => {
+describe('StageGateResultSchema', () => {
   it('validates a valid gate', () => {
-    const input = { id: 'invariants', status: 'pending' };
+    const input = { stage: 'planning', id: 'invariants', status: 'pending' };
 
-    const result = GateSchema.parse(input);
+    const result = StageGateResultSchema.parse(input);
 
     expect(result.id).toBe('invariants');
     expect(result.status).toBe('pending');
   });
 
   it('rejects invalid gate status like "pass"', () => {
-    const input = { id: 'invariants', status: 'pass' };
+    const input = { stage: 'planning', id: 'invariants', status: 'pass' };
 
-    expect(() => GateSchema.parse(input)).toThrow();
+    expect(() => StageGateResultSchema.parse(input)).toThrow();
   });
 
   it('rejects invalid gate status like "fail"', () => {
-    const input = { id: 'invariants', status: 'fail' };
+    const input = { stage: 'planning', id: 'invariants', status: 'fail' };
 
-    expect(() => GateSchema.parse(input)).toThrow();
+    expect(() => StageGateResultSchema.parse(input)).toThrow();
   });
 });
 

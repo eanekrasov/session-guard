@@ -85,7 +85,7 @@ async function report(
   callID: string,
   gate: string,
   status: 'pass' | 'fail',
-  agent = gate === 'code' ? 'code' : gate === 'review' ? 'review' : 'qa'
+  agent = gate === 'code' ? 'code' : gate === 'review' ? 'reviewer' : 'tester'
 ): Promise<string> {
   const tag = `<workflow-result>${JSON.stringify({
     stage: gate,
@@ -145,7 +145,7 @@ describe('a stage waits for every gate it declares', () => {
     const hooks = createRuntime(pluginInput());
     await reachVerify(hooks, store);
 
-    await dispatch(hooks, 'call-review', 'review');
+    await dispatch(hooks, 'call-review', 'reviewer');
     await report(hooks, 'call-review', 'review', 'pass');
 
     const midway = run(await load(store));
@@ -159,9 +159,9 @@ describe('a stage waits for every gate it declares', () => {
     const hooks = createRuntime(pluginInput());
     await reachVerify(hooks, store);
 
-    await dispatch(hooks, 'call-review', 'review');
+    await dispatch(hooks, 'call-review', 'reviewer');
     await report(hooks, 'call-review', 'review', 'pass');
-    await dispatch(hooks, 'call-qa', 'qa');
+    await dispatch(hooks, 'call-qa', 'tester');
     await report(hooks, 'call-qa', 'qa', 'pass');
 
     const session = await load(store);
@@ -174,7 +174,7 @@ describe('a stage waits for every gate it declares', () => {
     const hooks = createRuntime(pluginInput());
     await reachVerify(hooks, store);
 
-    await dispatch(hooks, 'call-review', 'review');
+    await dispatch(hooks, 'call-review', 'reviewer');
     await report(hooks, 'call-review', 'review', 'fail');
 
     const session = await load(store);
@@ -197,7 +197,7 @@ describe('editing again clears the verdicts about the old code', () => {
     const hooks = createRuntime(pluginInput());
     await dispatch(hooks, 'call-code', 'code');
     await report(hooks, 'call-code', 'code', 'pass');
-    await dispatch(hooks, 'call-review', 'review');
+    await dispatch(hooks, 'call-review', 'reviewer');
     await report(hooks, 'call-review', 'review', 'pass');
     expect(run(await load(store)).gates).toEqual({ review: 'passed' });
 
@@ -221,7 +221,7 @@ describe('a result naming a gate the stage did not declare', () => {
     await dispatch(hooks, 'call-code', 'code');
     await report(hooks, 'call-code', 'code', 'pass');
 
-    await dispatch(hooks, 'call-review', 'review');
+    await dispatch(hooks, 'call-review', 'reviewer');
     const told = await report(hooks, 'call-review', 'security', 'pass');
 
     const session = await load(store);
@@ -246,9 +246,9 @@ describe('a loop moved by its own transitions', () => {
     const hooks = createRuntime(pluginInput());
     await reachVerify(hooks, store);
 
-    await dispatch(hooks, 'call-review', 'review');
+    await dispatch(hooks, 'call-review', 'reviewer');
     await report(hooks, 'call-review', 'review', 'pass');
-    await dispatch(hooks, 'call-qa', 'qa');
+    await dispatch(hooks, 'call-qa', 'tester');
     await report(hooks, 'call-qa', 'qa', 'pass');
 
     expect(run(await load(store)).stage).toBe('commit');
@@ -260,7 +260,7 @@ describe('a loop moved by its own transitions', () => {
     const hooks = createRuntime(pluginInput());
     await reachVerify(hooks, store);
 
-    await dispatch(hooks, 'call-qa', 'qa');
+    await dispatch(hooks, 'call-qa', 'tester');
     await report(hooks, 'call-qa', 'qa', 'fail');
 
     const session = await load(store);
@@ -275,7 +275,7 @@ describe('a loop moved by its own transitions', () => {
     const hooks = createRuntime(pluginInput());
     await reachVerify(hooks, store);
 
-    await dispatch(hooks, 'call-review', 'review');
+    await dispatch(hooks, 'call-review', 'reviewer');
     await report(hooks, 'call-review', 'review', 'pass');
 
     expect(run(await load(store)).stage).toBe('verify');
@@ -305,9 +305,9 @@ describe('two verifiers work the same task at once', () => {
     const hooks = createRuntime(pluginInput());
     await reachVerify(hooks, store);
 
-    expect(await tryDispatch(hooks, 'call-review', 'review')).toBe('');
+    expect(await tryDispatch(hooks, 'call-review', 'reviewer')).toBe('');
     expect(
-      await tryDispatch(hooks, 'call-qa', 'qa'),
+      await tryDispatch(hooks, 'call-qa', 'tester'),
       'the second verifier was refused while the first was working'
     ).toBe('');
 
@@ -321,8 +321,8 @@ describe('two verifiers work the same task at once', () => {
     const hooks = createRuntime(pluginInput());
     await reachVerify(hooks, store);
 
-    await tryDispatch(hooks, 'call-review', 'review');
-    expect(await tryDispatch(hooks, 'call-review-2', 'review')).toContain(
+    await tryDispatch(hooks, 'call-review', 'reviewer');
+    expect(await tryDispatch(hooks, 'call-review-2', 'reviewer')).toContain(
       'already has an active call'
     );
   });
@@ -377,7 +377,7 @@ describe('the retry budget path clears verdicts too', () => {
     await dispatch(hooks, 'call-code', 'code');
     await report(hooks, 'call-code', 'code', 'pass');
 
-    await dispatch(hooks, 'call-review', 'review');
+    await dispatch(hooks, 'call-review', 'reviewer');
     await report(hooks, 'call-review', 'review', 'fail');
 
     const session = await load(store);
@@ -433,8 +433,8 @@ describe('a verdict from a round that is over', () => {
     await dispatch(hooks, 'call-code', 'code');
     await report(hooks, 'call-code', 'code', 'pass');
 
-    await dispatch(hooks, 'call-review', 'review');
-    await dispatch(hooks, 'call-qa', 'qa');
+    await dispatch(hooks, 'call-review', 'reviewer');
+    await dispatch(hooks, 'call-qa', 'tester');
 
     await report(hooks, 'call-review', 'review', 'fail');
     const afterReview = await load(store);
@@ -460,7 +460,7 @@ describe('a verdict from a round that is over', () => {
 
     await dispatch(hooks, 'call-code', 'code');
     await report(hooks, 'call-code', 'code', 'pass');
-    await dispatch(hooks, 'call-review', 'review');
+    await dispatch(hooks, 'call-review', 'reviewer');
     await report(hooks, 'call-review', 'review', 'pass');
 
     expect(run(await load(store)).gates).toEqual({ review: 'passed' });
@@ -476,8 +476,8 @@ describe('a verdict from a round that is over', () => {
 
     await dispatch(hooks, 'call-code', 'code');
     await report(hooks, 'call-code', 'code', 'pass');
-    await dispatch(hooks, 'call-review', 'review');
-    await dispatch(hooks, 'call-qa', 'qa');
+    await dispatch(hooks, 'call-review', 'reviewer');
+    await dispatch(hooks, 'call-qa', 'tester');
 
     await report(hooks, 'call-review', 'review', 'fail');
     const told = await report(hooks, 'call-qa', 'qa', 'pass');
@@ -497,8 +497,8 @@ describe('a verdict from a round that is over', () => {
 
     await dispatch(hooks, 'call-code', 'code');
     await report(hooks, 'call-code', 'code', 'pass');
-    await dispatch(hooks, 'call-review', 'review');
-    await dispatch(hooks, 'call-qa', 'qa');
+    await dispatch(hooks, 'call-review', 'reviewer');
+    await dispatch(hooks, 'call-qa', 'tester');
 
     await report(hooks, 'call-review', 'review', 'fail');
     await report(hooks, 'call-qa', 'qa', 'pass');
@@ -519,13 +519,13 @@ describe('a verdict from a round that is over', () => {
 
     await dispatch(hooks, 'call-code', 'code');
     await report(hooks, 'call-code', 'code', 'pass');
-    await dispatch(hooks, 'call-review', 'review');
-    await dispatch(hooks, 'call-qa', 'qa');
+    await dispatch(hooks, 'call-review', 'reviewer');
+    await dispatch(hooks, 'call-qa', 'tester');
     await report(hooks, 'call-review', 'review', 'fail');
     await report(hooks, 'call-qa', 'qa', 'pass');
 
     // Round two: the stage runs again, and review passes it.
-    await dispatch(hooks, 'call-review-2', 'review');
+    await dispatch(hooks, 'call-review-2', 'reviewer');
     await report(hooks, 'call-review-2', 'review', 'pass');
 
     const session = await load(store);
@@ -590,8 +590,8 @@ describe('an effect on a transition inside a loop', () => {
 
     await dispatch(hooks, 'call-code', 'code');
     await report(hooks, 'call-code', 'code', 'pass');
-    await dispatch(hooks, 'call-review', 'review');
-    await dispatch(hooks, 'call-qa', 'qa');
+    await dispatch(hooks, 'call-review', 'reviewer');
+    await dispatch(hooks, 'call-qa', 'tester');
     await report(hooks, 'call-review', 'review', 'pass');
     await report(hooks, 'call-qa', 'qa', 'pass');
 

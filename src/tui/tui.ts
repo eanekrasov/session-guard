@@ -159,7 +159,7 @@ export function parseRuntimeState(session: WorkflowSession): ParseResult {
   const nextStage: Stage | null =
     stageIndex >= 0 && stageIndex < STAGES.length - 1 ? STAGES[stageIndex + 1] : null;
 
-  const gates: GateInfo[] = (session.gates ?? []).map((gate) => ({
+  const gates: GateInfo[] = (session.stageGateResults ?? []).map((gate) => ({
     id: gate.id,
     status: gate.status,
   }));
@@ -415,7 +415,7 @@ export function formatDetailsLines(session: WorkflowSession): string[] {
     lines.push(`  running=${running} completed=${completed}`);
   }
 
-  const gates = session.gates ?? [];
+  const gates = session.stageGateResults ?? [];
   if (gates.length > 0) {
     lines.push(`gates: ${gates.map((gate) => `${gate.id}=${gate.status}`).join(', ')}`);
   }

@@ -179,13 +179,6 @@ const StageAssignmentRuleSchema = z.object({
 });
 export type StageAssignmentRule = z.infer<typeof StageAssignmentRuleSchema>;
 
-export const GateItemSchema = z.object({
-  id: z.string(),
-  status: z.string().default('pending'),
-  label: z.string().optional(),
-});
-export type GateItem = z.infer<typeof GateItemSchema>;
-
 export type DispatchDef = z.infer<typeof DispatchSchema>;
 
 /**
@@ -233,15 +226,6 @@ export const ProfileSchemaSchema = z
      * тратит бюджет ретраев.
      */
     transitions: z.array(TransitionDefSchema).optional(),
-
-    /**
-     * Вердикты, которых ждёт этот workflow; объявлены, чтобы `gates:` стадии
-     * было с чем сверять.
-     *
-     * Своего списка гейтов сессия не несёт — гейт появляется в ней в тот
-     * момент, когда кто-то впервые о нём высказался.
-     */
-    gates: z.array(GateItemSchema).optional(),
 
     /**
      * Агенты, которые правят код, в масштабе всего workflow.

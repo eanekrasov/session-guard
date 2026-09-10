@@ -94,18 +94,9 @@ describe('MutationOrchestrator.resolveEngine', () => {
     await orchestrator.resolveEngine('cycle-probe');
 
     process.env.SESSION_GUARD_PROFILES_DIR = broken;
-    await expect(orchestrator.resolveEngine('cycle-probe')).rejects.toThrow(/Gate "security"/);
-  });
-
-  it('refuses a profile whose stage waits on a gate it does not declare', async () => {
-    // The compiler checks a stage's `gates:` against the profile's own
-    // declaration, and `resolveEngine` is where that check reaches production.
-    // It compiles from an explicit field list, so omitting `gates` there turns
-    // the check off silently while the unit test over `compileWorkflow`, which
-    // passes its own, stays green.
-    process.env.SESSION_GUARD_PROFILES_DIR = fixtureProfilesDir('profile-roots/undeclared-gate');
-    const { orchestrator } = await makeOrchestrator();
-    await expect(orchestrator.resolveEngine('cycle-probe')).rejects.toThrow(/Gate "security"/);
+    await expect(orchestrator.resolveEngine('cycle-probe')).rejects.toThrow(
+      /declares no stages to run/
+    );
   });
 
   it("serves each of a profile's schemas as its own workflow", async () => {
@@ -278,7 +269,7 @@ describe('MutationOrchestrator.finishMutation', () => {
     const reloaded = await store.load('mo-pass');
     expect(reloaded?.activeOperations).toEqual({});
     // Гейт `invariants` удалён — вердикт больше никуда не пишется.
-    expect(reloaded?.gates).toEqual([]);
+    expect(reloaded?.stageGateResults).toEqual([]);
   });
 
   it('clears activeOperation and leaves the retry budget alone when output.metadata.failed is true', async () => {
@@ -303,7 +294,7 @@ describe('MutationOrchestrator.finishMutation', () => {
 
     const reloaded = await store.load('mo-failed-md');
     expect(reloaded?.activeOperations).toEqual({});
-    expect(reloaded?.gates).toEqual([]);
+    expect(reloaded?.stageGateResults).toEqual([]);
     // Recording the verdict is not spending an attempt: the move that retries
     // is what costs one. Bumping here spent the same counter a second time.
     expect(reloaded?.retryBudgets['task-1']).toBeUndefined();
@@ -330,7 +321,7 @@ describe('MutationOrchestrator.finishMutation', () => {
 
     const reloaded = await store.load('mo-scope-fail');
     expect(reloaded?.activeOperations).toEqual({});
-    expect(reloaded?.gates).toEqual([]);
+    expect(reloaded?.stageGateResults).toEqual([]);
     expect(reloaded?.changedFiles).toEqual([]);
   });
 

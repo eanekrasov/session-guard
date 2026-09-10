@@ -13,7 +13,7 @@ function makeSession(overrides: Partial<WorkflowSession> = {}): WorkflowSession 
     schemaVersion: 2,
     revision: 0,
     title: '',
-    gates: baseGates(),
+    stageGateResults: baseGates(),
     approvals: [],
     refs: {},
     tasks: {},

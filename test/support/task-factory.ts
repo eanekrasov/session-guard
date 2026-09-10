@@ -1,4 +1,4 @@
-import type { Gate, MutationTask } from '../../src/session/session-schema.ts';
+import type { MutationTask, StageGateResult } from '../../src/session/session-schema.ts';
 
 /**
  * Build one `MutationTask` for tests. Returns the inferred `MutationTask`
@@ -26,8 +26,8 @@ export const createTasks = (...overrides: Array<Partial<MutationTask>>): Mutatio
  * base workflow's gates say so here rather than importing a constant from
  * production code that exists only for them.
  */
-export const baseGates = (): Gate[] => [
-  { id: 'invariants', status: 'pending', label: 'Invariants check' },
-  { id: 'review', status: 'pending', label: 'Code review' },
-  { id: 'qa', status: 'pending', label: 'QA verification' },
+export const baseGates = (): StageGateResult[] => [
+  { stage: 'planning', id: 'invariants', status: 'pending' },
+  { stage: 'planning', id: 'review', status: 'pending' },
+  { stage: 'planning', id: 'qa', status: 'pending' },
 ];

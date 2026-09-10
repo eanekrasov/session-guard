@@ -14,23 +14,15 @@ import { createTask } from '../support/task-factory.ts';
  * What the compiler refuses at load.
  *
  * Every one of these was previously a silence: a guard that read false
- * forever, a verdict recorded against a gate the profile never declared, a
- * retry that spent a counter no one was watching. A defect in the file should
- * stop the workflow when the file is read.
+ * forever, or a retry that spent a counter no one was watching. A defect in
+ * the file should stop the workflow when the file is read.
  */
-
-/** What the fixture profile declares, so a stage's `gates:` has a list to be wrong about. */
-const DECLARED_GATES = [
-  { id: 'invariants', status: 'pending' },
-  { id: 'review', status: 'pending' },
-  { id: 'qa', status: 'pending' },
-];
 
 function schema(
   stages: ResolvedSchema['stages'],
   transitions: ResolvedSchema['transitions'] = []
 ): ResolvedSchema {
-  return { id: 'test', source: 'test.yaml', stages, transitions, gates: DECLARED_GATES };
+  return { id: 'test', source: 'test.yaml', stages, transitions };
 }
 
 function messages(input: ResolvedSchema): string[] {
@@ -71,48 +63,6 @@ describe('a workflow that cannot run is refused when it is read', () => {
     expect(messages(input)).toContain(
       'Stage "planning" declares transitions but no loop to move a task through'
     );
-  });
-
-  it('refuses a gate the profile does not declare', () => {
-    const input = schema({
-      execution: {
-        loop: 'implementation',
-        stages: { verify: { gates: ['review', 'security'] } },
-      },
-    });
-    expect(messages(input)).toContain('Gate "security" is not a gate this profile declares');
-  });
-
-  it('refuses a gate the profile does not declare on an outer stage too', () => {
-    expect(messages(schema({ validation: { gates: ['smoke'] } }))).toContain(
-      'Gate "smoke" is not a gate this profile declares'
-    );
-  });
-
-  it("reports a nested stage's bad gate once, not once per level that can see it", () => {
-    // The parent's walk checked each nested stage's gates and then recursed
-    // into that stage, which checked them again under the same path. Every
-    // such error was reported twice; `toContain` cannot see a duplicate.
-    const input = schema({
-      execution: {
-        loop: 'implementation',
-        stages: { verify: { gates: ['security'] } },
-      },
-    });
-    const gateErrors = messages(input).filter((message) => message.includes('Gate "security"'));
-    expect(gateErrors).toHaveLength(1);
-  });
-
-  it('accepts any gate name when the profile declares none', () => {
-    // No declaration is not an empty declaration: there is nothing to be wrong
-    // about, so the compiler must not invent a list of its own to reject against.
-    const undeclared: ResolvedSchema = {
-      id: 'test',
-      source: 'test.yaml',
-      stages: { validation: { gates: ['smoke'] } },
-      transitions: [],
-    };
-    expect(messages(undeclared)).toEqual([]);
   });
 
   it('refuses a transition to a stage the loop does not have', () => {

@@ -11,9 +11,6 @@
 ## Минимальный линейный workflow
 
 ```yaml
-gates:
-  - id: review
-
 stages:
   planning: {}
   review:
@@ -48,17 +45,17 @@ transitions:
 
 ## Review и QA
 
-```yaml
-gates:
-  - id: review
-  - id: qa
+Имена агентов в `allowedAgents` и имена гейтов в `gates` независимы: совпадение
+не требуется. Здесь агенты названы `reviewer` и `tester`, а результаты —
+`review` и `qa`, чтобы это различие было явным.
 
+```yaml
 stages:
   review:
-    allowedAgents: [review]
+    allowedAgents: [reviewer]
     gates: [review]
   qa:
-    allowedAgents: [qa]
+    allowedAgents: [tester]
     gates: [qa]
   done: {}
 
