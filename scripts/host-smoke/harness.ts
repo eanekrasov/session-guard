@@ -44,6 +44,13 @@ export interface HostOptions {
   env?: Record<string, string>;
 }
 
+const activeHostStops = new Set<() => Promise<void>>();
+
+/** Stop hosts that are running or still waiting for their listen URL. */
+export async function stopAllHosts(): Promise<void> {
+  await Promise.allSettled([...activeHostStops].map((stop) => stop()));
+}
+
 function run(cmd: string, args: string[], cwd: string): string {
   const result = spawnSync(cmd, args, { cwd, encoding: 'utf-8' });
   if (result.status !== 0) {
@@ -343,38 +350,55 @@ export async function startHost(options: HostOptions): Promise<Host> {
   child.stdout?.on('data', (chunk) => (buffer += chunk));
   child.stderr?.on('data', (chunk) => (buffer += chunk));
 
-  const url = await new Promise<string>((resolveUrl, rejectUrl) => {
-    const deadline = setTimeout(
-      () => rejectUrl(new Error(`opencode serve did not report a URL:\n${buffer}`)),
-      60_000
-    );
-    const poll = setInterval(() => {
-      const match = /(http:\/\/127\.0\.0\.1:\d+)/.exec(buffer);
-      if (!match) {
-        if (child.exitCode !== null) {
-          clearInterval(poll);
-          clearTimeout(deadline);
-          rejectUrl(new Error(`opencode serve exited (${child.exitCode}):\n${buffer}`));
-        }
-        return;
+  let stopPromise: Promise<void> | undefined;
+  const stop = async (): Promise<void> => {
+    if (stopPromise) return stopPromise;
+    stopPromise = (async () => {
+      if (child.exitCode === null) {
+        child.kill('SIGTERM');
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        if (child.exitCode === null) child.kill('SIGKILL');
       }
-      clearInterval(poll);
-      clearTimeout(deadline);
-      resolveUrl(match[1]!);
-    }, 100);
-  });
+      await rm(root, { recursive: true, force: true });
+      activeHostStops.delete(stop);
+    })();
+    return stopPromise;
+  };
+  activeHostStops.add(stop);
+
+  let url: string;
+  try {
+    url = await new Promise<string>((resolveUrl, rejectUrl) => {
+      const deadline = setTimeout(
+        () => rejectUrl(new Error(`opencode serve did not report a URL:\n${buffer}`)),
+        60_000
+      );
+      const poll = setInterval(() => {
+        const match = /(http:\/\/127\.0\.0\.1:\d+)/.exec(buffer);
+        if (!match) {
+          if (child.exitCode !== null) {
+            clearInterval(poll);
+            clearTimeout(deadline);
+            rejectUrl(new Error(`opencode serve exited (${child.exitCode}):\n${buffer}`));
+          }
+          return;
+        }
+        clearInterval(poll);
+        clearTimeout(deadline);
+        resolveUrl(match[1]!);
+      }, 100);
+    });
+  } catch (error) {
+    await stop();
+    throw error;
+  }
 
   return {
     url,
     workDir,
     homeDir,
     logs: () => buffer,
-    stop: async () => {
-      child.kill('SIGTERM');
-      await new Promise((r) => setTimeout(r, 300));
-      if (child.exitCode === null) child.kill('SIGKILL');
-      await rm(root, { recursive: true, force: true });
-    },
+    stop,
   };
 }
 

@@ -36,7 +36,7 @@ describe('createSession', () => {
   it('carries no gates — they are created by the first verdict about them', () => {
     const session = createSession('session-123', 'android', 'session-guard');
 
-    expect(session.gates).toEqual([]);
+    expect(session.stageGateResults).toEqual([]);
   });
 
   it('does not share gate state between sessions', () => {
@@ -44,7 +44,7 @@ describe('createSession', () => {
     setGateStatus(session, 'invariants', 'passed');
 
     const other = createSession('session-456', 'ios', 'session-guard');
-    expect(other.gates).toEqual([]);
+    expect(other.stageGateResults).toEqual([]);
   });
 
   it('initializes retryBudgets without a legacy global default', () => {
@@ -143,7 +143,7 @@ describe('setGateStatus', () => {
     setGateStatus(session, 'review', 'failed');
     setGateStatus(session, 'review', 'passed');
 
-    expect(session.gates.filter((g) => g.id === 'review')).toHaveLength(1);
+    expect(session.stageGateResults.filter((g) => g.id === 'review')).toHaveLength(1);
     expect(getGate(session, 'review')!.status).toBe('passed');
   });
 
@@ -152,7 +152,7 @@ describe('setGateStatus', () => {
 
     setGateStatus(session, '', 'passed');
 
-    expect(session.gates).toEqual([]);
+    expect(session.stageGateResults).toEqual([]);
   });
 });
 

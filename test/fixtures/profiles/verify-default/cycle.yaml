@@ -1,7 +1,3 @@
-gates:
-  - id: review
-  - id: qa
-  - id: invariants
 stages:
   execution:
     loop: implementation
@@ -13,7 +9,7 @@ stages:
       code:
         allowedAgents: ['code']
       verify:
-        allowedAgents: ['review', 'qa']
+        allowedAgents: ['reviewer', 'tester']
         gates: [review, qa]
 stageAssignments:
   - id: execution

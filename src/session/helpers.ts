@@ -1,6 +1,5 @@
 import type {
   WorkflowSession,
-  Gate,
   GateStatus,
   LoopRun,
   MutationTask,
@@ -10,8 +9,14 @@ import type {
 
 // ─── Gate helpers ─────────────────────────────────────────────────────────────
 
-export function getGate(session: WorkflowSession, gateId: string): Gate | undefined {
-  return session.gates.find((g) => g.id === gateId);
+export function getGate(
+  session: WorkflowSession,
+  gateId: string,
+  stage = session.currentStage
+): WorkflowSession['stageGateResults'][number] | undefined {
+  return [...session.stageGateResults]
+    .reverse()
+    .find((gate) => gate.id === gateId && gate.stage === stage);
 }
 
 export interface SetGateStatusOptions {
@@ -20,12 +25,11 @@ export interface SetGateStatusOptions {
 }
 
 /**
- * Record a verdict about a gate, creating the gate if this is the first one.
+ * Record a verdict about a gate for the current outer stage.
  *
- * A session carries no gate list of its own — the profile declares what the
- * workflow waits for, and a gate exists here only once somebody has spoken
- * about it. Returning early on an unknown id would drop that first verdict on
- * the floor, which is why this upserts rather than looks up.
+ * The profile declares what the workflow waits for; the session stores only
+ * results that were actually produced by a visited outer stage. Loop-local
+ * gates are stored on their loop run and never use this helper.
  */
 export function setGateStatus(
   session: WorkflowSession,
@@ -34,10 +38,11 @@ export function setGateStatus(
   options?: SetGateStatusOptions
 ): void {
   if (!gateId) return;
-  let gate = session.gates.find((g) => g.id === gateId);
+  const stage = session.currentStage;
+  let gate = [...session.stageGateResults].reverse().find((result) => result.id === gateId);
   if (!gate) {
-    gate = { id: gateId, status };
-    session.gates.push(gate);
+    gate = { stage, id: gateId, status };
+    session.stageGateResults.push(gate);
   }
   gate.status = status;
   if (status === 'passed' || status === 'failed') {

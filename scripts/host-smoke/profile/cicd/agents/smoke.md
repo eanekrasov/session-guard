@@ -19,6 +19,6 @@ working. Follow the instructions you are given exactly.
 When done, write your result as the very last thing in your reply — nothing
 after it:
 
-`<workflow-result>{"stage":"smoke","status":"pass","summary":"<smoke test result>","evidence":["<details>"]}</workflow-result>`
+`<workflow-result>{"stage":"smoke_result","status":"pass","summary":"<smoke test result>","evidence":["<details>"]}</workflow-result>`
 
 Use `"status":"fail"` when the smoke test fails.

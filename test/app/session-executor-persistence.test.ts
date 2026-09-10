@@ -135,7 +135,7 @@ function makeSession(sessionId: string, overrides?: Partial<WorkflowSession>): W
     schemaId: 'cycle',
     revision: 0,
     title: '',
-    gates: [],
+    stageGateResults: [],
     approvals: [],
     refs: {},
     tasks: {},

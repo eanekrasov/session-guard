@@ -11,9 +11,9 @@ function createSession(): WorkflowSession {
     schemaVersion: 2,
     revision: 0,
     title: '',
-    gates: [
-      { id: 'invariants', status: 'running' },
-      { id: 'review', status: 'pending' },
+    stageGateResults: [
+      { stage: 'planning', id: 'invariants', status: 'running' },
+      { stage: 'planning', id: 'review', status: 'pending' },
     ],
     approvals: [],
     refs: {},
@@ -42,7 +42,7 @@ function createSession(): WorkflowSession {
 describe('finishMutation', () => {
   test('finishMutation с passed=true и отсутствующим gate invariants — не падает, activeOperation очищен', () => {
     const session = createSession();
-    session.gates = session.gates.filter((g) => g.id !== 'invariants');
+    session.stageGateResults = session.stageGateResults.filter((g) => g.id !== 'invariants');
 
     beginMutation(session, 'm1', 'unknown', () => 'code');
     expect(() => finishMutation(session, true, 'm1')).not.toThrow();

@@ -165,7 +165,6 @@ export class SchemaLoader {
       stages: mergeStages(base.stages, extension.stages),
       transitions: mergeTransitions(base.transitions, extension.transitions),
       editingAgents: extension.editingAgents ?? base.editingAgents,
-      gates: extension.gates ?? base.gates,
       taskControlAgents: extension.taskControlAgents ?? base.taskControlAgents,
       stageAssignments: extension.stageAssignments ?? base.stageAssignments,
     };

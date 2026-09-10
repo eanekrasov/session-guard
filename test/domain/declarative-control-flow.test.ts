@@ -13,7 +13,7 @@ function createSession(overrides: Partial<WorkflowSession> = {}): WorkflowSessio
     schemaVersion: 1,
     revision: 0,
     title: 'Control flow test',
-    gates: baseGates(),
+    stageGateResults: baseGates(),
     approvals: [],
     refs: {},
     tasks: { implementation: [] },
@@ -130,7 +130,7 @@ describe('declarative control flow', () => {
       });
 
       const session = createSession({ currentStage: 'CHOOSE' });
-      session.gates = session.gates.map((g) =>
+      session.stageGateResults = session.stageGateResults.map((g) =>
         g.id === 'review' ? { ...g, status: 'passed' } : g
       );
 
@@ -193,7 +193,7 @@ describe('declarative control flow', () => {
       expect(session.currentStage).toBe('REVIEW');
 
       // Fail review, budget not exhausted → back to CODE
-      session.gates = session.gates.map((g) =>
+      session.stageGateResults = session.stageGateResults.map((g) =>
         g.id === 'review' ? { ...g, status: 'failed' } : g
       );
       engine.tryApplyTransitions(session);
@@ -224,7 +224,9 @@ describe('declarative control flow', () => {
       expect(session.currentStage).toBe('LOOP');
 
       // LOOP → START (re-entry)
-      session.gates = session.gates.map((g) => (g.id === 'qa' ? { ...g, status: 'failed' } : g));
+      session.stageGateResults = session.stageGateResults.map((g) =>
+        g.id === 'qa' ? { ...g, status: 'failed' } : g
+      );
       engine.tryApplyTransitions(session);
       expect(session.currentStage).toBe('START');
 

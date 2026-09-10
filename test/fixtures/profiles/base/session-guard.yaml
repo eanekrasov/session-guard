@@ -1,7 +1,3 @@
-gates:
-  - id: invariants
-  - id: review
-  - id: qa
 stages:
   planning:
     dispatch:

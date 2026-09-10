@@ -16,17 +16,6 @@
 #
 # Format: ProfileSchema (src/schema/profile-schema.ts).
 
-# The gates this workflow waits on. A session carries no gate list of its own —
-# a gate exists once a verdict lands on it, and one nobody has spoken about is
-# absent, which every guard reads as not-passed. This declaration is what the
-# compiler checks a stage's `gates:` against, so a typo is a compile error
-# rather than a stage that waits forever.
-gates:
-  - id: review
-    label: Code review
-  - id: qa
-    label: QA verification
-
 stages:
   # The architect writes the plan, reworking it with the operator as often as
   # it takes: each edit clears the verdicts about the draft it replaced.

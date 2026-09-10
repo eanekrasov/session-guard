@@ -61,7 +61,7 @@ stages:
 
   smoke:
     allowedAgents: [smoke, orchestrator]
-    gates: [smoke]
+    gates: [smoke_result]
 
   done: {}
 
@@ -110,7 +110,7 @@ transitions:
 
   - from: smoke
     to: done
-    guard: "session.gates.smoke == 'passed'"
+    guard: "session.gates.smoke_result == 'passed'"
 
 # Правил назначения стадии здесь нет намеренно.
 #

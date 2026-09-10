@@ -11,7 +11,7 @@ function makeSession(overrides: Partial<WorkflowSession> = {}): WorkflowSession 
     schemaVersion: 2,
     revision: 0,
     title: 'Test',
-    gates: [],
+    stageGateResults: [],
     approvals: [],
     refs: {},
     tasks: {},
@@ -39,9 +39,9 @@ describe('toSessionFacts', () => {
     const session = makeSession({
       deliveryReceipt: 'abc123',
       approvals: [{ type: 'plan', callId: 'call-1', status: 'granted' }],
-      gates: [
-        { id: 'invariants', status: 'passed' },
-        { id: 'review', status: 'pending' },
+      stageGateResults: [
+        { stage: 'planning', id: 'invariants', status: 'passed' },
+        { stage: 'planning', id: 'review', status: 'pending' },
       ],
       activeOperations: {
         'call-1': {
@@ -135,9 +135,9 @@ describe('toSessionFacts', () => {
 
   it('flattens gates array into Record<string, GateStatus>', () => {
     const session = makeSession({
-      gates: [
-        { id: 'a', status: 'passed' },
-        { id: 'b', status: 'running' },
+      stageGateResults: [
+        { stage: 'planning', id: 'a', status: 'passed' },
+        { stage: 'planning', id: 'b', status: 'running' },
       ],
     });
     const facts = toSessionFacts(session);
@@ -146,7 +146,7 @@ describe('toSessionFacts', () => {
   });
 
   it('returns empty gates record for empty gates array', () => {
-    const session = makeSession({ gates: [] });
+    const session = makeSession({ stageGateResults: [] });
     const facts = toSessionFacts(session);
 
     expect(facts.gates).toEqual({});

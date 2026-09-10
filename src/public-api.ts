@@ -1,5 +1,38 @@
 import type { ProfileMetadata, ResolvedProfile } from './schema/types.ts';
 import { ProfileResolver } from './app/profile-resolver.ts';
+import type { StageGateResult, WorkflowSession } from './session/session-schema.ts';
+
+/**
+ * Gate results visible at the current outer workflow step.
+ *
+ * The session stores results only after an outer stage has actually produced
+ * them. The current stage's declared gates are added as `pending` when no
+ * result exists yet. Nested loop gates deliberately stay on `loopRuns` and do
+ * not enter this projection.
+ */
+export async function getCurrentStageGates(
+  session: WorkflowSession,
+  profilesDir: string
+): Promise<StageGateResult[]> {
+  const resolved = await resolveConfig(session.profileId, profilesDir);
+  const schema =
+    resolved.schemas.find((candidate) => candidate.id === session.schemaId) ??
+    (resolved.schemas.length === 1 ? resolved.schemas[0] : undefined);
+  const currentStage = schema?.stages?.[session.currentStage];
+  const outerStageIds = new Set(Object.keys(schema?.stages ?? {}));
+  const results = session.stageGateResults
+    .filter((result) => outerStageIds.has(result.stage))
+    .map((result) => ({ ...result }));
+
+  for (const gateId of currentStage?.gates ?? []) {
+    if (results.some((result) => result.stage === session.currentStage && result.id === gateId)) {
+      continue;
+    }
+    results.push({ stage: session.currentStage, id: gateId, status: 'pending' });
+  }
+
+  return results;
+}
 
 /**
  * Resolve a profile's full configuration.

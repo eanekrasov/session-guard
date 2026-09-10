@@ -10,14 +10,12 @@ export type {
   ConsentOnTransition,
   RetryBudget,
   LoopSource,
-  GateItem,
 } from './profile-schema.ts';
 
 import type {
   StageDef,
   StageAssignmentRule,
   TransitionDef,
-  GateItem,
   TransitionEffect,
 } from './profile-schema.ts';
 
@@ -78,14 +76,6 @@ export interface ResolvedSchema {
   stages?: Record<string, StageDef>;
   transitions?: TransitionDef[];
   editingAgents?: string[];
-  /**
-   * The gates this workflow declares.
-   *
-   * The compiler checks a stage's `gates:` against this, so a typo is caught
-   * by comparing it with the profile that owns the workflow rather than with a
-   * whitelist of names hardcoded in the compiler.
-   */
-  gates?: GateItem[];
   taskControlAgents?: string[];
   stageAssignments?: StageAssignmentRule[];
   [key: string]: unknown;

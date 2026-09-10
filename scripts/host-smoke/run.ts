@@ -31,10 +31,73 @@ import {
   defaultModel,
   readWorkflowSession,
   startHost,
+  stopAllHosts,
   type Host,
 } from './harness.ts';
 
 const ATTEMPTS = Number(process.env.HOST_SMOKE_ATTEMPTS ?? 3);
+const OUTPUT_FORMAT = process.env.HOST_SMOKE_OUTPUT ?? 'human';
+
+let shutdownPromise: Promise<void> | undefined;
+
+function installSignalHandlers(): void {
+  for (const [signal, exitCode] of [
+    ['SIGINT', 130],
+    ['SIGTERM', 143],
+  ] as const) {
+    process.once(signal, () => {
+      if (shutdownPromise) return;
+      shutdownPromise = (async () => {
+        await stopAllHosts();
+        process.exit(exitCode);
+      })();
+    });
+  }
+}
+
+const ANSI = {
+  reset: '\u001b[0m',
+  blue: '\u001b[34m',
+  cyan: '\u001b[36m',
+  gray: '\u001b[90m',
+  green: '\u001b[32m',
+  magenta: '\u001b[35m',
+  red: '\u001b[31m',
+  yellow: '\u001b[33m',
+} as const;
+
+type LogColor = keyof Omit<typeof ANSI, 'reset'>;
+
+function colorize(text: string, color: LogColor): string {
+  const enabled =
+    process.env.NO_COLOR === undefined &&
+    (Boolean(process.env.FORCE_COLOR) || process.stderr.isTTY);
+  return enabled ? `${ANSI[color]}${text}${ANSI.reset}` : text;
+}
+
+/** Write one complete event so concurrent question polling cannot split it. */
+function logEvent(
+  text: string,
+  color?: LogColor,
+  type = 'message',
+  fields: Record<string, unknown> = {}
+): void {
+  if (OUTPUT_FORMAT === 'jsonl') {
+    process.stderr.write(
+      `${JSON.stringify({ timestamp: new Date().toISOString(), type, message: text, ...fields })}\n`
+    );
+    return;
+  }
+  process.stderr.write(`${color ? colorize(text, color) : text}\n`);
+}
+
+function logBlock(label: string, text: string, color: LogColor, type: string): void {
+  if (OUTPUT_FORMAT === 'jsonl') {
+    logEvent(text, undefined, type, { label: label.trim() });
+    return;
+  }
+  logEvent(`${colorize(label, color)}\n${text}`);
+}
 
 interface Part {
   type: string;
@@ -112,7 +175,7 @@ function answerQuestions(
           if (seen.has(request.id)) continue;
           seen.add(request.id);
           if (process.env.HOST_SMOKE_DEBUG) {
-            console.error(`  question: ${JSON.stringify(request).slice(0, 400)}`);
+            logEvent(`  question: ${JSON.stringify(request).slice(0, 400)}`, 'yellow', 'question');
           }
           const consent = isConsentQuestion(request);
           const answers = (request.questions ?? [{}]).map((question) => {
@@ -149,24 +212,37 @@ function answerQuestions(
 
 const SESSION_LOG = join(import.meta.dirname!, '../../.memory/session.log');
 
-/** Log the full `say` exchange: instruction sent, every part of the reply. */
+function modelResponseText(parts: Part[], error: string): string {
+  const response = parts
+    .map((part) =>
+      [
+        part.text ?? '',
+        part.state?.output ?? '',
+        part.state?.error ?? '',
+        part.tool ? `«tool:${part.tool}»` : '',
+      ]
+        .filter(Boolean)
+        .join(' ')
+    )
+    .filter(Boolean)
+    .join('\n');
+  return [error, response].filter(Boolean).join('\n') || '(empty response)';
+}
+
+/** Log the full `say` exchange: user instruction and model response. */
 async function logExchange(
   instruction: string,
   agent: string | undefined,
   error: string,
   parts: Part[]
 ): Promise<void> {
+  const response = modelResponseText(parts, error);
   const lines = [
     '',
     `─── ${new Date().toISOString()} ───`,
     `→ agent: ${agent ?? '(default)'}`,
-    `→ instruction: ${instruction}`,
-    ...(error ? [`⚠ error: ${error}`] : []),
-    ...parts.map((p, i) => {
-      const tool = p.tool ? ` [tool: ${p.tool}]` : '';
-      const state = p.state ? ` [state: ${JSON.stringify(p.state).slice(0, 200)}]` : '';
-      return `  [${i}]${tool}${state} ${(p.text ?? '').slice(0, 400)}`;
-    }),
+    `USER:\n${instruction}`,
+    `MODEL:\n${response}`,
   ];
   await appendFile(SESSION_LOG, lines.join('\n'), 'utf-8').catch(() => {});
 }
@@ -214,6 +290,11 @@ async function say(
     ),
   ].join('\n');
 
+  if (process.env.HOST_SMOKE_DEBUG) {
+    logBlock('  USER:', text, 'cyan', 'user');
+    logBlock('  MODEL:', modelResponseText(parts, error), 'magenta', 'model');
+  }
+
   await logExchange(text, agent, error, parts);
 
   return {
@@ -247,11 +328,25 @@ async function step(
     // before it runs is what makes the last line printed the answer.
     if (process.env.HOST_SMOKE_DEBUG) {
       const started = new Date().toISOString().slice(11, 19);
-      console.error(`  ${started} step[${attempt}]: ${options.instruction.slice(0, 90)}`);
+      logEvent(
+        `  ${started} step[${attempt}]: ${options.instruction.slice(0, 90)}`,
+        'blue',
+        'step.start',
+        { attempt }
+      );
     }
     session = await say(host, sessionId, model, options.instruction, options.agent);
     lastState = session.state;
     const verdict = options.expect(session);
+    if (process.env.HOST_SMOKE_DEBUG) {
+      const result = verdict === true ? 'PASS' : `WAIT: ${String(verdict).slice(0, 180)}`;
+      logEvent(
+        `  state after step[${attempt}]: ${result}; ${debugSessionState(session)}`,
+        verdict === true ? 'green' : 'yellow',
+        'step.state',
+        { attempt, status: verdict === true ? 'pass' : 'wait' }
+      );
+    }
     if (verdict === true) return { ok: true, attempts: attempt, detail: '', session };
     detail = typeof verdict === 'string' ? verdict : 'expectation not met';
   }
@@ -266,6 +361,7 @@ interface ScenarioResult {
   ok: boolean;
   evidence: string;
   attempts: number;
+  durationMs: number;
 }
 
 type Scenario = {
@@ -314,6 +410,38 @@ function firstRun(session: Session): RunView | undefined {
 
 function stage(session: Session): string {
   return String(session.state?.currentStage ?? '(none)');
+}
+
+function debugSessionState(session: Session): string {
+  const state = session.state as {
+    currentStage?: string;
+    stageGateResults?: Array<{ id?: string; status?: string }>;
+    loopRuns?: Record<
+      string,
+      {
+        taskId?: string;
+        stage?: string;
+        status?: string;
+        gates?: Record<string, string>;
+      }
+    >;
+  } | null;
+  if (!state) return 'state=(none)';
+
+  const sessionGates = (state.stageGateResults ?? [])
+    .map((gate) => `${gate.id ?? '?'}=${gate.status ?? '?'}`)
+    .join(',');
+  const runs = Object.values(state.loopRuns ?? {})
+    .map(
+      (run) =>
+        `${run.taskId ?? '?'}:${run.stage ?? '?'}:${run.status ?? '?'}(${Object.entries(
+          run.gates ?? {}
+        )
+          .map(([id, status]) => `${id}=${status}`)
+          .join(',')})`
+    )
+    .join(';');
+  return `stage=${state.currentStage ?? '(none)'} sessionGates=[${sessionGates}] runs=[${runs}]`;
 }
 
 async function newSession(host: Host, title: string): Promise<string> {
@@ -648,7 +776,8 @@ const scenarios: Scenario[] = [
               return 'setup reported a pass but src/ci-demo.ts was never created';
             }
             const gates =
-              (s.state as { gates?: Array<{ id: string; status: string }> } | null)?.gates ?? [];
+              (s.state as { stageGateResults?: Array<{ id: string; status: string }> } | null)
+                ?.stageGateResults ?? [];
             const checkout = gates.find((g) => g.id === 'checkout_done');
             return (
               checkout?.status === 'passed' ||
@@ -724,7 +853,8 @@ const scenarios: Scenario[] = [
             '<workflow-result>{"stage":"deploy_done","status":"pass","summary":"deploy successful","evidence":["version=1.0.0"]}</workflow-result>',
           expect: (s: Session) => {
             const gates =
-              (s.state as { gates?: Array<{ id: string; status: string }> } | null)?.gates ?? [];
+              (s.state as { stageGateResults?: Array<{ id: string; status: string }> } | null)
+                ?.stageGateResults ?? [];
             const deployed = gates.find((gate) => gate.id === 'deploy_done')?.status;
             return deployed === 'passed' || `deploy_done gate is ${deployed ?? '(unset)'}`;
           },
@@ -750,7 +880,7 @@ const scenarios: Scenario[] = [
             'Use the task tool with subagent_type "smoke" and description ' +
             '"[workflow-task:smoke] smoke test deployment", telling it to verify the ' +
             'deployment and then finish with exactly ' +
-            '<workflow-result>{"stage":"smoke","status":"pass","summary":"smoke tests passed","evidence":["deployment-ok"]}</workflow-result>',
+            '<workflow-result>{"stage":"smoke_result","status":"pass","summary":"smoke tests passed","evidence":["deployment-ok"]}</workflow-result>',
           expect: (s: Session) => stage(s) === 'done' || `stage is ${stage(s)}, expected done`,
         },
       ]) {
@@ -949,7 +1079,9 @@ async function prepareCommittableSession(
         '"evidence":["src/smoke-1.ts"]}</workflow-result>',
       agent: ORCHESTRATOR,
       expect: (s: Session) => {
-        const gates = (s.state as { gates?: Array<{ id: string; status: string }> } | null)?.gates;
+        const gates = (
+          s.state as { stageGateResults?: Array<{ id: string; status: string }> } | null
+        )?.stageGateResults;
         const review = gates?.find((gate) => gate.id === 'review')?.status;
         return review === 'passed' || `the session review gate is ${review ?? '(unset)'}`;
       },
@@ -991,13 +1123,19 @@ function headOf(host: Host): string {
 
 // ─── Runner ───────────────────────────────────────────────────────────────────
 
+function formatDuration(durationMs: number): string {
+  const seconds = durationMs / 1000;
+  return seconds < 60 ? `${seconds.toFixed(1)}s` : `${(seconds / 60).toFixed(1)}m`;
+}
+
 async function main(): Promise<void> {
+  installSignalHandlers();
   const wanted = process.argv.slice(2);
   const selected = wanted.length
     ? scenarios.filter((scenario) => wanted.includes(scenario.id))
     : scenarios;
   if (selected.length === 0) {
-    console.error(`No such scenario. Known: ${scenarios.map((s) => s.id).join(', ')}`);
+    logEvent(`No such scenario. Known: ${scenarios.map((s) => s.id).join(', ')}`, 'red', 'error');
     process.exit(2);
   }
 
@@ -1005,12 +1143,13 @@ async function main(): Promise<void> {
   const plugin = process.env.HOST_SMOKE_PLUGIN ?? buildPlugin();
   process.env.HOST_SMOKE_PLUGIN = plugin;
 
-  console.error(`model:  ${model}`);
-  console.error(`plugin: ${plugin}\n`);
+  logEvent(`model:  ${model}`, 'gray', 'run.start', { model, plugin });
+  if (OUTPUT_FORMAT !== 'jsonl') logEvent(`plugin: ${plugin}`, 'gray');
 
   const results: ScenarioResult[] = [];
   for (const scenario of selected) {
-    process.stderr.write(`▶ ${scenario.id} … `);
+    const startedAt = Date.now();
+    logEvent(`▶ ${scenario.id} …`, 'cyan', 'scenario.start', { scenario: scenario.id });
     const host = await startHost({
       model,
       profile: scenario.profile ?? 'smoke',
@@ -1023,16 +1162,34 @@ async function main(): Promise<void> {
     try {
       const outcome = await scenario.run(host, model);
       if (!outcome.ok && process.env.HOST_SMOKE_DEBUG) {
-        console.error(`  state: ${JSON.stringify(lastState).slice(0, 1200)}`);
+        logEvent(`  state: ${JSON.stringify(lastState).slice(0, 1200)}`, 'red', 'scenario.state');
         const relevant = host
           .logs()
           .split('\n')
           .filter((line) => /session-guard|consent|DIAG|workflow/i.test(line));
-        console.error(`  host log:\n    ${relevant.slice(-25).join('\n    ')}`);
+        logEvent(
+          `  host log:\n    ${relevant.slice(-25).join('\n    ')}`,
+          'red',
+          'scenario.host-log'
+        );
       }
-      results.push({ id: scenario.id, title: scenario.title, ...outcome });
-      console.error(outcome.ok ? `PASS (${outcome.attempts} attempt(s))` : 'FAIL');
-      if (!outcome.ok) console.error(`  ${outcome.evidence.split('\n').join('\n  ')}`);
+      const durationMs = Date.now() - startedAt;
+      results.push({ id: scenario.id, title: scenario.title, ...outcome, durationMs });
+      logEvent(
+        outcome.ok
+          ? `PASS (${outcome.attempts} attempt(s), ${formatDuration(durationMs)})`
+          : `FAIL (${formatDuration(durationMs)})`,
+        outcome.ok ? 'green' : 'red',
+        'scenario.result',
+        {
+          scenario: scenario.id,
+          status: outcome.ok ? 'pass' : 'fail',
+          attempts: outcome.attempts,
+          durationMs,
+        }
+      );
+      if (!outcome.ok)
+        logEvent(`  ${outcome.evidence.split('\n').join('\n  ')}`, 'red', 'scenario.evidence');
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       results.push({
@@ -1041,16 +1198,25 @@ async function main(): Promise<void> {
         ok: false,
         attempts: 0,
         evidence: `harness error: ${message}\n${host.logs().slice(-1500)}`,
+        durationMs: Date.now() - startedAt,
       });
-      console.error('ERROR');
-      console.error(`  ${message}`);
-      if (process.env.HOST_SMOKE_DEBUG) console.error(host.logs().slice(-4000));
+      logEvent('ERROR', 'red', 'scenario.result', {
+        scenario: scenario.id,
+        status: 'error',
+        durationMs: Date.now() - startedAt,
+      });
+      logEvent(`  ${message}`, 'red', 'error');
+      if (process.env.HOST_SMOKE_DEBUG)
+        logEvent(host.logs().slice(-4000), 'red', 'scenario.host-log');
     } finally {
       await host.stop();
     }
   }
 
   const passed = results.filter((result) => result.ok).length;
+  const averageDurationMs = results.length
+    ? results.reduce((total, result) => total + result.durationMs, 0) / results.length
+    : 0;
   const report = [
     '# Host smoke — session-guard against a real opencode',
     '',
@@ -1058,21 +1224,27 @@ async function main(): Promise<void> {
     '|---|---|',
     `| Plugin | \`${plugin.split('/').at(-1)}\` |`,
     `| Result | ${passed}/${results.length} scenarios passed |`,
+    `| Average duration | ${formatDuration(averageDurationMs)} per scenario |`,
     '',
-    '| # | Scenario | Result | Attempts | Evidence |',
-    '|---|---|---|---|---|',
+    '| # | Scenario | Result | Attempts | Duration | Evidence |',
+    '|---|---|---|---|---|---|',
     ...results.map(
       (result, index) =>
         `| ${index + 1} | ${result.title} | ${result.ok ? '**PASS**' : '**FAIL**'} | ${
           result.attempts
-        } | ${result.evidence.replace(/\n/g, ' ').slice(0, 300)} |`
+        } | ${formatDuration(result.durationMs)} | ${result.evidence.replace(/\n/g, ' ').slice(0, 300)} |`
     ),
     '',
   ].join('\n');
 
   const reportPath = join(import.meta.dir!, '../../docs/plans/host-smoke.md');
   await writeFile(reportPath, report, 'utf-8');
-  console.error(`\n${passed}/${results.length} passed — report written to ${reportPath}`);
+  logEvent(
+    `\n${passed}/${results.length} passed — report written to ${reportPath}`,
+    passed === results.length ? 'green' : 'red',
+    'run.summary',
+    { passed, total: results.length, averageDurationMs, reportPath }
+  );
   process.exit(passed === results.length ? 0 : 1);
 }
 

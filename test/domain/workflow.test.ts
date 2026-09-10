@@ -20,7 +20,7 @@ function makeSession(overrides: Partial<WorkflowSession> = {}): WorkflowSession 
     schemaVersion: 2,
     revision: 0,
     title: '',
-    gates: baseGates(),
+    stageGateResults: baseGates(),
     approvals: [],
     refs: {},
     tasks: {},
@@ -94,7 +94,7 @@ describe('beginMutation', () => {
     const session = makeSession({
       tasks: taskList(),
       verifications: [{ stage: 'bug', status: 'confirmed' }],
-      gates: baseGates().map((g) =>
+      stageGateResults: baseGates().map((g) =>
         g.id === 'invariants' ? { ...g, status: 'passed' as const } : { ...g }
       ),
     });
@@ -139,7 +139,7 @@ describe('beginMutation', () => {
 describe('generic step lifecycle', () => {
   it('completes without requiring all session tasks', () => {
     const session = makeSession({
-      gates: [{ id: 'invariants', status: 'passed' }],
+      stageGateResults: [{ stage: 'planning', id: 'invariants', status: 'passed' }],
       tasks: taskList('completed'),
     });
     // First step can complete even though later work is pending

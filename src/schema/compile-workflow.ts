@@ -147,14 +147,8 @@ export function compileWorkflow(schema: ResolvedSchema): {
     };
   }
 
-  // A stage's `gates:` is checked against what the profile declares, not
-  // against a list of names kept in the compiler. A profile that declares no
-  // gates has nothing to check against, so the check is skipped rather than
-  // guessed at.
-  const declaredGates = schema.gates ? new Set(schema.gates.map((gate) => gate.id)) : null;
-
   for (const [stageId, stageDef] of Object.entries(schema.stages ?? {})) {
-    validateNestedStages(stageId, stageDef, declaredGates, errors);
+    validateNestedStages(stageId, stageDef, errors);
     validateActions(`stages.${stageId}`, stageDef, errors);
   }
 
@@ -202,9 +196,8 @@ const TASK_DONE = 'done';
  * vocabulary, parses cleanly and is then read by nobody. That is how
  * `android.yaml` carried a dead `phases:` block for months while every test
  * stayed green. Reporting them here rather than tightening the parser keeps
- * `ResolvedSchema`'s index signature working and puts the complaint where the
- * undeclared gate and the unreachable stage already are: one funnel, with a
- * path and a name.
+ * `ResolvedSchema`'s index signature working and gives the author one funnel,
+ * with a path and a name.
  */
 const SCHEMA_KEYS = new Set([
   // Added by the resolver, not authored: the schema's own name and the file
@@ -215,7 +208,6 @@ const SCHEMA_KEYS = new Set([
   'stages',
   'stageAssignments',
   'transitions',
-  'gates',
   'editingAgents',
   'taskControlAgents',
 ]);
@@ -245,8 +237,6 @@ const STAGE_KEYS = new Set([
  * переходов вовсе, ходит по порядку объявления — там достижимы все, и проверка
  * пропускается. Это и поймал корпус фикстур на первой версии проверки.
  *
- * Комментарий к `SCHEMA_KEYS` годами обещал эту проверку («the undeclared gate
- * and the unreachable stage already are [in the funnel]»), а её не было.
  */
 function validateReachability(schema: ResolvedSchema, errors: CompileError[]): void {
   const stages = schema.stages ?? {};
@@ -523,18 +513,10 @@ function validateActions(path: string, stage: StageDef, errors: CompileError[]):
  * Check a stage's own stages and transitions.
  *
  * These are the rules the runtime would otherwise discover one failed workflow
- * at a time: a transition to a stage that does not exist, a gate the profile
- * never declared, a retry budget belonging to something other than the task.
- *
- * `declaredGates` is `null` when the profile declares no gates at all — there
- * is then nothing to compare against, and no gate name is rejected.
+ * at a time: a transition to a stage that does not exist, or a retry budget
+ * belonging to something other than the task.
  */
-function validateNestedStages(
-  stageId: string,
-  stageDef: StageDef,
-  declaredGates: Set<string> | null,
-  errors: CompileError[]
-): void {
+function validateNestedStages(stageId: string, stageDef: StageDef, errors: CompileError[]): void {
   const nested = nestedStages(stageDef);
   const nestedIds = new Set(nested.map((entry) => entry.id));
 
@@ -567,16 +549,7 @@ function validateNestedStages(
   // reported every one of them twice, which `toContain` in the tests could not
   // see.
   for (const entry of nested) {
-    validateNestedStages(`${stageId}.stages.${entry.id}`, entry, declaredGates, errors);
-  }
-
-  for (const gate of stageDef.gates ?? []) {
-    if (declaredGates && !declaredGates.has(gate)) {
-      errors.push({
-        path: `stages.${stageId}.gates`,
-        message: `Gate "${gate}" is not a gate this profile declares`,
-      });
-    }
+    validateNestedStages(`${stageId}.stages.${entry.id}`, entry, errors);
   }
 
   for (const transition of stageDef.transitions ?? []) {

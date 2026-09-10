@@ -15,7 +15,7 @@ function makeSession(overrides: Partial<WorkflowSession> = {}): WorkflowSession 
     // compiled workflow's first one. These tests speak the uppercase
     // vocabulary of their own fixture config, so this is theirs.
     currentStage: 'PLANNING',
-    gates: [],
+    stageGateResults: [],
     approvals: [],
     refs: {},
     tasks: {},
@@ -241,7 +241,7 @@ describe('SessionGuardEngine', () => {
 
     const session = makeSession({
       approvals: [{ type: 'plan', callId: 'c1', status: 'granted' }],
-      gates: [{ id: 'invariants', status: 'passed' }],
+      stageGateResults: [{ stage: 'EXECUTION', id: 'invariants', status: 'passed' }],
     });
 
     const result = engine.tryApplyTransitions(session);
@@ -274,7 +274,7 @@ describe('onFailure: retry', () => {
   function failingSession(): WorkflowSession {
     return makeSession({
       currentStage: 'execution',
-      gates: [{ id: 'review', status: 'failed' }],
+      stageGateResults: [{ stage: 'EXECUTION', id: 'review', status: 'failed' }],
     });
   }
 
