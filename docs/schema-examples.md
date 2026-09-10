@@ -3,12 +3,21 @@
 Более полный набор примеров вместе с разбором каждого поля — в
 [profile-authoring.md](profile-authoring.md).
 
+Примеры ниже показывают содержимое schema в source profile. В target OpenCode-
+проекте loader должен получить эту schema через настроенный каталог профилей;
+пути `<project>/.opencode/**` относятся к target project, а не к checkout-у
+плагина.
+
 ## Минимальный линейный workflow
 
 ```yaml
+gates:
+  - id: review
+
 stages:
   planning: {}
-  review: {}
+  review:
+    gates: [review]
   done: {}
 
 transitions:
@@ -22,6 +31,9 @@ transitions:
 
 ## Переход с approval
 
+Ниже приведён фрагмент schema: он предполагает, что стадии `planning` и
+`tasks_ready` уже объявлены в основном workflow.
+
 ```yaml
 transitions:
   - from: planning
@@ -30,14 +42,25 @@ transitions:
     consent: plan
 ```
 
+`consent` задаёт имя требуемого решения. Его передают в `workflow-consent` через
+`type`; перечисленные в запросе файлы становятся evidence и перепроверяются в
+момент решения.
+
 ## Review и QA
 
 ```yaml
+gates:
+  - id: review
+  - id: qa
+
 stages:
   review:
     allowedAgents: [review]
+    gates: [review]
   qa:
     allowedAgents: [qa]
+    gates: [qa]
+  done: {}
 
 transitions:
   - from: review
@@ -62,6 +85,8 @@ stages:
 
 ## Как проверять пример
 
-Проверяйте schema через реальный profile loader и соответствующий тест. Пример,
-который не проходит загрузку или не имеет достижимой конечной фазы, должен быть
-помечен как демонстрация ошибки.
+Проверяйте schema через реальный profile loader и соответствующий тест. В source
+repository базовая проверка выполняется через `mise run test` или `mise run check`;
+для target project нужен его фактический запуск OpenCode. Пример, который не
+проходит загрузку или не имеет достижимой конечной стадии, должен быть помечен
+как демонстрация ошибки.

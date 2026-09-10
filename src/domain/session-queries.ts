@@ -238,15 +238,6 @@ export function hasForbiddenGitSubcommand(command: string): boolean {
   });
 }
 
-/**
- * Check if a command is a commit task (commit-task.ts).
- */
-export function isCommitTaskCommand(command: string): boolean {
-  return shellSegments(command).some((words) =>
-    words.some((word) => executableName(word) === 'commit-task.ts')
-  );
-}
-
 /** Shell syntax that writes, or that hides what actually runs. */
 const WRITES_OR_HIDES = /[>]|\$\(|`|<\(/u;
 

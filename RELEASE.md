@@ -1,78 +1,86 @@
-# Release Process
+# Процесс выпуска
 
-This project uses Release Please and Npm Trusted Publishing for automated releases.
+Проект использует Release Please и NPM Trusted Publishing для автоматических
+выпусков.
 
-It follows two release channels:
+Предусмотрены два канала выпуска:
 
-- **Pre-release**: Normal PRs merged to main create `x.x.x-next.J` versions published to the `next` npm dist-tag for testing and feedback.
-- **Stable Releases**: Release PRs merged to main create computed version and publish to the `latest` npm dist-tag.
+- **Предварительные версии**: обычные PR, объединённые в `main`, создают версии
+  `x.x.x-next.J`, которые публикуются под npm-тегом `next` для тестирования и
+  сбора обратной связи.
+- **Стабильные версии**: PR выпуска, объединённый в `main`, создаёт вычисленную
+  версию и публикует её под npm-тегом `latest`.
 
-You can also trigger manual releases in the follow ways: 
+Публикацию также можно запустить вручную:
 
-- Push a tag in the format `v{semver}` (e.g. `v1.2.3`)
-- Run the `publish.yml` workflow manually from the GitHub Actions tab and supply a channel 'latest' or 'next'.
+- Запустить workflow `publish.yml` на вкладке GitHub Actions и выбрать npm-тег
+  `latest` или `next`.
+- Локально выполнить `mise run publish --tag latest` или
+  `mise run publish --tag next` после аутентификации в npm.
 
+## Первый выпуск
 
-## First Release
+До начала автоматических выпусков необходимо вручную выполнить первый выпуск.
 
-Before automated releases will work, you need to perform the first release manually. 
+Причины:
 
-Why: 
+- Используется [NPM Trusted Publishing](https://docs.npmjs.com/trusted-publishers).
+- Первый выпуск создаёт npm-пакет на npmjs.com.
+- После этого для последующих выпусков можно настроить Trusted Publishing через
+  GitHub Actions.
 
-- This uses [Npm Trusted Publishing](https://docs.npmjs.com/trusted-publishers).
-- The first release creates the npm package on npmjs.com.
-- This then allows you to setup trusted publishing with GitHub Actions for future releases.
+### Шаги
 
-### Steps
+1. Убедитесь, что `package.json` настроен корректно:
 
-1. make sure the `package.json` is correct: 
-  - is the version `0.0.1` ? 
-  - is the pkg name correct? Did you forget to set the scope if needed?
-  - do you have the right keywords? 
-  - do you have the right repository field?
-  - do you have the right author field?
+   - версия в `package.json` указана правильно;
+   - имя пакета указано правильно; если требуется scope, он не забыт;
+   - указаны нужные keywords;
+   - корректно заполнено поле repository;
+   - корректно заполнено поле author.
 
-2. run `npm login` to authenticate with npm. 
+2. Выполните `npm login`, чтобы аутентифицироваться в npm.
 
-3. run `mise build` to build the module.
+3. Выполните `mise run build`, чтобы собрать модуль.
 
-4. run `mise publish --otp {your-2fa-code}` to publish the first version.
+4. Выполните `mise run publish --otp {your-2fa-code}`, чтобы опубликовать первую
+   версию.
 
-5. Go to your npm package settings on npmjs.com and add a trusted publisher for GitHub Actions with:
-   - **Organization or user**: Your GitHub username/org
-   - **Repository**: Your repository name
-   - **Workflow filename**: `publish.yml` (the release workflow filename)
+5. Откройте настройки npm-пакета на npmjs.com и добавьте доверенного издателя для
+   GitHub Actions со следующими параметрами:
+   - **Организация или пользователь**: имя пользователя или организации GitHub;
+   - **Репозиторий**: имя репозитория;
+   - **Имя workflow-файла**: `publish.yml` (имя workflow выпуска).
 
-6. [Restrict token access](https://docs.npmjs.com/trusted-publishers#recommended-restrict-token-access-when-using-trusted-publishers) for maximum security.
+6. Для максимальной безопасности [ограничьте доступ токенов](https://docs.npmjs.com/trusted-publishers#recommended-restrict-token-access-when-using-trusted-publishers).
 
-
-## Release Workflow
+## Workflow выпуска
 
 ### Conventional Commits
 
-We follow [Conventional Commits](https://www.conventionalcommits.org/) specification:
+Мы следуем спецификации [Conventional Commits](https://www.conventionalcommits.org/):
 
-- `fix:` patches
-- `feat:` minor features
-- `feat!:` or `fix!:` breaking changes
+- `fix:` — исправления;
+- `feat:` — новые возможности;
+- `feat!:` или `fix!:` — обратно несовместимые изменения.
 
-### Pre-1.0 Versioning
+### Версионирование до версии 1.0
 
-While version is `0.x.x`, breaking changes bump **minor** version.
+Пока версия имеет формат `0.x.x`, обратно несовместимые изменения увеличивают
+minor-версию.
 
-### Release Process
+### Процесс выпуска
 
-1. Push commits to `main` branch
-2. Release Please will:
-   - Analyze commits
-   - Determine version bump
-   - Update `package.json`
-   - Update `CHANGELOG.md`
-   - Create a release PR
+1. Отправьте коммиты в ветку `main`.
+2. Release Please:
+   - проанализирует коммиты;
+   - определит необходимое изменение версии;
+   - обновит `package.json`;
+   - обновит `CHANGELOG.md`;
+   - создаст PR выпуска.
+3. Проверьте и объедините PR выпуска от Release Please.
 
-3. Review and merge the Release Please PR
-
-### Commit Message Examples
+### Примеры сообщений коммитов
 
 - `fix: resolve task tracking issue`
 - `feat: add global task support`
@@ -80,17 +88,18 @@ While version is `0.x.x`, breaking changes bump **minor** version.
 - `docs: improve README`
 - `chore: update dependencies`
 
-## Advanced Release Features
+## Расширенные возможности выпуска
 
-### Force a Specific Version
+### Принудительно задать версию
 
-Use the `Release-As` footer in your commit message to force a specific version, bypassing conventional commit analysis:
+Используйте footer `Release-As` в сообщении коммита, чтобы принудительно задать
+версию и обойти анализ Conventional Commits:
 
 ```bash
 git commit --allow-empty -m "chore: release 2.0.0" -m "Release-As: 2.0.0"
 ```
 
-This creates a commit:
+Такой коммит выглядит следующим образом:
 
 ```
 chore: release 2.0.0
@@ -98,11 +107,13 @@ chore: release 2.0.0
 Release-As: 2.0.0
 ```
 
-Release Please will open a PR for version `2.0.0` regardless of commit message types.
+Release Please создаст PR для версии `2.0.0` независимо от типов сообщений
+коммитов.
 
-### Update Extra Files During Release
+### Обновлять дополнительные файлы при выпуске
 
-If you have version numbers in other files beyond `package.json`, configure them in `release-please-config.json`:
+Если номера версий находятся не только в `package.json`, настройте эти файлы в
+`release-please-config.json`:
 
 ```json
 {
@@ -121,17 +132,18 @@ If you have version numbers in other files beyond `package.json`, configure them
 }
 ```
 
-**Supported file types:**
+**Поддерживаемые типы файлов:**
 
-- Generic files (any type)
-- JSON files (with JSONPath)
-- YAML files (with JSONPath)
-- XML files (with XPath)
-- TOML files (with JSONPath)
+- generic-файлы (любой тип);
+- JSON-файлы (с JSONPath);
+- YAML-файлы (с JSONPath);
+- XML-файлы (с XPath);
+- TOML-файлы (с JSONPath).
 
-### Magic Comments for Version Markers
+### Специальные комментарии для маркеров версии
 
-Use inline comments to mark where versions should be updated:
+Используйте встроенные комментарии, чтобы отметить места, где Release Please
+должен обновить версии:
 
 ```javascript
 // x-release-please-version
@@ -141,78 +153,84 @@ const VERSION = '1.0.0';
 const MAJOR = '1';
 ```
 
-Or use block markers:
+Или используйте блочные маркеры:
 
 ```markdown
 <!-- x-release-please-start-version -->
 
 - Current version: 1.0.0
+
 <!-- x-release-please-end -->
 ```
 
-Available markers:
+Доступные маркеры:
 
-- `x-release-please-version` - Full semver
-- `x-release-please-major` - Major number
-- `x-release-please-minor` - Minor number
-- `x-release-please-patch` - Patch number
+- `x-release-please-version` — полная semver-версия;
+- `x-release-please-major` — номер major-версии;
+- `x-release-please-minor` — номер minor-версии;
+- `x-release-please-patch` — номер patch-версии.
 
-## Do Not
+## Запрещено
 
-- Manually edit Release Please PRs
-- Manually create GitHub releases
-- Modify version numbers directly
+- вручную редактировать PR от Release Please;
+- вручную создавать GitHub Releases;
+- напрямую изменять номера версий.
 
-## Publishing
+## Публикация
 
-Releases are automatically published to NPM when the Release Please PR is merged.
+Релизы автоматически публикуются в NPM после объединения PR выпуска от Release
+Please.
 
 ### NPM Trusted Publishing
 
-This project uses [NPM Trusted Publishing](https://docs.npmjs.com/trusted-publishers) with GitHub Actions. No npm tokens are needed - authentication is handled automatically via OIDC (OpenID Connect).
+Проект использует [NPM Trusted Publishing](https://docs.npmjs.com/trusted-publishers)
+через GitHub Actions. npm-токены не нужны: аутентификация выполняется
+автоматически через OIDC (OpenID Connect).
 
-**How it works:**
+**Как это работает:**
 
-- Each publish uses short-lived, cryptographically-signed tokens specific to your workflow
-- Tokens cannot be extracted or reused
-- No need to manage or rotate long-lived credentials
-- Automatic provenance attestations prove where and how your package was built
+- каждая публикация использует краткоживущие криптографически подписанные
+  токены, предназначенные для конкретного workflow;
+- токены нельзя извлечь или использовать повторно;
+- не нужно управлять долгоживущими учётными данными или ротировать их;
+- автоматические provenance-attestations подтверждают, где и как был собран
+  пакет.
 
-**Setup required:**
+**Необходимая настройка:**
 
-1. Go to your npm package settings on npmjs.com
-2. Add a trusted publisher for GitHub Actions with:
-   - **Organization or user**: Your GitHub username/org
-   - **Repository**: Your repository name
-   - **Workflow filename**: `publish.yml` (the release workflow filename)
-3. Optionally, [restrict token access](https://docs.npmjs.com/trusted-publishers#recommended-restrict-token-access-when-using-trusted-publishers) for maximum security
+1. Откройте настройки npm-пакета на npmjs.com.
+2. Добавьте доверенного издателя для GitHub Actions со следующими параметрами:
+   - **Организация или пользователь**: имя пользователя или организации GitHub;
+   - **Репозиторий**: имя репозитория;
+   - **Имя workflow-файла**: `publish.yml` (имя workflow выпуска).
+3. При необходимости [ограничьте доступ токенов](https://docs.npmjs.com/trusted-publishers#recommended-restrict-token-access-when-using-trusted-publishers) для максимальной безопасности.
 
-When you merge a release PR, the GitHub Actions workflow will automatically:
+После объединения PR выпуска workflow GitHub Actions автоматически:
 
-1. Build the module
-2. Publish to NPM with OIDC authentication
-3. Generate and attach provenance attestations
-4. Create a GitHub release
+1. собирает модуль;
+2. публикует его в NPM с OIDC-аутентификацией;
+3. создаёт и прикрепляет provenance-attestations;
+4. создаёт GitHub Release.
 
-### Manual Releases
+### Ручная публикация
 
-You can also manually trigger a release by pushing a tag in the format `v{semver}`:
+Workflow `publish.yml` поддерживает ручной запуск `workflow_dispatch` с npm-тегом
+`latest` или `next`:
 
 ```bash
-git tag v1.2.3
-git push origin v1.2.3
+gh workflow run publish.yml --ref main -f tag=latest
 ```
 
-This will:
+Workflow собирает пакет и публикует его через npm Trusted Publishing. GitHub
+Release при этом не создаётся: GitHub Releases создаёт workflow Release Please.
+Для первого локального выпуска выполните `npm login`, затем `mise run build` и
+`mise run publish --tag latest --otp {your-2fa-code}`.
 
-1. Trigger the release workflow
-2. Build and publish to NPM using trusted publishing
-3. Create a GitHub release
+Ручная публикация нужна для:
 
-Use manual releases for:
+- срочных исправлений вне обычного цикла выпуска;
+- публикации предварительной версии под тегом `next`;
+- повторной публикации после временного сбоя CI.
 
-- Hot-fixes outside the normal release cycle
-- Bypassing Release Please when needed
-- Direct version control over releases
-
-**Learn more:** See the [NPM Trusted Publishing documentation](https://docs.npmjs.com/trusted-publishers) for complete setup and best practices.
+**Дополнительная информация:** полное описание настройки и рекомендаций доступно
+в [документации NPM Trusted Publishing](https://docs.npmjs.com/trusted-publishers).

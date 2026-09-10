@@ -2,13 +2,42 @@
 
 Документ-памятка о текущем статусе и плане развития ИИ-системы. Обновляется по мере продвижения.
 
-## Выполнено
+> **Статус (2026-09-10): текущий checkout.** Исторические пункты ниже помечены явно. Не
+> следует читать старые названия фаз и старые пути как описание текущего исходного кода.
+
+## Текущая реализация
+
+- Workflow выбирается из профиля и компилируется из YAML-схемы: стадии, guards, transitions,
+  вложенные task loops, dispatch и retry budgets не зашиты в универсальный набор из пяти фаз.
+- `WorkflowSession` сейчас имеет `schemaVersion: 2` и хранит `currentStage`, generic
+  `approvals`, `gates`, `refs`, задачи и loop runs, активные operations, delivery permit/receipt,
+  retry budgets, verifications и validation records.
+- `SessionGuardEngine` предоставляет `deriveStage`, `checkTransition` и
+  `tryApplyTransitions`; отдельного текущего `derivePhase` нет.
+- `SessionExecutor` уже владеет root resolution, очередью на root, ALS-reentrancy и условным
+  load/save transaction. `SessionQueue` остаётся отдельным низкоуровневым сериализатором.
+- Runtime подключает OpenCode hooks, action/task admission, mutation и consent orchestration,
+  task dispatch и delivery checks. Декомпозиция runtime и перевод всех путей на единый executor
+  остаются предметом planned design.
+- Dashboard запускается существующей задачей `mise run dashboard`; проверки — `mise run typecheck`,
+  `mise run test`, `mise run build`, `mise run smoke`.
+
+## Линия документов
+
+1. **Current implementation:** этот раздел и код в `src/domain/`, `src/session/`, `src/app/`,
+   `src/schema/`.
+2. **Planned design:** [`state-machine-v4-plan.md`](./state-machine-v4-plan.md).
+3. **Historical snapshots:** [`state-machine-v3-plan.md`](./state-machine-v3-plan.md),
+   [`state-machine-v3-tasks.md`](./state-machine-v3-tasks.md),
+   [`state-machine-redesign.md`](./state-machine-redesign.md), [`state-machine-v4.md`](./state-machine-v4.md).
+
+## Исторический срез: выполнено на момент раннего roadmap
 
 ### Фаза 1 — контур self-edit
 
 Харнесс умеет править сам себя:
 
-- `commit-task.ts` — pre-commit по расширениям (`.ts` -> typecheck+test, `.json` -> JSON, `.md` -> ссылки), формат коммита `harness:`.
+- `scripts/commit-task.ts` — pre-commit по расширениям (`.ts` -> typecheck+test, `.json` -> JSON, `.md` -> ссылки), формат коммита `harness:`.
 - `invariants.ts` — `HARNESS_INVARIANTS` (BROKEN_IMPORT, CONSOLE_LOG, INVALID_JSON, ANGLICISM) + маршрутизация по расширению.
 - `runtime.ts` — убраны `.kt`-фильтры, harness-инварианты подключены.
 - `agent/harness.md`, `rules/harness.md`, `skills/harness-code-review`.
@@ -26,30 +55,30 @@
 
 - `rules/harness.md` — правило эмпирической проверки гипотез о багах.
 - `docs/permission-fix-plan.md` — план исправления permission-дыр (отложено).
-- `docs/session-guard-redesign.md` — дизайн v2-final эволюционируемой стейт-машины (спроектировано).
+- `docs/state-machine-redesign.md` — дизайн v2-final эволюционируемой стейт-машины (спроектировано).
 - `docs/upstream/` — донорские спецификации переработанной версии (6 фич) + upstream-ideas.md.
 
-## Отложено (после текущего фокуса)
+## Исторический backlog
 
 - Permission-дыры (`pwsh *`/`bun *`/`Get-Content *` обходят deny) — см. `docs/permission-fix-plan.md`.
 - `crpt_confluence` vs `confluence` + рассинхрон Confluence API в `rag.md`/`architect.md`/`AGENTS.md`.
 - `PATH_CONFIG.md` устарел, дубль README, мёртвые артефакты (`qdrant-repository-indexing/`).
 
-## Текущий фокус: переработка стейт-машины
+## Исторический фокус: переработка стейт-машины
 
-- Дизайн v2-final — `docs/session-guard-redesign.md`.
+- Дизайн v2-final — `docs/state-machine-redesign.md`.
 - Многоцикловая (ПЛАН -> РАЗРАБОТКА -> ТЕСТЫ -> ВЕРИФИКАЦИЯ -> КОММИТ), 10 состояний, плоские циклы + 8 эволюционных швов.
 - Статус: шаг 1 (data-driven граф) ВЫПОЛНЕН — стейт-машина работает end-to-end (полный цикл до DONE, гейт canCommit, дашборд). Шаги 2-5 впереди.
 - Целевая архитектура — `session-guard/schemas/` v3 (event-sourcing, пер-задачная гранулярность, evidence) — это reference-цель, НЕ мусор.
 
-## План (порядок)
+## Исторический план (порядок)
 
 1. Реализация стейт-машины (v2-final, декомпозиция по слоям).
 2. Командные профили (см. ниже).
 3. Дашборд реального времени (метрики, граф, timeline, control panel).
 4. Консистентность правок харнесса (инварианты связей).
 
-## Командные профили (актуальные решения)
+## Исторические решения: командные профили
 
 - Мульти-командность: analytics, iOS, android, backend, PWA, qa + AI (команда разработки самого харнесса).
 - Вариант A: профиль поставляет наборы инвариантов, механизм их работы — в ядре.
@@ -58,7 +87,7 @@
 - `profiles/harness` — симметрично другим профилям.
 - Профиль: `id: string` (generic), контракт НЕ трогает граф переходов и гейты коммита.
 
-## Консистентность правок харнесса (задача)
+## Исторический planned backlog: консистентность правок харнесса
 
 Проблема: при правке харнесса агент часто забывает проверить связанные артефакты (промпты, скрипты, скиллы, документацию) на согласованность.
 
@@ -78,9 +107,9 @@
 
 Статус: спроектировано, не реализовано. Приоритет — после реализации стейт-машины.
 
-## Дашборд реального времени (задача)
+## Исторический planned backlog: дашборд
 
-Текущее состояние: standalone-сервер (`bun serve`, порт 3456) + HTML. Читает `runtime/*.json`,
+Текущее состояние: standalone-сервер (`mise run dashboard`) + HTML. Читает `runtime/*.json`,
 SSE, граф (статичный), timeline переходов, scope, инварианты (только статус), multi-session.
 Хардкодит состояния/переходы/поля сессии -> станет несовместим со стейт-машиной v2-final.
 
@@ -117,7 +146,7 @@ dry-run (ослабляет guardrails), предсказание откатов
 
 Статус: спроектировано, не реализовано.
 
-## Follow-up: стейт-машина (выявлено при smoke-тесте)
+## Исторический follow-up (выявлено при smoke-тесте)
 
 1. Недетерминированный canCommit для субагентов: rootSessionID субагента резолвится нестабильно
    (зависит, в какую сессию opencode поместил субагента) — гейт коммита можно обойти.
@@ -128,7 +157,7 @@ dry-run (ослабляет guardrails), предсказание откатов
 3. Плагин грузится как .js (автозагрузка из .opencode/plugins/), исполняется в Node.js
    (не bun): в ядре не использовать Bun API; импорты — с явными .ts-расширениями.
 
-## Методология
+## Методология (исторические заметки)
 
 - Гипотезы — не факты; перед правкой бага — эмпирическое подтверждение (см. `rules/harness.md`).
 - Правки `.ts`-ядра вступают в силу после перезапуска OpenCode.

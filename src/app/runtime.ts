@@ -38,7 +38,6 @@ import { createLogFn } from './logger.ts';
 import {
   extractBashCommand,
   hasForbiddenGitSubcommand,
-  isCommitTaskCommand,
   isReadOnlyBashCommand,
 } from '../domain/session-queries.ts';
 import {
@@ -2514,7 +2513,7 @@ class SessionGuardRuntime {
     if (!hasForbiddenGitSubcommand(command)) return;
     void this.log('warn', `Blocked forbidden git command`, { callID: callID, command });
     throw new WorkflowBlockedError(
-      'Direct git commit/push is blocked. Use commit-task.ts instead.'
+      'Direct git commit/push is blocked. Declare a delivery action with delivers: true.'
     );
   }
 
@@ -2733,12 +2732,8 @@ class SessionGuardRuntime {
    * Доставка ли это коммита.
    *
    * Ответ принадлежит схеме: запись с `delivers: true` называет команды, и они
-   * же опознают вызов. Раньше это решала зашитая в ядро проверка на имя файла
-   * `commit-task.ts` — знание о том, чем именно делается коммит, лежало в
-   * ядре и дублировалось в текстах скиллов, а схема о нём не знала ничего.
-   *
-   * Пока стадия ничего не объявила, отвечает прежний классификатор: база не
-   * объявляет действий вовсе, и её поведение не меняется.
+   * же опознают вызов. Пока стадия ничего не объявила, доставка не
+   * распознаётся: имя и форма команды принадлежат только schema.
    *
    * Один ответ на все точки вызова намеренно: `commitBefore` выдаёт permit, а
    * `mutationBefore`/`mutationAfter` по этому же признаку НЕ входят в
@@ -2749,8 +2744,7 @@ class SessionGuardRuntime {
     if (tool !== 'bash') return false;
     const command = extractBashCommand(args);
     const declared = await this.declaredDeliveryCommands(sessionID);
-    if (declared.length > 0) return commandMatches(command, declared);
-    return isCommitTaskCommand(command);
+    return declared.length > 0 && commandMatches(command, declared);
   }
 
   /**

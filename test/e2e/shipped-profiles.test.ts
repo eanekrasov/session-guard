@@ -5,7 +5,6 @@ import { resolveConfig } from '../../src/public-api.ts';
 import { schemaToEngineConfig, selectSchema } from '../../src/app/mutation-orchestrator.ts';
 import { SessionGuardEngine, toGuardContext } from '../../src/domain/engine.ts';
 import { admitAction, commandMatches } from '../../src/domain/action-admission.ts';
-import { isCommitTaskCommand } from '../../src/domain/session-queries.ts';
 import { approve } from '../../src/domain/approvals.ts';
 import type { ActionEntry } from '../../src/schema/profile-schema.ts';
 import { createSession } from '../../src/session/session-store.ts';
@@ -275,14 +274,11 @@ describe('base carries the former canCommit on the delivering bash entry', () =>
     const patterns = (await deliveryEntry())?.commands ?? [];
     expect(patterns.length).toBeGreaterThan(0);
 
-    // Схема опознаёт тот же вызов, что ядро узнавало по имени файла.
+    // The schema identifies the delivery command.
     expect(commandMatches(COMMIT_CALL, patterns)).toBe(true);
-    expect(isCommitTaskCommand(COMMIT_CALL)).toBe(true);
 
-    // И расходится с ним там, где профиль этого захотел: ядро узнаёт файл по
-    // имени, как бы его ни запустили, схема — только в объявленной форме.
+    // A different command is not delivery unless the schema declares it too.
     const direct = './scripts/commit-task.ts --Message m';
-    expect(isCommitTaskCommand(direct)).toBe(true);
     expect(commandMatches(direct, patterns)).toBe(false);
   });
   it.each(['base', 'harness', 'android'])(

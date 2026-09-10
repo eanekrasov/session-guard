@@ -1,9 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import {
-  extractBashCommand,
-  hasForbiddenGitSubcommand,
-  isCommitTaskCommand,
-} from '../../src/domain/session-queries.ts';
+import { extractBashCommand, hasForbiddenGitSubcommand } from '../../src/domain/session-queries.ts';
 describe('extractBashCommand', () => {
   test('возвращает строку как есть', () => {
     expect(extractBashCommand('echo hi')).toBe('echo hi');
@@ -74,24 +70,6 @@ describe('hasForbiddenGitSubcommand', () => {
 
   test('упоминание в комментарии не срабатывает', () => {
     expect(hasForbiddenGitSubcommand('# git commit planning')).toBe(false);
-  });
-});
-
-describe('isCommitTaskCommand', () => {
-  test('содержит commit-task.ts', () => {
-    expect(isCommitTaskCommand('bun run commit-task.ts')).toBe(true);
-  });
-
-  test('распознаёт запуск по абсолютному пути с флагами', () => {
-    expect(isCommitTaskCommand('node /path/to/commit-task.ts --dry-run')).toBe(true);
-  });
-
-  test('без commit-task.ts — false', () => {
-    expect(isCommitTaskCommand('bun run something.ts')).toBe(false);
-  });
-
-  test('не принимает упоминание commit-task.ts в комментарии', () => {
-    expect(isCommitTaskCommand('printf injected > unexpected.ts # commit-task.ts')).toBe(false);
   });
 });
 

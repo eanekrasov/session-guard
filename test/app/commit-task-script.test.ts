@@ -70,12 +70,9 @@ describe('scripts/commit-task.ts', () => {
     expect(committed).toEqual(['b.txt']);
   });
 
-  it('is recognised by the plugin as a commit task', async () => {
-    const { isCommitTaskCommand, hasForbiddenGitSubcommand } =
-      await import('../../src/domain/session-queries.ts');
+  it('does not trigger the direct-git block', async () => {
+    const { hasForbiddenGitSubcommand } = await import('../../src/domain/session-queries.ts');
     const command = 'bun run scripts/commit-task.ts -m "feat: x"';
-    expect(isCommitTaskCommand(command)).toBe(true);
-    // It must not trip the direct-git block, or it could never run.
     expect(hasForbiddenGitSubcommand(command)).toBe(false);
   });
 });

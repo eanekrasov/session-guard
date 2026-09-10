@@ -80,20 +80,18 @@ describe('the schema, not the core, says which command delivers a commit', () =>
     const store = await sessionOnCommit();
     const hooks = await createRuntime(pluginInput());
 
-    // `deliver now` не содержит имени `commit-task.ts` — зашитый в ядро
-    // классификатор его не узнал бы никогда.
+    // The command is accepted because the schema declares it as delivery.
     await runBash(hooks, 'deliver now');
 
     expect((await store.load('s1'))?.deliveryPermit?.callID).toBe('c1');
   });
 
-  it('does not treat the core’s own commit-task shape as delivery once the schema declares its own', async () => {
+  it('does not treat an undeclared command as delivery', async () => {
     const store = await sessionOnCommit();
     const hooks = await createRuntime(pluginInput());
 
-    // Эту форму ядро узнаёт, а профиль её не объявлял. Действие называет
-    // инструмент, так что отказ говорит про `bash` — ровно то имя, которое
-    // автор и написал, — и называет команду, которую ничто не покрыло.
+    // A command is not delivery merely because another profile uses it; the
+    // active schema must declare its matching pattern.
     await expect(runBash(hooks, 'bun run commit-task.ts --Message m')).rejects.toThrow(
       /Refused: 'bash' is declared on this stage, but no entry covers/
     );
