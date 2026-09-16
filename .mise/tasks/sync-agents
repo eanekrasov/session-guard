@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+#MISE description="Sync profile agents into the harness agents directory"
+
+bun run src/cli.ts "$@"

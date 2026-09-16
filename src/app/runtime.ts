@@ -71,7 +71,7 @@ import { resolveConfig } from '../public-api.ts';
 import { sessionsDir, profilesDir as getProfilesDir, opencodeStateDir } from './paths.ts';
 import { OpenCodeRulesRuntime } from '../rules/runtime.ts';
 import { MatchedRulesStateStore } from '../rules/matched-rules-state.ts';
-import { syncProfileAgents } from './profile-agent-sync.ts';
+import { syncAllProfileAgents } from './profile-agent-sync.ts';
 import { agentIsAllowed } from './agent-names.ts';
 import { schemaId } from './profile-resolver.ts';
 import { WorkflowBlockedError } from './blocked-error.ts';
@@ -2966,26 +2966,9 @@ class SessionGuardRuntime {
     // Sync agents for all profiles on startup — complete before returning
     // so agents are discoverable by the host when config resolves.
     try {
-      await this.syncAllProfileAgents();
+      await syncAllProfileAgents(this.projectDir, (msg) => this.log('info', msg, {}));
     } catch (err) {
       void this.log('error', 'syncAllProfileAgents failed after retry', {
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
-
-  private async syncAllProfileAgents(): Promise<void> {
-    try {
-      const entries = await readdir(this.profilesDir, { withFileTypes: true });
-      const profileIds = entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name);
-
-      for (const profileId of profileIds) {
-        const profileJsonPath = join(this.profilesDir, profileId, 'profile.json');
-        if (!existsSync(profileJsonPath)) continue;
-        await syncProfileAgents(profileId, this.projectDir, (msg) => this.log('info', msg, {}));
-      }
-    } catch (err) {
-      void this.log('warn', 'syncAllProfileAgents failed', {
         error: err instanceof Error ? err.message : String(err),
       });
     }

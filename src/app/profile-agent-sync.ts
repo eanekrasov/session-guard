@@ -67,6 +67,38 @@ function injectManagedMarker(content: string): string {
 }
 
 /**
+ * What one profile's sync did, by name.
+ *
+ * The sync never throws — every filesystem step is caught and reported — so
+ * this is how a caller learns that something failed. `log` describes the run
+ * as it happens; this says what actually happened once it is over.
+ */
+export interface SyncOutcome {
+  profileId: string;
+  /** Target file names written this run. */
+  synced: string[];
+  /** Stale managed target files unlinked this run. */
+  removed: string[];
+  /** Source files the roster does not name, and a profile with no `profile.json`. */
+  skipped: string[];
+  /** Unowned target files deliberately left untouched. */
+  collisions: string[];
+  /** Filesystem failures, and a `profile.json` that would not parse. */
+  errors: string[];
+}
+
+/**
+ * What a whole-project sync did, one entry per profile that was synced.
+ *
+ * `errors` here is about reaching the profiles at all — a projects directory
+ * that cannot be read. Per-profile failures live in each outcome's `errors`.
+ */
+export interface SyncReport {
+  profiles: SyncOutcome[];
+  errors: string[];
+}
+
+/**
  * The agents a profile ships.
  *
  * `profile.json`'s `agents` is the source of truth when the profile declares
@@ -111,12 +143,28 @@ export async function listProfileAgents(
   }
 }
 
+/**
+ * Copy a profile's agents into the harness agents directory.
+ *
+ * Never throws: every filesystem step is caught, logged, and recorded in the
+ * returned outcome. One unreadable file therefore does not stop the others,
+ * and a caller that needs to know whether the run succeeded reads `errors`
+ * rather than watching the log.
+ */
 export async function syncProfileAgents(
   profileId: string,
   projectDir: string,
   log?: (msg: string) => void
-): Promise<void> {
+): Promise<SyncOutcome> {
   const logMsg = log ?? (() => {});
+  const outcome: SyncOutcome = {
+    profileId,
+    synced: [],
+    removed: [],
+    skipped: [],
+    collisions: [],
+    errors: [],
+  };
 
   const pDir = profilesDir(projectDir);
   const hDir = harnessDir(projectDir);
@@ -126,17 +174,18 @@ export async function syncProfileAgents(
   const profileJsonPath = path.join(pDir, profileId, 'profile.json');
   if (!existsSync(profileJsonPath)) {
     logMsg(`[profile-agent-sync] No profile.json for "${profileId}" at ${profileJsonPath}`);
-    return;
+    outcome.skipped.push('profile.json');
+    return outcome;
   }
 
   let profileMeta: { agentsDir?: string };
   try {
     profileMeta = JSON.parse(await readFile(profileJsonPath, 'utf-8'));
   } catch (err) {
-    logMsg(
-      `[profile-agent-sync] Failed to parse ${profileJsonPath}: ${err instanceof Error ? err.message : String(err)}`
-    );
-    return;
+    const detail = err instanceof Error ? err.message : String(err);
+    logMsg(`[profile-agent-sync] Failed to parse ${profileJsonPath}: ${detail}`);
+    outcome.errors.push(`Failed to parse ${profileJsonPath}: ${detail}`);
+    return outcome;
   }
 
   const sourceAgentsDir = path.join(pDir, profileId, profileMeta.agentsDir ?? 'agents');
@@ -169,13 +218,14 @@ export async function syncProfileAgents(
         .filter((name) => {
           if (roster.has(name.slice(0, -'.md'.length))) return true;
           logMsg(`[profile-agent-sync] "${name}" is not on ${profileId}'s agents list; skipped`);
+          outcome.skipped.push(name);
           return false;
         });
     } catch (err) {
-      logMsg(
-        `[profile-agent-sync] Error reading ${sourceAgentsDir}: ${err instanceof Error ? err.message : String(err)}`
-      );
-      return;
+      const detail = err instanceof Error ? err.message : String(err);
+      logMsg(`[profile-agent-sync] Error reading ${sourceAgentsDir}: ${detail}`);
+      outcome.errors.push(`Error reading ${sourceAgentsDir}: ${detail}`);
+      return outcome;
     }
   }
 
@@ -210,16 +260,18 @@ export async function syncProfileAgents(
       logMsg(
         `[profile-agent-sync] COLLISION: unowned file "${stale}" at ${targetPath} would be stale — preserved unchanged`
       );
+      outcome.collisions.push(stale);
       continue;
     }
 
     try {
       await unlink(targetPath);
       logMsg(`[profile-agent-sync] Removed stale agent: ${stale}`);
+      outcome.removed.push(stale);
     } catch (err) {
-      logMsg(
-        `[profile-agent-sync] Error removing stale agent ${stale}: ${err instanceof Error ? err.message : String(err)}`
-      );
+      const detail = err instanceof Error ? err.message : String(err);
+      logMsg(`[profile-agent-sync] Error removing stale agent ${stale}: ${detail}`);
+      outcome.errors.push(`Error removing stale agent ${stale}: ${detail}`);
     }
   }
 
@@ -233,9 +285,9 @@ export async function syncProfileAgents(
       try {
         content = await readFile(sourcePath, 'utf-8');
       } catch (err) {
-        logMsg(
-          `[profile-agent-sync] Error reading ${sourcePath}: ${err instanceof Error ? err.message : String(err)}`
-        );
+        const detail = err instanceof Error ? err.message : String(err);
+        logMsg(`[profile-agent-sync] Error reading ${sourcePath}: ${detail}`);
+        outcome.errors.push(`Error reading ${sourcePath}: ${detail}`);
         continue;
       }
 
@@ -245,6 +297,7 @@ export async function syncProfileAgents(
         logMsg(
           `[profile-agent-sync] COLLISION: unowned file "${sourceFile}" at ${targetPath} preserved unchanged`
         );
+        outcome.collisions.push(sourceFile);
         continue;
       }
 
@@ -253,14 +306,63 @@ export async function syncProfileAgents(
       await mkdir(path.dirname(targetPath), { recursive: true });
       await writeFile(targetPath, prefixed, 'utf-8');
       logMsg(`[profile-agent-sync] Synced agent: ${targetNameOf(sourceFile)}`);
+      outcome.synced.push(targetNameOf(sourceFile));
     } catch (err) {
-      logMsg(
-        `[profile-agent-sync] Error copying ${sourceFile}: ${err instanceof Error ? err.message : String(err)}`
-      );
+      const detail = err instanceof Error ? err.message : String(err);
+      logMsg(`[profile-agent-sync] Error copying ${sourceFile}: ${detail}`);
+      outcome.errors.push(`Error copying ${sourceFile}: ${detail}`);
     }
   }
 
-  await markGenerated(targetAgentsDir, logMsg);
+  outcome.errors.push(...(await markGenerated(targetAgentsDir, logMsg)));
+
+  return outcome;
+}
+
+/**
+ * Sync every profile in the project's profiles directory.
+ *
+ * This is the whole-project entrypoint — the plugin's startup path and the
+ * `sync-agents` command both go through it, so a profile is listed in exactly
+ * one place.
+ *
+ * Like `syncProfileAgents` it never throws. A missing profiles directory is
+ * not an error: a project that ships no profiles has nothing to sync, and
+ * saying so is more useful than a warning nobody can act on.
+ */
+export async function syncAllProfileAgents(
+  projectDir: string,
+  log?: (msg: string) => void
+): Promise<SyncReport> {
+  const logMsg = log ?? (() => {});
+  const report: SyncReport = { profiles: [], errors: [] };
+
+  const pDir = profilesDir(projectDir);
+  if (!existsSync(pDir)) {
+    logMsg(`[profile-agent-sync] No profiles directory at ${pDir}; nothing to sync`);
+    return report;
+  }
+
+  let entries;
+  try {
+    entries = await readdir(pDir, { withFileTypes: true });
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    logMsg(`[profile-agent-sync] Error reading ${pDir}: ${detail}`);
+    report.errors.push(`Error reading ${pDir}: ${detail}`);
+    return report;
+  }
+
+  const profileIds = entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+
+  for (const profileId of profileIds) {
+    // A directory without a profile.json is not a profile, and the sync would
+    // only tell us it had nothing to do.
+    if (!existsSync(path.join(pDir, profileId, 'profile.json'))) continue;
+    report.profiles.push(await syncProfileAgents(profileId, projectDir, logMsg));
+  }
+
+  return report;
 }
 
 /**
@@ -288,7 +390,8 @@ export async function syncProfileAgents(
 async function markGenerated(
   targetAgentsDir: string,
   logMsg: (msg: string) => void
-): Promise<void> {
+): Promise<string[]> {
+  const errors: string[] = [];
   const ignorePath = path.join(targetAgentsDir, '.gitignore');
   try {
     await mkdir(targetAgentsDir, { recursive: true });
@@ -297,7 +400,7 @@ async function markGenerated(
     try {
       entries = await readdir(targetAgentsDir, { withFileTypes: true });
     } catch {
-      return;
+      return errors;
     }
 
     const managed: string[] = [];
@@ -316,18 +419,19 @@ async function markGenerated(
       managed.map((name) => `/${name}\n`).join('');
 
     const existing = await tryReadFile(ignorePath);
-    if (existing === body) return;
+    if (existing === body) return errors;
     if (existing !== null && !existing.startsWith(IGNORE_HEADER)) {
       logMsg(`[profile-agent-sync] ${ignorePath} was not written by this plugin — left unchanged`);
-      return;
+      return errors;
     }
     await writeFile(ignorePath, body, 'utf-8');
     logMsg(
       `[profile-agent-sync] Listed ${managed.length} generated agent file(s) in ${ignorePath}`
     );
   } catch (err) {
-    logMsg(
-      `[profile-agent-sync] Could not mark ${targetAgentsDir} as generated: ${err instanceof Error ? err.message : String(err)}`
-    );
+    const detail = err instanceof Error ? err.message : String(err);
+    logMsg(`[profile-agent-sync] Could not mark ${targetAgentsDir} as generated: ${detail}`);
+    errors.push(`Could not mark ${targetAgentsDir} as generated: ${detail}`);
   }
+  return errors;
 }

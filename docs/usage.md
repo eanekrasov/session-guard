@@ -67,21 +67,23 @@ mise run setup
 mise run build
 ```
 
-Собирается два независимых артефакта:
+Собираются три точки входа и две JSON Schema:
 
 | Файл                              | Что это                              |
 | --------------------------------- | ------------------------------------ |
 | `dist/index.js`                   | плагин и публичное API библиотеки    |
+| `dist/cli.js`                     | команда `session-guard sync-agents`  |
 | `dist/tui.js`                     | TUI-модуль: боковая панель состояния |
 | `dist/profile.schema.json`        | JSON Schema для `profile.json`       |
 | `dist/profile-schema.schema.json` | JSON Schema для YAML-схемы workflow  |
 
 Последним шагом `mise run build` запускается `scripts/verify-build.ts`: он
-проверяет наличие этих артефактов и то, что две точки входа не перезаписали друг
+проверяет наличие этих артефактов и то, что точки входа не перезаписали друг
 друга.
 
-В `package.json` они разведены по экспортам: `.` → `dist/index.js`,
-`./tui` → `dist/tui.js`.
+В `package.json` точки входа разведены: по экспортам `.` → `dist/index.js` и
+`./tui` → `dist/tui.js`, а `bin` публикует `dist/cli.js` под именем
+`session-guard`.
 
 ---
 

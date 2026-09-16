@@ -4,7 +4,11 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
 
-import { listProfileAgents, syncProfileAgents } from '../../src/app/profile-agent-sync.ts';
+import {
+  listProfileAgents,
+  syncAllProfileAgents,
+  syncProfileAgents,
+} from '../../src/app/profile-agent-sync.ts';
 
 const temporaryDirectories: string[] = [];
 
@@ -202,7 +206,11 @@ describe('syncProfileAgents', () => {
       agentsDir: 'nonexistent-agents',
     });
 
-    await expect(syncProfileAgents('test-profile', root)).resolves.toBeUndefined();
+    const outcome = await syncProfileAgents('test-profile', root);
+
+    // Nothing to copy is not a failure: this profile simply ships no agents.
+    expect(outcome.synced).toEqual([]);
+    expect(outcome.errors).toEqual([]);
   });
 
   it('handles missing profile.json gracefully', async () => {
@@ -399,6 +407,91 @@ describe('syncProfileAgents', () => {
     const simpleContent = await readFile(path.join(targetDir, 'test-profile_simple.md'), 'utf-8');
     expect(simpleContent).toContain('# MANAGED BY session-guard');
     expect(simpleContent).toContain('body content');
+  });
+
+  it('reports what it wrote in the outcome it resolves', async () => {
+    const root = await createFixtureLayout({ agentsContent: { 'code.md': '# Code agent' } });
+
+    const outcome = await syncProfileAgents('test-profile', root);
+
+    expect(outcome.profileId).toBe('test-profile');
+    expect(outcome.synced).toEqual(['test-profile_code.md']);
+    expect(outcome.errors).toEqual([]);
+    expect(outcome.collisions).toEqual([]);
+  });
+
+  it('reports a preserved unowned file as a collision, not as an error', async () => {
+    const root = await createFixtureLayout({ agentsContent: { 'code.md': '# Code agent' } });
+    const targetDir = path.join(root, '.opencode', 'agents');
+    await mkdir(targetDir, { recursive: true });
+    await writeFile(path.join(targetDir, 'test-profile_code.md'), '# mine\n', 'utf-8');
+
+    const outcome = await syncProfileAgents('test-profile', root);
+
+    // The command still exits 0 with a collision, so the outcome has to carry
+    // it — the log line scrolls away, the caller's decision does not.
+    expect(outcome.collisions).toEqual(['code.md']);
+    expect(outcome.errors).toEqual([]);
+  });
+
+  it('reports a missing profile.json as skipped, not as an error', async () => {
+    const root = await createFixtureLayout({ agentsContent: {} });
+
+    const outcome = await syncProfileAgents('no-such-profile', root);
+
+    expect(outcome.skipped).toEqual(['profile.json']);
+    expect(outcome.errors).toEqual([]);
+  });
+
+  it('reports an unparseable profile.json as an error', async () => {
+    const root = await createFixtureLayout({ agentsContent: {} });
+    const profileJson = path.join(root, '.opencode', 'profiles', 'test-profile', 'profile.json');
+    await writeFile(profileJson, '{ not json', 'utf-8');
+
+    const outcome = await syncProfileAgents('test-profile', root);
+
+    expect(outcome.errors).toHaveLength(1);
+    expect(outcome.errors[0]).toContain('Failed to parse');
+  });
+});
+
+describe('syncAllProfileAgents', () => {
+  it('synchronizes every profile that ships a profile.json', async () => {
+    const root = await createFixtureLayout({
+      agents: ['code'],
+      agentsContent: { 'code.md': '# Code agent' },
+    });
+
+    // A second profile beside the first, and a directory that is not a profile.
+    const profilesDir = path.join(root, '.opencode', 'profiles');
+    const secondDir = path.join(profilesDir, 'second');
+    await mkdir(path.join(secondDir, 'agents'), { recursive: true });
+    await writeFile(path.join(secondDir, 'profile.json'), JSON.stringify({ id: 'second' }));
+    await writeFile(path.join(secondDir, 'agents', 'review.md'), '# Review agent');
+    await mkdir(path.join(profilesDir, 'not-a-profile'), { recursive: true });
+
+    const report = await syncAllProfileAgents(root);
+
+    expect(report.errors).toEqual([]);
+    expect(report.profiles.map((outcome) => outcome.profileId).sort()).toEqual([
+      'second',
+      'test-profile',
+    ]);
+
+    const targetDir = path.join(root, '.opencode', 'agents');
+    expect(existsSync(path.join(targetDir, 'second_review.md'))).toBe(true);
+  });
+
+  it('treats a missing profiles directory as nothing to do, not as a failure', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'profile-agent-sync-empty-'));
+    temporaryDirectories.push(root);
+    process.env.SESSION_GUARD_PROFILES_DIR = path.join(root, '.opencode', 'profiles');
+    process.env.OPENCODE_HARNESS_DIR = path.join(root, '.opencode');
+
+    const report = await syncAllProfileAgents(root);
+
+    // A project that ships no profiles is not a project with a broken one.
+    expect(report).toEqual({ profiles: [], errors: [] });
   });
 });
 
