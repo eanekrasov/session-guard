@@ -19,6 +19,6 @@ are given exactly.
 When done, write your result as the very last thing in your reply — nothing
 after it:
 
-`<workflow-result>{"stage":"unit","status":"pass","summary":"<tests run>","evidence":["<test output>"]}</workflow-result>`
+`<workflow-result>{"gate":"unit","status":"pass","summary":"<tests run>","evidence":["<test output>"]}</workflow-result>`
 
 Use `"stage":"integration"` and `"status":"fail"` when tests fail.

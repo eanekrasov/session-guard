@@ -88,7 +88,7 @@ async function report(
   agent = gate === 'code' ? 'code' : gate === 'review' ? 'reviewer' : 'tester'
 ): Promise<string> {
   const tag = `<workflow-result>${JSON.stringify({
-    stage: gate,
+    gate,
     status,
     summary: `${gate} ${status}`,
     evidence: [`${gate}-evidence`],
@@ -505,7 +505,7 @@ describe('a verdict from a round that is over', () => {
 
     const session = await load(store);
     expect(
-      session.verifications.filter((entry) => entry.stage === 'qa'),
+      session.verifications.filter((entry) => entry.gate === 'qa'),
       'the stale verdict was still filed as evidence'
     ).toEqual([]);
   });

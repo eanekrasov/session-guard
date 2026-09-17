@@ -100,6 +100,26 @@ export const ActiveOperationSchema = z.object({
   kind: z.enum(['mutation', 'task']).default('mutation'),
 });
 
+/**
+ * Provenance of a verdict, keyed by the call that delivered it.
+ *
+ * A verdict about a task is a verdict about one occupancy of a stage: a
+ * verifier dispatched before the task moved must not close the gate of the
+ * round that replaced it. The operation record carries a `round` too, but the
+ * operation lives the life of a move and is deleted by paths that have nothing
+ * to do with a verdict — a lock release, an interruption, a run removed with
+ * its task. Freshness cannot depend on a record that may already be gone, so
+ * the verdict gets its own record, owned by the gate mechanism.
+ *
+ * Both fields are required on purpose. "Outside a loop" is expressed by the
+ * absence of an entry, not by a sentinel: `round` is only meaningful as "which
+ * round of the run", and without a run there is nothing to compare it to.
+ */
+export const VerdictProvenanceSchema = z.object({
+  runId: z.string().min(1),
+  round: z.number().int().min(0),
+});
+
 export const RetryBudgetSchema = z.object({
   attempts: z.number().int().min(0),
   maximum: z.number().int().min(1),
@@ -311,10 +331,29 @@ export const DeliveryPermitSchema = z.object({
 });
 
 export const VerificationSchema = z.object({
-  stage: z.string().min(1),
+  gate: z.string().min(1),
   status: z.enum(['confirmed', 'rejected']),
   recordedAt: z.string().optional(),
 });
+
+/**
+ * A verification record as it is read, accepting the pre-rename spelling.
+ *
+ * Sessions written before the verdict field was renamed record `stage`, and
+ * this repository has no migration mechanism to rewrite them. The reader
+ * normalises the old key to `gate`; a rename that changed nothing about what
+ * the record means must not make an old session unreadable, and dropping the
+ * verdicts it holds would lose the very evidence it was written to keep.
+ *
+ * New records already carry `gate` and pass through untouched.
+ */
+const VerificationReadSchema = z.preprocess((entry) => {
+  if (typeof entry !== 'object' || entry === null) return entry;
+  const record = entry as Record<string, unknown>;
+  if (record.gate !== undefined || typeof record.stage !== 'string') return record;
+  const { stage, ...rest } = record;
+  return { ...rest, gate: stage };
+}, VerificationSchema);
 
 // ─── WorkflowSession schema (strip mode — for save) ───────────────────────────
 
@@ -325,7 +364,7 @@ export const WorkflowSessionSchema = z
     // A profile may hold several independent schemas; the session runs exactly
     // one of them, named here by its id within the profile.
     schemaId: z.string().min(1, 'schemaId is required'),
-    schemaVersion: z.number().int().positive().default(2),
+    schemaVersion: z.number().int().positive().default(1),
     revision: z.number().int().min(0).default(0),
     title: z.string().default(''),
     stageGateResults: z.array(StageGateResultSchema).default([]),
@@ -333,6 +372,14 @@ export const WorkflowSessionSchema = z
     refs: z.record(z.string()).default({}),
     tasks: TasksSchema.default({}),
     activeOperations: ActiveOperationsSchema.default({}),
+    /**
+     * Freshness stamps for `<workflow-result>` verdicts, keyed by call id.
+     *
+     * Written where an operation is written, but owned by the gate mechanism:
+     * unlike `activeOperations`, it is not deleted by the mutation lifecycle.
+     * See `VerdictProvenanceSchema`.
+     */
+    verdictProvenance: z.record(VerdictProvenanceSchema).default({}),
     activeTaskContexts: z.array(ActiveTaskContextSchema).default([]),
     loopRuns: LoopRunsSchema.default({}),
     deliveryPermit: DeliveryPermitSchema.nullable().default(null),
@@ -340,7 +387,7 @@ export const WorkflowSessionSchema = z
     retryBudgets: RetryBudgetsSchema.default({}),
     pendingDecisions: z.array(PendingDecisionSchema).default([]),
     updatedAt: z.string().default(() => new Date().toISOString()),
-    verifications: z.array(VerificationSchema).default([]),
+    verifications: z.array(VerificationReadSchema).default([]),
     changedFiles: z.array(z.string()).default([]),
     currentStage: z.string(),
     /**

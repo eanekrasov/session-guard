@@ -85,7 +85,7 @@ describe('cancelling a task ends the work on it', () => {
       {
         title: 'task',
         output:
-          '<workflow-result>{"stage":"dev","status":"pass","summary":"ok","evidence":["ok"]}</workflow-result>',
+          '<workflow-result>{"gate":"dev","status":"pass","summary":"ok","evidence":["ok"]}</workflow-result>',
         metadata: {},
       }
     );
@@ -249,7 +249,7 @@ describe('a nested task finishes, not only starts', () => {
     const output = {
       title: 'task',
       output:
-        '<workflow-result>{"stage":"child","status":"pass","summary":"ok","evidence":["ok"]}</workflow-result>',
+        '<workflow-result>{"gate":"child","status":"pass","summary":"ok","evidence":["ok"]}</workflow-result>',
       metadata: {},
     };
     await hooks['tool.execute.after']!(

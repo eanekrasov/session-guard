@@ -8,7 +8,7 @@ function makeSession(overrides: Partial<WorkflowSession> = {}): WorkflowSession 
     sessionId: 'test-session',
     profileId: 'android',
     schemaId: 'session-guard',
-    schemaVersion: 2,
+    schemaVersion: 1,
     revision: 0,
     title: 'Test',
     stageGateResults: [],
@@ -16,6 +16,7 @@ function makeSession(overrides: Partial<WorkflowSession> = {}): WorkflowSession 
     refs: {},
     tasks: {},
     activeOperations: {},
+    verdictProvenance: {},
     activeTaskContexts: [],
     loopRuns: {},
     deliveryReceipt: null,
@@ -58,7 +59,7 @@ describe('toSessionFacts', () => {
       tasks: {
         implementation: [createTask({ status: 'completed' })],
       },
-      verifications: [{ stage: 'bug', status: 'confirmed' }],
+      verifications: [{ gate: 'bug', status: 'confirmed' }],
     });
 
     const facts = toSessionFacts(session);

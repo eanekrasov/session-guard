@@ -57,25 +57,25 @@ export function setInvariantViolations(
 
 // ─── Verification helpers ─────────────────────────────────────────────────────
 
-export function confirm(session: WorkflowSession, stage: string): void {
+export function confirm(session: WorkflowSession, gate: string): void {
   const now = new Date().toISOString();
-  const existing = session.verifications.find((v) => v.stage === stage);
+  const existing = session.verifications.find((v) => v.gate === gate);
   if (existing) {
     existing.status = 'confirmed';
     existing.recordedAt = now;
   } else {
-    session.verifications.push({ stage, status: 'confirmed', recordedAt: now });
+    session.verifications.push({ gate, status: 'confirmed', recordedAt: now });
   }
 }
 
-export function rejectVerification(session: WorkflowSession, stage: string): void {
+export function rejectVerification(session: WorkflowSession, gate: string): void {
   const now = new Date().toISOString();
-  const existing = session.verifications.find((v) => v.stage === stage);
+  const existing = session.verifications.find((v) => v.gate === gate);
   if (existing) {
     existing.status = 'rejected';
     existing.recordedAt = now;
   } else {
-    session.verifications.push({ stage, status: 'rejected', recordedAt: now });
+    session.verifications.push({ gate, status: 'rejected', recordedAt: now });
   }
 }
 

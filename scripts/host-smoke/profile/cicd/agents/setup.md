@@ -19,6 +19,6 @@ necessary source files. Follow the instructions you are given exactly.
 When done, write your result as the very last thing in your reply — nothing
 after it:
 
-`<workflow-result>{"stage":"checkout_done","status":"pass","summary":"<what you set up>","evidence":["<files you created>"]}</workflow-result>`
+`<workflow-result>{"gate":"checkout_done","status":"pass","summary":"<what you set up>","evidence":["<files you created>"]}</workflow-result>`
 
 Use `"status":"fail"` when setup fails.

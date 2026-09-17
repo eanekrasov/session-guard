@@ -116,7 +116,7 @@ describe('a missing baseline frame leaves no gate (D5)', () => {
       await store.save(before);
     }
 
-    const tag = `<workflow-result>${JSON.stringify({ stage: 'code', status: 'pass', summary: 'ok', evidence: ['ok'] })}</workflow-result>`;
+    const tag = `<workflow-result>${JSON.stringify({ gate: 'code', status: 'pass', summary: 'ok', evidence: ['ok'] })}</workflow-result>`;
     const output = { title: 'task', output: tag, metadata: {} };
     await hooks['tool.execute.after']!(
       { tool: 'task', sessionID: 's1', callID: 'call-1', args: { subagent_type: 'coder' } },
@@ -183,7 +183,7 @@ describe('the core’s verdict about a task move reaches the run', () => {
     // Ход субагента: файл появляется между baseline и after-хуком.
     writeFileSync(join(gitDir, 'touched.ts'), dirty, 'utf-8');
 
-    const tag = `<workflow-result>${JSON.stringify({ stage: 'code', status: 'pass', summary: 'ok', evidence: ['ok'] })}</workflow-result>`;
+    const tag = `<workflow-result>${JSON.stringify({ gate: 'code', status: 'pass', summary: 'ok', evidence: ['ok'] })}</workflow-result>`;
     await hooks['tool.execute.after']!(
       { tool: 'task', sessionID: 's1', callID: 'call-1', args: { subagent_type: 'coder' } },
       { title: 'task', output: tag, metadata: {} }

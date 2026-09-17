@@ -52,6 +52,7 @@ import {
 import {
   TASK_STATUS,
   MutationTaskSchema,
+  type ActiveOperation,
   type LoopRun,
   type MutationTask,
   type WorkflowSession,
@@ -114,6 +115,20 @@ interface EventEnvelope {
     properties?: { part?: EventPart } & Record<string, unknown>;
   };
 }
+
+/**
+ * Where a `<workflow-result>` verdict belongs.
+ *
+ * `run` — the gate is declared by the nested stage a live run is in, so the
+ * verdict is about that task's occupancy of that stage. `stage` — the gate is
+ * declared by the session's own current stage, so the verdict is about the work
+ * as a whole. `refused` — no stage in scope declares the gate, and the caller
+ * says so instead of recording it nowhere.
+ */
+type GateOwner =
+  | { kind: 'run'; run: LoopRun; loopStage: StageDef; stage: StageDef | undefined }
+  | { kind: 'stage'; stageId: string; stage: StageDef }
+  | { kind: 'refused'; stageLabel: string; declaredGates: string[] };
 
 class SessionGuardRuntime {
   private store: WorkflowStore;
@@ -1088,6 +1103,10 @@ class SessionGuardRuntime {
         };
         task.status = 'running';
       }
+      // The occupancy of the stage this call belongs to. A verdict that
+      // arrives after the task has moved on belongs to a round that is over.
+      // Stamped in one place for both records, so the two cannot drift.
+      const round = tx.session.loopRuns[runId]?.round ?? 0;
       tx.session.activeOperations[callID] = {
         callId: callID,
         runId,
@@ -1096,13 +1115,24 @@ class SessionGuardRuntime {
         kind: 'task',
         status: 'running',
         startedAt: new Date().toISOString(),
-        // The occupancy of the stage this call belongs to. A verdict that
-        // arrives after the task has moved on belongs to a round that is over.
-        round: tx.session.loopRuns[runId]?.round ?? 0,
+        round,
         // The pre-move snapshot captured above, before admission. A missing
         // frame (no projectDir) leaves this unset — see D5.
         baseline: frame,
       };
+      // The verdict's own freshness stamp, owned by the gate mechanism. Unlike
+      // the operation above, it is not deleted by the mutation lifecycle — a
+      // verdict must still be judgeable against its round when the operation
+      // is gone.
+      tx.session.verdictProvenance[callID] = { runId, round };
+      // Bounded: a call that is never answered leaves its stamp behind, and a
+      // session's call ids only ever accumulate.
+      const stampedCalls = Object.keys(tx.session.verdictProvenance);
+      if (stampedCalls.length > 500) {
+        for (const expired of stampedCalls.slice(0, stampedCalls.length - 500)) {
+          delete tx.session.verdictProvenance[expired];
+        }
+      }
 
       upsertActiveTaskContext(tx.session, {
         runId,
@@ -1793,238 +1823,272 @@ class SessionGuardRuntime {
     }
 
     const operation = session.activeOperations[callID];
-    const run = operation && operation.runId ? session.loopRuns[operation.runId] : undefined;
-    const task = operation ? findTask(session, operation.taskId) : undefined;
+    const provenance = session.verdictProvenance?.[callID];
+    // The stamp is normally the verdict's own provenance. A call admitted before
+    // provenance existed still carries its round on the operation, so both are
+    // read — being judgeable is what matters, not which record happens to hold
+    // the round.
+    const stampedRunId = provenance?.runId ?? operation?.runId;
+    const stampedRound = provenance?.round ?? operation?.round;
 
-    if (
-      operation &&
-      run &&
-      task &&
-      operation.status === 'running' &&
-      operation.round !== run.round
-    ) {
-      // The task has entered the stage again — or a different one — since
-      // this verifier was dispatched. Its verdict is about work that has
-      // already been judged, so NOTHING it says is recorded: not the gate,
-      // not the verification. This check has to come before every write,
-      // because a stale gate left behind lets a finished round vouch for
-      // the round that replaced it, and the stage closes with one verifier
-      // of the current round never heard from.
-      output.output +=
-        `\n\n[workflow-result-stale]\n` +
-        `This result was produced for an earlier round of ${task.id}, ` +
-        `which has since moved to ${run.stage}. Nothing was recorded.`;
-      void this.log('warn', 'Workflow result from a finished round', {
-        sessionID: session.sessionId,
-        taskId: task.id,
-        resultRound: operation.round,
-        currentRound: run.round,
-      });
-      delete session.activeOperations[callID];
+    // A verdict produced for a round that is over must not seed the round that
+    // replaced it: the gates it names were cleared on the move, and a late
+    // verifier vouching for work nobody re-did is how a stage closes with one
+    // of its own never heard from. Reading the provenance rather than the
+    // operation is what keeps this working when the operation is already gone
+    // or interrupted — the case the old check silently skipped.
+    if (stampedRunId !== undefined && stampedRound !== undefined) {
+      const stamped = session.loopRuns[stampedRunId];
+      if (stamped && (!isOpenLoopRun(stamped) || stampedRound !== stamped.round)) {
+        output.output +=
+          `\n\n[workflow-result-stale]\n` +
+          `This result was produced for an earlier round of ${stamped.taskId}, ` +
+          `which has since moved to ${stamped.stage}. Nothing was recorded.`;
+        void this.log('warn', 'Workflow result from a finished round', {
+          sessionID: session.sessionId,
+          taskId: stamped.taskId,
+          resultRound: stampedRound,
+          currentRound: stamped.round,
+        });
+        this.releaseVerdict(session, callID);
+        return;
+      }
+    }
+
+    // A task that reports nothing is not a task that passed. Saying so is the
+    // difference between a stalled loop and a stalled loop nobody can explain.
+    if (!parsed) {
+      const silent = this.runForCall(session, provenance, operation);
+      if (silent) {
+        output.output +=
+          `\n\n[workflow-result-missing]\n` +
+          `Stage ${silent.stage} of ${silent.taskId} ended without a ` +
+          `<workflow-result> marker, so nothing was recorded and the task did not move.`;
+        void this.log('warn', 'Workflow task returned no result', {
+          sessionID: session.sessionId,
+          taskId: silent.taskId,
+          stage: silent.stage,
+          outputPreview: output.output.slice(0, 200),
+        });
+      }
+      this.releaseVerdict(session, callID);
       return;
     }
+
+    // Where the verdict belongs follows the gate's declaration, never the
+    // bookkeeping of the call that carried it.
+    const owner = await this.resolveGateOwner(session, parsed.gate, provenance, operation);
 
     // Свернуть вердикт хода (написан `invariantsAfter`, шаг 1a) в
     // `run.checks` — строго после проверки свежести раунда выше. Старая
     // операция не должна трогать вердикт текущего раунда даже временно.
-    if (run && operation?.checks) {
-      run.checks = operation.checks;
+    if (owner.kind === 'run' && operation?.checks) {
+      owner.run.checks = operation.checks;
     }
 
-    if (operation) {
-      if (run && task) {
-        if (operation.status !== 'running') {
+    if (owner.kind === 'refused') {
+      // Silence was the original symptom: a gate nobody honours has to say so.
+      output.output +=
+        `\n\n[workflow-result-rejected]\n` +
+        (owner.declaredGates.length > 0
+          ? `${owner.stageLabel} is waiting on [${owner.declaredGates.join(', ')}], ` +
+            `and this result reports '${parsed.gate}'. Nothing was recorded.`
+          : `No stage in scope declares the gate '${parsed.gate}'. Nothing was recorded.`);
+      void this.log('warn', 'Workflow result names a gate no stage in scope declares', {
+        sessionID: session.sessionId,
+        reported: parsed.gate,
+        stage: owner.stageLabel,
+        declared: owner.declaredGates,
+      });
+      this.releaseVerdict(session, callID);
+      return;
+    }
+
+    if (owner.kind === 'stage') {
+      await this.recordStageGate(session, owner, parsed, reportingAgent, output);
+      this.releaseVerdict(session, callID);
+      void this.log('info', `Workflow result recorded`, {
+        sessionID: session.sessionId,
+        gate: parsed.gate,
+        status: parsed.status,
+        summary: parsed.summary,
+      });
+      return;
+    }
+
+    const run = owner.run;
+    const task = findTask(session, run.taskId);
+    const loopStage = owner.loopStage;
+    const currentStage = owner.stage;
+    const declaredGates = currentStage?.gates ?? [];
+    // The verdict is recorded whatever the call's lifecycle did; a call that is
+    // no longer running may not MOVE the task on it. Returning early here — as
+    // this used to — lost the verdict along with the movement.
+    const mayMove = operation === undefined || operation.status === 'running';
+
+    if (run && task) {
+      if (parsed && declaredGates.length > 0) {
+        // A verifier stage may run several agents at once — review and qa
+        // in parallel — so a tag names the gate it closes, never the stage
+        // it ran in. A name the stage does not declare is refused: it is
+        // evidence for something nobody asked about.
+        if (!this.mayVerify(reportingAgent, currentStage, session.profileId)) {
+          output.output +=
+            `\n\n[workflow-result-rejected]\n` +
+            `Stage ${run.stage} accepts results from ` +
+            `[${(currentStage?.allowedAgents ?? []).join(', ') || '(no roster)'}], ` +
+            `and this one came from '${reportingAgent ?? '(unknown agent)'}'. ` +
+            `Nothing was recorded.`;
+          void this.log('warn', 'Workflow result from an agent the stage does not allow', {
+            sessionID: session.sessionId,
+            stage: run.stage,
+            agent: reportingAgent ?? null,
+          });
+          delete session.activeOperations[callID];
           return;
         }
-        const loopStage = parsed ? await this.resolveLoopStage(session, run.listKey) : null;
-        const nested = loopStage ? nestedStages(loopStage) : [];
-        const currentStage = nested.find((entry) => entry.id === run.stage);
-        const declaredGates = currentStage?.gates ?? [];
-
-        if (parsed && declaredGates.length > 0) {
-          // A verifier stage may run several agents at once — review and qa
-          // in parallel — so a tag names the gate it closes, never the stage
-          // it ran in. A name the stage does not declare is refused: it is
-          // evidence for something nobody asked about.
-          if (!this.mayVerify(reportingAgent, currentStage, session.profileId)) {
-            output.output +=
-              `\n\n[workflow-result-rejected]\n` +
-              `Stage ${run.stage} accepts results from ` +
-              `[${(currentStage?.allowedAgents ?? []).join(', ') || '(no roster)'}], ` +
-              `and this one came from '${reportingAgent ?? '(unknown agent)'}'. ` +
-              `Nothing was recorded.`;
-            void this.log('warn', 'Workflow result from an agent the stage does not allow', {
-              sessionID: session.sessionId,
-              stage: run.stage,
-              agent: reportingAgent ?? null,
-            });
-            delete session.activeOperations[callID];
-            return;
-          }
-          if (!declaredGates.includes(parsed.stage)) {
-            output.output +=
-              `\n\n[workflow-result-rejected]\n` +
-              `Stage ${run.stage} is waiting on [${declaredGates.join(', ')}], ` +
-              `and this result reports '${parsed.stage}'. Nothing was recorded.`;
-            void this.log('warn', 'Workflow result names an undeclared gate', {
-              sessionID: session.sessionId,
-              stage: run.stage,
-              reported: parsed.stage,
-              declared: declaredGates,
-            });
-            delete session.activeOperations[callID];
-            return;
-          }
-          run.gates[parsed.stage] = parsed.status === 'pass' ? 'passed' : 'failed';
-        }
-
-        // Verification is recorded only after all admission checks pass —
-        // agent authority, declared gates, and round freshness. A result
-        // rejected above leaves nothing in session.verifications.
-        if (parsed) {
-          session.verifications.push({
-            stage: parsed.stage,
-            status: parsed.status === 'pass' ? 'confirmed' : 'rejected',
-            recordedAt: new Date().toISOString(),
-          });
-        }
-
-        const stageFailed = declaredGates.some((gate) => run.gates[gate] === 'failed');
-        const stagePassed =
-          declaredGates.length > 0 && declaredGates.every((gate) => run.gates[gate] === 'passed');
-        // A stage with no gates keeps the old contract: its single agent's
-        // own pass or fail decides.
-        const failed = declaredGates.length > 0 ? stageFailed : parsed?.status === 'fail';
-        const passed = declaredGates.length > 0 ? stagePassed : parsed?.status === 'pass';
-
-        if (!parsed) {
-          // A workflow task that reports nothing is not a task that passed.
-          // Saying so is the difference between a stalled loop and a stalled
-          // loop nobody can explain.
+        if (!declaredGates.includes(parsed.gate)) {
           output.output +=
-            `\n\n[workflow-result-missing]\n` +
-            `Stage ${run.stage} of ${task.id} ended without a <workflow-result> marker, ` +
-            `so nothing was recorded and the task did not move.`;
-          void this.log('warn', 'Workflow task returned no result', {
+            `\n\n[workflow-result-rejected]\n` +
+            `Stage ${run.stage} is waiting on [${declaredGates.join(', ')}], ` +
+            `and this result reports '${parsed.gate}'. Nothing was recorded.`;
+          void this.log('warn', 'Workflow result names an undeclared gate', {
+            sessionID: session.sessionId,
+            stage: run.stage,
+            reported: parsed.gate,
+            declared: declaredGates,
+          });
+          delete session.activeOperations[callID];
+          return;
+        }
+        run.gates[parsed.gate] = parsed.status === 'pass' ? 'passed' : 'failed';
+      }
+
+      // Verification is recorded only after all admission checks pass —
+      // agent authority, declared gates, and round freshness. A result
+      // rejected above leaves nothing in session.verifications.
+      if (parsed) {
+        session.verifications.push({
+          gate: parsed.gate,
+          status: parsed.status === 'pass' ? 'confirmed' : 'rejected',
+          recordedAt: new Date().toISOString(),
+        });
+      }
+
+      const stageFailed = declaredGates.some((gate) => run.gates[gate] === 'failed');
+      const stagePassed =
+        declaredGates.length > 0 && declaredGates.every((gate) => run.gates[gate] === 'passed');
+      // A stage with no gates keeps the old contract: its single agent's
+      // own pass or fail decides.
+      const failed = declaredGates.length > 0 ? stageFailed : parsed?.status === 'fail';
+      const passed = declaredGates.length > 0 ? stagePassed : parsed?.status === 'pass';
+
+      if (mayMove && (failed || passed)) {
+        const engine = await this.mutationOrchestrator.resolveEngine(
+          session.profileId,
+          session.schemaId
+        );
+        const movement = nextTaskStage(
+          loopStage,
+          run,
+          passed,
+          (expression, facts) =>
+            engine.evaluateGuard(expression, toGuardContext(session, { ...facts }), {
+              currentLoopListKey: run.listKey,
+            }),
+          (type) =>
+            session.approvals.some(
+              (approval) => approval.type === type && approval.status === 'granted'
+            )
+        );
+
+        // An edge that is taken applies what it declares, at either level
+        // and whichever way it ends. The retry budget below is the one
+        // effect with its own conditions; everything else follows the
+        // edge, because a schema that is accepted has to be obeyed.
+        if (movement.kind === 'complete' || movement.kind === 'move') {
+          this.applyApprovalEffects(
+            session,
+            run,
+            movement.kind === 'move' ? movement.to : TASK_DONE,
+            movement.effects
+          );
+        }
+
+        if (movement.kind === 'complete') {
+          run.status = 'completed';
+          task.status = 'completed';
+          removeActiveTaskContext(session, run.id);
+        } else if (movement.kind === 'move') {
+          // A move that walks a failure back into the loop spends the
+          // task's budget whether or not the edge remembered to say so.
+          // An edge without the effect would otherwise cycle forever, and
+          // the operator would never be asked.
+          const spendsBudget =
+            failed || (movement.effects ?? []).some((e) => e.bumpRetry !== undefined);
+          const exhausted = spendsBudget
+            ? this.applyTaskEffects(session, run, task, loopStage, movement.effects, failed)
+            : false;
+          run.stage = movement.to;
+          // Each stage judges its own work: the next one starts with no
+          // verdicts carried over from the last, and a new round, so any
+          // verifier still working the previous one is answered too late.
+          run.gates = {};
+          run.round += 1;
+          // The stamps written for the round just cleared are dead weight, and
+          // one of them being read against the round that replaced it is worse.
+          this.clearRunProvenance(session, run.id);
+          if (exhausted) {
+            run.status = 'awaiting_decision';
+            this.upsertActiveTaskContextFromSession(session, run.id, 'awaiting_decision');
+            this.upsertPendingDecision(session, task.id, run.id);
+          } else {
+            task.status = 'running';
+            run.status = 'running';
+            this.upsertActiveTaskContextFromSession(session, run.id, 'running');
+          }
+        } else if (failed && movement.kind === 'unreachable') {
+          // No transition took the failure and there is no applicable route
+          // at all — the loop's own retry budget decides: back to the first
+          // stage, or a decision for the operator. When stayKind is
+          // 'blocked' the route exists but a guard or consent explicitly
+          // shut it — retry must NOT override that policy decision.
+          this.recordTaskRetryFailure(session, run, task, loopStage);
+        } else if (movement.kind === 'blocked') {
+          // A route exists but a guard or consent explicitly shut it —
+          // a policy decision, not a missing route. It must NOT be
+          // silently dropped, and it must NOT spend retry budget.
+          output.output +=
+            `\n\n[workflow-task-blocked]\n` +
+            `${task.id} stayed at ${run.stage}: ${movement.reason}`;
+          void this.log('warn', 'Workflow task movement blocked', {
             sessionID: session.sessionId,
             taskId: task.id,
             stage: run.stage,
-            outputPreview: output.output.slice(0, 200),
+            reason: movement.reason,
+          });
+        } else if (passed && movement.kind === 'unreachable') {
+          // A passing stage with nowhere applicable to go — surfaced
+          // rather than silently dropped, matching the failure case above.
+          output.output +=
+            `\n\n[workflow-task-unreachable]\n` +
+            `${task.id} stayed at ${run.stage}: ${movement.reason}`;
+          void this.log('warn', 'Workflow task movement unreachable on pass', {
+            sessionID: session.sessionId,
+            taskId: task.id,
+            stage: run.stage,
+            reason: movement.reason,
           });
         }
-
-        if (failed || passed) {
-          const engine = await this.mutationOrchestrator.resolveEngine(
-            session.profileId,
-            session.schemaId
-          );
-          const movement = nextTaskStage(
-            loopStage,
-            run,
-            passed,
-            (expression, facts) =>
-              engine.evaluateGuard(expression, toGuardContext(session, { ...facts }), {
-                currentLoopListKey: run.listKey,
-              }),
-            (type) =>
-              session.approvals.some(
-                (approval) => approval.type === type && approval.status === 'granted'
-              )
-          );
-
-          // An edge that is taken applies what it declares, at either level
-          // and whichever way it ends. The retry budget below is the one
-          // effect with its own conditions; everything else follows the
-          // edge, because a schema that is accepted has to be obeyed.
-          if (movement.kind === 'complete' || movement.kind === 'move') {
-            this.applyApprovalEffects(
-              session,
-              run,
-              movement.kind === 'move' ? movement.to : TASK_DONE,
-              movement.effects
-            );
-          }
-
-          if (movement.kind === 'complete') {
-            run.status = 'completed';
-            task.status = 'completed';
-            removeActiveTaskContext(session, run.id);
-          } else if (movement.kind === 'move') {
-            // A move that walks a failure back into the loop spends the
-            // task's budget whether or not the edge remembered to say so.
-            // An edge without the effect would otherwise cycle forever, and
-            // the operator would never be asked.
-            const spendsBudget =
-              failed || (movement.effects ?? []).some((e) => e.bumpRetry !== undefined);
-            const exhausted = spendsBudget
-              ? this.applyTaskEffects(session, run, task, loopStage, movement.effects, failed)
-              : false;
-            run.stage = movement.to;
-            // Each stage judges its own work: the next one starts with no
-            // verdicts carried over from the last, and a new round, so any
-            // verifier still working the previous one is answered too late.
-            run.gates = {};
-            run.round += 1;
-            if (exhausted) {
-              run.status = 'awaiting_decision';
-              this.upsertActiveTaskContextFromSession(session, run.id, 'awaiting_decision');
-              this.upsertPendingDecision(session, task.id, run.id);
-            } else {
-              task.status = 'running';
-              run.status = 'running';
-              this.upsertActiveTaskContextFromSession(session, run.id, 'running');
-            }
-          } else if (failed && movement.kind === 'unreachable') {
-            // No transition took the failure and there is no applicable route
-            // at all — the loop's own retry budget decides: back to the first
-            // stage, or a decision for the operator. When stayKind is
-            // 'blocked' the route exists but a guard or consent explicitly
-            // shut it — retry must NOT override that policy decision.
-            this.recordTaskRetryFailure(session, run, task, loopStage);
-          } else if (movement.kind === 'blocked') {
-            // A route exists but a guard or consent explicitly shut it —
-            // a policy decision, not a missing route. It must NOT be
-            // silently dropped, and it must NOT spend retry budget.
-            output.output +=
-              `\n\n[workflow-task-blocked]\n` +
-              `${task.id} stayed at ${run.stage}: ${movement.reason}`;
-            void this.log('warn', 'Workflow task movement blocked', {
-              sessionID: session.sessionId,
-              taskId: task.id,
-              stage: run.stage,
-              reason: movement.reason,
-            });
-          } else if (passed && movement.kind === 'unreachable') {
-            // A passing stage with nowhere applicable to go — surfaced
-            // rather than silently dropped, matching the failure case above.
-            output.output +=
-              `\n\n[workflow-task-unreachable]\n` +
-              `${task.id} stayed at ${run.stage}: ${movement.reason}`;
-            void this.log('warn', 'Workflow task movement unreachable on pass', {
-              sessionID: session.sessionId,
-              taskId: task.id,
-              stage: run.stage,
-              reason: movement.reason,
-            });
-          }
-        }
       }
-      // Cleanup always follows movement recording above, for every
-      // movement kind — move, complete, blocked, and unreachable.
-      delete session.activeOperations[callID];
-    } else if (parsed) {
-      // A verdict about the whole body of work, not about one task: the
-      // current stage's own gates. A stage is a stage at either level, so the
-      // rule is the same — the tag names a gate the stage declared, or it is
-      // refused.
-      await this.recordStageGate(session, parsed, reportingAgent, output);
-      delete session.activeOperations[callID];
     }
+    // Cleanup always follows movement recording, for every movement kind.
+    this.releaseVerdict(session, callID);
 
     if (parsed) {
       void this.log('info', `Workflow result recorded`, {
         sessionID: session.sessionId,
-        stage: parsed.stage,
+        gate: parsed.gate,
         status: parsed.status,
         summary: parsed.summary,
       });
@@ -2032,76 +2096,156 @@ class SessionGuardRuntime {
   }
 
   /**
-   * Close a gate on the session's current stage from a `<workflow-result>`.
+   * Close a gate on the session's own current stage from a `<workflow-result>`.
    *
    * The loop case records a verdict about one task; this records one about the
    * work as a whole — the `validation` stage of the shipped workflow, where the
    * same review and qa agents check everything that was built.
+   *
+   * The stage arrives already resolved by its declaration: this method is the
+   * writer, not the address book.
    */
   private async recordStageGate(
     session: WorkflowSession,
-    parsed: { stage: string; status: 'pass' | 'fail' },
+    owner: Extract<GateOwner, { kind: 'stage' }>,
+    parsed: { gate: string; status: 'pass' | 'fail' },
     reportingAgent: string | undefined,
     output: { output: string }
   ): Promise<void> {
-    const stageId = session.currentStage;
-    if (!stageId) return;
-
-    let stage: StageDef | undefined;
-    try {
-      const engine = await this.mutationOrchestrator.resolveEngine(
-        session.profileId,
-        session.schemaId
-      );
-      stage = engine.getStages()[stageId];
-    } catch (error) {
-      // A profile we cannot read declares no gates we can honour. The verdict
-      // is still recorded in `verifications`; nothing is invented here.
-      void this.log('warn', 'recordStageGate: profile could not be resolved', {
-        sessionID: session.sessionId,
-        profileId: session.profileId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      return;
-    }
-    const declaredGates = stage?.gates ?? [];
-    if (declaredGates.length === 0) return;
-
-    if (!this.mayVerify(reportingAgent, stage, session.profileId)) {
+    if (!this.mayVerify(reportingAgent, owner.stage, session.profileId)) {
       output.output +=
         `\n\n[workflow-result-rejected]\n` +
-        `Stage ${stageId} accepts results from ` +
-        `[${(stage?.allowedAgents ?? []).join(', ') || '(no roster)'}], and this one came from ` +
-        `'${reportingAgent ?? '(unknown agent)'}'. Nothing was recorded.`;
+        `Stage ${owner.stageId} accepts results from ` +
+        `[${(owner.stage.allowedAgents ?? []).join(', ') || '(no roster)'}], ` +
+        `and this one came from '${reportingAgent ?? '(unknown agent)'}'. ` +
+        `Nothing was recorded.`;
       void this.log('warn', 'Workflow result from an agent the stage does not allow', {
         sessionID: session.sessionId,
-        stage: stageId,
+        stage: owner.stageId,
         agent: reportingAgent ?? null,
       });
       return;
     }
 
-    if (!declaredGates.includes(parsed.stage)) {
-      output.output +=
-        `\n\n[workflow-result-rejected]\n` +
-        `Stage ${stageId} is waiting on [${declaredGates.join(', ')}], ` +
-        `and this result reports '${parsed.stage}'. Nothing was recorded.`;
-      void this.log('warn', 'Workflow result names an undeclared gate', {
-        sessionID: session.sessionId,
-        stage: stageId,
-        reported: parsed.stage,
-        declared: declaredGates,
-      });
-      return;
-    }
-
-    setGateStatus(session, parsed.stage, parsed.status === 'pass' ? 'passed' : 'failed');
+    setGateStatus(session, parsed.gate, parsed.status === 'pass' ? 'passed' : 'failed');
     void this.log('info', 'Stage gate recorded', {
       sessionID: session.sessionId,
-      stage: stageId,
-      gate: parsed.stage,
+      stage: owner.stageId,
+      gate: parsed.gate,
       status: parsed.status,
     });
+  }
+
+  /**
+   * Which stage owns a gate — and therefore where its verdict is recorded.
+   *
+   * A `<workflow-result>` names a gate, never the stage it ran in, so the
+   * destination follows the declaration: the stage that declares the gate is
+   * the stage the verdict is about.
+   *
+   * The call's records — its provenance, its operation — are read only to find
+   * the RUN the verdict is about, never to decide whether the verdict counts.
+   * `activeOperations` is deleted by paths that have nothing to do with a
+   * verdict (a lock release, an interruption, a run removed with its task), and
+   * a verdict that outlives it is still a verdict about the gate it names.
+   *
+   * Scope, in order: the nested stage the run is currently in, then the session's
+   * own current stage. A gate declared by neither is nobody's, and the caller
+   * refuses it rather than inventing a home for it.
+   */
+  private async resolveGateOwner(
+    session: WorkflowSession,
+    gate: string,
+    provenance: { runId?: string; round?: number } | undefined,
+    operation: ActiveOperation | undefined
+  ): Promise<GateOwner> {
+    const runId = provenance?.runId ?? operation?.runId;
+    if (runId !== undefined) {
+      const run = session.loopRuns[runId];
+      if (run && isOpenLoopRun(run)) {
+        try {
+          const loopStage = await this.resolveLoopStage(session, run.listKey);
+          if (loopStage) {
+            const stage = nestedStages(loopStage).find((entry) => entry.id === run.stage);
+            const declaredGates = stage?.gates ?? [];
+            // A stage with no gates keeps the old contract: its single agent's
+            // own pass or fail decides. A stage we cannot find at all — a
+            // renamed or corrupted `run.stage` — declares nothing we can honour
+            // either, and the run still owns the verdict, so the movement (and
+            // its `unreachable` diagnostic) stays observable.
+            if (declaredGates.length === 0 || declaredGates.includes(gate)) {
+              return { kind: 'run', run, loopStage, stage };
+            }
+            return { kind: 'refused', stageLabel: run.stage, declaredGates };
+          }
+        } catch (error) {
+          void this.log('warn', 'resolveGateOwner: loop stage could not be resolved', {
+            sessionID: session.sessionId,
+            runId: run.id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+    }
+
+    const stageId = session.currentStage;
+    if (!stageId) return { kind: 'refused', stageLabel: '(no stage)', declaredGates: [] };
+    try {
+      const engine = await this.mutationOrchestrator.resolveEngine(
+        session.profileId,
+        session.schemaId
+      );
+      const stage = engine.getStages()[stageId];
+      const declaredGates = stage?.gates ?? [];
+      if (stage && declaredGates.includes(gate)) return { kind: 'stage', stageId, stage };
+      return { kind: 'refused', stageLabel: stageId, declaredGates };
+    } catch (error) {
+      void this.log('warn', 'resolveGateOwner: profile could not be resolved', {
+        sessionID: session.sessionId,
+        profileId: session.profileId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return { kind: 'refused', stageLabel: stageId, declaredGates: [] };
+    }
+  }
+
+  /**
+   * Drop every trace of the call that carried a verdict.
+   *
+   * The operation is the mutation's record; the provenance is the gate
+   * mechanism's. Both are finished with once the verdict has been judged — and
+   * only the first is also deleted by paths that never saw a verdict.
+   */
+  private releaseVerdict(session: WorkflowSession, callID: string): void {
+    delete session.activeOperations[callID];
+    if (session.verdictProvenance) delete session.verdictProvenance[callID];
+  }
+
+  /** The open run a call belongs to: its provenance first, its operation second. */
+  private runForCall(
+    session: WorkflowSession,
+    provenance: { runId?: string; round?: number } | undefined,
+    operation: ActiveOperation | undefined
+  ): LoopRun | undefined {
+    const runId = provenance?.runId ?? operation?.runId;
+    if (!runId) return undefined;
+    const run = session.loopRuns[runId];
+    return run && isOpenLoopRun(run) ? run : undefined;
+  }
+
+  /**
+   * Forget the provenance of a run whose round is over.
+   *
+   * Those stamps were written for gates the move has just cleared. Keeping them
+   * would both grow without bound and invite a verdict to be judged against a
+   * round it never saw.
+   */
+  private clearRunProvenance(session: WorkflowSession, runId: string): void {
+    const provenance = session.verdictProvenance;
+    if (!provenance) return;
+    for (const callId of Object.keys(provenance)) {
+      if (provenance[callId]?.runId === runId) delete provenance[callId];
+    }
   }
 
   /**
@@ -2230,6 +2374,7 @@ class SessionGuardRuntime {
     // a second time.
     run.gates = {};
     run.round += 1;
+    this.clearRunProvenance(session, run.id);
 
     if (budget.attempts < budget.maximum) {
       run.status = 'running';

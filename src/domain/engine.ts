@@ -22,7 +22,7 @@ export interface StageTransitionResult {
 }
 
 export interface WorkflowResult {
-  stage: string;
+  gate: string;
   status: 'pass' | 'fail';
   summary: string;
   evidence: string[];

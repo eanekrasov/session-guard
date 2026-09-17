@@ -398,7 +398,7 @@ describe('formatDetailsLines', () => {
   test('скалярные поля сессии выводятся построчно', () => {
     const lines = formatDetailsLines(makeSession({ revision: 5, title: 'My Task' }));
     expect(lines.some((l) => l.startsWith('sessionId: ses_root'))).toBe(true);
-    expect(lines.some((l) => l.startsWith('schemaVersion: 2'))).toBe(true);
+    expect(lines.some((l) => l.startsWith('schemaVersion: 1'))).toBe(true);
     expect(lines.some((l) => l.startsWith('revision: 5'))).toBe(true);
     expect(lines.some((l) => l.startsWith('title: My Task'))).toBe(true);
   });

@@ -16,7 +16,7 @@ describe('createSession', () => {
 
     expect(session.sessionId).toBe('session-123');
     expect(session.profileId).toBe('android');
-    expect(session.schemaVersion).toBe(2);
+    expect(session.schemaVersion).toBe(1);
     expect(session.revision).toBe(0);
     expect(session.title).toBe('');
     expect(session.deliveryPermit).toBeNull();

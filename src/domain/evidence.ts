@@ -7,7 +7,7 @@ const WORKFLOW_RESULT_RE = /<workflow-result>([\s\S]*?)<\/workflow-result>/gu;
 function isValidWorkflowResult(value: unknown): value is WorkflowResult {
   if (typeof value !== 'object' || value === null) return false;
   const obj = value as Record<string, unknown>;
-  if (typeof obj.stage !== 'string') return false;
+  if (typeof obj.gate !== 'string') return false;
   if (obj.status !== 'pass' && obj.status !== 'fail') return false;
   if (typeof obj.summary !== 'string' || obj.summary.length === 0) return false;
   if (!Array.isArray(obj.evidence) || obj.evidence.length === 0) return false;

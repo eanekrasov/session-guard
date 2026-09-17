@@ -157,7 +157,7 @@ describe('handleWorkflowResult (via handleToolAfter)', () => {
       title: 'test',
       output: [
         'Some text before',
-        '<workflow-result>{"stage":"review","status":"pass","summary":"All checks passed","evidence":["check-1","check-2"]}</workflow-result>',
+        '<workflow-result>{"gate":"review","status":"pass","summary":"All checks passed","evidence":["check-1","check-2"]}</workflow-result>',
         'Some text after',
       ].join('\n'),
       metadata: {},
@@ -182,7 +182,7 @@ describe('handleWorkflowResult (via handleToolAfter)', () => {
     const output = {
       title: 'test',
       output:
-        '<workflow-result>{"stage":"review","status":"pass","summary":"All checks passed","evidence":["check-1"]}</workflow-result>',
+        '<workflow-result>{"gate":"review","status":"pass","summary":"All checks passed","evidence":["check-1"]}</workflow-result>',
       metadata: {},
     };
 
@@ -198,7 +198,7 @@ describe('handleWorkflowResult (via handleToolAfter)', () => {
 
     const session = await loadSession(sessionId);
     expect(session!.verifications.length).toBe(1);
-    expect(session!.verifications[0].stage).toBe('review');
+    expect(session!.verifications[0].gate).toBe('review');
     expect(session!.verifications[0].status).toBe('confirmed');
   });
 
@@ -234,7 +234,7 @@ describe('handleWorkflowResult (via handleToolAfter)', () => {
     const output = {
       title: 'test',
       output:
-        '<workflow-result>{"stage":"qa","status":"pass","summary":"QA passed","evidence":["e1"]}</workflow-result>',
+        '<workflow-result>{"gate":"qa","status":"pass","summary":"QA passed","evidence":["e1"]}</workflow-result>',
       metadata: {},
     };
 
@@ -258,7 +258,7 @@ describe('handleWorkflowResult (via handleToolAfter)', () => {
     const output = {
       title: 'test',
       output:
-        '<workflow-result>{"stage":"review","status":"fail","summary":"Failed","evidence":["e1"]}</workflow-result>',
+        '<workflow-result>{"gate":"review","status":"fail","summary":"Failed","evidence":["e1"]}</workflow-result>',
       metadata: {},
     };
 

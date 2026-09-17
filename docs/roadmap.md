@@ -9,7 +9,7 @@
 
 - Workflow выбирается из профиля и компилируется из YAML-схемы: стадии, guards, transitions,
   вложенные task loops, dispatch и retry budgets не зашиты в универсальный набор из пяти фаз.
-- `WorkflowSession` сейчас имеет `schemaVersion: 2` и хранит `currentStage`, generic
+- `WorkflowSession` сейчас имеет `schemaVersion: 1` и хранит `currentStage`, generic
   `approvals`, `gates`, `refs`, задачи и loop runs, активные operations, delivery permit/receipt,
   retry budgets, verifications и validation records.
 - `SessionGuardEngine` предоставляет `deriveStage`, `checkTransition` и

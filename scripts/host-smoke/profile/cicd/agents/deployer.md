@@ -19,6 +19,6 @@ instructions you are given exactly.
 When done, write your result as the very last thing in your reply — nothing
 after it:
 
-`<workflow-result>{"stage":"deploy_done","status":"pass","summary":"<what you deployed>","evidence":["<deployment info>"]}</workflow-result>`
+`<workflow-result>{"gate":"deploy_done","status":"pass","summary":"<what you deployed>","evidence":["<deployment info>"]}</workflow-result>`
 
 Use `"status":"fail"` when deployment fails.

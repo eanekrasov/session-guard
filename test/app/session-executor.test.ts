@@ -50,7 +50,7 @@ function mockStore(): {
 
 function makeSession(sessionId: string, overrides?: Partial<WorkflowSession>): WorkflowSession {
   return {
-    schemaVersion: 2,
+    schemaVersion: 1,
     sessionId,
     profileId: 'test',
     schemaId: 'cycle',
@@ -61,6 +61,7 @@ function makeSession(sessionId: string, overrides?: Partial<WorkflowSession>): W
     refs: {},
     tasks: {},
     activeOperations: {},
+    verdictProvenance: {},
     activeTaskContexts: [],
     loopRuns: {},
     deliveryPermit: null,

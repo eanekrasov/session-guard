@@ -88,4 +88,4 @@ AGENTS.md загружен отдельно. Для быстрых провер�
 
 Последним блоком ответа выведи ровно один маркер без текста после него:
 
-`<workflow-result>{"stage":"qa","status":"pass|fail","applicability":"verified|not_applicable","summary":"непустой итог","evidence":["минимум одно доказательство или причина N/A"]}</workflow-result>`
+`<workflow-result>{"gate":"qa","status":"pass|fail","applicability":"verified|not_applicable","summary":"непустой итог","evidence":["минимум одно доказательство или причина N/A"]}</workflow-result>`

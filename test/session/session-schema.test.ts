@@ -34,7 +34,7 @@ describe('WorkflowSessionSchema', () => {
 
     const result = WorkflowSessionSchema.parse(input);
 
-    expect(result.schemaVersion).toBe(2);
+    expect(result.schemaVersion).toBe(1);
     expect(result.revision).toBe(0);
     expect(result.title).toBe('');
     expect(result.stageGateResults).toEqual([]);

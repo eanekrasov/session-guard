@@ -8,7 +8,7 @@ function createSession(): WorkflowSession {
     sessionId: 'test-session',
     profileId: 'test-profile',
     schemaId: 'cycle',
-    schemaVersion: 2,
+    schemaVersion: 1,
     revision: 0,
     title: '',
     stageGateResults: [
@@ -21,6 +21,7 @@ function createSession(): WorkflowSession {
       implementation: [createTask()],
     },
     activeOperations: {},
+    verdictProvenance: {},
     activeTaskContexts: [],
     loopRuns: {},
     deliveryPermit: null,

@@ -84,12 +84,12 @@ async function afterTask(hooks: Hooks, callID: string, outputText: string): Prom
   );
 }
 
-function workflowResult(stage: 'review' | 'qa', status: 'pass' | 'fail'): string {
+function workflowResult(gate: 'review' | 'qa', status: 'pass' | 'fail'): string {
   return `<workflow-result>${JSON.stringify({
-    stage,
+    gate,
     status,
-    summary: `${stage} ${status}`,
-    evidence: [`${stage}-evidence`],
+    summary: `${gate} ${status}`,
+    evidence: [`${gate}-evidence`],
   })}</workflow-result>`;
 }
 

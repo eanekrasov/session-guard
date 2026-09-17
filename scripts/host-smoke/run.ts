@@ -765,7 +765,7 @@ const scenarios: Scenario[] = [
             '"[workflow-task:checkout] prepare the project", telling it to create ' +
             'src/ci-demo.ts containing `export const appVersion = "1.0.0";` ' +
             'and then finish with exactly ' +
-            '<workflow-result>{"stage":"checkout_done","status":"pass","summary":"created source file","evidence":["src/ci-demo.ts"]}</workflow-result>',
+            '<workflow-result>{"gate":"checkout_done","status":"pass","summary":"created source file","evidence":["src/ci-demo.ts"]}</workflow-result>',
           expect: (s: Session) => {
             // The file first, then the gate. A setup agent that closes
             // `checkout_done` without writing anything used to be accepted
@@ -790,7 +790,7 @@ const scenarios: Scenario[] = [
             'Use the task tool with subagent_type "builder" and description ' +
             '"[workflow-task:build] build the project", telling it to verify ' +
             'src/ci-demo.ts compiles correctly and then finish with exactly ' +
-            '<workflow-result>{"stage":"build_done","status":"pass","summary":"build successful","evidence":["src/ci-demo.ts"]}</workflow-result>',
+            '<workflow-result>{"gate":"build_done","status":"pass","summary":"build successful","evidence":["src/ci-demo.ts"]}</workflow-result>',
           expect: (s: Session) => stage(s) === 'test' || `stage is ${stage(s)}, expected test`,
         },
         {
@@ -823,7 +823,7 @@ const scenarios: Scenario[] = [
             'Use the task tool with subagent_type "tester" and description ' +
             '"[workflow-task:task-0] unit test", telling it to run unit tests on ' +
             'src/ci-demo.ts and then finish with exactly ' +
-            '<workflow-result>{"stage":"unit","status":"pass","summary":"unit tests passed","evidence":["src/ci-demo.ts"]}</workflow-result>',
+            '<workflow-result>{"gate":"unit","status":"pass","summary":"unit tests passed","evidence":["src/ci-demo.ts"]}</workflow-result>',
           expect: (s: Session) => {
             // The verdict moves the task, and a move clears the gates it was
             // judged by — each stage judges its own work. So the evidence that
@@ -837,7 +837,7 @@ const scenarios: Scenario[] = [
             'Use the task tool with subagent_type "tester" and description ' +
             '"[workflow-task:task-0] integration test", telling it to verify ' +
             'src/ci-demo.ts works with the environment and then finish with exactly ' +
-            '<workflow-result>{"stage":"integration","status":"pass","summary":"integration tests passed","evidence":["src/ci-demo.ts"]}</workflow-result>',
+            '<workflow-result>{"gate":"integration","status":"pass","summary":"integration tests passed","evidence":["src/ci-demo.ts"]}</workflow-result>',
           expect: (s: Session) => {
             const tasks = (s.state as { tasks?: Record<string, Array<{ status: string }>> } | null)
               ?.tasks;
@@ -850,7 +850,7 @@ const scenarios: Scenario[] = [
             'Use the task tool with subagent_type "deployer" and description ' +
             '"[workflow-task:deploy] deploy the build", telling it to register the ' +
             'deployment of version 1.0.0 and then finish with exactly ' +
-            '<workflow-result>{"stage":"deploy_done","status":"pass","summary":"deploy successful","evidence":["version=1.0.0"]}</workflow-result>',
+            '<workflow-result>{"gate":"deploy_done","status":"pass","summary":"deploy successful","evidence":["version=1.0.0"]}</workflow-result>',
           expect: (s: Session) => {
             const gates =
               (s.state as { stageGateResults?: Array<{ id: string; status: string }> } | null)
@@ -880,7 +880,7 @@ const scenarios: Scenario[] = [
             'Use the task tool with subagent_type "smoke" and description ' +
             '"[workflow-task:smoke] smoke test deployment", telling it to verify the ' +
             'deployment and then finish with exactly ' +
-            '<workflow-result>{"stage":"smoke_result","status":"pass","summary":"smoke tests passed","evidence":["deployment-ok"]}</workflow-result>',
+            '<workflow-result>{"gate":"smoke_result","status":"pass","summary":"smoke tests passed","evidence":["deployment-ok"]}</workflow-result>',
           expect: (s: Session) => stage(s) === 'done' || `stage is ${stage(s)}, expected done`,
         },
       ]) {
@@ -933,7 +933,7 @@ const scenarios: Scenario[] = [
             'Use the task tool with subagent_type "coder" and description ' +
             '"[workflow-task:task-0] write the file", telling it to create src/smoke-1.ts ' +
             'containing `export const smoke = 1;` and then finish with exactly ' +
-            '<workflow-result>{"stage":"code","status":"pass","summary":"wrote the file",' +
+            '<workflow-result>{"gate":"code","status":"pass","summary":"wrote the file",' +
             '"evidence":["src/smoke-1.ts"]}</workflow-result>',
           expect: (s: Session) => {
             // The stage moves on the coder's own <workflow-result>, so a model
@@ -1075,7 +1075,7 @@ async function prepareCommittableSession(
       instruction:
         'Use the task tool with subagent_type "reviewer" and description "review the work", ' +
         'telling it to finish with exactly ' +
-        '<workflow-result>{"stage":"review","status":"pass","summary":"reviewed",' +
+        '<workflow-result>{"gate":"review","status":"pass","summary":"reviewed",' +
         '"evidence":["src/smoke-1.ts"]}</workflow-result>',
       agent: ORCHESTRATOR,
       expect: (s: Session) => {
@@ -1090,7 +1090,7 @@ async function prepareCommittableSession(
       instruction:
         'Use the task tool with subagent_type "tester" and description "verify the work", ' +
         'telling it to finish with exactly ' +
-        '<workflow-result>{"stage":"qa","status":"pass","summary":"verified",' +
+        '<workflow-result>{"gate":"qa","status":"pass","summary":"verified",' +
         '"evidence":["src/smoke-1.ts"]}</workflow-result>',
       agent: ORCHESTRATOR,
       expect: (s: Session) =>

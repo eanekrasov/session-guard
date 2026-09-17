@@ -409,13 +409,13 @@ describe('E2E: Full state machine flow', () => {
 
     confirm(session, 'bug');
 
-    const bugV1 = session.verifications.find((v) => v.stage === 'bug');
+    const bugV1 = session.verifications.find((v) => v.gate === 'bug');
     expect(bugV1).toBeDefined();
     expect(bugV1!.status).toBe('confirmed');
 
     reject(session, 'bug');
 
-    const bugV2 = session.verifications.find((v) => v.stage === 'bug');
+    const bugV2 = session.verifications.find((v) => v.gate === 'bug');
     expect(bugV2).toBeDefined();
     expect(bugV2!.status).toBe('rejected');
   });
@@ -649,14 +649,14 @@ describe('E2E: Full state machine flow', () => {
     store = makeStore();
     const output = [
       'irrelevant text',
-      '<workflow-result>{"stage":"first","status":"pass","summary":"early","evidence":["e1"]}</workflow-result>',
+      '<workflow-result>{"gate":"first","status":"pass","summary":"early","evidence":["e1"]}</workflow-result>',
       '<workflow-result>invalid json}</workflow-result>',
-      '<workflow-result>{"stage":"second","status":"fail","summary":"late","evidence":["e3"]}</workflow-result>',
+      '<workflow-result>{"gate":"second","status":"fail","summary":"late","evidence":["e3"]}</workflow-result>',
     ].join('\n');
 
     const result = parseWorkflowResult(output);
     expect(result).not.toBeNull();
-    expect(result!.stage).toBe('second');
+    expect(result!.gate).toBe('second');
     expect(result!.status).toBe('fail');
   });
 
@@ -867,14 +867,14 @@ describe('E2E: Full state machine flow', () => {
     confirm(session, 'bug');
     session = await persistAndReload(session);
 
-    const bugV1 = session.verifications.find((v) => v.stage === 'bug');
+    const bugV1 = session.verifications.find((v) => v.gate === 'bug');
     expect(bugV1).toBeDefined();
     expect(bugV1!.status).toBe('confirmed');
 
     reject(session, 'bug');
     session = await persistAndReload(session);
 
-    const bugV2 = session.verifications.find((v) => v.stage === 'bug');
+    const bugV2 = session.verifications.find((v) => v.gate === 'bug');
     expect(bugV2).toBeDefined();
     expect(bugV2!.status).toBe('rejected');
   });

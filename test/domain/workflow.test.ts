@@ -17,7 +17,7 @@ function makeSession(overrides: Partial<WorkflowSession> = {}): WorkflowSession 
     sessionId: 'test-session',
     profileId: 'android',
     schemaId: 'session-guard',
-    schemaVersion: 2,
+    schemaVersion: 1,
     revision: 0,
     title: '',
     stageGateResults: baseGates(),
@@ -25,6 +25,7 @@ function makeSession(overrides: Partial<WorkflowSession> = {}): WorkflowSession 
     refs: {},
     tasks: {},
     activeOperations: {},
+    verdictProvenance: {},
     activeTaskContexts: [],
     loopRuns: {},
     deliveryReceipt: null,
@@ -93,7 +94,7 @@ describe('beginMutation', () => {
   it('sets active operation from fresh state', () => {
     const session = makeSession({
       tasks: taskList(),
-      verifications: [{ stage: 'bug', status: 'confirmed' }],
+      verifications: [{ gate: 'bug', status: 'confirmed' }],
       stageGateResults: baseGates().map((g) =>
         g.id === 'invariants' ? { ...g, status: 'passed' as const } : { ...g }
       ),
@@ -244,7 +245,7 @@ describe('confirm', () => {
 
     confirm(session, 'bug');
 
-    const bugV = session.verifications.find((v) => v.stage === 'bug');
+    const bugV = session.verifications.find((v) => v.gate === 'bug');
     expect(bugV).toBeDefined();
     expect(bugV!.status).toBe('confirmed');
     expect(bugV!.recordedAt).toBeDefined();
@@ -252,12 +253,12 @@ describe('confirm', () => {
 
   it('updates existing verification to confirmed and refreshes recordedAt', () => {
     const session = makeSession({
-      verifications: [{ stage: 'bug', status: 'rejected', recordedAt: '2024-01-01T00:00:00.000Z' }],
+      verifications: [{ gate: 'bug', status: 'rejected', recordedAt: '2024-01-01T00:00:00.000Z' }],
     });
 
     confirm(session, 'bug');
 
-    const bugV = session.verifications.find((v) => v.stage === 'bug');
+    const bugV = session.verifications.find((v) => v.gate === 'bug');
     expect(bugV).toBeDefined();
     expect(bugV!.status).toBe('confirmed');
     expect(bugV!.recordedAt).not.toBe('2024-01-01T00:00:00.000Z');
@@ -270,10 +271,10 @@ describe('reject', () => {
 
     reject(session, 'bug');
 
-    const bugV = session.verifications.find((v) => v.stage === 'bug');
+    const bugV = session.verifications.find((v) => v.gate === 'bug');
     expect(bugV).toBeDefined();
     expect(bugV!).toMatchObject({
-      stage: 'bug',
+      gate: 'bug',
       status: 'rejected',
     });
     expect(bugV!.recordedAt).toBeDefined();
@@ -281,14 +282,12 @@ describe('reject', () => {
 
   it('updates existing verification to rejected and refreshes recordedAt', () => {
     const session = makeSession({
-      verifications: [
-        { stage: 'bug', status: 'confirmed', recordedAt: '2024-01-01T00:00:00.000Z' },
-      ],
+      verifications: [{ gate: 'bug', status: 'confirmed', recordedAt: '2024-01-01T00:00:00.000Z' }],
     });
 
     reject(session, 'bug');
 
-    const bugV = session.verifications.find((v) => v.stage === 'bug');
+    const bugV = session.verifications.find((v) => v.gate === 'bug');
     expect(bugV).toBeDefined();
     expect(bugV!.status).toBe('rejected');
     expect(bugV!.recordedAt).not.toBe('2024-01-01T00:00:00.000Z');
@@ -337,12 +336,12 @@ describe('finishMutation', () => {
 describe('parseWorkflowResult', () => {
   it('parses a valid workflow-result tag', () => {
     const output =
-      'Some text <workflow-result>{"stage":"review","status":"pass","summary":"LGTM","evidence":["log-1"]}</workflow-result> more text';
+      'Some text <workflow-result>{"gate":"review","status":"pass","summary":"LGTM","evidence":["log-1"]}</workflow-result> more text';
 
     const result = parseWorkflowResult(output);
 
     expect(result).toEqual({
-      stage: 'review',
+      gate: 'review',
       status: 'pass',
       summary: 'LGTM',
       evidence: ['log-1'],
@@ -359,13 +358,13 @@ describe('parseWorkflowResult', () => {
 
   it('picks the last valid tag when multiple tags exist', () => {
     const output =
-      '<workflow-result>{"stage":"review","status":"pass","summary":"First","evidence":["e1"]}</workflow-result>' +
-      ' <workflow-result>{"stage":"qa","status":"fail","summary":"Second","evidence":["e2"]}</workflow-result>';
+      '<workflow-result>{"gate":"review","status":"pass","summary":"First","evidence":["e1"]}</workflow-result>' +
+      ' <workflow-result>{"gate":"qa","status":"fail","summary":"Second","evidence":["e2"]}</workflow-result>';
 
     const result = parseWorkflowResult(output);
 
     expect(result).toEqual({
-      stage: 'qa',
+      gate: 'qa',
       status: 'fail',
       summary: 'Second',
       evidence: ['e2'],
@@ -383,12 +382,12 @@ describe('parseWorkflowResult', () => {
   it('skips malformed JSON and picks next valid tag', () => {
     const output =
       '<workflow-result>{invalid}</workflow-result>' +
-      ' <workflow-result>{"stage":"qa","status":"pass","summary":"Fixed","evidence":["e1"]}</workflow-result>';
+      ' <workflow-result>{"gate":"qa","status":"pass","summary":"Fixed","evidence":["e1"]}</workflow-result>';
 
     const result = parseWorkflowResult(output);
 
     expect(result).toEqual({
-      stage: 'qa',
+      gate: 'qa',
       status: 'pass',
       summary: 'Fixed',
       evidence: ['e1'],

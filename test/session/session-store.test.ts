@@ -253,4 +253,47 @@ describe('WorkflowStore', () => {
       expect(session2.revision).toBe(1);
     });
   });
+
+  /**
+   * Sessions written before the verdict field was renamed carry `stage` in
+   * their verification records. There is no migration mechanism in this
+   * repository, so the reader has to accept both spellings — otherwise every
+   * session written before the rename becomes unreadable the moment the name
+   * changes, and the verdicts it recorded are lost with it.
+   */
+  describe('legacy verifications', () => {
+    it('loads a session that recorded verifications under the old `stage` key', async () => {
+      const legacy = {
+        ...createSession('legacy-verification', 'android', 'session-guard', 'planning'),
+        verifications: [
+          { stage: 'bug', status: 'confirmed', recordedAt: '2024-01-01T00:00:00.000Z' },
+        ],
+      } as unknown as Record<string, unknown>;
+      await writeFile(
+        path.join(TEST_DIR, 'legacy-verification.json'),
+        JSON.stringify(legacy),
+        'utf-8'
+      );
+
+      const loaded = await store.load('legacy-verification');
+
+      expect(loaded?.verifications).toEqual([
+        { gate: 'bug', status: 'confirmed', recordedAt: '2024-01-01T00:00:00.000Z' },
+      ]);
+    });
+
+    it('reads a record already written under `gate` unchanged', async () => {
+      const session = createSession('current-verification', 'android', 'session-guard', 'planning');
+      session.verifications = [
+        { gate: 'review', status: 'rejected', recordedAt: '2024-01-01T00:00:00.000Z' },
+      ];
+      await store.save(session);
+
+      const loaded = await store.load('current-verification');
+
+      expect(loaded?.verifications).toEqual([
+        { gate: 'review', status: 'rejected', recordedAt: '2024-01-01T00:00:00.000Z' },
+      ]);
+    });
+  });
 });

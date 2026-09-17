@@ -79,7 +79,7 @@ const dispatch = (hooks: Hooks, callID: string): Promise<void> =>
 
 const report = (hooks: Hooks, callID: string, status: 'pass' | 'fail'): Promise<void> => {
   const tag = `<workflow-result>${JSON.stringify({
-    stage: 'code',
+    gate: 'code',
     status,
     summary: 'ok',
     evidence: ['ok'],
@@ -102,7 +102,7 @@ describe('a blocked movement surfaces its reason without spending budget', () =>
     const budgetBefore = session?.retryBudgets['task-1']?.attempts;
 
     const tag = `<workflow-result>${JSON.stringify({
-      stage: 'code',
+      gate: 'code',
       status: 'pass',
       summary: 'ok',
       evidence: ['ok'],
@@ -146,7 +146,7 @@ describe('an unreachable movement on a pass is reported', () => {
 
     const output = { title: 'task', output: '', metadata: {} };
     output.output = `<workflow-result>${JSON.stringify({
-      stage: 'no-such-stage',
+      gate: 'no-such-stage',
       status: 'pass',
       summary: 'ok',
       evidence: ['ok'],
@@ -182,7 +182,7 @@ describe('a replayed result is not a verdict about the whole body of work', () =
     const gatesAfterFirst = JSON.stringify(afterFirst?.stageGateResults);
 
     const tag = `<workflow-result>${JSON.stringify({
-      stage: 'code',
+      gate: 'code',
       status: 'pass',
       summary: 'ok',
       evidence: ['ok'],

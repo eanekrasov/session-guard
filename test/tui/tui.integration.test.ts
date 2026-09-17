@@ -21,7 +21,7 @@ const RUNTIME_SUBDIR = 'sessions';
  */
 function stateJson(overrides: Record<string, unknown> = {}): string {
   return JSON.stringify({
-    schemaVersion: 2,
+    schemaVersion: 1,
     sessionId: 'ses_root',
     profileId: 'test',
     schemaId: 'cycle',
@@ -147,7 +147,7 @@ describe('sidebar-state: проводка плагина', () => {
     writeState(
       'ses_root',
       JSON.stringify({
-        schemaVersion: 2,
+        schemaVersion: 1,
         sessionId: 'ses_root',
         profileId: 'test',
         schemaId: 'cycle',

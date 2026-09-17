@@ -11,8 +11,8 @@ function makeFacts(overrides: Partial<SessionFacts> = {}): SessionFacts {
     tasks: [],
     activeOperations: [],
     verifications: [],
-    verified(this: SessionFacts, stage: string, status: 'confirmed' | 'rejected') {
-      return this.verifications.some((v) => v.stage === stage && v.status === status);
+    verified(this: SessionFacts, gate: string, status: 'confirmed' | 'rejected') {
+      return this.verifications.some((v) => v.gate === gate && v.status === status);
     },
     gates: {},
     profileId: 'android',
@@ -159,7 +159,7 @@ describe('deriveStage', () => {
       },
       { id: 'r2', priority: 0, condition: 'true', result: 'PLANNING' },
     ];
-    const facts = makeFacts({ verifications: [{ stage: 'bug', status: 'confirmed' }] });
+    const facts = makeFacts({ verifications: [{ gate: 'bug', status: 'confirmed' }] });
 
     const result = deriveStage(facts, rules);
 

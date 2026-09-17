@@ -1,0 +1,5 @@
+{
+  "id": "verdict-outer",
+  "name": "verdict-outer",
+  "schemas": ["flow.yaml"]
+}

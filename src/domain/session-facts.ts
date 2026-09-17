@@ -22,10 +22,10 @@ export interface SessionFacts {
   approvals: Array<{ type: string; status: string }>; // for approved(type) guard expressions
   tasks: { id: string; status: TaskStatus }[];
   activeOperations: ActiveOperation[];
-  /** Full verification records. Use `session.verified(stage, status)` in guard expressions. */
+  /** Full verification records. Use `session.verified(gate, status)` in guard expressions. */
   verifications: Verification[];
   /** Guard-expression helper: `session.verified('bug', 'confirmed')` */
-  verified(stage: string, status: 'confirmed' | 'rejected'): boolean;
+  verified(gate: string, status: 'confirmed' | 'rejected'): boolean;
   gates: Record<string, GateStatus>;
   profileId: string;
   /** Used in guard: `session.revision == 0` */
@@ -71,9 +71,9 @@ export function toSessionFacts(session: WorkflowSession): SessionFacts {
       .flat()
       .map((task) => ({ id: task.id, status: task.status })),
     activeOperations: Object.values(activeOperations),
-    verifications: session.verifications.map((v) => ({ stage: v.stage, status: v.status })),
-    verified(stage: string, status: 'confirmed' | 'rejected') {
-      return this.verifications.some((v) => v.stage === stage && v.status === status);
+    verifications: session.verifications.map((v) => ({ gate: v.gate, status: v.status })),
+    verified(gate: string, status: 'confirmed' | 'rejected') {
+      return this.verifications.some((v) => v.gate === gate && v.status === status);
     },
     gates: Object.fromEntries(session.stageGateResults.map((g) => [g.id, g.status])),
     profileId: session.profileId,

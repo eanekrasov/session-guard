@@ -125,7 +125,7 @@ async function beforeTask(
 async function afterTask(
   hooks: Hooks,
   callID: string,
-  stage: 'review' | 'qa',
+  gate: 'review' | 'qa',
   status: 'pass' | 'fail'
 ): Promise<void> {
   await hooks['tool.execute.after']!(
@@ -133,10 +133,10 @@ async function afterTask(
     {
       title: 'workflow task',
       output: `<workflow-result>${JSON.stringify({
-        stage,
+        gate,
         status,
-        summary: `${stage} ${status}`,
-        evidence: [`${stage}-evidence`],
+        summary: `${gate} ${status}`,
+        evidence: [`${gate}-evidence`],
       })}</workflow-result>`,
       metadata: {},
     }

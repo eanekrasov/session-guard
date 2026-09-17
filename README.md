@@ -161,6 +161,7 @@ WorkflowSession
 ├── loopRuns: Record<runId, LoopRun>       # stage, gates, checks, round
 ├── activeTaskContexts: ActiveTaskContext[]
 ├── activeOperations: Record<callId, ActiveOperation>
+├── verdictProvenance: Record<callId, { runId, round }>  # происхождение вердикта (свежесть)
 ├── pendingDecisions: PendingDecision[]
 ├── retryBudgets: Record<string, RetryBudget>
 ├── deliveryPermit: DeliveryPermit | null
@@ -176,7 +177,7 @@ WorkflowSession
 └── updatedAt: string
 ```
 
-`schemaVersion` по умолчанию равен `2`. Статусы gate — `pending`, `running`,
+`schemaVersion` по умолчанию равен `1`. Статусы gate — `pending`, `running`,
 `passed`, `failed`, `skipped`; статусы task — `pending`, `running`, `completed`,
 `failed`, `cancelled`. Операции различают `kind: mutation | task`, а task имеет
 дополнительные `readScope`, `writeScope`, `editingAgents`, `round` и baseline.
@@ -481,6 +482,7 @@ interface OpenCodeSessionClient {
    └── Tool != task или нет subagent_type/agent/type → skip
    └── Ход этого callID уже коррелирован → отказ
    └── session.activeOperations[callID] = { runId?, taskId?, agent, status }
+   └── session.verdictProvenance[callID] = { runId, round } — происхождение вердикта
 
 3c. Stage actions (actionsBefore)
    └── Действующая стадия — вложенная при открытом прогоне, иначе внешняя
@@ -522,9 +524,16 @@ interface OpenCodeSessionClient {
 2. Workflow result (handleWorkflowResult)
    └── parseWorkflowResult(output):
    │   └── Ищет последний <workflow-result>{JSON}</workflow-result>
-   │   └── Валидация выполняется по текущей схеме и допускает только действительный результат verifier-а
-   └── session.verifications.push({ stage, status, recordedAt })
-   └── Совпадает activeOperation?.id == callID → clear
+   │   └── Поле `gate` называет ГЕЙТ, а не стадию; допускается только действительный результат
+   └── Свежесть — по provenance вердикта (fallback: операция). Раунд сменился или прогон закрыт
+   │   └── [workflow-result-stale], не записывается ничего
+   └── Адресат — по ОБЪЯВЛЕНИЮ гейта, а не по активной операции:
+   │   └── гейт объявлен вложенной стадией живого прогона → run.gates[gate] + движение задачи
+   │   └── гейт объявлен текущей внешней стадией → session.stageGateResults (setGateStatus)
+   │   └── гейт не объявлен ни одной стадией в области видимости → [workflow-result-rejected]
+   └── Проверки допуска: mayVerify() по ростеру владеющей стадии, свежесть, replay-guard
+   └── session.verifications.push({ gate, status, recordedAt })
+   └── releaseVerdict() — снять activeOperations[callID] и verdictProvenance[callID]
 
 3. File tool invariants (handleFileToolAfter)
    └── Tool ∈ {edit, write, apply_patch}

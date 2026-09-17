@@ -28,7 +28,7 @@ export function createSession(
   initialStage: string = ''
 ): WorkflowSession {
   return {
-    schemaVersion: 2,
+    schemaVersion: 1,
     sessionId,
     profileId,
     schemaId,
@@ -39,6 +39,7 @@ export function createSession(
     refs: {},
     tasks: {},
     activeOperations: {},
+    verdictProvenance: {},
     activeTaskContexts: [],
     loopRuns: {},
     deliveryPermit: null,

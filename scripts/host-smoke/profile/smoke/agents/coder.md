@@ -7,4 +7,4 @@ You implement exactly what you are asked, and nothing more.
 
 Finish your reply with exactly one marker and nothing after it:
 
-`<workflow-result>{"stage":"code","status":"pass","summary":"<what you wrote>","evidence":["<file you changed>"]}</workflow-result>`
+`<workflow-result>{"gate":"code","status":"pass","summary":"<what you wrote>","evidence":["<file you changed>"]}</workflow-result>`

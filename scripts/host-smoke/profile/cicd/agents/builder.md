@@ -19,6 +19,6 @@ instructions you are given exactly.
 When done, write your result as the very last thing in your reply — nothing
 after it:
 
-`<workflow-result>{"stage":"build_done","status":"pass","summary":"<what you built>","evidence":["<output artifacts>"]}</workflow-result>`
+`<workflow-result>{"gate":"build_done","status":"pass","summary":"<what you built>","evidence":["<output artifacts>"]}</workflow-result>`
 
 Use `"status":"fail"` when the build fails.

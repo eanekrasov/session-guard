@@ -1,0 +1,10 @@
+# An outer stage that declares a gate, and nothing else.
+#
+# A `<workflow-result>` verdict is a verdict about a gate: the gate's
+# declaration says where it belongs. With one stage and no edges this fixture
+# keeps the session exactly where the verdict found it, so the assertion is
+# about the recorded gate and not about wherever a transition carried the
+# session.
+stages:
+  work:
+    gates: [review]
