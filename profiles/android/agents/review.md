@@ -20,12 +20,14 @@ permission:
 ## Visibility Restrictions (ОГРАНИЧЕНИЯ ВИДИМОСТИ)
 
 Тебе ДОСТУПНО:
+
 - ✅ Task description — описание задачи и контекст
 - ✅ Code changes from previous tasks — diff изменений
 - ✅ Test results — результаты тестирования
 - ✅ Spec/Plan из `.opencode/plan/<story>/`
 
 Тебе НЕ ДОСТУПНО:
+
 - ❌ `approval` — решения об утверждении задач
 - ❌ `consent` — детали согласий
 - ❌ `revision state` — статус ревизии workflow

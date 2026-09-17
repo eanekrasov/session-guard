@@ -2,14 +2,7 @@
   "id": "smoke",
   "description": "Host smoke profile \u2014 the base state machine wired to the agents the host actually runs",
   "extends": "base",
-  "schemas": [
-    "smoke.yaml"
-  ],
+  "schemas": ["smoke.yaml"],
   "agentsDir": "agents",
-  "agents": [
-    "orchestrator",
-    "coder",
-    "reviewer",
-    "tester"
-  ]
+  "agents": ["orchestrator", "coder", "reviewer", "tester"]
 }

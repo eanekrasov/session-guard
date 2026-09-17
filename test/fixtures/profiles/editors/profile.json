@@ -1,1 +1,5 @@
-{ "id": "editors", "description": "Declares who edits; its stages declare no roster", "schemas": ["flow.yaml"] }
+{
+  "id": "editors",
+  "description": "Declares who edits; its stages declare no roster",
+  "schemas": ["flow.yaml"]
+}

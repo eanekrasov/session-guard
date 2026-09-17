@@ -1,1 +1,5 @@
-{ "id": "absent-schema", "description": "Declares a schema file it does not have", "schemas": ["absent.yaml"] }
+{
+  "id": "absent-schema",
+  "description": "Declares a schema file it does not have",
+  "schemas": ["absent.yaml"]
+}

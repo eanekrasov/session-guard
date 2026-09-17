@@ -72,12 +72,12 @@ stages:
 transitions:
   - from: planning
     to: tasks_ready
-    guard: "session.refs.plan != null"
+    guard: 'session.refs.plan != null'
     consent: plan
 
   - from: tasks_ready
     to: execution
-    guard: "hasPendingTasks()"
+    guard: 'hasPendingTasks()'
 
   - from: execution
     to: validation
@@ -97,9 +97,8 @@ transitions:
 
   - from: commit
     to: done
-    guard: "session.deliveryReceipt != null"
+    guard: 'session.deliveryReceipt != null'
 
 editingAgents:
   - coder
   - orchestrator
-

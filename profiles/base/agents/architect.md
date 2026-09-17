@@ -10,7 +10,7 @@ permission:
   todowrite: allow
   question: allow
   task:
-    "*": deny
+    '*': deny
   skill: allow
   webfetch: deny
   external_directory: deny
@@ -47,6 +47,7 @@ permission:
 ```
 
 Опции вопроса:
+
 - `{ label: "grant", description: "Утвердить план и приступить к выполнению" }`
 - `{ label: "decline", description: "Скорректировать план (укажи что изменить)" }`
 

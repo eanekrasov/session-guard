@@ -23,12 +23,14 @@ permission:
 ## Visibility Restrictions (ОГРАНИЧЕНИЯ ВИДИМОСТИ)
 
 Тебе ДОСТУПНО:
+
 - ✅ Task description — описание задачи
 - ✅ Implementation details — что реализовано
 - ✅ Expected behavior из spec.md — ожидаемое поведение
 - ✅ Test scenarios из tasks.md
 
 Тебе НЕ ДОСТУПНО:
+
 - ❌ `revision` — история ревизий задачи
 - ❌ `evidence` — доказательства из предыдущих этапов
 - ❌ `approval flow` — процесс утверждения

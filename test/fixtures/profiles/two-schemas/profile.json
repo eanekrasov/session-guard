@@ -1,1 +1,1 @@
-{"id": "two-schemas", "name": "two-schemas", "schemas": ["alpha.yaml", "beta.yaml"]}
+{ "id": "two-schemas", "name": "two-schemas", "schemas": ["alpha.yaml", "beta.yaml"] }

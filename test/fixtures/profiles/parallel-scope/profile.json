@@ -1,1 +1,6 @@
-{"id": "parallel-scope", "name": "parallel-scope", "extends": "cycle-code", "schemas": ["cycle.yaml"]}
+{
+  "id": "parallel-scope",
+  "name": "parallel-scope",
+  "extends": "cycle-code",
+  "schemas": ["cycle.yaml"]
+}

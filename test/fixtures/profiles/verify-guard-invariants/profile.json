@@ -1,1 +1,6 @@
-{"id": "verify-guard-invariants", "name": "verify-guard-invariants", "extends": "verify-default", "schemas": ["cycle.yaml"]}
+{
+  "id": "verify-guard-invariants",
+  "name": "verify-guard-invariants",
+  "extends": "verify-default",
+  "schemas": ["cycle.yaml"]
+}

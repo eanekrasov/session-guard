@@ -2,14 +2,7 @@
   "id": "comprehensive",
   "description": "Comprehensive test profile — exercises every plugin feature",
   "extends": "base",
-  "schemas": [
-    "comprehensive.yaml"
-  ],
+  "schemas": ["comprehensive.yaml"],
   "agentsDir": "agents",
-  "agents": [
-    "orchestrator",
-    "coder",
-    "reviewer",
-    "tester"
-  ]
+  "agents": ["orchestrator", "coder", "reviewer", "tester"]
 }

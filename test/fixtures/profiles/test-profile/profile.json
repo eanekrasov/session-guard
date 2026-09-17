@@ -1,1 +1,6 @@
-{"id": "test-profile", "name": "test-profile", "extends": "cycle-minimal", "schemas": ["cycle.yaml"]}
+{
+  "id": "test-profile",
+  "name": "test-profile",
+  "extends": "cycle-minimal",
+  "schemas": ["cycle.yaml"]
+}

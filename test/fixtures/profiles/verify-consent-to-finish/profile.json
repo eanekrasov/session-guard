@@ -1,1 +1,6 @@
-{"id": "verify-consent-to-finish", "name": "verify-consent-to-finish", "extends": "verify-default", "schemas": ["cycle.yaml"]}
+{
+  "id": "verify-consent-to-finish",
+  "name": "verify-consent-to-finish",
+  "extends": "verify-default",
+  "schemas": ["cycle.yaml"]
+}

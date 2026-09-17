@@ -1,1 +1,6 @@
-{"id": "cycle-retry-current-task", "name": "cycle-retry-current-task", "extends": "cycle-serial", "schemas": ["cycle.yaml"]}
+{
+  "id": "cycle-retry-current-task",
+  "name": "cycle-retry-current-task",
+  "extends": "cycle-serial",
+  "schemas": ["cycle.yaml"]
+}

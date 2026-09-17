@@ -1,1 +1,6 @@
-{ "id": "chain-c", "extends": "chain-b", "description": "The grandchild — it must not lose what A forbids", "schemas": ["flow.yaml"] }
+{
+  "id": "chain-c",
+  "extends": "chain-b",
+  "description": "The grandchild — it must not lose what A forbids",
+  "schemas": ["flow.yaml"]
+}

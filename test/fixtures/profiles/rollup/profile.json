@@ -1,1 +1,7 @@
-{"id": "rollup", "name": "rollup", "extends": "cycle-code", "schemas": ["cycle.yaml"], "invariants": ["LF_ONLY"]}
+{
+  "id": "rollup",
+  "name": "rollup",
+  "extends": "cycle-code",
+  "schemas": ["cycle.yaml"],
+  "invariants": ["LF_ONLY"]
+}

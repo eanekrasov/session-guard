@@ -2,10 +2,6 @@
   "id": "extends-child",
   "name": "extends-child",
   "extends": "extends-parent",
-  "schemas": [
-    "child.yaml"
-  ],
-  "agents": [
-    "figma"
-  ]
+  "schemas": ["child.yaml"],
+  "agents": ["figma"]
 }

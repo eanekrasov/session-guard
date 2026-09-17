@@ -1,16 +1,7 @@
 {
   "id": "cicd",
   "description": "CI/CD pipeline profile — checkout, build, test, deploy, smoke",
-  "schemas": [
-    "cicd.yaml"
-  ],
+  "schemas": ["cicd.yaml"],
   "agentsDir": "agents",
-  "agents": [
-    "orchestrator",
-    "setup",
-    "builder",
-    "tester",
-    "deployer",
-    "smoke"
-  ]
+  "agents": ["orchestrator", "setup", "builder", "tester", "deployer", "smoke"]
 }

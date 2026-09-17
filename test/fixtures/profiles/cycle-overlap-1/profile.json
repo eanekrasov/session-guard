@@ -1,1 +1,6 @@
-{"id": "cycle-overlap-1", "name": "cycle-overlap-1", "extends": "cycle-serial", "schemas": ["cycle.yaml"]}
+{
+  "id": "cycle-overlap-1",
+  "name": "cycle-overlap-1",
+  "extends": "cycle-serial",
+  "schemas": ["cycle.yaml"]
+}

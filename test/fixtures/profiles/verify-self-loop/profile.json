@@ -1,1 +1,6 @@
-{"id": "verify-self-loop", "name": "verify-self-loop", "extends": "verify-default", "schemas": ["cycle.yaml"]}
+{
+  "id": "verify-self-loop",
+  "name": "verify-self-loop",
+  "extends": "verify-default",
+  "schemas": ["cycle.yaml"]
+}

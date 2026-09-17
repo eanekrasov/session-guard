@@ -1,1 +1,6 @@
-{"id": "cycle-retry-serial", "name": "cycle-retry-serial", "extends": "cycle-serial", "schemas": ["cycle.yaml"]}
+{
+  "id": "cycle-retry-serial",
+  "name": "cycle-retry-serial",
+  "extends": "cycle-serial",
+  "schemas": ["cycle.yaml"]
+}

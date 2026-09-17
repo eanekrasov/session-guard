@@ -2,9 +2,7 @@
   "id": "android",
   "description": "Android (Kotlin/Compose) development profile",
   "extends": "base",
-  "schemas": [
-    "android.yaml"
-  ],
+  "schemas": ["android.yaml"],
   "agentsDir": "agents",
   "skillsDir": "skills",
   "agents": [

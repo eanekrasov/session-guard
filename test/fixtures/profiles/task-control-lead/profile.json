@@ -1,1 +1,6 @@
-{"id": "task-control-lead", "name": "task-control-lead", "extends": "cycle-minimal", "schemas": ["cycle.yaml"]}
+{
+  "id": "task-control-lead",
+  "name": "task-control-lead",
+  "extends": "cycle-minimal",
+  "schemas": ["cycle.yaml"]
+}

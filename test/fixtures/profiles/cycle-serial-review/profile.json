@@ -1,1 +1,6 @@
-{"id": "cycle-serial-review", "name": "cycle-serial-review", "extends": "cycle-serial", "schemas": ["cycle.yaml"]}
+{
+  "id": "cycle-serial-review",
+  "name": "cycle-serial-review",
+  "extends": "cycle-serial",
+  "schemas": ["cycle.yaml"]
+}
