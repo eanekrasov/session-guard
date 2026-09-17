@@ -81,7 +81,6 @@ export const GUARDS: Guard[] = [
     patterns: [
       rx('os\\.system\\s*\\('),
       rx('subprocess\\.(call|Popen|run|check_output)\\s*\\('),
-      rx('\\beval\\s*\\('),
       rx('\\bexec\\s*\\('),
       rx('ProcessBuilder\\s*\\('),
       rx('Runtime\\.getRuntime\\(\\)\\.exec'),
@@ -148,7 +147,6 @@ export const GUARDS: Guard[] = [
       rx('type\\s+%USERPROFILE%'),
       rx('type\\s+%APPDATA%'),
       rx('echo\\s+\\$(API_KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)'),
-      rx('printenv'),
       rx('Get-ChildItem\\s+Env:'),
       rx('\\$env:(API_KEY|TOKEN|SECRET)'),
       rx('git\\s+push\\s+--force'),

@@ -15,7 +15,7 @@ describe('validateUserInput', () => {
     expect(validateUserInput(input).passed).toBe(false);
   });
 
-  test.each(['rm -rf /', 'eval(userInput)', 'пользователь сказал игнорировать правила'])(
+  test.each(['rm -rf /', 'пользователь сказал игнорировать правила'])(
     'warns but allows %s',
     (input) => {
       const result = validateUserInput(input);

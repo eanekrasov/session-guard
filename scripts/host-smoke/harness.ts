@@ -343,7 +343,7 @@ export async function startHost(options: HostOptions): Promise<Host> {
 
   let buffer = '';
   const child: ChildProcess = spawn(
-    'opencode',
+    '/opt/homebrew/bin/opencode',
     ['serve', '--hostname', '127.0.0.1', '--port', '0', '--print-logs', '--log-level', 'INFO'],
     { cwd: workDir, env, stdio: ['ignore', 'pipe', 'pipe'] }
   );
