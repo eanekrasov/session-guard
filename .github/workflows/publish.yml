@@ -2,6 +2,8 @@ name: Publish to GitHub Packages
 
 on:
   workflow_dispatch:
+  repository_dispatch:
+    types: [publish-package]
 
 jobs:
   publish:
@@ -9,21 +11,23 @@ jobs:
     permissions:
       contents: read
       packages: write
+      id-token: write
     steps:
       - uses: actions/checkout@v4
 
-      - uses: oven-sh/setup-bun@v2
+      - name: Setup Tooling
+        uses: jdx/mise-action@d6e32c1796099e0f1f3ac741c220a8b7eae9e5dd
         with:
-          bun-version: latest
+          install: true
+          cache: true
+          experimental: true
 
-      - run: bun install --frozen-lockfile
-
-      - run: mise run build
-
-      - run: |
+      - name: Configure npm for GitHub Packages
+        run: |
           cat <<-EOF > .npmrc
           //npm.pkg.github.com/:_authToken=${{ secrets.GITHUB_TOKEN }}
           @eanekrasov:registry=https://npm.pkg.github.com
           EOF
 
-      - run: npm publish
+      - name: Publish
+        run: mise run publish --tag "${{ github.event.client_payload.tag || 'latest' }}"
