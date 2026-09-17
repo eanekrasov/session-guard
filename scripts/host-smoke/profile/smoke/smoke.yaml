@@ -4,16 +4,11 @@
 # the agent roster is pinned to what the host actually dispatches, so the
 # scenarios exercise the shipped stages rather than a toy machine.
 #
-# `base` declares no rosters (see profiles/base/base.yaml), so they are named
-# here. Stages merge entry by entry, so naming `execution` again keeps the loop
-# and transitions it inherits.
-#
-# The `extends` below is what makes that inheritance happen. A profile's
-# schemas became its own — combining is schema-level only — and this delta was
-# left behind: on its own it declares an `execution` loop whose only edge is
-# `code → verify`, so nothing reaches `done` and the workflow does not compile.
-# `workflow-create` then returned a configuration error and persisted no
-# session at all, which is what the `create` scenario reported.
+# Merger rule: schemas merge at the top level only. Redeclaring a stage key
+# (e.g. `execution`) replaces that stage entirely — its nested `stages`,
+# `transitions`, `gates`, `actions` — nothing is deep-merged. Loops, transitions,
+# and nested rosters inherited from base must be repeated in full when a stage
+# is redeclared; an incomplete set leaves the workflow uncompilable.
 
 extends: 'base/base.yaml'
 
@@ -38,6 +33,14 @@ stages:
       # verifier gates, so the edge is refined to move on the coder's own result.
       - from: code
         to: verify
+      - from: verify
+        to: done
+        guard: "task.gates.review == 'passed' && task.gates.qa == 'passed'"
+      - from: verify
+        to: code
+        guard: "task.gates.review == 'failed' || task.gates.qa == 'failed'"
+        effects:
+          - bumpRetry: task.id
   validation:
     allowedAgents: [reviewer, tester]
     gates: [review, qa]
