@@ -23,7 +23,6 @@ import { toGuardContext, type SessionGuardEngine } from '../domain/engine.ts';
 import { admitAction, commandMatches, type AdmissionRequest } from '../domain/action-admission.ts';
 import type { ActionEntry } from '../schema/profile-schema.ts';
 import { SessionExecutor } from './session-executor.ts';
-import { SessionQueue } from './session-queue.ts';
 import { sanitizeToolOutput, validateUserInput } from './guardrails.ts';
 import { listProfiles } from '../public-api.ts';
 import {
@@ -132,7 +131,6 @@ type GateOwner =
 
 class SessionGuardRuntime {
   private store: WorkflowStore;
-  private queue: SessionQueue;
   private executor: SessionExecutor;
   private mutationOrchestrator: MutationOrchestrator;
   private consentOrchestrator: ConsentOrchestrator;
@@ -221,7 +219,6 @@ class SessionGuardRuntime {
     this.executor = new SessionExecutor(this.store, this.log, (sessionID) =>
       this.resolveHostParent(sessionID)
     );
-    this.queue = new SessionQueue(this.log, (sessionID) => this.resolveHostParent(sessionID));
 
     this.profilesDir = paths?.profilesDir ?? getProfilesDir(context.directory);
     this.projectDir = context.directory;
@@ -3083,7 +3080,7 @@ class SessionGuardRuntime {
    * Handle dispose — clean up all resources.
    */
   async handleDispose(): Promise<void> {
-    this.queue.clear();
+    this.executor.clear();
     this.mutationOrchestrator.dispose();
     void this.log('info', 'SessionGuardRuntime disposed');
   }

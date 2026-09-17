@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { WorkflowStore, createSession } from '../../src/session/session-store.ts';
-import { SessionQueue } from '../../src/app/session-queue.ts';
 import { SessionExecutor } from '../../src/app/session-executor.ts';
 import { SessionGuardEngine, type EvaluateGuardFn } from '../../src/domain/engine.ts';
 import type { WorkflowSession } from '../../src/session/session-schema.ts';
@@ -23,13 +22,11 @@ function createNoopEngine(): SessionGuardEngine {
 
 let storeDir: string;
 let store: WorkflowStore;
-let queue: SessionQueue;
 let executor: SessionExecutor;
 
 beforeEach(() => {
   storeDir = '/tmp/session-guard-test-' + Math.random().toString(36).slice(2);
   store = new WorkflowStore(storeDir);
-  queue = new SessionQueue();
   executor = new SessionExecutor(store);
 });
 

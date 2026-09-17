@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { WorkflowSession } from '../../src/session/session-schema.ts';
 import type { WorkflowStore } from '../../src/session/session-store.ts';
 import type { LogFn } from '../../src/app/logger.ts';
-import type { ResolveParentFn } from '../../src/app/session-queue.ts';
+import type { ResolveParentFn } from '../../src/app/session-executor.ts';
 
 // ─── Mock store ───────────────────────────────────────────────────────────────
 

@@ -3,7 +3,12 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import type { WorkflowSession } from '../session/session-schema.ts';
 import type { WorkflowStore } from '../session/session-store.ts';
 import type { LogFn } from './logger.ts';
-import type { ResolveParentFn } from './session-queue.ts';
+
+/**
+ * Ask the host for a session's parent. Returns the parent id, or null when the
+ * session is a root, unknown, or the host could not be reached.
+ */
+export type ResolveParentFn = (_sessionID: string) => Promise<string | null>;
 
 // ─── Transaction ──────────────────────────────────────────────────────────────
 
