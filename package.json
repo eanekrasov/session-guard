@@ -1,7 +1,7 @@
 {
-  "name": "opencode-session-guard",
+  "name": "@eanekrasov/session-guard",
   "version": "0.1.0",
-  "description": "State machine library for OpenCode plugins — gives schema-based workflow with strict validation between steps",
+  "description": "Session guard for OpenCode — gives schema-based workflow with strict validation between steps",
   "keywords": [
     "opencode",
     "opencode-plugin",
@@ -12,8 +12,8 @@
   ],
   "license": "MIT",
   "author": {
-    "name": "OpenCode AI",
-    "email": "dev@opencode.ai"
+    "name": "e.nekrasov",
+    "email": "e.nekrasov@crpt.ru"
   },
   "type": "module",
   "main": "./dist/index.js",
@@ -33,22 +33,24 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/opencode-ai/profile-config"
+    "url": "https://github.com/eanekrasov/session-guard"
   },
   "bugs": {
-    "url": "https://github.com/opencode-ai/profile-config/issues"
+    "url": "https://github.com/eanekrasov/session-guard/issues"
   },
-  "homepage": "https://github.com/opencode-ai/profile-config#readme",
+  "homepage": "https://github.com/eanekrasov/session-guard#readme",
   "engines": {
     "opencode": ">=1.18.29"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "registry": "https://npm.pkg.github.com"
   },
   "files": [
     "dist",
     "scripts/commit-task.ts",
-    "README.md"
+    "README.md",
+    "docs"
   ],
   "dependencies": {
     "@opencode-ai/plugin": "^1.18.29",
