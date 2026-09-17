@@ -110,6 +110,7 @@ describe('task-cycle session persistence', () => {
         sessionId: 'new-form',
         profileId: 'android',
         schemaId: 'session-guard',
+        currentStage: 'planning',
       }),
       'utf-8'
     );
@@ -127,6 +128,7 @@ describe('task-cycle session persistence', () => {
         sessionId: 'invalid-id',
         profileId: 'android',
         schemaId: 'session-guard',
+        currentStage: 'planning',
         tasks: {
           implementation: [{ id: 'invalid', status: 'pending' }],
         },
@@ -138,6 +140,7 @@ describe('task-cycle session persistence', () => {
         sessionId: 'duplicate-id',
         profileId: 'android',
         schemaId: 'session-guard',
+        currentStage: 'planning',
         tasks: {
           implementation: [createTask()],
           review: [createTask()],
@@ -152,6 +155,7 @@ describe('task-cycle session persistence', () => {
         sessionId: 'mismatched-run-key',
         profileId: 'android',
         schemaId: 'session-guard',
+        currentStage: 'planning',
         loopRuns: {
           'other-key': {
             id: 'run-1',

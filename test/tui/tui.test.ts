@@ -18,6 +18,7 @@ function makeSession(overrides: Record<string, unknown> = {}): WorkflowSession {
     sessionId: 'ses_root',
     profileId: 'base',
     schemaId: 'session-guard',
+    currentStage: 'planning',
     revision: 1,
     updatedAt: '2026-08-23T00:00:00.000Z',
     stageGateResults: [

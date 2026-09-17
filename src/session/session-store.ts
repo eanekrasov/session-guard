@@ -25,7 +25,7 @@ export function createSession(
   sessionId: string,
   profileId: string,
   schemaId: string,
-  initialStage: string = 'planning'
+  initialStage: string = ''
 ): WorkflowSession {
   return {
     schemaVersion: 2,

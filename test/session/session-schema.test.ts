@@ -15,6 +15,7 @@ describe('WorkflowSessionSchema', () => {
       sessionId: 'session-123',
       profileId: 'android',
       schemaId: 'session-guard',
+      currentStage: 'planning',
     };
 
     const result = WorkflowSessionSchema.parse(input);
@@ -28,6 +29,7 @@ describe('WorkflowSessionSchema', () => {
       sessionId: 'session-123',
       profileId: 'android',
       schemaId: 'session-guard',
+      currentStage: 'planning',
     };
 
     const result = WorkflowSessionSchema.parse(input);
@@ -74,6 +76,7 @@ describe('WorkflowSessionSchema', () => {
       sessionId: 'session-123',
       profileId: 'android',
       schemaId: 'session-guard',
+      currentStage: 'planning',
       unknownField: 'should be stripped',
     };
 
@@ -88,6 +91,7 @@ describe('WorkflowSessionSchema', () => {
       sessionId: 'session-123',
       profileId: 'android',
       schemaId: 'session-guard',
+      currentStage: 'planning',
       futureField: 'should be preserved',
     };
 
@@ -102,6 +106,7 @@ describe('WorkflowSessionSchema', () => {
       sessionId: 'session-123',
       profileId: 'android',
       schemaId: 'session-guard',
+      currentStage: 'planning',
       retryBudgets: {
         'task-1': { attempts: 2, maximum: 5 },
       },
@@ -120,6 +125,7 @@ describe('WorkflowSessionSchema', () => {
       sessionId: 'session-123',
       profileId: 'android',
       schemaId: 'session-guard',
+      currentStage: 'planning',
       retryBudgets: {
         cycles: { attempts: 0, maximum: 3 },
         'task-1': { attempts: 1, maximum: 3 },
@@ -136,6 +142,7 @@ describe('WorkflowSessionSchema', () => {
         sessionId: 'session-123',
         profileId: 'android',
         schemaId: 'session-guard',
+        currentStage: 'planning',
         retryBudgets: {
           'Not A Key': { attempts: 0, maximum: 3 },
         },

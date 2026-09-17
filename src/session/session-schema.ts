@@ -342,7 +342,7 @@ export const WorkflowSessionSchema = z
     updatedAt: z.string().default(() => new Date().toISOString()),
     verifications: z.array(VerificationSchema).default([]),
     changedFiles: z.array(z.string()).default([]),
-    currentStage: z.string().default('planning'),
+    currentStage: z.string(),
     /**
      * Вердикт ядра о последнем ходе на текущей стадии — вне цикла задач.
      *

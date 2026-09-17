@@ -159,6 +159,7 @@ describe('WorkflowStore', () => {
         sessionId: 'passthrough-test',
         profileId: 'android',
         schemaId: 'session-guard',
+        currentStage: 'planning',
         futureField: 'should survive',
       };
       const filePath = path.join(TEST_DIR, 'passthrough-test.json');

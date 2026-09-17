@@ -52,7 +52,7 @@ async function createWorkflowSession(
   preset: string,
   overrides?: Partial<WorkflowSession>
 ): Promise<WorkflowSession> {
-  const session = createSession(sessionId, preset, 'cycle');
+  const session = createSession(sessionId, preset, 'cycle', 'planning');
   // Set tasks to avoid empty-state stage issues
   session.tasks.implementation = [createTask({ status: 'running' })];
   Object.assign(session, overrides);

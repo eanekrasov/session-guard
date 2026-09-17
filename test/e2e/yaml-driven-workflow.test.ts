@@ -54,7 +54,8 @@ function freshSession(): WorkflowSession {
   return createSession(
     `test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     'session-guard',
-    'base'
+    'base',
+    'planning'
   );
 }
 
