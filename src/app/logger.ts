@@ -26,6 +26,9 @@ export type LogFn = (
   extra?: Record<string, unknown>
 ) => Promise<void>;
 
+/** A LogFn that discards everything — the default when a caller wires none. */
+export const noopLog: LogFn = () => Promise.resolve();
+
 /**
  * Create a LogFn backed by client.app.log().
  * Respects SESSION_GUARD_LOG_LEVEL env var — messages below the threshold
@@ -42,5 +45,23 @@ export function createLogFn(client: PluginInput['client']): LogFn {
     } catch {
       // ignore — logging must never throw
     }
+  };
+}
+
+/**
+ * Create a LogFn backed by the console.
+ *
+ * Standalone entry points run outside OpenCode and hold no client to log
+ * through — the dashboard server is its own process. Same level threshold and
+ * formatting as the plugin logger, so both surfaces read alike.
+ */
+export function createConsoleLogFn(): LogFn {
+  return async (level, message, extra) => {
+    if (LOG_LEVELS[level] < LOG_LEVELS[EFFECTIVE_LEVEL]) return;
+
+    const prefix = level === 'error' ? '[ERROR] ' : level === 'warn' ? '[WARN] ' : '';
+    const extraStr = extra ? ` ${JSON.stringify(extra)}` : '';
+    // eslint-disable-next-line no-console
+    console.log(`${new Date().toISOString()} ${prefix}${message}${extraStr}`);
   };
 }

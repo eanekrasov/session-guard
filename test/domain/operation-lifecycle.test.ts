@@ -139,6 +139,48 @@ describe('operation-lifecycle', () => {
       expect(session.activeOperations['call-1'].startedAt).toBe(fixedTime);
     });
 
+    it('expires an existing operation against the injected now, not the wall clock', () => {
+      const startedAt = '2024-01-01T00:00:00.000Z';
+      session.activeOperations = {
+        'old-call': {
+          callId: 'old-call',
+          agent: 'old-agent',
+          kind: 'mutation',
+          startedAt,
+          status: 'running',
+          round: 0,
+        },
+      };
+
+      const resolveStage = () => 'executing';
+      const afterTtl = new Date(Date.parse(startedAt) + MUTATION_TTL_MS + 1000).toISOString();
+      beginMutation(session, 'call-1', 'agent-1', resolveStage, 'tasks', afterTtl);
+
+      expect(session.activeOperations['old-call']).toBeUndefined();
+      expect(session.activeOperations['call-1']).toBeDefined();
+    });
+
+    it('keeps an existing operation when the injected now is within TTL', () => {
+      const startedAt = '2024-01-01T00:00:00.000Z';
+      session.activeOperations = {
+        'old-call': {
+          callId: 'old-call',
+          agent: 'old-agent',
+          kind: 'mutation',
+          startedAt,
+          status: 'running',
+          round: 0,
+        },
+      };
+
+      const resolveStage = () => 'executing';
+      const withinTtl = new Date(Date.parse(startedAt) + 1000).toISOString();
+
+      expect(() =>
+        beginMutation(session, 'call-1', 'agent-1', resolveStage, 'tasks', withinTtl)
+      ).toThrow('Active operation already exists: old-call');
+    });
+
     it('clears verifications and checks on new mutation', () => {
       session.verifications = [{ gate: 'old-gate', status: 'confirmed' }];
       session.checks = 'passed' as
@@ -298,6 +340,26 @@ describe('operation-lifecycle', () => {
 
       expect(isExpiredMutation(session, 'old-call')).toBe(true);
       expect(isExpiredMutation(session, 'new-call')).toBe(false);
+    });
+
+    it('measures TTL against the injected now instead of the wall clock', () => {
+      const startedAt = '2024-01-01T00:00:00.000Z';
+      session.activeOperations = {
+        'call-1': {
+          callId: 'call-1',
+          agent: 'agent-1',
+          kind: 'mutation',
+          startedAt,
+          status: 'running',
+          round: 0,
+        },
+      };
+
+      const justBeforeExpiry = new Date(Date.parse(startedAt) + MUTATION_TTL_MS - 1).toISOString();
+      const atExpiry = new Date(Date.parse(startedAt) + MUTATION_TTL_MS).toISOString();
+
+      expect(isExpiredMutation(session, 'call-1', justBeforeExpiry)).toBe(false);
+      expect(isExpiredMutation(session, 'call-1', atExpiry)).toBe(true);
     });
   });
 

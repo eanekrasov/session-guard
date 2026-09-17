@@ -6,6 +6,11 @@
 
 set -euo pipefail
 
+# Hermetic build: emit from nothing. Without this a deleted source leaves its
+# declaration behind in the published package — `tsc --emitDeclarationOnly`
+# adds files, it never removes the ones whose source is gone.
+rm -rf dist
+
 bun build ./src/index.ts ./src/cli.ts --outdir dist --target bun
 bun scripts/build-tui.ts
 bun scripts/build-schema.ts

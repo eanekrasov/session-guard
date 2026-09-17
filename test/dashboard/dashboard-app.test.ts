@@ -312,4 +312,48 @@ describe('dashboard', () => {
       expect(last.snapshot?.['ses-1']?.currentStage).toBe('code');
     });
   });
+
+  describe('log port', () => {
+    it('reports SSE clients connecting and disconnecting', async () => {
+      const calls: Array<{ level: string; message: string }> = [];
+      const local = make({
+        log: async (level, message) => {
+          calls.push({ level, message });
+        },
+      });
+
+      const response = await local.fetch(get('/events'));
+      const reader = response.body!.getReader();
+      await reader.read(); // the opening snapshot
+      await reader.cancel();
+
+      expect(calls).toContainEqual({
+        level: 'debug',
+        message: 'dashboard: SSE client connected',
+      });
+      expect(calls).toContainEqual({
+        level: 'debug',
+        message: 'dashboard: SSE client disconnected',
+      });
+      local.stop();
+    });
+
+    it('warns and keeps serving when the session directory cannot be watched', () => {
+      const calls: Array<{ level: string; message: string }> = [];
+      const local = make({
+        sessionsDir: path.join(ROOT, 'does-not-exist'),
+        log: async (level, message) => {
+          calls.push({ level, message });
+        },
+      });
+
+      local.start();
+      local.stop();
+
+      expect(calls).toContainEqual({
+        level: 'warn',
+        message: 'dashboard: session watcher unavailable, polling instead',
+      });
+    });
+  });
 });

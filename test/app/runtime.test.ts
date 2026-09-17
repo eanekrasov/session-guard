@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { execSync } from 'node:child_process';
 import type { PluginInput } from '@opencode-ai/plugin';
 import { createSession, WorkflowStore } from '../../src/session/session-store.ts';
+import { sessionFileName } from '../../src/session/session-files.ts';
 import { createTask } from '../support/task-factory.ts';
 import { hostPayload } from '../support/host-payload.ts';
 
@@ -1094,6 +1095,39 @@ describe('extractCallId via handleEvent', () => {
 
     await hooks.event!(hostPayload(event));
     // Should not throw
+  });
+});
+
+// ─── markTaskOperationInterrupted sweep (P2-4) ────────────────────────────────
+
+describe('markTaskOperationInterrupted', () => {
+  test('a session that cannot be read does not strand the flag on the others', async () => {
+    const hooks = await createRuntime();
+    const callId = 'sweep-call';
+    // `list()` sorts, so the corrupt file is loaded first — before the fix its
+    // throw aborted the loop and the healthy session kept a running operation.
+    await createTestSession('aaa-corrupt', 'test-profile', { ...activeOperation(callId) });
+    await createTestSession('zzz-healthy', 'test-profile', { ...activeOperation(callId) });
+    writeFileSync(
+      join(process.env.SESSION_GUARD_STORE_DIR!, sessionFileName('aaa-corrupt')),
+      '{ not json'
+    );
+
+    await hooks.event!(
+      hostPayload({
+        event: {
+          type: 'message.part.updated',
+          message: {
+            id: 'msg-1',
+            parts: [{ type: 'tool_use', status: 'failed', callID: callId }],
+          },
+          part: { id: 'part-1', status: 'failed', callID: callId },
+        },
+      })
+    );
+
+    const healthy = await loadSession('zzz-healthy');
+    expect(healthy!.activeOperations[callId]!.status).toBe('interrupted');
   });
 });
 

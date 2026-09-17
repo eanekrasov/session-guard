@@ -25,21 +25,12 @@
 import { serve } from 'bun';
 import { join, resolve } from 'node:path';
 import { createDashboard } from './dashboard-app.ts';
+import { createConsoleLogFn } from '../app/logger.ts';
 import { harnessDir, opencodeStateDir, profilesDir, sessionsDir } from '../app/paths.ts';
 
 const PROJECT_ROOT = resolve(join(import.meta.dir, '..', '..'));
 
-/** Simple logger for standalone dashboard server. */
-function log(
-  level: 'info' | 'warn' | 'error',
-  message: string,
-  extra?: Record<string, unknown>
-): void {
-  const prefix = level === 'error' ? '[ERROR] ' : level === 'warn' ? '[WARN] ' : '';
-  const extraStr = extra ? ` ${JSON.stringify(extra)}` : '';
-  // eslint-disable-next-line no-console
-  console.log(`${new Date().toISOString()} ${prefix}${message}${extraStr}`);
-}
+const log = createConsoleLogFn();
 const BIND_HOST = process.env['DASHBOARD_HOST'] ?? '127.0.0.1';
 const PORT = 3456;
 
@@ -73,6 +64,7 @@ const dashboard = createDashboard({
   token: process.env['DASHBOARD_TOKEN'] ?? '',
   allowedOrigin: process.env['ALLOWED_ORIGIN'] ?? '',
   fallbackProfileId: process.env['HARNESS_PROFILE'] ?? '',
+  log,
 });
 
 serve({
@@ -84,4 +76,4 @@ serve({
 
 dashboard.start();
 
-log('info', `Dashboard: http://${BIND_HOST}:${PORT}`);
+void log('info', `Dashboard: http://${BIND_HOST}:${PORT}`);

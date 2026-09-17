@@ -126,7 +126,7 @@ export function beginMutation(
   now: string = new Date().toISOString()
 ): void {
   for (const operation of getActiveOperations(session)) {
-    if (isExpiredMutation(session, operation.callId)) {
+    if (isExpiredMutation(session, operation.callId, now)) {
       delete session.activeOperations[operation.callId];
     }
   }
@@ -199,15 +199,28 @@ export function finishMutation(session: WorkflowSession, passed: boolean, callId
   delete session.activeOperations[operation.callId];
 }
 
-/** True when the active operation has been running longer than MUTATION_TTL_MS. */
-export function isExpiredMutation(session: WorkflowSession, callId?: string): boolean {
+/**
+ * True when the active operation has been running longer than MUTATION_TTL_MS.
+ *
+ * `now` is the same clock source `beginMutation` stamps `startedAt` from, so a
+ * caller that injects time for the start also gets a TTL decision measured
+ * against that time rather than the wall clock.
+ */
+export function isExpiredMutation(
+  session: WorkflowSession,
+  callId?: string,
+  now: string = new Date().toISOString()
+): boolean {
   const operation = getActiveOperation(session, callId);
   if (!operation) return false;
 
   const startedAt = Date.parse(operation.startedAt);
   if (isNaN(startedAt)) return false;
 
-  return Date.now() - startedAt >= MUTATION_TTL_MS;
+  const currentTime = Date.parse(now);
+  if (isNaN(currentTime)) return false;
+
+  return currentTime - startedAt >= MUTATION_TTL_MS;
 }
 
 /** Clear the active mutation. Safe no-op when already null. */

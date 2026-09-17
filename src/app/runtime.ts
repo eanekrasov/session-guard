@@ -69,7 +69,8 @@ import { canonicalizePlan, computeSha256 } from './sdd-artifacts.ts';
 import { TaskApi, type SetTasksInput } from './task-api.ts';
 import { resolveConfig } from '../public-api.ts';
 import { sessionsDir, profilesDir as getProfilesDir, opencodeStateDir } from './paths.ts';
-import { OpenCodeRulesRuntime } from '../rules/runtime.ts';
+import { OpenCodeRulesRuntime, type MessagesTransformOutput } from '../rules/runtime.ts';
+import type { ChatMessageInput, ChatMessageOutput } from '../rules/runtime-chat.ts';
 import { MatchedRulesStateStore } from '../rules/matched-rules-state.ts';
 import { syncAllProfileAgents } from './profile-agent-sync.ts';
 import { agentIsAllowed } from './agent-names.ts';
@@ -83,15 +84,18 @@ const DEFAULT_TASK_RETRY_MAXIMUM = 3;
 const RETRY_EXHAUSTED_DECISION_KIND = 'retry_exhausted';
 
 // Wrapper around the SDK's tool() that bridges the zod v3↔v4 type gap.
-// The SDK uses zod v4 internally; our project uses zod v3.  This wrapper
-// strips the generic so consumers get proper runtime behaviour without
-// a cross-version zod TypeError at build time.
+// The SDK bundles zod v4; this project uses zod v3, and the two `ZodRawShape`s
+// are not structurally compatible. The bridge is one assertion at that
+// boundary, cast to the SDK's own parameter — not `never`, which would swallow
+// any wrong shape instead of naming the one intended.
+type SdkToolInput = Parameters<typeof toolFn>[0];
+
 function tool<A extends Record<string, unknown>>(def: {
   description: string;
   args: A;
   execute(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult>;
 }): ToolDefinition {
-  return toolFn(def as never);
+  return toolFn(def as unknown as SdkToolInput);
 }
 
 // ─── SessionGuardRuntime ─────────────────────────────────────────────────────
@@ -739,15 +743,7 @@ class SessionGuardRuntime {
    * Handle [chat.message] — run guardrails on user input, capture baseline,
    * then evaluate rules.
    */
-  async handleChatMessage(
-    input: {
-      sessionID: string;
-      messageID?: string;
-      message?: { role?: string; id?: string };
-      parts?: Array<{ type?: string; text?: string; id?: string }>;
-    },
-    output?: { parts?: Array<Record<string, unknown>>; message?: { id?: string } }
-  ): Promise<void> {
+  async handleChatMessage(input: ChatMessageInput, output?: ChatMessageOutput): Promise<void> {
     const sessionID = input?.sessionID;
     const session = sessionID ? await this.loadGoverning(sessionID) : null;
     if (!session) {
@@ -783,7 +779,7 @@ class SessionGuardRuntime {
     void validateUserInput;
 
     // Delegate to rules sub-system
-    await this.rulesRuntime.handleChatMessage(input, output ?? ({} as never));
+    await this.rulesRuntime.handleChatMessage(input, output ?? {});
   }
 
   /**
@@ -1578,9 +1574,9 @@ class SessionGuardRuntime {
    */
   async handleMessagesTransform(
     _input: Record<string, never>,
-    output: { messages?: unknown[] }
+    output: MessagesTransformOutput
   ): Promise<void> {
-    await this.rulesRuntime.handleMessagesTransform(_input, output as never);
+    await this.rulesRuntime.handleMessagesTransform(_input, output);
   }
 
   /**
@@ -1619,15 +1615,26 @@ class SessionGuardRuntime {
   private async markTaskOperationInterrupted(callId: string): Promise<void> {
     const sessionIds = await this.store.list();
     for (const sessionID of sessionIds) {
-      const loaded = await this.store.load(sessionID);
-      const loadedOperation = loaded?.activeOperations[callId];
-      if (!loadedOperation || loadedOperation.status !== 'running') continue;
-      await this.executor.run(sessionID, async (tx) => {
-        const operation = tx.session?.activeOperations[callId];
-        if (!operation || operation.status !== 'running') return;
-        operation.status = 'interrupted';
-        operation.interruptedAt = new Date().toISOString();
-      });
+      try {
+        const loaded = await this.store.load(sessionID);
+        const loadedOperation = loaded?.activeOperations[callId];
+        if (!loadedOperation || loadedOperation.status !== 'running') continue;
+        await this.executor.run(sessionID, async (tx) => {
+          const operation = tx.session?.activeOperations[callId];
+          if (!operation || operation.status !== 'running') return;
+          operation.status = 'interrupted';
+          operation.interruptedAt = new Date().toISOString();
+        });
+      } catch (error) {
+        // Best-effort sweep over every stored session. An unreadable file —
+        // or one whose write fails — used to abort the whole loop, leaving the
+        // interrupted flag stranded on every session after it in the list.
+        await this.log('warn', 'markTaskOperationInterrupted: session skipped', {
+          sessionID,
+          callID: callId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
   }
 

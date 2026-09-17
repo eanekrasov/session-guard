@@ -43,7 +43,7 @@ import { promisify } from 'node:util';
 
 const execAsync = promisify(exec);
 
-interface MessagesTransformOutput {
+export interface MessagesTransformOutput {
   messages: MessageWithInfo[];
 }
 

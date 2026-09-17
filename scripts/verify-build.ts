@@ -6,7 +6,7 @@
  * misconfigured entry name made one overwrite another — a build that looked
  * successful and shipped the same artifact twice.
  */
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 
 const required = [
   'dist/index.js',
@@ -31,4 +31,25 @@ if (distinct.size !== entrypoints.length) {
   process.exit(1);
 }
 
-console.error('Build verification: all outputs present, entrypoints distinct');
+// Every declaration has to come from a source. A declaration whose source is
+// gone is a module that no longer exists but is still shipped and still
+// typechecks as importable — the build must not carry it.
+const orphans: string[] = [];
+for (const entry of readdirSync('dist', { recursive: true })) {
+  const rel = String(entry);
+  if (!rel.endsWith('.d.ts')) continue;
+  const base = `src/${rel}`;
+  const sourced =
+    existsSync(base) ||
+    existsSync(base.replace(/\.d\.ts$/, '.ts')) ||
+    existsSync(base.replace(/\.d\.ts$/, '.tsx'));
+  if (!sourced) orphans.push(`dist/${rel}`);
+}
+if (orphans.length > 0) {
+  console.error('ERROR: declarations without a source - stale build output:', orphans.join(', '));
+  process.exit(1);
+}
+
+console.error(
+  'Build verification: all outputs present, entrypoints distinct, no orphan declarations'
+);

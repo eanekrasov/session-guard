@@ -27,6 +27,7 @@ import {
   resolveConfig,
 } from '../public-api.ts';
 import { selectSchema, schemaToEngineConfig } from '../app/mutation-orchestrator.ts';
+import { noopLog, type LogFn } from '../app/logger.ts';
 import { compileWorkflow } from '../schema/compile-workflow.ts';
 import type { StageDef } from '../schema/profile-schema.ts';
 import type { WorkflowSession } from '../session/session-schema.ts';
@@ -67,6 +68,14 @@ export interface DashboardConfig {
   allowedOrigin?: string;
   /** The profile to describe when no session names one. */
   fallbackProfileId?: string;
+  /**
+   * Where the dashboard reports what it is doing.
+   *
+   * A port, not a console call: the dashboard is embedded in tests and in the
+   * standalone process alike, and only the composition root decides which
+   * surface those records land on. Defaults to discarding them.
+   */
+  log?: LogFn;
 }
 
 export interface Dashboard {
@@ -215,6 +224,7 @@ export function createDashboard(config: DashboardConfig): Dashboard {
     token = '',
     allowedOrigin = '',
     fallbackProfileId = '',
+    log = noopLog,
   } = config;
 
   type SSEClient = ReadableStreamDefaultController;
@@ -496,6 +506,13 @@ export function createDashboard(config: DashboardConfig): Dashboard {
       }
       lastSnapshot = current;
       pushToAll({ snapshot: newSessions });
+    } catch (error) {
+      // Callers fire this with `void` — the watcher and a timer — so a throw
+      // here would surface only as an unhandled rejection. Report it on the
+      // log port and keep the watcher alive for the next change.
+      void log('error', 'dashboard: publishChanges failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
     } finally {
       publishing = false;
     }
@@ -529,8 +546,12 @@ export function createDashboard(config: DashboardConfig): Dashboard {
         if (filename && filename.endsWith('.json')) void publishChanges();
       });
       stoppers.push(() => watcher.close());
-    } catch {
-      /* polling below covers it */
+    } catch (error) {
+      // Polling below covers it, but a silent fallback hides a store that is
+      // not where the operator thinks — say so.
+      void log('warn', 'dashboard: session watcher unavailable, polling instead', {
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
     const sessionsTimer = setInterval(() => void publishChanges(), 500);
     const metricsTimer = setInterval(checkMetricsChanges, 2000);
@@ -610,10 +631,12 @@ export function createDashboard(config: DashboardConfig): Dashboard {
         async start(c) {
           controller = c;
           clients.add(controller);
+          void log('debug', 'dashboard: SSE client connected', { clients: clients.size });
           controller.enqueue(frame({ snapshot: await loadAllSessions() }));
         },
         cancel() {
           clients.delete(controller!);
+          void log('debug', 'dashboard: SSE client disconnected', { clients: clients.size });
         },
       });
       return new Response(stream, {
