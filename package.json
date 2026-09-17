@@ -1,6 +1,6 @@
 {
   "name": "@eanekrasov/session-guard",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Session guard for OpenCode — gives schema-based workflow with strict validation between steps",
   "keywords": [
     "opencode",
