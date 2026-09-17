@@ -1134,13 +1134,17 @@ class SessionGuardRuntime {
         }
       }
 
-      upsertActiveTaskContext(tx.session, {
-        runId,
-        taskId,
-        agent,
-        callId: callID,
-        status: 'running',
-      });
+      upsertActiveTaskContext(
+        tx.session,
+        {
+          runId,
+          taskId,
+          agent,
+          callId: callID,
+          status: 'running',
+        },
+        new Date().toISOString()
+      );
 
       void this.log('info', 'Workflow task admitted', {
         sessionID,
@@ -2127,7 +2131,13 @@ class SessionGuardRuntime {
       return;
     }
 
-    setGateStatus(session, parsed.gate, parsed.status === 'pass' ? 'passed' : 'failed');
+    setGateStatus(
+      session,
+      parsed.gate,
+      parsed.status === 'pass' ? 'passed' : 'failed',
+      undefined,
+      new Date().toISOString()
+    );
     void this.log('info', 'Stage gate recorded', {
       sessionID: session.sessionId,
       stage: owner.stageId,
@@ -2291,7 +2301,13 @@ class SessionGuardRuntime {
   ): void {
     for (const effect of effects ?? []) {
       if (!effect.approve) continue;
-      approve(session, effect.approve, '', `transition:${run.stage}->${to}`);
+      approve(
+        session,
+        effect.approve,
+        '',
+        `transition:${run.stage}->${to}`,
+        new Date().toISOString()
+      );
       void this.log('info', 'Task transition granted an approval', {
         sessionID: session.sessionId,
         taskId: run.taskId,
@@ -2424,7 +2440,11 @@ class SessionGuardRuntime {
   ): void {
     const existing = session.activeTaskContexts.find((a) => a.runId === runId);
     const agent = existing?.agent ?? '';
-    upsertActiveTaskContext(session, { runId, taskId: existing?.taskId ?? '', agent, status });
+    upsertActiveTaskContext(
+      session,
+      { runId, taskId: existing?.taskId ?? '', agent, status },
+      new Date().toISOString()
+    );
   }
 
   /**

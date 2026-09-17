@@ -65,6 +65,14 @@ const LOCK_STALE_MS = 30_000;
 /** A save built on a revision the file no longer holds. */
 export class WorkflowSessionConflictError extends Error {
   readonly name = 'WorkflowSessionConflictError';
+  readonly expectedRevision: number;
+  readonly actualRevision: number;
+
+  constructor(message: string, expectedRevision: number, actualRevision: number) {
+    super(message);
+    this.expectedRevision = expectedRevision;
+    this.actualRevision = actualRevision;
+  }
 }
 
 // ─── WorkflowStore ────────────────────────────────────────────────────────────
@@ -250,8 +258,12 @@ export class WorkflowStore {
     const message =
       `[ERROR] Session ${sessionId} changed underneath this write: ` +
       `loaded revision ${revisionBefore}, on disk ${onDisk}. Reload and retry.`;
-    void this.log('error', message, { sessionId });
-    throw new WorkflowSessionConflictError(message);
+    void this.log('error', message, {
+      sessionId,
+      expectedRevision: revisionBefore,
+      actualRevision: onDisk,
+    });
+    throw new WorkflowSessionConflictError(message, revisionBefore, onDisk);
   }
 
   async load(sessionId: string): Promise<WorkflowSession | null> {

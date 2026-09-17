@@ -7,13 +7,14 @@ export function approve(
   session: WorkflowSession,
   type: string,
   evidence: string,
-  callId: string
+  callId: string,
+  now: string = new Date().toISOString()
 ): void {
   const existing = session.approvals.find((a) => a.type === type);
 
   if (existing) {
     existing.status = 'granted';
-    existing.grantedAt = new Date().toISOString();
+    existing.grantedAt = now;
     existing.evidence = evidence;
     existing.callId = callId;
     delete (existing as { feedback?: string }).feedback;
@@ -22,7 +23,7 @@ export function approve(
       type,
       callId,
       status: 'granted',
-      grantedAt: new Date().toISOString(),
+      grantedAt: now,
       evidence,
     });
   }

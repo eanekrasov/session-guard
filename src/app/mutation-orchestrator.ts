@@ -434,7 +434,8 @@ export class MutationOrchestrator {
             const loopStage = engine.getLoopStage(listKey);
             return loopStage ? (firstNestedStageId(loopStage) ?? null) : null;
           },
-          stageDef?.loop ?? null
+          stageDef?.loop ?? null,
+          new Date().toISOString()
         );
       } catch (err) {
         await this.log('error', `beginMutation: domain mutation failed`, {

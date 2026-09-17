@@ -153,7 +153,7 @@ export class ConsentOrchestrator {
         process.env.HARNESS_AUTO_APPROVE === 'true' &&
         !tx.session.approvals.some((a) => a.type === consentType && a.status === 'granted')
       ) {
-        approve(tx.session, consentType, documentEvidence, callID);
+        approve(tx.session, consentType, documentEvidence, callID, new Date().toISOString());
         void this.log('info', 'HARNESS_AUTO_APPROVE: consent auto-approved', {
           sessionID,
           callID,
@@ -318,7 +318,13 @@ export class ConsentOrchestrator {
         // Одобряется то согласие, которое спрашивали. Здесь стояло литеральное
         // 'plan', и схема с `consent: deploy` получала одобрение с чужим
         // именем — переход ждал своего и не дожидался никогда.
-        approve(tx.session, pendingApproval.type, pendingApproval.evidence ?? '', callID);
+        approve(
+          tx.session,
+          pendingApproval.type,
+          pendingApproval.evidence ?? '',
+          callID,
+          new Date().toISOString()
+        );
         wasGranted = true;
         grantedType = pendingApproval.type;
         evidence = pendingApproval.evidence ?? '';

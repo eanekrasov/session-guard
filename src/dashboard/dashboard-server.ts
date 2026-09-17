@@ -1,5 +1,3 @@
-/* eslint-disable no-console */
-
 /**
  * Dashboard Standalone Server
  * Запуск: bun run src/dashboard/dashboard-server.ts
@@ -30,6 +28,18 @@ import { createDashboard } from './dashboard-app.ts';
 import { harnessDir, opencodeStateDir, profilesDir, sessionsDir } from '../app/paths.ts';
 
 const PROJECT_ROOT = resolve(join(import.meta.dir, '..', '..'));
+
+/** Simple logger for standalone dashboard server. */
+function log(
+  level: 'info' | 'warn' | 'error',
+  message: string,
+  extra?: Record<string, unknown>
+): void {
+  const prefix = level === 'error' ? '[ERROR] ' : level === 'warn' ? '[WARN] ' : '';
+  const extraStr = extra ? ` ${JSON.stringify(extra)}` : '';
+  // eslint-disable-next-line no-console
+  console.log(`${new Date().toISOString()} ${prefix}${message}${extraStr}`);
+}
 const BIND_HOST = process.env['DASHBOARD_HOST'] ?? '127.0.0.1';
 const PORT = 3456;
 
@@ -74,4 +84,4 @@ serve({
 
 dashboard.start();
 
-console.log(`Dashboard: http://${BIND_HOST}:${PORT}`);
+log('info', `Dashboard: http://${BIND_HOST}:${PORT}`);

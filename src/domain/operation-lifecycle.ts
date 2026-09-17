@@ -122,7 +122,8 @@ export function beginMutation(
   callId: string,
   agent: string = 'unknown',
   resolveInitialStage?: ResolveInitialStage,
-  currentListKey?: string | null
+  currentListKey?: string | null,
+  now: string = new Date().toISOString()
 ): void {
   for (const operation of getActiveOperations(session)) {
     if (isExpiredMutation(session, operation.callId)) {
@@ -160,7 +161,7 @@ export function beginMutation(
     ...(run ? { runId: run.id, taskId: run.taskId } : {}),
     agent,
     kind: 'mutation',
-    startedAt: new Date().toISOString(),
+    startedAt: now,
     status: 'running',
     round: run?.round ?? 0,
   };

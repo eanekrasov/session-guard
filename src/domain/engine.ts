@@ -472,7 +472,13 @@ export class SessionGuardEngine {
             }
           }
           if (effect.approve) {
-            approve(session, effect.approve, '', `transition:${currentStage}->${transition.to}`);
+            approve(
+              session,
+              effect.approve,
+              '',
+              `transition:${currentStage}->${transition.to}`,
+              new Date().toISOString()
+            );
           }
         }
         const leftStage = currentStage;

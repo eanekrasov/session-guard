@@ -35,7 +35,8 @@ export function setGateStatus(
   session: WorkflowSession,
   gateId: string,
   status: GateStatus,
-  options?: SetGateStatusOptions
+  options?: SetGateStatusOptions,
+  now: string = new Date().toISOString()
 ): void {
   if (!gateId) return;
   const stage = session.currentStage;
@@ -46,7 +47,7 @@ export function setGateStatus(
   }
   gate.status = status;
   if (status === 'passed' || status === 'failed') {
-    gate.resolvedAt = new Date().toISOString();
+    gate.resolvedAt = now;
   } else {
     // При переводе в pending — очищаем устаревший resolvedAt
     gate.resolvedAt = undefined;
@@ -106,9 +107,9 @@ export function upsertActiveTaskContext(
     executionSessionId?: string;
     callId?: string;
     status: ActiveTaskContext['status'];
-  }
+  },
+  now: string = new Date().toISOString()
 ): void {
-  const now = new Date().toISOString();
   const existing = session.activeTaskContexts.find((a) => a.runId === ctx.runId);
   if (existing) {
     existing.taskId = ctx.taskId;
