@@ -1,6 +1,6 @@
 {
   "name": "opencode-session-guard",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "State machine library for OpenCode plugins — gives schema-based workflow with strict validation between steps",
   "keywords": [
     "opencode",
