@@ -293,7 +293,7 @@ export class WorkflowStore {
       });
       return null;
     }
-    const data = result.data as WorkflowSession;
+    const data = result.data;
     void this.log('info', `Session loaded: ${sessionId}`, {
       revision: data.revision,
       profileId: data.profileId,

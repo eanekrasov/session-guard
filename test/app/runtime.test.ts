@@ -1264,6 +1264,8 @@ describe('handleFileToolAfter tool-name normalisation', () => {
     // CRLF line ending trips the LF_ONLY invariant carried by the base profile.
     writeFileSync(join(tmpDir, 'src', 'crlf.ts'), 'const x = 1;\r\n', 'utf-8');
 
+    process.env.SESSION_GUARD_PROFILES_DIR = REAL_PROFILES_DIR;
+
     const mod = await import('../../src/app/runtime.ts');
     const pluginInput = createPluginInput();
     const hooks = mod.createRuntime({
@@ -1272,7 +1274,6 @@ describe('handleFileToolAfter tool-name normalisation', () => {
       worktree: tmpDir,
     } as PluginInput);
 
-    process.env.SESSION_GUARD_PROFILES_DIR = REAL_PROFILES_DIR;
     await createTestSession('file-case-lower', 'base');
     await createTestSession('file-case-upper', 'base');
 
