@@ -8,7 +8,7 @@ export type {
   TransitionEffect,
   DispatchDef,
   ConsentOnTransition,
-  RetryBudget,
+  ProfileRetryBudget,
   LoopSource,
 } from './profile-schema.ts';
 
@@ -101,6 +101,7 @@ export interface ResolvedProfile {
 export interface ProfileConfigurationIssue {
   path: string;
   message: string;
+  severity: 'error' | 'warning';
 }
 
 export class ProfileConfigurationError extends Error {

@@ -17,6 +17,8 @@ import type { ProfileMetadata } from '../schema/types.ts';
 import { WorkflowSessionSchema } from '../session/session-schema.ts';
 import type { WorkflowSession } from '../session/session-schema.ts';
 import { formatDetailsLines, isRecord, parseRuntimeState, type Tui } from './tui.ts';
+import { toSessionSnapshot } from '../types/session-snapshot.ts';
+import type { SessionSnapshot } from '../types/session-snapshot.ts';
 import { buildPanelPalette, createPanelLayout, TuiPanel, TuiSection } from './tui-panel/index.ts';
 import { SidebarContent as RulesSidebarContent } from './slots/sidebar-content.tsx';
 
@@ -336,7 +338,7 @@ function gateTone(status: string): 'success' | 'warning' | 'error' | 'muted' {
 function guardRows(
   view: Tui
 ): Array<{ label: string; value: string; tone: 'success' | 'warning' | 'error' | 'muted' }> {
-  const guards = view.raw.guards;
+  const guards = view.snapshot.gates;
   if (Array.isArray(guards)) {
     return guards.slice(0, 3).map((guard, index) => ({
       label: `guard.${index + 1}`,
@@ -347,10 +349,10 @@ function guardRows(
   if (guards && typeof guards === 'object') {
     return Object.entries(guards)
       .slice(0, 3)
-      .map(([key, value]) => ({
+      .map(([key, gateStatus]) => ({
         label: `guard.${key}`,
-        value: compactValue(value),
-        tone: value === true ? 'success' : value === false ? 'error' : 'warning',
+        value: compactValue(gateStatus),
+        tone: gateTone(gateStatus),
       }));
   }
   return [];
@@ -375,7 +377,7 @@ async function resolveStageNeighbors(
   profileId: string,
   stage: string,
   baseDir: string,
-  rawSession?: Record<string, unknown>
+  snapshot?: SessionSnapshot
 ): Promise<StageNeighbors> {
   for (const dir of profileDirs(baseDir)) {
     if (!existsSync(dir)) continue;
@@ -383,7 +385,7 @@ async function resolveStageNeighbors(
       const profile = await resolveConfig(profileId, dir);
       const transitions = profile.schemas.flatMap((schema) => schema.transitions ?? []);
       const outgoing = transitions.filter((transition) => transition.from === stage);
-      const parsedSession = rawSession ? WorkflowSessionSchema.safeParse(rawSession) : null;
+      const parsedSession = snapshot ? WorkflowSessionSchema.safeParse(snapshot) : null;
       const facts = parsedSession?.success
         ? {
             ...toSessionFacts(parsedSession.data),
@@ -440,7 +442,7 @@ async function readSessionView(
   // Запасной строки больше нет: `formatDetailsLines` не разбирает текст и
   // потому не может не справиться, а поля `runId` у схемы сессии нет — эта
   // ветка печатала бы `runId: undefined`, если бы вообще достигалась.
-  section.setLastDetails(formatDetailsLines(session));
+  section.setLastDetails(formatDetailsLines(toSessionSnapshot(session)));
   return parsed.value;
 }
 
@@ -484,10 +486,11 @@ export function createSessionGuardCoordinator(options: {
       if (disposed || mine !== generation) return;
       const profiles = await options.section.loadProfiles();
       if (disposed || mine !== generation) return;
-      const profileId = typeof view?.raw.profileId === 'string' ? view.raw.profileId : null;
+      const profileId =
+        typeof view?.snapshot.profileId === 'string' ? view.snapshot.profileId : null;
       const neighbors =
         profileId && view
-          ? await resolveStageNeighbors(profileId, view.stage, options.baseDir, view.raw)
+          ? await resolveStageNeighbors(profileId, view.stage, options.baseDir, view.snapshot)
           : { previous: null, next: null, available: [] };
       if (disposed || mine !== generation) return;
       options.onUpdate({ view, profiles, neighbors });
@@ -535,41 +538,43 @@ export function createSessionGuardCoordinator(options: {
 function sessionSummaryRows(
   view: Tui
 ): Array<{ label: string; value: string; tone: 'success' | 'warning' | 'error' | 'muted' }> {
-  const raw = view.raw;
+  const snap = view.snapshot;
   const rows: Array<{
     label: string;
     value: string;
     tone: 'success' | 'warning' | 'error' | 'muted';
   }> = [];
-  if (typeof raw.profileId === 'string')
-    rows.push({ label: 'profile', value: raw.profileId, tone: 'muted' });
+  if (typeof snap.profileId === 'string')
+    rows.push({ label: 'profile', value: snap.profileId, tone: 'muted' });
   rows.push({ label: 'revision', value: String(view.revision), tone: 'muted' });
 
-  const approvals = Array.isArray(raw.approvals) ? raw.approvals : [];
+  const approvals = Array.isArray(snap.approvals) ? snap.approvals : [];
   if (approvals.length > 0) {
     rows.push({
       label: 'approvals',
       value: approvals
         .filter(isRecord)
         .map(
-          (approval) =>
+          (approval: Record<string, unknown>) =>
             `${String(approval.type ?? 'unknown')}=${String(approval.status ?? 'unknown')}`
         )
         .join(' '),
-      tone: approvals.some((approval) => isRecord(approval) && approval.status === 'rejected')
+      tone: approvals.some(
+        (approval: Record<string, unknown>) => isRecord(approval) && approval.status === 'rejected'
+      )
         ? 'error'
         : 'success',
     });
   }
 
-  const pending = Array.isArray(raw.pendingDecisions) ? raw.pendingDecisions.length : 0;
+  const pending = Array.isArray(snap.pendingDecisions) ? snap.pendingDecisions.length : 0;
   if (pending > 0)
     rows.push({ label: 'pending decisions', value: String(pending), tone: 'warning' });
 
-  const violations = Array.isArray(raw.invariantViolations) ? raw.invariantViolations.length : 0;
+  const violations = Array.isArray(snap.invariantViolations) ? snap.invariantViolations.length : 0;
   if (violations > 0) rows.push({ label: 'violations', value: String(violations), tone: 'error' });
 
-  const operations = isRecord(raw.activeOperations) ? Object.keys(raw.activeOperations).length : 0;
+  const operations = snap.activeOperations ? Object.keys(snap.activeOperations).length : 0;
   if (operations > 0)
     rows.push({ label: 'operations', value: String(operations), tone: 'warning' });
   rows.push({
@@ -728,7 +733,7 @@ function WorkflowSidebarContent(props: {
       : (nextStage() ?? '—');
   };
   const title = () =>
-    view()?.stage ?? (view()?.raw.title ? compactValue(view()!.raw.title) : 'Workflow');
+    view()?.stage ?? (view()?.snapshot.title ? compactValue(view()!.snapshot.title) : 'Workflow');
   const panelPalette = createMemo(() =>
     buildPanelPalette(theme as unknown as Record<string, unknown>)
   );

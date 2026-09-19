@@ -9,7 +9,7 @@
  * The two rules are deliberately trivial: what the fixture is for is metadata
  * resolution and inheritance, and five tests assert these ids by name.
  */
-import type { InvariantCheck } from '../../../../src/app/invariants.ts';
+import type { InvariantCheck } from '../../../../src/types/index.ts';
 
 export const INVARIANTS: InvariantCheck[] = [
   {

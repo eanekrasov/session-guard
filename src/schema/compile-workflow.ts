@@ -79,6 +79,7 @@ export interface CompiledWorkflow {
 export interface CompileError {
   path: string;
   message: string;
+  severity: 'error' | 'warning';
 }
 
 /**
@@ -267,6 +268,7 @@ function validateReachability(schema: ResolvedSchema, errors: CompileError[]): v
   for (const id of ids) {
     if (reached.has(id)) continue;
     errors.push({
+      severity: 'error',
       path: `stages.${id}`,
       message: `Stage '${id}' is declared but nothing reaches it: no transition leads here from '${initialStageOf(stages)}', and no stage assignment names it`,
     });
@@ -286,6 +288,7 @@ function validateReachability(schema: ResolvedSchema, errors: CompileError[]): v
     for (const id of nested) {
       if (inner.has(id)) continue;
       errors.push({
+        severity: 'error',
         path: `stages.${stageId}.stages.${id}`,
         message: `Nested stage '${id}' is declared but nothing reaches it: the loop starts at '${nested[0]}' and no transition leads here`,
       });
@@ -319,6 +322,7 @@ function validateTermination(schema: ResolvedSchema, errors: CompileError[]): vo
 
   if (terminals.length === 0) {
     errors.push({
+      severity: 'error',
       path: 'stages',
       message:
         'This workflow has no end: every declared stage has an outgoing transition, so a session can never come to rest. Declare a stage nothing leads out of.',
@@ -344,6 +348,7 @@ function validateTermination(schema: ResolvedSchema, errors: CompileError[]): vo
   for (const id of ids) {
     if (canFinish.has(id)) continue;
     errors.push({
+      severity: 'error',
       path: `stages.${id}`,
       message: `Stage '${id}' has no way to finish: no chain of transitions leads from here to any stage the workflow ends at (${terminals.join(', ')})`,
     });
@@ -355,6 +360,7 @@ function validateKnownKeys(schema: ResolvedSchema, errors: CompileError[]): void
     // The resolver adds provenance of its own; only authored keys are checked.
     if (key.startsWith('_') || SCHEMA_KEYS.has(key)) continue;
     errors.push({
+      severity: 'error',
       path: key,
       message: `Unknown key "${key}". A key nothing reads is silently ignored; allowed: ${[
         ...SCHEMA_KEYS,
@@ -369,6 +375,7 @@ function validateKnownKeys(schema: ResolvedSchema, errors: CompileError[]): void
     for (const key of Object.keys(stage)) {
       if (STAGE_KEYS.has(key)) continue;
       errors.push({
+        severity: 'error',
         path: `${path}.${key}`,
         message: `Unknown key "${key}" on a stage; allowed: ${[...STAGE_KEYS].sort().join(', ')}`,
       });
@@ -399,6 +406,7 @@ function validateGuardSyntax(schema: ResolvedSchema, errors: CompileError[]): vo
       parseGuard(expression);
     } catch (err) {
       errors.push({
+        severity: 'error',
         path,
         message: `Guard expression does not parse: ${expression} (${err instanceof Error ? err.message : String(err)})`,
       });
@@ -462,24 +470,28 @@ function validateActions(path: string, stage: StageDef, errors: CompileError[]):
 
     if (entry.paths !== undefined && entry.action !== 'edit') {
       errors.push({
+        severity: 'error',
         path: at,
         message: `'paths' is only meaningful for action 'edit'; '${entry.action}' carries no path in its arguments, so the mask could never be enforced`,
       });
     }
     if (entry.commands !== undefined && entry.action !== 'bash') {
       errors.push({
+        severity: 'error',
         path: at,
         message: `'commands' is only meaningful for action 'bash', not '${entry.action}'`,
       });
     }
     if (entry.delivers && entry.action !== 'bash') {
       errors.push({
+        severity: 'error',
         path: at,
         message: `'delivers' is only meaningful for action 'bash'; a delivery arrives as a shell command, not as '${entry.action}'`,
       });
     }
     if (entry.delivers && (entry.commands ?? []).length === 0) {
       errors.push({
+        severity: 'error',
         path: at,
         message: `'delivers' needs 'commands': without them every bash call on this stage would be routed as a delivery, skipping the mutation lifecycle`,
       });
@@ -487,6 +499,7 @@ function validateActions(path: string, stage: StageDef, errors: CompileError[]):
     for (const [maskIndex, mask] of (entry.paths ?? []).entries()) {
       if (!/[*?[\]{}]/.test(mask)) {
         errors.push({
+          severity: 'error',
           path: `${at}.paths[${maskIndex}]`,
           message: `Mask '${mask}' has no wildcard, so it matches that one path and nothing inside it. Write '${mask}/**' to cover a directory`,
         });
@@ -497,6 +510,7 @@ function validateActions(path: string, stage: StageDef, errors: CompileError[]):
         new RegExp(pattern);
       } catch (err) {
         errors.push({
+          severity: 'error',
           path: `${at}.commands[${commandIndex}]`,
           message: `Command pattern does not compile as a regular expression: ${pattern} (${err instanceof Error ? err.message : String(err)})`,
         });
@@ -524,6 +538,7 @@ function validateNestedStages(stageId: string, stageDef: StageDef, errors: Compi
     const ends = (stageDef.transitions ?? []).some((transition) => transition.to === TASK_DONE);
     if (!ends) {
       errors.push({
+        severity: 'error',
         path: `stages.${stageId}.transitions`,
         message: `Loop "${stageId}" declares transitions but none of them reaches "${TASK_DONE}", so no task can ever finish it`,
       });
@@ -532,6 +547,7 @@ function validateNestedStages(stageId: string, stageDef: StageDef, errors: Compi
 
   if (stageDef.loop && nested.length === 0) {
     errors.push({
+      severity: 'error',
       path: `stages.${stageId}`,
       message: `Stage "${stageId}" cycles over "${stageDef.loop}" but declares no stages to run`,
     });
@@ -539,6 +555,7 @@ function validateNestedStages(stageId: string, stageDef: StageDef, errors: Compi
 
   if (!stageDef.loop && (stageDef.transitions?.length ?? 0) > 0) {
     errors.push({
+      severity: 'error',
       path: `stages.${stageId}.transitions`,
       message: `Stage "${stageId}" declares transitions but no loop to move a task through`,
     });
@@ -558,6 +575,7 @@ function validateNestedStages(stageId: string, stageDef: StageDef, errors: Compi
     for (const endpoint of endpoints) {
       if (!nestedIds.has(endpoint)) {
         errors.push({
+          severity: 'error',
           path: `stages.${stageId}.transitions`,
           message: `Transition ${transition.from} → ${transition.to} names "${endpoint}", which is not a stage of "${stageId}"`,
         });
@@ -566,6 +584,7 @@ function validateNestedStages(stageId: string, stageDef: StageDef, errors: Compi
     for (const effect of transition.effects ?? []) {
       if (effect.bumpRetry !== undefined && effect.bumpRetry !== 'task.id') {
         errors.push({
+          severity: 'error',
           path: `stages.${stageId}.transitions`,
           message: `Transition ${transition.from} → ${transition.to} bumps "${effect.bumpRetry}"; inside a loop the budget is the task's own, written as task.id`,
         });
@@ -617,16 +636,25 @@ function compileTransitions(
 ): CompiledTransition[] {
   return transitions.map((t, i) => {
     if (!stageIds.has(t.from)) {
-      errors.push({ path: `transitions[${i}]`, message: `Unknown source stage '${t.from}'` });
+      errors.push({
+        severity: 'error',
+        path: `transitions[${i}]`,
+        message: `Unknown source stage '${t.from}'`,
+      });
     }
     if (!stageIds.has(t.to)) {
-      errors.push({ path: `transitions[${i}]`, message: `Unknown target stage '${t.to}'` });
+      errors.push({
+        severity: 'error',
+        path: `transitions[${i}]`,
+        message: `Unknown target stage '${t.to}'`,
+      });
     }
     for (const effect of t.effects ?? []) {
       // The mirror of the loop rule below: inside a loop the budget is always
       // the task's own, and at workflow level there is no task to name.
       if (effect.bumpRetry === 'task.id') {
         errors.push({
+          severity: 'error',
           path: `transitions[${i}]`,
           message: `Transition ${t.from} → ${t.to} bumps "task.id", but a workflow-level transition has no task; name a workflow budget instead`,
         });

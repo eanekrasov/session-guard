@@ -1,4 +1,6 @@
 import type { WorkflowSession } from '../session/session-schema.ts';
+import type { SessionSnapshot } from '../types/session-snapshot.ts';
+import { toSessionSnapshot } from '../types/session-snapshot.ts';
 
 // Чистая логика секции workflow для TUI-плагина.
 // Без JSX: импортируется и плагином, и bun-тестами (scripts/tui.test.ts).
@@ -73,7 +75,8 @@ export type Tui = {
   /** Gates of each task still in flight — a verdict belongs to the work it judged. */
   taskGates: TaskGateInfo[];
   retryBudgets: RetryInfo[];
-  raw: Record<string, unknown>;
+  /** Typed snapshot for UI - excludes internal/legacy fields */
+  snapshot: SessionSnapshot;
 };
 
 /** One task's verdicts, as the operator needs to see them: whose, and where. */
@@ -192,7 +195,7 @@ export function parseRuntimeState(session: WorkflowSession): ParseResult {
       gates,
       taskGates,
       retryBudgets,
-      raw: session as unknown as Record<string, unknown>,
+      snapshot: toSessionSnapshot(session),
     },
   };
 }
@@ -385,29 +388,24 @@ const KNOWN_KEYS = [
 /**
  * Полный дамп сессии для панели подробностей.
  *
- * Тоже принимает объект. Разбор текста и защита от чужих форм здесь не нужны
- * по той же причине, что и в `parseRuntimeState`: сессию уже проверила схема.
- * Вместе с текстом ушли и мёртвые чтения — `tasks` массивом, статусы `active`
- * и `committed`, которых нет среди статусов задачи, и поле `processedEventIds`,
- * которого нет у схемы.
+ * Принимает типизированный снэпшот — безопасно, без кастов.
  */
-export function formatDetailsLines(session: WorkflowSession): string[] {
-  const record = session as unknown as Record<string, unknown>;
+export function formatDetailsLines(snapshot: SessionSnapshot): string[] {
   const lines: string[] = [];
   for (const key of KNOWN_KEYS) {
-    lines.push(`${key}: ${scalar(record[key])}`);
+    lines.push(`${key}: ${scalar((snapshot as Record<string, unknown>)[key])}`);
   }
 
   // По строке на открытый вызов. Читалось `activeMutation` — одиночный объект
   // и поле, которого у схемы нет, — так что не печаталось ничего.
-  for (const operation of parseActiveOperations(session.activeOperations)) {
+  for (const operation of parseActiveOperations(snapshot.activeOperations)) {
     lines.push(
       `activeOperation: callID=${scalar(operation.callId)} task=${scalar(operation.taskId)} ` +
         `agent=${scalar(operation.agent)} outputReady=${scalar(operation.outputReady)}`
     );
   }
 
-  const tasks = Object.values(session.tasks ?? {}).flat();
+  const tasks = snapshot.tasks ?? [];
   lines.push(`tasks: ${tasks.length}`);
   if (tasks.length > 0) {
     const running = tasks.filter((task) => task.status === 'running').length;
@@ -415,14 +413,18 @@ export function formatDetailsLines(session: WorkflowSession): string[] {
     lines.push(`  running=${running} completed=${completed}`);
   }
 
-  const gates = session.stageGateResults ?? [];
-  if (gates.length > 0) {
-    lines.push(`gates: ${gates.map((gate) => `${gate.id}=${gate.status}`).join(', ')}`);
+  const gates = snapshot.gates ?? {};
+  if (Object.keys(gates).length > 0) {
+    lines.push(
+      `gates: ${Object.entries(gates)
+        .map(([id, status]) => `${id}=${status}`)
+        .join(', ')}`
+    );
   }
 
   // Чем кончилось — и почему. Ради этой строки архив и существует: без неё
   // «завершилось», «провалилось» и «застряло» читаются одинаково.
-  const outcome = session.outcome;
+  const outcome = snapshot.outcome;
   if (outcome) {
     lines.push(`outcome: ${outcome.from} → ${outcome.stage}`);
     lines.push(`  because: ${outcome.guard ?? '(ребро без условия)'}`);
@@ -434,9 +436,10 @@ export function formatDetailsLines(session: WorkflowSession): string[] {
     }
   }
 
-  lines.push(...collectionLines('changedFiles', session.changedFiles ?? []));
+  // Note: changedFiles is not in snapshot (intentionally excluded)
+  // lines.push(...collectionLines('changedFiles', snapshot.changedFiles ?? []));
 
-  for (const [budget, value] of Object.entries(session.retryBudgets ?? {})) {
+  for (const [budget, value] of Object.entries(snapshot.retryBudgets ?? {})) {
     lines.push(`retry.${budget}: ${scalar(value.attempts)}/${scalar(value.maximum)}`);
   }
 
@@ -446,9 +449,9 @@ export function formatDetailsLines(session: WorkflowSession): string[] {
     'tasks',
     'gates',
     'outcome',
-    'changedFiles',
     'retryBudgets',
   ]);
+  const record = snapshot as Record<string, unknown>;
   for (const [key, value] of Object.entries(record)) {
     if (!known.has(key)) lines.push(`${key}: ${trunc(JSON.stringify(value) ?? scalar(value))}`);
   }

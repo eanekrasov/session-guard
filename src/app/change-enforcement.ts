@@ -20,6 +20,7 @@ import type { MutationOrchestrator } from './mutation-orchestrator.ts';
 import type { SessionExecutor } from './session-executor.ts';
 import type { LogFn } from './logger.ts';
 import { type Reporter } from './report.ts';
+import type { ApplyPatchToolArgs } from './tool-args.ts';
 
 export interface ChangeBeforeInput {
   tool: string;
@@ -114,8 +115,7 @@ export function createChangeEnforcement(ports: ChangeEnforcementPorts): ChangeEn
 
   function scopeTargetPaths(tool: string, args: unknown): string[] {
     if (tool === 'apply_patch') {
-      const patchText =
-        args && typeof args === 'object' ? (args as Record<string, unknown>).patchText : undefined;
+      const patchText = (args as ApplyPatchToolArgs).patchText;
       if (typeof patchText !== 'string') return [];
       const parsed = parsePatch(patchText);
       return parsed ? parsed.map((observation) => observation.path) : [];

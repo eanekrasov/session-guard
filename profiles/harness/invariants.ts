@@ -9,7 +9,7 @@
 
 import { existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
-import type { InvariantCheck } from '../../src/app/invariants.ts';
+import type { InvariantCheck } from '../../src/types/index.ts';
 
 const isTypeScript = (filePath: string) => filePath.endsWith('.ts');
 const LOCK_FILES = new Set(['package-lock.json', 'bun.lock', 'bun.lockb']);

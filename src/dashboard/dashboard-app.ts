@@ -31,6 +31,7 @@ import { noopLog, type LogFn } from '../app/logger.ts';
 import { compileWorkflow } from '../schema/compile-workflow.ts';
 import type { StageDef } from '../schema/profile-schema.ts';
 import type { WorkflowSession } from '../session/session-schema.ts';
+import { toSessionSnapshot, type SessionSnapshot } from '../types';
 
 function gateIdsFromStages(stages: Record<string, StageDef> | undefined): string[] {
   const ids = new Set<string>();
@@ -124,34 +125,29 @@ interface EnrichedSession {
  * `currentStage`. Reading that field is seeing the engine's answer; anything
  * else here is a second opinion from a workflow nobody is running.
  */
-export function stageOf(session: Record<string, unknown>): string {
-  const stage = session['currentStage'];
+export function stageOf(session: SessionSnapshot): string {
+  const stage = session.currentStage;
   return typeof stage === 'string' && stage !== '' ? stage : 'UNKNOWN';
 }
 
-export function gatesOf(session: Record<string, unknown>): Record<string, string> {
-  const gates = Array.isArray(session['stageGateResults'])
-    ? (session['stageGateResults'] as Array<Record<string, unknown>>)
-    : [];
+export function gatesOf(session: SessionSnapshot): Record<string, string> {
   const result: Record<string, string> = {};
-  for (const g of gates) {
-    if (typeof g['id'] === 'string' && typeof g['status'] === 'string') {
-      result[g['id']] = g['status'];
-    }
+  for (const [gate, status] of Object.entries(session.gates)) {
+    result[gate] = status;
   }
   return result;
 }
 
-export function buildTimeline(session: Record<string, unknown>): TimelineEvent[] {
+export function buildTimeline(session: SessionSnapshot): TimelineEvent[] {
   const events: TimelineEvent[] = [];
-  const revision = (session['revision'] as number) ?? 0;
-  const updatedAt = session['updatedAt'];
+  const revision = session.revision ?? 0;
+  const updatedAt = session.updatedAt;
   for (const [gate, status] of Object.entries(gatesOf(session))) {
     if (status && status !== 'pending') {
       events.push({
         id: `gate-${gate}-${revision}`,
         type: 'gate',
-        ts: updatedAt ? new Date(updatedAt as string).getTime() : Date.now(),
+        ts: updatedAt ? new Date(updatedAt).getTime() : Date.now(),
         data: { gate, status },
       });
     }
@@ -159,8 +155,8 @@ export function buildTimeline(session: Record<string, unknown>): TimelineEvent[]
   return events;
 }
 
-export function buildInvariants(session: Record<string, unknown>): InvariantViolation[] {
-  const records = (session['invariantViolations'] as unknown[]) ?? [];
+export function buildInvariants(session: SessionSnapshot): InvariantViolation[] {
+  const records = session.invariantViolations ?? [];
   const violations: InvariantViolation[] = [];
   for (const item of records) {
     if (!item || typeof item !== 'object') continue;
@@ -178,21 +174,19 @@ export function buildInvariants(session: Record<string, unknown>): InvariantViol
   return violations;
 }
 
-function enrichSession(session: unknown): EnrichedSession | null {
-  if (!session || typeof session !== 'object') return null;
-  const s = session as Record<string, unknown>;
-  return { ...s, stage: stageOf(s) } as EnrichedSession;
+function enrichSession(session: SessionSnapshot | null): EnrichedSession | null {
+  if (!session) return null;
+  return { ...session, stage: stageOf(session) } as EnrichedSession;
 }
 
 export function diffSessions(
-  oldSessions: Record<string, unknown>,
-  newSessions: Record<string, unknown>,
+  oldSessions: Record<string, SessionSnapshot>,
+  newSessions: Record<string, SessionSnapshot>,
   now: number
 ): unknown[] {
   const events: unknown[] = [];
-  for (const [sessionId, newSessionRaw] of Object.entries(newSessions)) {
-    const newSession = newSessionRaw as Record<string, unknown>;
-    const oldSession = oldSessions[sessionId] as Record<string, unknown> | undefined;
+  for (const [sessionId, newSession] of Object.entries(newSessions)) {
+    const oldSession = oldSessions[sessionId];
     if (!oldSession) continue;
 
     const oldState = stageOf(oldSession);
@@ -297,15 +291,16 @@ export function createDashboard(config: DashboardConfig): Dashboard {
    * Рантайм читается последним: пока сессия жива, её текущее состояние важнее
    * любой одноимённой записи в архиве.
    */
-  async function loadAllSessions(): Promise<Record<string, unknown>> {
-    return {
-      ...(await readAllSessions(archiveDirOf(sessionsDir))),
-      ...(await readAllSessions(sessionsDir)),
-    };
+  async function loadAllSessions(): Promise<Record<string, WorkflowSession>> {
+    const archiveSessions = await readAllSessions(archiveDirOf(sessionsDir));
+    const activeSessions = await readAllSessions(sessionsDir);
+    return { ...archiveSessions, ...activeSessions };
   }
 
   async function loadSession(id: string): Promise<WorkflowSession | null> {
-    return (await readSession(sessionsDir, id)) ?? readSession(archiveDirOf(sessionsDir), id);
+    return (
+      (await readSession(sessionsDir, id)) ?? (await readSession(archiveDirOf(sessionsDir), id))
+    );
   }
 
   /**
@@ -496,16 +491,20 @@ export function createDashboard(config: DashboardConfig): Dashboard {
     publishing = true;
     try {
       const newSessions = await loadAllSessions();
+      const newSessionsSnapshots: Record<string, SessionSnapshot> = {};
+      for (const [id, session] of Object.entries(newSessions)) {
+        newSessionsSnapshots[id] = toSessionSnapshot(session);
+      }
       const current = JSON.stringify(newSessions);
       if (current === lastSnapshot) return;
 
-      const oldSessions = JSON.parse(lastSnapshot) as Record<string, unknown>;
+      const oldSessions = JSON.parse(lastSnapshot) as Record<string, SessionSnapshot>;
       const ts = Math.floor(Date.now() / 1000);
-      for (const event of diffSessions(oldSessions, newSessions, ts)) {
+      for (const event of diffSessions(oldSessions, newSessionsSnapshots, ts)) {
         pushToAll(event);
       }
       lastSnapshot = current;
-      pushToAll({ snapshot: newSessions });
+      pushToAll({ snapshot: newSessionsSnapshots });
     } catch (error) {
       // Callers fire this with `void` — the watcher and a timer — so a throw
       // here would surface only as an unhandled rejection. Report it on the
@@ -680,13 +679,11 @@ export function createDashboard(config: DashboardConfig): Dashboard {
       } catch {
         // Keep serving persisted session data when its profile is unavailable.
       }
-      return json(
-        enrichSession({
-          ...session,
-          stageGateResults,
-        }),
-        req
-      );
+      const snapshot = toSessionSnapshot({
+        ...session,
+        stageGateResults,
+      });
+      return json(enrichSession(snapshot), req);
     }
 
     // HTML dashboard (same-origin, no CORS)
@@ -704,14 +701,14 @@ export function createDashboard(config: DashboardConfig): Dashboard {
     if (timelineMatch) {
       const session = await loadSession(sessionId(timelineMatch[1]!));
       if (!session) return json({ error: 'Session not found' }, req, 404);
-      return json(buildTimeline(session as Record<string, unknown>), req);
+      return json(buildTimeline(toSessionSnapshot(session)), req);
     }
 
     const invariantsMatch = url.pathname.match(/^\/api\/session\/([^/]+)\/invariants$/);
     if (invariantsMatch) {
       const session = await loadSession(sessionId(invariantsMatch[1]!));
       if (!session) return json({ error: 'Session not found' }, req, 404);
-      return json(buildInvariants(session as Record<string, unknown>), req);
+      return json(buildInvariants(toSessionSnapshot(session)), req);
     }
 
     if (url.pathname === '/api/metrics') return json(readMetrics(), req);

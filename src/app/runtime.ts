@@ -104,7 +104,7 @@ class SessionGuardRuntime {
     const resolveHostParent = async (sessionID: string): Promise<string | null> => {
       try {
         const result = await context.client.session.get({ path: { id: sessionID } });
-        const session = (result as { data?: { parentID?: string } }).data;
+        const session = result.data;
         const parent = session?.parentID;
         return typeof parent === 'string' && parent !== '' ? parent : null;
       } catch (err) {

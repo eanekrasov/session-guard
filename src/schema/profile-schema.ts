@@ -81,7 +81,7 @@ const ActionEntrySchema = z.object({
 const RetryBudgetSchema = z.object({
   maximum: z.number().int().min(1),
 });
-export type RetryBudget = z.infer<typeof RetryBudgetSchema>;
+export type ProfileRetryBudget = z.infer<typeof RetryBudgetSchema>;
 
 /**
  * Стадия — единственная единица состояния workflow.
@@ -96,7 +96,7 @@ export interface StageDef {
   /** Список задач, по которому стадия ходит циклом. Её `stages` выполняются на каждую задачу. */
   loop?: LoopSource;
   dispatch?: DispatchDef;
-  retryBudget?: RetryBudget;
+  retryBudget?: ProfileRetryBudget;
   /** Агенты, которым разрешено действовать, пока эта стадия текущая. */
   allowedAgents?: string[];
   /**

@@ -28,6 +28,7 @@ import {
 } from '../schema/types.ts';
 import { matchesScope } from './scope-match.ts';
 import { resolve, relative, isAbsolute } from 'node:path';
+import type { TaskToolArgs } from './tool-args.ts';
 import { existsSync } from 'node:fs';
 
 const DEFAULT_TASK_RETRY_MAXIMUM = 3;
@@ -614,8 +615,8 @@ export class WorkflowResultSettlerImpl implements WorkflowResultSettler {
 
   private dispatchedAgent(args: unknown): string | undefined {
     if (!args || typeof args !== 'object') return undefined;
-    const value = (args as Record<string, unknown>).subagent_type;
-    return typeof value === 'string' && value !== '' ? value : undefined;
+    const taskArgs = args as TaskToolArgs;
+    return taskArgs.subagent_type ?? taskArgs.agent ?? taskArgs.type;
   }
 
   private mayVerify(

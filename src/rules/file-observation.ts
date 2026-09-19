@@ -7,6 +7,8 @@
  * same record. Paths are consumed verbatim as the after-hook receives them.
  */
 
+import type { ToolArgsMap } from '../app/tool-args.ts';
+
 export interface FileObservation {
   path: string;
   tool: string;
@@ -46,7 +48,9 @@ function completedInput(part: HistoryToolPart): unknown {
 }
 
 function asString(value: unknown): string | undefined {
-  return typeof value === 'string' && value.length > 0 ? value : undefined;
+  if (typeof value !== 'string') return undefined;
+  // Return empty string for empty strings (to distinguish from missing/non-string)
+  return value;
 }
 
 /**
@@ -151,19 +155,17 @@ export function normalizeObservations(event: RawToolEvent): FileObservation[] {
   if (!OBSERVATION_TOOLS.has(event.tool)) return [];
   if (!event.args || typeof event.args !== 'object') return [];
   const args = event.args as Record<string, unknown>;
-
   const path = asString(args.filePath) ?? asString(args.path);
 
   switch (event.tool) {
-    case 'write':
-      return path ? [{ path, tool: 'write', content: asString(args.content) ?? '' }] : [];
+    case 'write': {
+      const content = asString(args.content);
+      return path ? [{ path, tool: 'write', content: content ?? '' }] : [];
+    }
     case 'edit': {
       if (!path) return [];
-      // Content requires both fields to be submitted strings — empty ones
-      // included, so pure deletions keep their removed text. Malformed args
-      // degrade to a path-only observation (globs still match).
-      const oldString = typeof args.oldString === 'string' ? args.oldString : undefined;
-      const newString = typeof args.newString === 'string' ? args.newString : undefined;
+      const oldString = asString(args.oldString);
+      const newString = asString(args.newString);
       const content =
         oldString !== undefined && newString !== undefined
           ? [oldString, newString].filter((value) => value.length > 0).join('\n')

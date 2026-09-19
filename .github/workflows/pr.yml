@@ -33,4 +33,5 @@ jobs:
           mise run setup
           mise run pkgjsonlint
           mise run check
+          bun test test/contract/
           mise run build

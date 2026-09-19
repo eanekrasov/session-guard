@@ -23,7 +23,10 @@ describe('WorkflowToolSurface', () => {
     taskApi: {
       setTasks: vi.fn(async () => []),
       getTasks: vi.fn(async () => []),
-      setTaskStatus: vi.fn(async () => ({}) as any),
+      setTaskStatus: vi.fn(async () => ({
+        id: 'task-1',
+        status: 'pending' as const,
+      })),
     } as unknown as TaskApi,
     sessionContext: {
       load: vi.fn(async () => null as WorkflowSession | null),

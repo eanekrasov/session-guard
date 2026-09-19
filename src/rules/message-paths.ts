@@ -1,3 +1,5 @@
+import { parsePatch } from './file-observation.ts';
+
 /**
  * Message path extraction utilities
  */
@@ -17,7 +19,7 @@ interface OpenCodeToolPart {
   type: 'tool';
   tool: string;
   state?: {
-    input?: unknown;
+    input?: Record<string, unknown>;
   };
 }
 
@@ -87,6 +89,7 @@ export function extractFilePathsFromMessages(messages: Message[]): string[] {
  * - grep -> path only (pattern/include are search terms, not paths)
  * - glob -> directory derived from pattern, plus explicit path
  * - bash -> workdir
+ * - apply_patch -> patchText (parsed for paths)
  * - unknown tools -> nothing
  */
 const PATH_ARG_TOOLS: ReadonlyMap<string, readonly string[]> = new Map([
@@ -96,6 +99,7 @@ const PATH_ARG_TOOLS: ReadonlyMap<string, readonly string[]> = new Map([
   ['glob', ['pattern', 'path']],
   ['grep', ['path']],
   ['bash', ['workdir']],
+  ['apply_patch', ['patchText']],
 ]);
 
 /**
@@ -115,6 +119,11 @@ export function extractToolCallPaths(toolName: string, args: unknown): string[] 
       if (argName === 'pattern') {
         const dirPart = extractDirFromGlob(value);
         if (dirPart) paths.push(dirPart);
+      }
+      // For apply_patch, parse the patch text for file paths
+      else if (argName === 'patchText') {
+        const parsed = parsePatch(value);
+        if (parsed) paths.push(...parsed.map((p) => p.path));
       } else {
         paths.push(value);
       }

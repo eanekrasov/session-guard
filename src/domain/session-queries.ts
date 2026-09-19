@@ -1,3 +1,5 @@
+import type { BashToolArgs } from '../app/tool-args.ts';
+
 /**
  * Extract the shell command from bash tool arguments.
  *
@@ -9,7 +11,7 @@
 export function extractBashCommand(args: unknown): string {
   if (typeof args === 'string') return args;
   if (args && typeof args === 'object') {
-    const command = (args as { command?: unknown }).command;
+    const command = (args as BashToolArgs).command;
     if (typeof command === 'string') return command;
   }
   return JSON.stringify(args ?? '');

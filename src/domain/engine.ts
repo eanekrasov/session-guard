@@ -82,8 +82,10 @@ export interface TransitionCheck {
 
 // ─── Inlined deriveStage (from derive-stage.ts) ────────────────────────────────
 
+import type { GuardEvaluationSession } from './session-facts.ts';
+
 function deriveDefaultEvaluateGuard(expr: string, facts: SessionFacts): boolean {
-  return new GuardEvaluator(facts as unknown as Record<string, unknown>).evaluate(expr);
+  return new GuardEvaluator(facts as GuardEvaluationSession).evaluate(expr);
 }
 
 /**
@@ -216,7 +218,7 @@ export function evaluateTransition(
   if (guard && guard.trim() !== '' && session) {
     const passed = evaluateGuard
       ? evaluateGuard(guard)
-      : new GuardEvaluator(session as unknown as Record<string, unknown>).evaluate(guard);
+      : new GuardEvaluator(session as GuardEvaluationSession).evaluate(guard);
     if (!passed) {
       return {
         allowed: false,
@@ -256,7 +258,7 @@ export function evaluateTransition(
 
 export type EvaluateGuardFn = (
   expression: string,
-  session: object,
+  session: GuardEvaluationSession,
   guards: Record<string, (...args: unknown[]) => unknown>,
   evaluationContext?: GuardEvaluationContext
 ) => boolean;
@@ -282,10 +284,15 @@ export class SessionGuardEngine {
    */
   evaluateGuard(
     expression: string,
-    session: object,
+    session: GuardEvaluationSession,
     evaluationContext: GuardEvaluationContext = {}
   ): boolean {
-    return this.evaluateGuardFn(expression, session, {}, evaluationContext);
+    return this.evaluateGuardFn(
+      expression,
+      session,
+      {} as Record<string, (...args: unknown[]) => unknown>,
+      evaluationContext
+    );
   }
 
   /**
@@ -519,12 +526,12 @@ export class SessionGuardEngine {
 
 function defaultEvaluateGuard(
   expression: string,
-  session: object,
+  session: GuardEvaluationSession,
   guards: Record<string, (...args: unknown[]) => unknown>,
   evaluationContext: GuardEvaluationContext = {}
 ): boolean {
   const evaluator = new GuardEvaluator(
-    session as Record<string, unknown>,
+    session,
     guards as Record<string, Function>,
     evaluationContext
   );

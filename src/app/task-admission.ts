@@ -1,29 +1,11 @@
-import type {
-  WorkflowSession,
-  LoopRun,
-  ActiveOperation,
-  MutationTask,
-  TaskStatus,
-} from '../session/session-schema.ts';
+import type { WorkflowSession, LoopRun, MutationTask } from '../session/session-schema.ts';
 import { SessionExecutor } from './session-executor.ts';
 import { MutationOrchestrator } from './mutation-orchestrator.ts';
 import type { LogFn } from './logger.ts';
-import { createReporter, errorMessage, type Reporter } from './report.ts';
+import { type Reporter } from './report.ts';
 import { agentIsAllowed } from './agent-names.ts';
-import { canonicalizePlan, computeSha256 } from './sdd-artifacts.ts';
-import { evidenceOf, type ConsentManifest } from './consent.ts';
-import { listProfiles, resolveConfig } from '../public-api.ts';
-import { schemaId } from './profile-resolver.ts';
-import { selectSchema } from './mutation-orchestrator.ts';
-import { createSession } from '../session/session-store.ts';
-import {
-  firstNestedStageId,
-  nestedStages,
-  ProfileConfigurationError,
-  type StageDef,
-  type TransitionDef,
-} from '../schema/types.ts';
-import type { SessionGuardEngine } from '../domain/engine.ts';
+import { resolveConfig } from '../public-api.ts';
+import { firstNestedStageId, nestedStages, type StageDef } from '../schema/types.ts';
 import {
   findTask,
   isOpenLoopRun,
@@ -34,7 +16,7 @@ import { toGuardContext } from '../domain/engine.ts';
 import { scopesIntersect } from './scope-match.ts';
 import { captureBaseline } from './change-scope.ts';
 import { WorkflowBlockedError } from './blocked-error.ts';
-import { profilesDir as getProfilesDir } from './paths.ts';
+import type { TaskToolArgs } from './tool-args.ts';
 
 export interface TaskAdmissionInput {
   tool: string;
@@ -78,13 +60,14 @@ export class TaskAdmissionImpl implements TaskAdmission {
 
   isWorkflowTask(tool: string, args: unknown): boolean {
     if (tool !== 'task' || !args || typeof args !== 'object') return false;
-    return isWorkflowTaskDescription((args as Record<string, unknown>).description) !== null;
+    const taskArgs = args as TaskToolArgs;
+    return isWorkflowTaskDescription(taskArgs.description) !== null;
   }
 
   async before(input: TaskAdmissionInput): Promise<void> {
-    const { sessionID, callID, args, output, session } = input;
-    const taskArgs = args as Record<string, unknown>;
-    const agent = (taskArgs.subagent_type ?? taskArgs.agent ?? taskArgs.type) as string;
+    const { sessionID, callID, args } = input;
+    const taskArgs = args as TaskToolArgs;
+    const agent = taskArgs.subagent_type ?? taskArgs.agent ?? taskArgs.type;
     const description = taskArgs.description;
     const match =
       typeof description === 'string'

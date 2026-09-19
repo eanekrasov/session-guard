@@ -9,6 +9,62 @@ import type { StageDef, TransitionDef } from './types.ts';
 import { ProfileConfigurationError, type ProfileSchema, type ResolvedSchema } from './types.ts';
 
 /**
+ * Map a ZodIssue to a readable error object with severity and context.
+ */
+function mapZodIssue(issue: z.ZodIssue): {
+  path: string;
+  message: string;
+  severity: 'error' | 'warning';
+} {
+  const path = issue.path.length > 0 ? issue.path.join('.') : '(root)';
+  let message = issue.message;
+
+  // Add context based on error code
+  switch (issue.code) {
+    case 'invalid_type':
+      message = `Expected ${issue.expected}, received ${issue.received}`;
+      break;
+    case 'invalid_literal':
+      message = `Expected literal value "${issue.expected}", received "${issue.received}"`;
+      break;
+    case 'unrecognized_keys':
+      message = `Unrecognized key(s): ${issue.keys.join(', ')}`;
+      break;
+    case 'invalid_union':
+      message = `Value does not match any of the expected variants`;
+      break;
+    case 'invalid_enum_value':
+      message = `Expected one of: ${issue.options.join(', ')}, received "${issue.received}"`;
+      break;
+    case 'too_small':
+      message = `Value too small: minimum ${issue.minimum} (${issue.type} ${issue.inclusive ? 'inclusive' : 'exclusive'})`;
+      break;
+    case 'too_big':
+      message = `Value too big: maximum ${issue.maximum} (${issue.type} ${issue.inclusive ? 'inclusive' : 'exclusive'})`;
+      break;
+    case 'custom':
+      // Custom validation messages already have context
+      break;
+    default:
+      message = `${issue.code}: ${issue.message}`;
+  }
+
+  // Determine severity: unrecognized keys are warnings (extra config), rest are errors
+  const severity = issue.code === 'unrecognized_keys' ? 'warning' : 'error';
+
+  return { path, message, severity };
+}
+
+/**
+ * Convert a ZodError to an array of formatted error objects.
+ */
+function formatZodError(
+  error: z.ZodError
+): Array<{ path: string; message: string; severity: 'error' | 'warning' }> {
+  return error.issues.map(mapZodIssue);
+}
+
+/**
  * Load a ProfileSchema from an arbitrary path. Returns null when the file
  * does not exist or fails to validate.
  */
@@ -133,12 +189,14 @@ export class SchemaLoader {
       return ProfileSchemaSchema.parse(raw);
     } catch (error) {
       if (error instanceof z.ZodError) {
+        const formatted = formatZodError(error);
         throw new ProfileConfigurationError(
           profileId,
           schemaFilename,
-          error.issues.map((issue) => ({
-            path: issue.path.join('.') || '(root)',
-            message: issue.message,
+          formatted.map((f) => ({
+            path: f.path,
+            message: f.message,
+            severity: f.severity,
           }))
         );
       }
