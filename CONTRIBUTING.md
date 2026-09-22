@@ -17,9 +17,11 @@ Thank you for your interest in contributing!
 3. Make your changes
 4. Run tests and linting:
    ```bash
-   mise run test
-   mise run lint
+   mise run check
    ```
+   `mise run check` включает typecheck, lint и test, но не выполняет build. Для изменений
+   runtime, API, schema compiler или поставочных артефактов дополнительно запустите
+   `mise run build`; для host-интеграции — `mise run smoke`.
 5. Commit using [Conventional Commits](https://www.conventionalcommits.org/) format:
    - `feat: add new feature`
    - `fix: resolve bug`
