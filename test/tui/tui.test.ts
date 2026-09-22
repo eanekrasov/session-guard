@@ -105,11 +105,13 @@ describe('parseRuntimeState', () => {
     expect(r.value.stage).toBe('done');
   });
 
-  test('unknown stage falls back to first stage', () => {
+  test('unknown stage returns as-is (no fallback)', () => {
     const r = parseRuntimeState(makeSession({ currentStage: 'unknown_stage' }));
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.value.stage).toBe('planning');
+    expect(r.value.stage).toBe('unknown_stage');
+    expect(r.value.prevStage).toBeNull();
+    expect(r.value.nextStage).toBeNull();
   });
 
   test('approvals round-trip through view', () => {
@@ -182,11 +184,11 @@ describe('parseRuntimeState', () => {
   });
 
   test('prevStage/nextStage neighbours from base STAGES', () => {
-    const r = parseRuntimeState(makeSession({ currentStage: 'code' }));
+    const r = parseRuntimeState(makeSession({ currentStage: 'execution' }));
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.value.prevStage).toBe('tasks_ready');
-    expect(r.value.nextStage).toBe('execution');
+    expect(r.value.nextStage).toBe('validation');
   });
 
   test('unknown stage has no neighbours', () => {
@@ -207,7 +209,7 @@ describe('parseRuntimeState', () => {
     expect(r.value.totalTasks).toBe(3);
   });
 
-  test('verifications included in view', () => {
+  test('verifications included in snapshot', () => {
     const r = parseRuntimeState(
       makeSession({
         verifications: [
@@ -218,9 +220,11 @@ describe('parseRuntimeState', () => {
     );
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    const view = r.value;
-    expect(view.gates.some((g) => g.id === 'bug' && g.status === 'confirmed')).toBe(true);
-    expect(view.gates.some((g) => g.id === 'review' && g.status === 'rejected')).toBe(true);
+    const snap = r.value.snapshot;
+    expect(snap.verifications.some((v) => v.gate === 'bug' && v.status === 'confirmed')).toBe(true);
+    expect(snap.verifications.some((v) => v.gate === 'review' && v.status === 'rejected')).toBe(
+      true
+    );
   });
 
   test('taskGates include checks from run', () => {
@@ -231,6 +235,7 @@ describe('parseRuntimeState', () => {
         listKey: 'implementation',
         stage: 'code',
         status: 'completed',
+        ancestry: [],
       },
       'run-2': {
         id: 'run-2',
@@ -238,6 +243,7 @@ describe('parseRuntimeState', () => {
         listKey: 'implementation',
         stage: 'review',
         status: 'completed',
+        ancestry: [],
       },
     };
     const view = parseRuntimeState(
@@ -267,6 +273,8 @@ describe('parseRuntimeState', () => {
         listKey: 'implementation',
         stage: 'code',
         status: 'completed',
+        checks: 'passed',
+        ancestry: [],
       },
     };
     const r = parseRuntimeState(
@@ -280,7 +288,7 @@ describe('parseRuntimeState', () => {
     if (!r.ok) return;
     const view = r.value;
     const task1 = view.taskGates.find((t) => t.taskId === 'task-1');
-    expect(task1?.checks).toBe('completed');
+    expect(task1?.checks).toBe('passed');
   });
 
   test('shows the verdict against the task and stage it was given for', () => {
@@ -291,6 +299,8 @@ describe('parseRuntimeState', () => {
         listKey: 'implementation',
         stage: 'code',
         status: 'completed',
+        checks: 'passed',
+        ancestry: [],
       },
       'run-2': {
         id: 'run-2',
@@ -298,6 +308,7 @@ describe('parseRuntimeState', () => {
         listKey: 'implementation',
         stage: 'review',
         status: 'completed',
+        ancestry: [],
       },
     };
     const view = parseRuntimeState(
@@ -316,7 +327,7 @@ describe('parseRuntimeState', () => {
     if (!view.ok) return;
     const viewValue = view.value;
     const status = formatSectionLines(viewValue).join('\n');
-    expect(status).toContain('task-1@verify');
+    expect(status).toContain('task-1@code');
     expect(status).not.toContain('task-2@code');
   });
 });
@@ -357,11 +368,13 @@ describe('formatDetailsLines', () => {
   test('tasks summary includes count and active index', () => {
     const lines = formatDetailsLines(
       makeSnapshot({
-        tasks: [
-          { id: 'task-0', status: 'running', title: 'Task 0', branch: 'feature/task-0' },
-          { id: 'task-1', status: 'pending', title: 'Task 1', branch: 'feature/task-1' },
-          { id: 'task-2', status: 'pending', title: 'Task 2', branch: 'feature/task-2' },
-        ],
+        tasks: {
+          implementation: [
+            { id: 'task-0', status: 'running', title: 'Task 0', branch: 'feature/task-0' },
+            { id: 'task-1', status: 'pending', title: 'Task 1', branch: 'feature/task-1' },
+            { id: 'task-2', status: 'pending', title: 'Task 2', branch: 'feature/task-2' },
+          ],
+        },
       })
     );
     expect(lines).not.toBeNull();
@@ -372,7 +385,11 @@ describe('formatDetailsLines', () => {
   test('gates summary shows status per gate', () => {
     const lines = formatDetailsLines(
       makeSnapshot({
-        gates: { invariants: 'passed', review: 'pending', qa: 'running' },
+        stageGateResults: [
+          { stage: 'planning', id: 'invariants', status: 'passed' },
+          { stage: 'planning', id: 'review', status: 'pending' },
+          { stage: 'planning', id: 'qa', status: 'running' },
+        ],
       })
     );
     expect(lines).not.toBeNull();

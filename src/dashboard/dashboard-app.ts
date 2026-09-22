@@ -495,7 +495,7 @@ export function createDashboard(config: DashboardConfig): Dashboard {
       for (const [id, session] of Object.entries(newSessions)) {
         newSessionsSnapshots[id] = toSessionSnapshot(session);
       }
-      const current = JSON.stringify(newSessions);
+      const current = JSON.stringify(newSessionsSnapshots);
       if (current === lastSnapshot) return;
 
       const oldSessions = JSON.parse(lastSnapshot) as Record<string, SessionSnapshot>;

@@ -15,7 +15,7 @@ console.log('📁 Test directory:', TEST_DIR);
 process.env.SESSION_GUARD_STORE_DIR = TEST_DIR;
 process.env.HARNESS_PROFILE = 'android';
 if (!process.env.SESSION_GUARD_PROFILES_DIR) {
-  process.env.SESSION_GUARD_PROFILES_DIR = resolve(import.meta.dir, '..', 'profiles');
+  process.env.SESSION_GUARD_PROFILES_DIR = resolve(import.meta.dir, '..', '..', 'profiles');
 }
 
 async function main() {

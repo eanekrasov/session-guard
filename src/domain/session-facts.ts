@@ -54,7 +54,7 @@ interface BaseSessionFacts {
   refs: Record<string, string>;
 
   /** Бюджеты ретраев — по ключу задачи или имени бюджета */
-  retryBudgets: Record<string, { attempts: number; maximum: number }>;
+  retryBudgets: Record<string, RetryBudget>;
 
   /** Статус основного гарда вне лупов */
   checks?: GateStatus;
@@ -103,7 +103,7 @@ export interface GuardEvaluationSession {
   deliveryReceipt?: string | null;
   deliveryPermit?: WorkflowSession['deliveryPermit'];
   refs?: Record<string, string>;
-  retryBudgets?: Record<string, { attempts: number; maximum: number }>;
+  retryBudgets?: Record<string, RetryBudget>;
   checks?: GateStatus;
   [key: string]: unknown;
 }
