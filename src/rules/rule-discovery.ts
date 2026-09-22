@@ -1,5 +1,5 @@
 /**
- * Rule file discovery utilities
+ * Утилиты обнаружения файлов правил
  */
 
 import { stat, readFile, readdir } from 'node:fs/promises';
@@ -11,7 +11,7 @@ import { parseRuleMetadata, stripFrontmatter, type RuleMetadata } from './rule-m
 const debugLog = createDebugLog();
 
 /**
- * Cached rule data for performance optimization
+ * Кэшированные данные правила для оптимизации производительности
  */
 interface CachedRule {
   /** Raw file content */
@@ -25,23 +25,23 @@ interface CachedRule {
 }
 
 /**
- * Rule cache keyed by absolute file path
+ * Кэш правил, закеированный по абсолютному пути файла
  */
 const ruleCache = new Map<string, CachedRule>();
 
 /**
- * Clear the rule cache (useful for testing or manual invalidation)
+ * Очистить кэш правил (полезно для тестов или ручной инвалидации)
  */
 export function clearRuleCache(): void {
   ruleCache.clear();
 }
 
 /**
- * Get cached rule data, refreshing from disk if file has changed.
- * Uses mtime-based invalidation to detect file changes.
+ * Получить кэшированные данные правила, обновляя с диска если файл изменился.
+ * Использует mtime-инвалидацию для обнаружения изменений файлов.
  *
- * @param filePath - Absolute path to the rule file
- * @returns Cached rule data or null if file cannot be read
+ * @param filePath - Абсолютный путь к файлу правила
+ * @returns Кэшированные данные правила или null если файл не читается
  */
 export async function getCachedRule(filePath: string): Promise<CachedRule | null> {
   try {
@@ -77,7 +77,7 @@ export async function getCachedRule(filePath: string): Promise<CachedRule | null
 }
 
 /**
- * Get the global rules directory path
+ * Получить путь к глобальной директории правил
  */
 function getGlobalRulesDir(): string | null {
   const opencodeConfigDir = process.env.OPENCODE_CONFIG_DIR;
@@ -95,11 +95,11 @@ function getGlobalRulesDir(): string | null {
 }
 
 /**
- * Recursively scan a directory for markdown rule files
- * Skips hidden files and directories (starting with .)
- * @param dir - Directory to scan
- * @param baseDir - Base directory for relative path calculation
- * @returns Array of discovered file paths with their relative paths from baseDir
+ * Рекурсивно просканировать директорию на markdown файлы правил
+ * Пропускает скрытые файлы и директории (начинающиеся с .)
+ * @param dir - Директория для сканирования
+ * @param baseDir - Базовая директория для расчёта относительных путей
+ * @returns Массив обнаруженных путей файлов с их относительными путями от baseDir
  */
 async function scanDirectoryRecursively(
   dir: string,
@@ -136,32 +136,37 @@ async function scanDirectoryRecursively(
 }
 
 /**
- * Discovered rule file with both absolute and relative paths
+ * Обнаруженный файл правила с абсолютным и относительным путями
  */
 export interface DiscoveredRule {
-  /** Absolute path to the rule file */
+  /**
+   * Абсолютный путь к файлу правила
+   */
   filePath: string;
-  /** Relative path from the rules directory root */
+  /**
+   * Относительный путь от корня директории правил
+   */
   relativePath: string;
 }
 
 /**
- * Immutable per-session snapshot of a discovered rule's parsed data.
- * Captured once per process/session; file edits do not affect an
- * existing session's snapshot.
+ * Неизменный per-session снимок распарсенных данных обнаруженного правила.
+ * Захватывается один раз на процесс/сессию; правки файла не влияют на
+ * существующий сессионный снимок.
  */
 export interface RuleSnapshot extends DiscoveredRule {
-  /** Short display name from frontmatter or the file name without extension */
+  /** Короткое отображаемое имя из frontmatter или имя файла без расширения */
   name: string;
-  /** Parsed frontmatter metadata (null when the file has none) */
+  /** Распарсенные frontmatter метаданные (null когда у файла их нет) */
   metadata: RuleMetadata | null;
-  /** Content with frontmatter stripped */
+  /** Контент без frontmatter */
   strippedContent: string;
 }
 
 /**
- * Load rule snapshots for the given discovered files, preserving discovery
- * order and skipping unreadable rules (warnings are logged by getCachedRule).
+ * Загрузить снимки правил для данных обнаруженных файлов, сохраняя порядок
+ * обнаружения и пропуская нечитаемые правила (предупреждения логируются
+ * getCachedRule).
  */
 export async function loadRuleSnapshots(files: readonly DiscoveredRule[]): Promise<RuleSnapshot[]> {
   const snapshots: RuleSnapshot[] = [];
@@ -185,12 +190,12 @@ export async function loadRuleSnapshots(files: readonly DiscoveredRule[]): Promi
 }
 
 /**
- * Discover markdown rule files from standard directories
- * Searches recursively in:
- * - $OPENCODE_CONFIG_DIR/rules/ (highest priority)
- * - $XDG_CONFIG_HOME/opencode/rules/ (or ~/.config/opencode/rules as fallback)
- * - .opencode/rules/ (in project directory if provided)
- * Finds all .md and .mdc files including nested subdirectories.
+ * Обнаружить markdown файлы правил из стандартных директорий
+ * Ищет рекурсивно в:
+ * - $OPENCODE_CONFIG_DIR/rules/ (высший приоритет)
+ * - $XDG_CONFIG_HOME/opencode/rules/ (или ~/.config/opencode/rules как фоллбек)
+ * - .opencode/rules/ (в директории проекта если предоставлена)
+ * Находит все .md и .mdc файлы включая вложенные поддиректории.
  */
 export async function discoverRuleFiles(projectDir?: string): Promise<DiscoveredRule[]> {
   const files: DiscoveredRule[] = [];

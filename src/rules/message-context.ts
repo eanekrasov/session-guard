@@ -24,9 +24,9 @@ export interface MessageWithInfo {
 }
 
 /**
- * Extract and join text content from message parts.
- * Skips synthetic parts and parts without text content.
- * Returns an empty string if no text is extracted.
+ * Извлечь и склеить текстовый контент из частей сообщения.
+ * Пропускает синтетические части и части без текстового контента.
+ * Возвращает пустую строку если текст не извлечён.
  */
 export function extractTextFromParts(
   parts: Array<{ type?: string; text?: string; synthetic?: boolean }>
@@ -50,9 +50,9 @@ export function extractTextFromParts(
 }
 
 /**
- * Normalize paths to repo-relative POSIX format.
- * If path is absolute and under baseDir, convert to relative POSIX path.
- * Otherwise return path as-is.
+ * Нормализовать пути в repo-relative POSIX формат.
+ * Если путь абсолютный и под baseDir, конвертировать в относительный POSIX путь.
+ * Иначе вернуть путь как есть.
  */
 export function normalizeContextPath(filePath: string, baseDir: string): string {
   if (!path.isAbsolute(filePath)) return filePath;
@@ -61,14 +61,15 @@ export function normalizeContextPath(filePath: string, baseDir: string): string 
 }
 
 /**
- * Strip control characters and limit length for safe inclusion in context strings.
+ * Убрать контрольные символы и ограничить длину для безопасного включения
+ * в context строки.
  */
 export function sanitizePathForContext(filePath: string): string {
   return filePath.replace(/[\r\n\t]/g, ' ').slice(0, 300);
 }
 
 /**
- * Extract sessionID from messages array.
+ * Извлечь sessionID из массива сообщений.
  */
 export function extractSessionID(messages: MessageWithInfo[]): string | undefined {
   for (const message of messages) {
@@ -87,7 +88,7 @@ export function extractSessionID(messages: MessageWithInfo[]): string | undefine
 }
 
 /**
- * Extract the latest user message text from messages array.
+ * Извлечь текст последнего пользовательского сообщения из массива сообщений.
  */
 export function extractLatestUserPrompt(messages: MessageWithInfo[]): string | undefined {
   for (let i = messages.length - 1; i >= 0; i--) {
@@ -105,8 +106,8 @@ export function extractLatestUserPrompt(messages: MessageWithInfo[]): string | u
 }
 
 /**
- * Convert MessageWithInfo[] to Message[] by filtering out messages
- * that lack required fields (role, non-empty parts array).
+ * Конвертировать MessageWithInfo[] в Message[] фильтруя сообщения
+ * не имеющие обязательных полей (role, непустой parts array).
  */
 export function filterValidMessages(messages: MessageWithInfo[]): Message[] {
   const result: Message[] = [];
@@ -123,9 +124,9 @@ export function filterValidMessages(messages: MessageWithInfo[]): Message[] {
 }
 
 /**
- * Extract the leading slash command from a user prompt.
- * Returns the first whitespace-delimited token if it starts with '/'
- * and contains at least one non-slash character after the leading slash.
+ * Извлечь ведущую slash command из пользовательского промпта.
+ * Возвращает первый whitespace-delimited токен если он начинается с '/'
+ * и содержит хотя бы один non-slash символ после ведущего слэша.
  */
 export function extractSlashCommand(prompt?: string): string | undefined {
   if (!prompt) return undefined;

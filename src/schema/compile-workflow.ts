@@ -83,17 +83,17 @@ export interface CompileError {
 }
 
 /**
- * The stage a session starts in: the first one the schema declares.
+ * Стадия, в которой сессия стартует: первая, которую декларирует схема.
  *
- * This used to read the highest-priority stage assignment's result, which is
- * the opposite of an initial stage. Assignments derive where a session *is*
- * from what is true about it, and the most specific rule wins — in the base
- * workflow that is `deliveryReceipt → done`, so the "initial" stage compiled
- * to `done`. Nothing read the value, so nothing said so.
+ * Раньше это читал результат стадии с наивысшим приоритетом, что наоборот от
+ * начальной стадии. Назначения вычисляют, где сессия *есть* из того, что про
+ * неё верно, и самое конкретное правило выигрывает — в базовом workflow это
+ * `deliveryReceipt → done`, так что "начальная" стадия компилировалась в
+ * `done`. Значение никто не читал, так что никто ничего не говорил.
  *
- * Declaration order is what a profile author means by the first stage, and it
- * needs no session to evaluate against — which is the whole point, since there
- * is no session yet when this is asked.
+ * Порядок декларации — то, что автор профиля имеет в виду под первой стадией,
+ * и ему не нужна сессия для оценки — в этом весь смысл, ведь сессии ещё нет
+ * когда это спрашивают.
  */
 export function initialStageOf(stages: Record<string, StageDef> | undefined): string {
   return Object.keys(stages ?? {})[0] ?? '';
@@ -118,10 +118,10 @@ export function terminalStagesOf(
 // ─── Compiler ────────────────────────────────────────────────────────────────
 
 /**
- * Compile a resolved schema into a `CompiledWorkflow`.
+ * Скомпилировать резолвленную схему в `CompiledWorkflow`.
  *
- * Normalises defaults, validates cross-references, and produces
- * a deterministic execution contract. Rejects unsupported declarations.
+ * Нормализует дефолты, валидирует кросс-референсы, и производит
+ * детерминированный контракт исполнения. Отвергает неподдерживаемые декларации.
  */
 export function compileWorkflow(schema: ResolvedSchema): {
   workflow: CompiledWorkflow;
@@ -153,8 +153,8 @@ export function compileWorkflow(schema: ResolvedSchema): {
     validateActions(`stages.${stageId}`, stageDef, errors);
   }
 
-  // Every expression the workflow will ever evaluate, parsed now rather than
-  // read as `false` for ever at runtime.
+  // Каждое выражение, которое workflow когда-либо оценит, распарсено сейчас,
+  // а не читается как `false` навсегда в рантайме.
   validateGuardSyntax(schema, errors);
 
   // Стадия, до которой не дойти, — это объявление, которое никогда не
@@ -163,7 +163,7 @@ export function compileWorkflow(schema: ResolvedSchema): {
   // доставить, и ни одной жалобы при загрузке.
   validateReachability(schema, errors);
 
-  // Keys nobody reads, reported rather than ignored.
+  // Ключи, которые никто не читает, репортим вместо игнора.
   validateKnownKeys(schema, errors);
 
   // Build compiled transitions
@@ -187,22 +187,21 @@ export function compileWorkflow(schema: ResolvedSchema): {
   };
 }
 
-/** The transition target that ends a task's work; never a stage of its own. */
+/** Цель перехода, завершающая работу задачи; никогда не стадия сама по себе. */
 const TASK_DONE = 'done';
 
 /**
- * Fields a schema may declare. Anything else is reported.
+ * Поля, которые схема может декларировать. Всё остальное репортится.
  *
- * `ProfileSchemaSchema` is `.passthrough()` — a typo, or a key from an older
- * vocabulary, parses cleanly and is then read by nobody. That is how
- * `android.yaml` carried a dead `phases:` block for months while every test
- * stayed green. Reporting them here rather than tightening the parser keeps
- * `ResolvedSchema`'s index signature working and gives the author one funnel,
- * with a path and a name.
+ * `ProfileSchemaSchema` — `.passthrough()` — опечатка, или ключ из старой
+ * лексики, парсится чисто и потом никем не читается. Так `android.yaml`
+ * нес мёртвый блок `phases:` месяцами, пока все тесты оставались зелёными.
+ * Репортим их здесь вместо ужесточения парсера, что держит `ResolvedSchema`'s
+ * index signature рабочей и даёт автору одну воронку, с путём и именем.
  */
 const SCHEMA_KEYS = new Set([
-  // Added by the resolver, not authored: the schema's own name and the file
-  // it came from.
+  // Добавлено резолвером, не автором: собственное имя схемы и файл,
+  // из которого она пришла.
   'id',
   'source',
   'extends',
@@ -391,13 +390,13 @@ function validateKnownKeys(schema: ResolvedSchema, errors: CompileError[]): void
 }
 
 /**
- * Parse every guard expression the workflow declares.
+ * Распарсить каждое выражение гарда, которое декларирует workflow.
  *
- * The compiler exists to turn silence into an error, and this was its widest
- * hole: `"session.gates.((("` compiled clean and then evaluated to `false` for
- * ever, so the transition simply never fired. The evaluator reports the parse
- * failure at runtime through `onError`, which is far too late — nothing
- * refused the profile at load.
+ * Компилятор существует чтобы превратить молчанку в ошибку, и это была его
+ * широкая дыра: `"session.gates.((("` компилировался чисто и потом оценивался
+ * в `false` навсегда, так что переход просто никогда не срабатывал. Оценщик
+ * репортит парс-фейл в рантайме через `onError`, что слишком поздно — ничто
+ * не отвергало профиль при загрузке.
  */
 function validateGuardSyntax(schema: ResolvedSchema, errors: CompileError[]): void {
   const check = (path: string, expression: string | undefined): void => {
@@ -650,8 +649,8 @@ function compileTransitions(
       });
     }
     for (const effect of t.effects ?? []) {
-      // The mirror of the loop rule below: inside a loop the budget is always
-      // the task's own, and at workflow level there is no task to name.
+      // Зеркало правила лупа ниже: внутри лупа бюджет всегда задачи, а на уровне
+      // workflow нет задачи, которую можно назвать.
       if (effect.bumpRetry === 'task.id') {
         errors.push({
           severity: 'error',

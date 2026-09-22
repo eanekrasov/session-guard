@@ -1,30 +1,30 @@
 /**
  * Type-level API surface contract tests.
  *
- * This file uses @ts-expect-error to assert that certain types are NOT exported.
- * If a forbidden type is accidentally re-exported, the @ts-expect-error will
- * become invalid and TypeScript compilation will fail.
+ * Этот файл использует @ts-expect-error чтобы ассертить, что определённые типы
+ * НЕ экспортируются. Если запрещённый тип случайно реэкспортируется,
+ * @ts-expect-error станет невалидным и TypeScript компиляция упадёт.
  *
- * This file is checked by `mise run build` / `tsc` but produces no runtime output.
+ * Этот файл проверяется `mise run build` / `tsc` но не производит runtime output.
  */
 
-// --- mcp-tools.ts: McpStatusMap should NOT be exported ---
+// --- mcp-tools.ts: McpStatusMap должен НЕ экспортироваться ---
 // @ts-expect-error McpStatusMap is internal and should not be exported
 import type { McpStatusMap } from './mcp-tools.js';
 
-// --- runtime.ts: OpenCodeRulesRuntimeOptions should NOT be exported ---
+// --- runtime.ts: OpenCodeRulesRuntimeOptions должен НЕ экспортироваться ---
 // @ts-expect-error OpenCodeRulesRuntimeOptions is internal and should not be exported
 import type { OpenCodeRulesRuntimeOptions } from './runtime.js';
 
-// --- session-store.ts: SessionStoreOptions should NOT be exported ---
+// --- session-store.ts: SessionStoreOptions должен НЕ экспортироваться ---
 // @ts-expect-error SessionStoreOptions is internal and should not be exported
 import type { SessionStoreOptions } from './session-store.js';
 
-// --- matched-rules-state.ts: MatchedRulesStateStoreOptions should NOT be exported ---
+// --- matched-rules-state.ts: MatchedRulesStateStoreOptions должен НЕ экспортироваться ---
 // @ts-expect-error MatchedRulesStateStoreOptions is internal and should not be exported
 import type { MatchedRulesStateStoreOptions } from './matched-rules-state.js';
 
-// --- rule-delivery.ts: delivery implementation types should NOT be exported ---
+// --- rule-delivery.ts: delivery implementation types должны НЕ экспортироваться ---
 // @ts-expect-error RuleDeliveryOptions is internal and should not be exported
 import type { RuleDeliveryOptions } from './rule-delivery.js';
 

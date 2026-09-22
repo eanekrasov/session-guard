@@ -40,7 +40,7 @@ export { schemaToEngineConfig };
 // any wrong shape instead of naming the one intended.
 // ─── SessionGuardRuntime ─────────────────────────────────────────────────────
 
-/** A tool part as it arrives on the event stream, in either host shape. */
+/** Часть инструмента, как она приходит в event stream, в любой форме хоста. */
 interface EventPart {
   id?: string;
   status?: string;
@@ -95,10 +95,10 @@ class SessionGuardRuntime {
   constructor(context: PluginInput, paths?: RuntimePaths) {
     this.log = createLogFn(context.client);
     this.report = createReporter(context.client, this.log);
-    // The store lives outside the project, under OpenCode's own state
-    // directory. It used to be told so through process.env, which the plugin
-    // set from the first project it happened to initialise for — so a second
-    // project in the same process read the first's value.
+    // Стор живёт вне проекта, под собственной стейт-директорией OpenCode.
+    // Раньше это говорили через process.env, который плагин выставлял от
+    // первого проекта, с которым инициализировался — так что второй проект в
+    // том же процессе читал значение первого.
     const storeDir = paths?.storeDir ?? sessionsDir(opencodeStateDir());
     this.store = new WorkflowStore(storeDir, this.log);
     const resolveHostParent = async (sessionID: string): Promise<string | null> => {
@@ -202,8 +202,8 @@ class SessionGuardRuntime {
       mutation: async () => undefined,
     });
 
-    // Initialize the rules sub-system — rule files are discovered lazily
-    // inside OpenCodeRulesRuntime on first use.
+    // Инициализировать подсистему правил — файлы правил обнаруживаются лениво
+    // внутри OpenCodeRulesRuntime при первом использовании.
     const matchedRulesStateStore = new MatchedRulesStateStore();
     this.rulesRuntime = new OpenCodeRulesRuntime({
       client: context.client,
@@ -226,8 +226,8 @@ class SessionGuardRuntime {
   }
 
   /**
-   * The task lists the session's own workflow declares, by its `loop:` sources.
-   * Used by TaskApi for static list key validation.
+   * Списки задач, которые объявляет workflow сессии, по их `loop:` источникам.
+   * Используется TaskApi для статической валидации ключей списков.
    */
   private async declaredTaskListsForTaskApi(
     profileId: string,
@@ -241,8 +241,8 @@ class SessionGuardRuntime {
   }
 
   /**
-   * Handle [chat.message] — run guardrails on user input, capture baseline,
-   * then evaluate rules.
+   * Обработать [chat.message] — запустить гардрейлы на пользовательском вводе,
+   * захватить базовую линию, затем оценить правила.
    */
   async handleChatMessage(input: ChatMessageInput, output?: ChatMessageOutput): Promise<void> {
     const sessionID = input?.sessionID;
@@ -278,30 +278,30 @@ class SessionGuardRuntime {
     // TODO: guardrails для chat.message будет реализован, когда SDK начнёт передавать текст сообщения. Пока блокировка работает в handleToolBefore.
     void validateUserInput;
 
-    // Delegate to rules sub-system
+    // Делегировать подсистеме правил
     await this.rulesRuntime.handleChatMessage(input, output ?? {});
   }
 
   /**
-   * P1-012: Handle tool.execute.before — runs guardrails, consent, or mutation.
+   * P1-012: Обработать tool.execute.before — запускает гардрейлы, consent или мутацию.
    */
   async handleToolBefore(
     input: { tool: string; sessionID: string; callID: string },
     output: { args: unknown }
   ): Promise<void> {
     await this.executor.run(input.sessionID, async (tx) => {
-      // 0. Opt-in gate — no workflow session means no plugin mechanics at all.
+      // 0. Opt-in gate — нет сессии workflow значит нет механик плагина вообще.
       if (!tx.session) return;
 
-      // Normalize tool name to lowercase (SDK may send any casing)
+      // Нормализовать имя инструмента в lowercase (SDK может прислать любой кейс)
       const tool = this.sessionContext.normalizeTool(input.tool);
 
       // SDK передаёт args вызова в output.args для tool.execute.before,
       // НЕ в input.args (в input.args нет поля args по типам SDK).
       const args = output.args;
 
-      // Every refusal below throws WorkflowBlockedError: the host cancels the
-      // tool call only when this hook rejects. See blocked-error.ts.
+      // Каждый отказ ниже бросает WorkflowBlockedError: хост отменяет вызов
+      // инструмента только когда этот хук отвергает. См. blocked-error.ts.
 
       await this.toolExecutionPolicy.before({
         tool,
@@ -315,7 +315,7 @@ class SessionGuardRuntime {
   }
 
   /**
-   * Handle tool.execute.after — runs guardrails, consent, or mutation.
+   * Обработать tool.execute.after — запускает гардрейлы, consent или мутацию.
    */
   async handleToolAfter(
     input: { tool: string; sessionID: string; callID: string; args: unknown },
@@ -328,13 +328,13 @@ class SessionGuardRuntime {
       // Normalize tool name to lowercase (SDK may send any casing)
       const tool = this.sessionContext.normalizeTool(input.tool);
 
-      // 1. Guardrails — always sanitize output
+      // 1. Guardrails — всегда санитизировать вывод
       output.output = this.guardrailAfter(output.output, tool);
 
-      // 1c. Rules — PostToolUse evaluation + file observations
+      // 1c. Rules — PostToolUse оценка + файловые наблюдения
       await this.rulesRuntime.handleToolExecuteAfter(input, output);
 
-      // 1a/1b/1d. Invariants + Workflow result + File tool — all in settler
+      // 1a/1b/1d. Инварианты + Результат workflow + Файловый инструмент — всё в settler
       const operation = tx.session.activeOperations[input.callID];
       const args = input.args as { filePath?: unknown; path?: unknown; file?: unknown } | undefined;
       await this.workflowResultSettler.settle({
@@ -349,20 +349,20 @@ class SessionGuardRuntime {
         fileToolArgs: args,
       });
 
-      // 2. Commit Permit: verify HEAD changed after commit-task
+      // 2. Commit Permit: проверить, что HEAD изменился после commit-task
       if (tool === 'bash') {
         await this.workflowLifecycle.handleCommitTaskAfter(tx.session, input.callID, output);
       }
 
-      // 3. Question tool — consent request (approve/decline plan)
+      // 3. Question tool — запрос consent (approve/decline plan)
       if (tool === 'question') {
         await this.consentAfter(tool, input.sessionID, input.callID, input.args, output);
       }
 
-      // 5. Finish mutation (Bash/Write tool) — единственный путь finalization.
+      // 5. Finish mutation (Bash/Write tool) — единственный путь финализации.
       //    MutationOrchestrator.finishMutation вычисляет scope, валидацию
       //    инвариантов и устанавливает gate через один вызов domain finishMutation.
-      //    Now handled by changeEnforcement in toolExecutionPolicy.
+      //    Теперь обрабатывается changeEnforcement в toolExecutionPolicy.
 
       // 6. Try transitions — после любого инструмента проверяем, можно ли перейти
       await this.workflowLifecycle.afterTool(tx.session, tx);
@@ -370,9 +370,9 @@ class SessionGuardRuntime {
   }
 
   /**
-   * SDK-005: Inject workflow session context into the system prompt.
-   * Called before each model request — adds stage, gates, and approvals
-   * so the model is aware of the current workflow state.
+   * SDK-005: Внедрить контекст workflow сессии в системный промпт.
+   * Вызывается перед каждым запросом к модели — добавляет стадию, гейты и
+   * одобрения, чтобы модель знала текущее состояние workflow.
    */
   async handleSystemTransform(
     input: { sessionID?: string; model: unknown },
@@ -387,11 +387,11 @@ class SessionGuardRuntime {
     lines.push(`[workflow session: ${session.sessionId}]`);
     lines.push(`[workflow profile: ${session.profileId}]`);
 
-    // Read the stage from the session. `currentStage` is written by
-    // tryApplyTransitions, and by workflow-create before that from the
-    // compiled workflow's own first stage — so it is always set, and the
-    // `?? 'planning'` that stood here was a fallback to the base profile's
-    // first stage that could never fire and would have been wrong if it did.
+    // Прочитать стадию из сессии. `currentStage` пишется
+    // tryApplyTransitions, а до того — workflow-create из скомпилированной
+    // первой стадии workflow — так что оно всегда установлено, и
+    // `?? 'planning'`, что тут стояло, было фоллбеком к первой стадии
+    // базового профиля, который никогда не сработал бы и был бы неправ, если б.
     const stage = session.currentStage;
     lines.push(`[workflow stage: ${stage}]`);
 
@@ -430,7 +430,8 @@ class SessionGuardRuntime {
   }
 
   /**
-   * Handle session compaction — augment existing context with rules sub-system output.
+   * Обработать сжатие сессии — дополнить существующий контекст выводом
+   * подсистемы правил.
    */
   async handleSessionCompacting(
     input: { sessionID?: string },
@@ -446,7 +447,7 @@ class SessionGuardRuntime {
   }
 
   /**
-   * Handle experimental.chat.messages.transform — delegate to rules sub-system.
+   * Обработать experimental.chat.messages.transform — делегировать подсистеме правил.
    */
   async handleMessagesTransform(
     _input: Record<string, never>,
@@ -456,8 +457,8 @@ class SessionGuardRuntime {
   }
 
   /**
-   * Handle events — clear only errored callId from the mutation orchestrator's
-   * in-flight mutation tracking.
+   * Обработать события — очистить только ошибочный callId из трекинга
+   * in-flight мутаций оркестратором мутаций.
    */
   async handleEvent(
     event: EventEnvelope & {
@@ -466,9 +467,9 @@ class SessionGuardRuntime {
   ): Promise<void> {
     await this.workflowLifecycle.handleEvent(event);
 
-    // Rules are a per-session mechanic. The rules sub-system reads the session
-    // from `event.properties.sessionID` (not from `part`), so gate on that same
-    // field: no workflow session, no rules.
+    // Правила — механика на сессию. Подсистема правил читает сессию из
+    // `event.properties.sessionID` (не из `part`), поэтому гейтим по тому же
+    // полю: нет сессии workflow — нет правил.
     const rulesSessionID = event.event.properties?.['sessionID'];
     if (typeof rulesSessionID === 'string' && (await this.sessionContext.has(rulesSessionID))) {
       await this.rulesRuntime.handleEvent(event);
@@ -529,7 +530,7 @@ class SessionGuardRuntime {
   }
 
   /**
-   * Handle dispose — clean up all resources.
+   * Обработать dispose — очистить все ресурсы.
    */
   async handleDispose(): Promise<void> {
     this.executor.clear();
@@ -538,7 +539,7 @@ class SessionGuardRuntime {
   }
 
   /**
-   * Handle config — register sm-* commands and session-guard agent.
+   * Обработать config — зарегистрировать sm-* команды и session-guard agent.
    */
   async handleConfig(config: Config): Promise<void> {
     config.command = config.command || {};
@@ -577,8 +578,8 @@ class SessionGuardRuntime {
       color: '#6366F1',
     };
 
-    // Sync agents for all profiles on startup — complete before returning
-    // so agents are discoverable by the host when config resolves.
+    // Синхронизировать агентов для всех профилей при старте — завершить перед
+    // возвратом, чтобы агенты были обнаружимы хостом когда резолвится config.
     try {
       await syncAllProfileAgents(this.projectDir, (msg) => this.log('info', msg, {}));
     } catch (err) {
@@ -633,15 +634,16 @@ class SessionGuardRuntime {
 // ─── Factory ──────────────────────────────────────────────────────────────────
 
 /**
- * Create a new SessionGuardRuntime and return its Hooks.
+ * Создать новый SessionGuardRuntime и вернуть его Hooks.
  */
+
 /**
- * Directories this instance works in, passed rather than exported.
+ * Директории, в которых работает этот экземпляр, передаются, а не экспортируются.
  *
- * `SESSION_GUARD_PROFILES_DIR` / `SESSION_GUARD_STORE_DIR` remain the
- * operator's override, read by `paths.ts`; what must not happen is a plugin
- * instance *writing* them, which turns one project's local default into every
- * later instance's global override.
+ * `SESSION_GUARD_PROFILES_DIR` / `SESSION_GUARD_STORE_DIR` остаются
+ * переопределением оператора, читаются в `paths.ts`; чего не должно случиться
+ * — это экземпляр плагина *писащий* их, что превращает локальный дефолт одного
+ * проекта в глобальное переопределение для всех последующих экземпляров.
  */
 export interface RuntimePaths {
   storeDir?: string;

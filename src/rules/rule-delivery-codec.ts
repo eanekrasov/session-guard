@@ -233,14 +233,14 @@ export function decodeRawHistory(messages: readonly unknown[]): DeliveryLedgerFa
 }
 
 /**
- * Reads Transient delivery presence facts: identifiers and canonical metadata
- * keys already present in a dispatch's message array. Deliberately separate
- * from decodeRawHistory: presence counts Transient delivery parts, which the
- * durable ledger must exclude, and ignores the legacy persisted forms the
- * ledger must accept. Neither function calls the other.
+ * Читает Transient delivery presence facts: идентификаторы и канонические
+ * metadata ключи уже присутствующие в message array диспатча. Намеренно
+ * разделено от decodeRawHistory: presence считает Transient delivery части,
+ * которые durable ledger должен исключить, и игнорирует legacy персистнутые
+ * формы которые ledger должен принять. Ни одна функция не вызывает другую.
  *
- * Malformed messages abort with the offending property-access TypeError,
- * matching the inline scan this replaced; hardening is deferred.
+ * Malformed сообщения abort с TypeError на проблемном property-access,
+ * матча инлайн скан который это заменил; hardening отложен.
  */
 export function decodeTransientPresence(
   messages: readonly TransientPresenceMessage[]

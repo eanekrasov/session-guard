@@ -77,9 +77,9 @@ export class TaskAdmissionImpl implements TaskAdmission {
     // match гарантированно не null — проверка уже в isWorkflowTask
     const taskId = match![1];
 
-    // Captured before admission (D2): this is real I/O (git status + a hash
-    // per dirty path) that must not run inside the serialised session queue.
-    // A refused admission wastes one snapshot — the rare path.
+    // Захвачено до допуска (D2): это реальный I/O (git status + хеш на каждый
+    // грязный путь) который не должен запускаться внутри сериализованной очереди
+    // сессии. Отказ в допуске тратит один снимок — редкий путь.
     const frame = await this.safeCaptureBaseline();
 
     await this.ports.executor.run(sessionID, async (tx) => {
@@ -109,13 +109,13 @@ export class TaskAdmissionImpl implements TaskAdmission {
         blockTaskAdmission(`Stage ${derivedStageId} does not declare an executable task loop`);
       }
 
-      // The loop that owns this task's list, which is not always the stage the
-      // session is in: a loop stage may nest a loop of its own
-      // (`loop: $currentTask.id`), and that inner loop's tasks live in a list
-      // keyed by the parent task's id. Admission looked only in the outer
-      // loop's list, so a schema declaring a nested loop was accepted and its
-      // child tasks were then always "not eligible" — the shape could be
-      // written and never run.
+      // Луп, который владеет списком этой задачи — не всегда стадия, в которой
+      // сессия: стадия-луп может гнездить свой собственный луп
+      // (`loop: $currentTask.id`), и задачи этого внутреннего лупа живут в
+      // списке, закеированном по id родительской задачи. Допуск смотрел только
+      // в список внешнего лупа, так что схема с вложенным лупом принималась, а
+      // её дочерние задачи были всегда "not eligible" — форма могла быть
+      // написана и никогда не запущена.
       const owner = this.resolveAdmissionLoop(tx.session, derivedStageId, derivedStage, taskId);
       if (!owner) {
         blockTaskAdmission(
@@ -126,12 +126,12 @@ export class TaskAdmissionImpl implements TaskAdmission {
       if (nestedStages(loopStage).length === 0) {
         blockTaskAdmission(`Stage ${loopStageId} does not declare an executable task loop`);
       }
-      // A loop that names no dispatch runs one task at a time. Requiring the
-      // field made every profile repeat boilerplate, and forgetting it stopped
-      // the loop with a message about a loop that is plainly declared. The
-      // inner loop's own dispatch, roster and budget govern its tasks.
-      // `serial` carries no maxConcurrent — the schema's own union says so, and
-      // the check below short-circuits on the strategy before reading it.
+      // Луп, не называющий dispatch, запускает одну задачу за раз. Требование поля
+      // заставляло каждый профиль повторять бойлерплейт, и забывчивость его
+      // останавливала луп с сообщением о лупе, который заявлен явно. Внутренний
+      // собственный dispatch, ростер и бюджет лупа правят его задачами.
+      // `serial` не несёт maxConcurrent — собственный union схемы так говорит, и
+      // проверка ниже шорт-циркуитует на стратегии до чтения поля.
       const dispatch = loopStage.dispatch ?? { strategy: 'serial' as const };
 
       const tasks = tx.session.tasks[listKey]!;
@@ -165,21 +165,23 @@ export class TaskAdmissionImpl implements TaskAdmission {
           `Agent ${agent} is not allowed in stage ${stageId}. Allowed: ${allowedAgents.join(', ')}`
         );
       }
-      // task.editingAgents restricts who may hold this task's mutating tool
-      // calls at all. Agent identity is only known at dispatch time — a
-      // native tool.execute.before hook carries no agent — so this is
-      // enforced here, refusing the dispatch itself rather than each write.
+      // task.editingAgents ограничивает, кто может держать мутирующие вызовы
+      // инструментов этой задачи вообще. Идентичность агента известна только в
+      // момент диспатча — нативный tool.execute.before хук не несет агента —
+      // так что это принуждается здесь, отвергая сам диспатч, а не каждый write.
       //
-      // Whether this stage is one where work happens is asked of its roster,
-      // not of its `gates`. `stage.gates?.length === 0` was the old test, and
-      // it is false when a stage declares no `gates:` at all — which is most
-      // stages — so the check was skipped for exactly the case it was written
-      // for and a task naming its own editors admitted anyone.
+      // Является ли эта стадия той, где происходит работа, спрашивается у её
+      // ростера, а не у её `gates`. `stage.gates?.length === 0` был старым
+      // тестом, и он false когда стадия не декларирует `gates:` вообще — а это
+      // большинство стадий — так что проверка пропускалась ровно для того
+      // случая, для которого она писалась, и задача, называющая своих
+      // редакторов, пускала любого.
       //
-      // A stage whose roster admits an editor is a stage where work happens.
-      // No roster means anyone may run there, editors included. A workflow
-      // that declares no editors at all cannot classify its stages, and this
-      // stays silent rather than guess — every shipped profile declares them.
+      // Стадия, чей ростер допускает редактора — стадия, где происходит работа.
+      // Никакой ростер — кто угодно может там бегать, редакторы в том числе.
+      // Workflow, не декларирующий редакторов вообще, не может классифицировать
+      // свои стадии, и это молчит вместо угадывания — каждый shipped профиль их
+      // декларирует.
       const editors = engine.getEditingAgents();
       const roster = stage.allowedAgents ?? loopStage.allowedAgents;
       const stageMayEdit =
@@ -196,10 +198,11 @@ export class TaskAdmissionImpl implements TaskAdmission {
           `Agent ${agent} may not edit ${taskId}. editingAgents: [${task.editingAgents.join(', ')}]`
         );
       }
-      // A stage that declares gates is waiting for several verdicts, so it may
-      // have one call per gate at a time — review and qa run together. Every
-      // other stage is one call at a time, and the same agent may never hold
-      // two: one agent cannot judge the same work twice at once.
+      // Стадия, декларирующая гейты, ждёт несколько вердиктов, поэтому может
+      // иметь по одному вызову на гейт за раз — review и qa бегают вместе.
+      // Любая другая стадия — один вызов за раз, и тот же агент никогда не
+      // может держать два: один агент не может судить ту же работу дважды
+      // одновременно.
       const running = Object.values(tx.session.activeOperations).filter(
         (operation) => operation.taskId === taskId && operation.status === 'running'
       );
@@ -268,9 +271,9 @@ export class TaskAdmissionImpl implements TaskAdmission {
         };
         task.status = 'running';
       }
-      // The occupancy of the stage this call belongs to. A verdict that
-      // arrives after the task has moved on belongs to a round that is over.
-      // Stamped in one place for both records, so the two cannot drift.
+      // Занятость стадии, которой принадлежит этот вызов. Вердикт, пришедший
+      // после того как задача ушла, принадлежит законченному раунду.
+      // Штамп в одном месте для обеих записей, так что они не могут расойтись.
       const round = tx.session.loopRuns[runId]?.round ?? 0;
       tx.session.activeOperations[callID] = {
         callId: callID,
@@ -285,13 +288,12 @@ export class TaskAdmissionImpl implements TaskAdmission {
         // frame (no projectDir) leaves this unset — see D5.
         baseline: frame,
       };
-      // The verdict's own freshness stamp, owned by the gate mechanism. Unlike
-      // the operation above, it is not deleted by the mutation lifecycle — a
-      // verdict must still be judgeable against its round when the operation
-      // is gone.
-      tx.session.verdictProvenance[callID] = { runId, round };
-      // Bounded: a call that is never answered leaves its stamp behind, and a
-      // session's call ids only ever accumulate.
+      // Собственный штамп свежести вердикта, которым владеет механизм гейтов. В
+      // отличие от операции выше, он не удаляется жизненным циклом мутации —
+      // вердикт должен всё ещё судиться против своего раунда когда операции
+      // уже нет.
+      // Bounded: вызов, которому никогда не ответили, оставляет свой штамп
+      // позади, и call ids сессии только накапливаются.
       const stampedCalls = Object.keys(tx.session.verdictProvenance);
       if (stampedCalls.length > 500) {
         for (const expired of stampedCalls.slice(0, stampedCalls.length - 500)) {
@@ -376,19 +378,19 @@ export class TaskAdmissionImpl implements TaskAdmission {
   }
 
   /**
-   * Two scopes meet here, and telling them apart is the whole job.
+   * Два скоупа встречаются здесь, и различать их — вся работа.
    *
-   * A `dispatch:` strategy governs one cycle: `serial` means one task of *that
-   * list* at a time, and `maxConcurrent` counts *that list's* runs. These read
-   * `cycleRuns`. Counting every open run in the session instead made a parent
-   * refuse its own child — the parent occupies `parents`, the child's cycle
-   * owns `task-1`, and the parent's run turned the child away with «Serial task
-   * cycle admits only the next unfinished task». The parent then waited for a
-   * child that was not allowed to start.
+   * Стратегия `dispatch:` управляет одним циклом: `serial` значит одна задача
+   * *этого списка* за раз, а `maxConcurrent` считает *прогоны этого списка*.
+   * Они читают `cycleRuns`. Подсчёт каждого открытого прогона в сессии вместо
+   * этого заставлял родителя отвергать своего ребёнка — родитель занимает
+   * `parents`, цикл ребёнка владеет `task-1`, и прогон родителя отвергал
+   * ребёнка с «Serial task cycle admits only the next unfinished task».
+   * Родитель потом ждал ребёнка, которого не пускали запускаться.
    *
-   * `writeScope` overlap is the other scope and stays session-wide: two tasks
-   * writing the same paths break invariant attribution whether or not they
-   * belong to the same cycle, because the diff is split by path, not by time.
+   * Перекрытие `writeScope` — другой скоуп и он сессионно-широкий: две задачи,
+   * пишущие в одни пути, ломают атрибуцию инвариантов входят они в один цикл
+   * или нет, потому что дифф разбит по путям, а не по времени.
    */
   private taskAdmissionRejection(
     dispatch: NonNullable<StageDef['dispatch']>,
@@ -416,12 +418,12 @@ export class TaskAdmissionImpl implements TaskAdmission {
       return null;
     }
 
-    // Non-overlap applies to EVERY non-serial strategy (`parallel` and
-    // `serial_with_overlap`), not just `parallel`: disjoint writeScope is
-    // what makes invariant attribution possible at all, by splitting the
-    // diff by path instead of by time. `serial` admits one run at a time
-    // and needs nothing here. An absent/empty writeScope overlaps nothing,
-    // so a read-only task is always admissible (task-scope spec).
+    // Non-overlap applies to EVERY non-serial strategy (`parallel` и
+    // `serial_with_overlap`), не только `parallel`: непересекающийся writeScope —
+    // это то, что делает атрибуцию инвариантов возможной вообще, разделяя
+    // дифф по путям вместо времени. `serial` допускает один прогон за раз и
+    // тут ничего не требует. Отсутствующий/пустой writeScope ни с чем не
+    // перекрывается, так что read-only задача всегда допустима (task-scope spec).
     const incoming = tasks[taskIndex];
     const overlapping = activeRuns.find((run) => {
       const running = findTask(session, run.taskId);
@@ -430,9 +432,9 @@ export class TaskAdmissionImpl implements TaskAdmission {
     if (overlapping) {
       let message = `Task ${taskId}'s writeScope overlaps running task ${overlapping.taskId}`;
       if (dispatch.strategy === 'parallel') {
-        // Only `parallel` has an alternative: under `serial_with_overlap`
-        // the order is strict, so there is no other admissible task and the
-        // answer is always "wait".
+        // Только `parallel` имеет альтернативу: под `serial_with_overlap`
+        // порядок строгий, так что другого допустимого таска нет и ответ всегда
+        // "wait".
         const runningTaskIds = new Set(activeRuns.map((run) => run.taskId));
         const admissibleNow = tasks.filter(
           (task) =>

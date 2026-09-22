@@ -83,18 +83,18 @@ interface OpenCodeRulesRuntimeOptions {
   client: unknown;
   directory: string;
   projectDirectory: string;
-  /** Optional pre-discovered rule files. When omitted, the runtime
-   * discovers them lazily from the project directory on first use. */
+  /** Опциональные заранее обнаруженные файлы правил. Когда опущены, рантайм
+   * обнаруживает их лениво из директории проекта при первом использовании. */
   ruleFiles?: DiscoveredRule[];
   matchedRulesStateStore: MatchedRulesStateStore;
   debugLog?: DebugLog;
-  /** Optional external session store. When provided, the runtime uses it
-   * instead of creating its own, so legacy __testOnly.getSessionStateSnapshot
-   * can observe the same state. */
+  /** Опциональный внешний session store. Когда предоставлен, рантайм использует его
+   * вместо создания своего, так что legacy __testOnly.getSessionStateSnapshot
+   * может наблюдать за тем же состоянием. */
   sessionStore?: SessionStore;
 }
 
-/** One object-shaped input for the single session-rule evaluation path. */
+/** Один объектный ввод для единственного пути оценки session-rule. */
 interface SessionRuleEvaluationInput {
   sessionID: string;
   userPrompt: string | undefined;
@@ -212,9 +212,9 @@ export class OpenCodeRulesRuntime {
       return;
     }
 
-    // Pre-success: no File observation is recorded here. A failed or blocked
-    // execution must never activate globs/fileContains rules; only the
-    // after-hook (successful events) feeds the observation store.
+    // Pre-success: File observation здесь не записывается. Неуспешный или заблокированный
+    // execution никогда не должен активировать globs/fileContains правила; только
+    // after-hook (успешные события) кормит observation store.
     await this.evaluateAndQueueHooks('PreToolUse', sessionID, toolName, args);
   }
 
@@ -236,8 +236,8 @@ export class OpenCodeRulesRuntime {
       return;
     }
 
-    // Successful tool events produce File observations; failed executions
-    // never reach this hook. Output text supports fileContains matching.
+    // Успешные tool events производят File observations; неудачные executions
+    // никогда не доходят до этого хука. Output text поддерживает fileContains matching.
     const observations = this.fileObservationContext.recordToolEvent(sessionID, {
       tool: toolName,
       args,
@@ -262,8 +262,8 @@ export class OpenCodeRulesRuntime {
         userPrompt: state?.lastUserPrompt,
         modelID: state?.lastModelID,
         agentType: state?.lastAgentType,
-        // Only file-observation-family rules can be triggered by a fresh
-        // observation; other condition kinds are evaluated per dispatch.
+        // Только file-observation-family правила могут быть триггерены свежим
+        // observation; другие виды условий оцениваются на диспатче.
         selectSnapshot: (rule) => hasFileObservationFamily(rule.metadata),
       })
     ).filter((rule) => rule.lifetime === 'durable');
@@ -273,8 +273,8 @@ export class OpenCodeRulesRuntime {
       rules: this.toDeliveryRules(matches),
     });
     if (result === 'accepted') {
-      // Union with existing sidebar state; never clobber previously
-      // matched rules from durable turns.
+      // Union с существующим sidebar state; никогда не затирать ранее
+      // матченные правила от durable turns.
       await this.matchedRulesStateStore.merge(
         sessionID,
         matches.map((rule) => rule.filePath)
@@ -327,8 +327,9 @@ export class OpenCodeRulesRuntime {
     } catch (error) {
       this.debugLog(`Ephemeral rule evaluation failed for ${sessionID}: ${formatError(error)}`);
     }
-    // Delivery runs even when evaluation failed: ledger seeding, queue
-    // routing, and queued transient Hook content must not slip a dispatch.
+    // Delivery бегает даже когда оценка фейлила: ledger seeding, queue
+    // routing, и заqueued transient Hook content не должны промахнуться
+    // диспатч.
     this.ruleDelivery.deliverTransientDispatch({
       sessionID,
       matchedRules: ephemeralRules,
@@ -339,8 +340,8 @@ export class OpenCodeRulesRuntime {
     return output;
   }
 
-  /** Load the per-session rule snapshot exactly once per process/session,
-   * deduplicating concurrent loads via a promise map. */
+  /** Загрузить per-session rule snapshot ровно один раз на процесс/сессию,
+   * дедуплицируя конкурентные загрузки через promise map. */
   private async ensureSessionRuleSnapshot(sessionID: string): Promise<RuleSnapshot[]> {
     const existing = this.sessionStore.get(sessionID)?.ruleSnapshots;
     if (existing) return existing;
@@ -365,7 +366,7 @@ export class OpenCodeRulesRuntime {
     }
   }
 
-  /** Assemble the shared match context from session state and live queries. */
+  /** Собрать shared match context из session state и live queries. */
   private async buildSessionRuleMatchContext(
     sessionID: string,
     userPrompt: string | undefined,
@@ -385,7 +386,7 @@ export class OpenCodeRulesRuntime {
     });
   }
 
-  /** Evaluate the session snapshot against the current request context. */
+  /** Оценить session snapshot против текущего request context. */
   private async evaluateSessionRules(
     input: SessionRuleEvaluationInput
   ): Promise<MatchedRuleEntry[]> {
@@ -424,8 +425,8 @@ export class OpenCodeRulesRuntime {
         return;
       }
 
-      // 1. Accumulate file paths mentioned in this message before durable-turn
-      // preparation so matching sees current and restored paths.
+      // 1. Накопить пути файлов, упомянутые в этом сообщении, до durable-turn
+      // preparation чтобы matching видел текущие и восстановленные пути.
       if (output.parts && output.parts.length > 0) {
         this.sessionWorkingContext.workingContext.recordMessageParts(sessionID, output.parts);
       }
@@ -543,8 +544,8 @@ export class OpenCodeRulesRuntime {
     }
   }
 
-  /** Evaluate hooks for a tool invocation and queue matches.
-   * @throws {Error} When a PreToolUse hook with block:true matches the tool and arguments. */
+  /** Оценить хуки для вызова инструмента и заqueued матчи.
+   * @throws {Error} Когда PreToolUse хук с block:true матчит инструмент и аргументы. */
   private async evaluateAndQueueHooks(
     hookType: 'PreToolUse' | 'PostToolUse',
     sessionID: string,
@@ -555,7 +556,7 @@ export class OpenCodeRulesRuntime {
 
     const snapshots = await this.ensureSessionRuleSnapshot(sessionID);
 
-    // First pass: collect all matched hooks across all rules
+    // First pass: собрать все матченные хуки по всем правилам
     const allMatches: Array<{
       hook: { type: string; run?: string };
       rule: RuleSnapshot;
@@ -580,9 +581,9 @@ export class OpenCodeRulesRuntime {
 
     if (allMatches.length === 0) return;
 
-    // Build the shared classification context only when hooks actually
-    // matched: the context query (tool RPCs, project tags, git branch) is
-    // the expensive part of the tool-event path.
+    // Построить shared classification context только когда хуки реально
+    // сматчились: context query (tool RPCs, project tags, git branch) —
+    // дорогая часть tool-event path.
     const state = this.sessionStore.get(sessionID);
     const matchContext = await this.buildSessionRuleMatchContext(
       sessionID,
@@ -607,8 +608,8 @@ export class OpenCodeRulesRuntime {
       }
     }
 
-    // No blockers: queue content and run side-effects
-    // Queue each matched rule once, regardless of how many hooks matched.
+    // Нет блокеров: заqueue content и запустить side-effects
+    // Заqueue каждый матченный rule один раз, сколько бы хуков ни сматчилось.
     const seenRules = new Set<string>();
     const matchedHooks: MatchedHookContent[] = [];
     for (const { hook, rule } of allMatches) {
@@ -640,9 +641,9 @@ export class OpenCodeRulesRuntime {
     }
   }
 
-  /** Create a test-only hooks object compatible with old test expectations.
-   * Returns the same shape that createHooks() used to return, delegating
-   * to the new public methods. */
+  /** Создать test-only hooks объект, совместимый со старыми тестовыми ожиданиями.
+   * Возвращает ту же форму, что createHooks() раньше возвращал, делегируя
+   * новым публичным методам. */
   createTestHooks(): Record<string, unknown> {
     return {
       'tool.execute.before': this.handleToolExecuteBefore.bind(this),

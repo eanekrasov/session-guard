@@ -41,18 +41,18 @@ export interface FinishMutationInput {
 // ─── Pure helper: ResolvedSchema → EngineConfig ───────────────────────────
 
 /**
- * Project one resolved schema onto the engine's configuration.
+ * Проецировать одну резолвленную схему на конфиг движка.
  *
- * A session runs **one** schema. Schemas combine only through `extends`, and
- * that combining has already happened by the time a `ResolvedSchema` exists
- * (`ProfileResolver.resolveSingleSchema`), so there is nothing left to merge
- * here.
+ * Сессия запускает **одну** схему. Схемы комбинируются только через `extends`, и
+ * этот комбининг уже случился к моменту существования `ResolvedSchema`
+ * (`ProfileResolver.resolveSingleSchema`), так что тут нечего мержить.
  *
- * This used to fold a profile's whole schema list into one config. Stages
- * survived that only because their keys differ; `gates`,
- * `taskControlAgents` and same-endpoint transitions were
- * silently last-wins, so two independent workflows in one profile would have
- * quietly become one. No profile declared two, so it never bit.
+ * Раньше это сводило весь список схем профиля в один конфиг. Стадии
+ * выживали только потому что их ключи отличаются; `gates`,
+ * `taskControlAgents` и переходы с одинаковым эндпоинтом были
+ * silently last-wins, так что два независимых workflow в одном профиле
+ * бы тихо стали одним. Ни один профиль не объявлял два, так что это никогда
+ * не проявлялось.
  */
 export function schemaToEngineConfig(schema: ResolvedSchema): EngineConfig {
   const stages = (mergeStages({}, schema.stages) ?? {}) as NonNullable<EngineConfig['stages']>;
@@ -67,11 +67,11 @@ export function schemaToEngineConfig(schema: ResolvedSchema): EngineConfig {
 }
 
 /**
- * Pick the schema a session runs out of the profile's list.
+ * Выбрать схему, которую запускает сессия, из списка профиля.
  *
- * A bare profile id — no schema named — is legal only while the profile holds
- * exactly one schema. With several, the choice is the caller's to make, and
- * guessing at it is how one workflow silently becomes another.
+ * Голый profile id — без названной схемы — легален только пока профиль держит
+ * ровно одну схему. С несколькими выбор — за вызывающим кодом, и угадывание
+ * тут — как один workflow тихо становится другим.
  */
 export function selectSchema(
   profileId: string,
@@ -112,20 +112,21 @@ export interface ScopeProcessInput {
   log: (level: LogLevel, message: string, extra?: Record<string, unknown>) => Promise<void>;
   onDiagnostics?: (text: string) => void;
   /**
-   * The move's own baseline frame (`captureBaseline`, taken in
-   * `beginMutation`), diffed via `computeChangeScope`. `undefined` means no
-   * frame was captured for this move (D5) — the scope is not computed, and
-   * no empty baseline is ever substituted for a real one.
+   * Собственный базовый фрейм хода (`captureBaseline`, взятый в
+   * `beginMutation`), диффнутый через `computeChangeScope`. `undefined` значит
+   * фрейм для этого хода не захватывался (D5) — скоуп не вычисляется, и пустой
+   * базовый фрейм никогда не подставляется вместо настоящего.
    */
   frame?: BaselineHashes;
 }
 
 /**
- * Pure function: compute scope → run invariant validation → determine finalPassed.
+ * Чистая функция: вычислить скоуп → запустить валидацию инвариантов → определить
+ * finalPassed.
  *
- * Extracted from MutationOrchestrator.finishMutation for testability.
- * Does NOT touch the session store or queue — only mutates session.changedFiles
- * and returns the pass/fail decision and any diagnostics text.
+ * Вынесена из MutationOrchestrator.finishMutation для тестируемости.
+ * НЕ трогает сессию стор и очередь — только мутирует session.changedFiles
+ * и возвращает решение pass/fail и любой диагностический текст.
  */
 export async function processScopeAndInvariants(
   input: ScopeProcessInput
@@ -150,19 +151,19 @@ export async function processScopeAndInvariants(
     });
   }
 
-  // Two different lists, and conflating them is a defect in either direction.
+  // Два разных списка, и смешение их — дефект в любом направлении.
   //
-  // `sorted` is THIS move's scope. Every verdict below is about this move —
-  // whether it wrote outside its task's writeScope, and whether the files it
-  // touched satisfy the invariants — so judging it against anything wider
-  // convicts a move of what an earlier one did.
+  // `sorted` — это скоуп ЭТОГО хода. Каждый вердикт ниже про этот ход —
+  // писал ли он за пределами writeScope своей задачи, и удовлетворяют ли файлы,
+  // которые он тронул, инварианты — поэтому судить его против чего-то более
+  // широкого осуждает ход за то, что сделал более ранний.
   //
-  // `session.changedFiles` is what the delivery permit expects the commit to
-  // carry: what the work produced, gathered one move at a time. It accumulates
-  // — and is then pruned to what still differs from HEAD, because a file
-  // edited by one move and put back by the next has not been changed by the
-  // work at all. Left on the list it made the permit expect a file the commit
-  // could not contain, and a correct commit was refused.
+  // `session.changedFiles` — это то, что delivery permit ожидает в коммите:
+  // то, что работа произвела, собранное по одному ходу за раз. Оно аккумулируется
+  // — и затем причесывается до того, что всё ещё отличается от HEAD, потому что
+  // файл, отредактированный одним ходом и возвращённый следующим, работой не
+  // изменён вовсе. Оставленный в списке он заставлял permit ожидать файл, чего
+  // коммит не мог содержать, и правильный коммит отвергался.
   const sorted = [...changedFiles].sort();
   const accumulated = new Set([...(session.changedFiles ?? []), ...sorted]);
   session.changedFiles = scopeRoot
@@ -243,9 +244,9 @@ export async function processScopeAndInvariants(
 // ─── MutationOrchestrator ────────────────────────────────────────────────────
 
 /**
- * Owns the bash/write mutation lifecycle: engine resolution/caching,
- * in-flight mutation bookkeeping (liveMutations), begin/finish mutation,
- * and clearing a mutation when its tool call errors out.
+ * Владение lifecycle мутации bash/write: резолвинг/кэширование движка,
+ * букипинг in-flight мутаций (liveMutations), begin/finish mutation,
+ * и очистка мутации когда вызов инструмента фейлит с ошибкой.
  */
 export class MutationOrchestrator {
   private engineCache = new Map<string, SessionGuardEngine>();
@@ -263,8 +264,8 @@ export class MutationOrchestrator {
     log?: LogFn,
     client?: SessionClient | string
   ) {
-    // Keep compatibility with the pre-merge constructor where the project
-    // directory occupied the final argument.
+    // Сохранить совместимость с pre-merge конструктором, где директория проекта
+    // занимала последний аргумент.
     this.projectDir = projectDir ?? (typeof client === 'string' ? client : '');
     this.client = typeof client === 'string' ? undefined : client;
     this.logNoop = log ?? (() => Promise.resolve());
@@ -279,15 +280,15 @@ export class MutationOrchestrator {
   }
 
   /**
-   * Resolve (lazy-init) an engine for the given profileId.
+   * Резолвить (lazy-init) движок для данного profileId.
    */
   async resolveEngine(profileId: string, schemaId?: string): Promise<SessionGuardEngine> {
-    // The engine depends on the directory as much as on the id, and the
-    // directory is read from the environment on every call. Keying on the id
-    // alone returns the first directory's engine for every later one — which
-    // production never notices, because its directory does not move, and a
-    // test suite that points the same profile id at two fixture directories
-    // does not notice either: it just silently gets the first.
+    // Движок зависит от директории не меньше чем от id, и директория читается из
+    // окружения на каждом вызове. Ключ только по id возвращает движок первой
+    // директории для всех последующих — чего продакшн не замечает, потому что
+    // его директория не двигается, и тестовый сьют, направляющий тот же profile
+    // id на две фикстурные директории, тоже не замечает: он просто молча
+    // получает первый.
     const profilesDir = process.env.SESSION_GUARD_PROFILES_DIR ?? this.profilesDir;
     const cacheKey = `${profilesDir}\u0000${profileId}\u0000${schemaId ?? ''}`;
     const cached = this.engineCache.get(cacheKey);
@@ -302,16 +303,17 @@ export class MutationOrchestrator {
     });
     const resolved = await resolveConfig(profileId, profilesDir);
 
-    // Compile before running: a transition to a stage that does not exist, a
-    // gate no session carries, or a retry budget belonging to something other
-    // than the task are all defects in the file, and a defect in the file
-    // should stop the workflow at load rather than one silent guard at a time.
+    // Скомпилировать перед запуском: переход в стадию, которой нет, гейт,
+    // который ни одна сессия не несет, или бюджет ретрая, принадлежащий чему-то
+    // другому кроме задачи — всё это дефекты в файле, и дефект в файле должен
+    // остановить workflow при загрузке, а не по одному тихому гарду за раз.
     const schema = selectSchema(profileId, resolved.schemas, schemaId);
     const engineConfig = schemaToEngineConfig(schema);
 
-    // Compile the schema the session actually runs, after its `extends` chain
-    // has been folded in: a delta schema names stages its parent declares, and
-    // reading the delta's own file alone would call every one of them unknown.
+    // Скомпилировать схему, которую сессия реально запускает, после того как её
+    // цепочка `extends` свёрнута: дельта-схема называет стадии, которые
+    // декларирует родитель, и чтение только файла дельты назвало бы каждый из
+    // них неизвестным.
     const { errors } = compileWorkflow({
       id: schema.id,
       source: schema.source,
@@ -331,11 +333,11 @@ export class MutationOrchestrator {
       expression: string,
       session: GuardEvaluationSession,
       guards: Record<string, (...args: unknown[]) => unknown>,
-      // Dropped on the floor before, replaced with `{}`. It carries
-      // `currentLoopListKey`, which is how `allTasksCompleted()` with no
-      // argument knows which list it is being asked about — so the same guard
-      // answered `true` evaluated directly and `false` through the engine, and
-      // transitions that should have fired did not.
+      // Дропалось на пол раньше, заменялось на `{}`. Оно несёт
+      // `currentLoopListKey`, которым `allTasksCompleted()` без аргумента знает,
+      // о каком списке его спрашивают — так что один и тот же гард отвечал
+      // `true` оценённым напрямую и `false` через движок, и переходы, которые
+      // должны были сработать, не срабатывали.
       evaluationContext?: GuardEvaluationContext
     ): boolean => {
       const evaluator = new GuardEvaluator(
@@ -410,10 +412,10 @@ export class MutationOrchestrator {
       }
     }
 
-    // Run the actual mutation work inside an executor transaction — serialised
-    // per root session with load/save lifecycle.
+    // Запустить реальную работу мутации внутри транзакции исполнителя — сериализованной
+    // на корневую сессию с циклом load/save.
     await this.executor.run(input.sessionID, async (tx) => {
-      // No workflow session means the plugin does not govern this call.
+      // Нет сессии workflow — плагин не управляет этим вызовом.
       if (!tx.session) return;
 
       // P1-014: Release interrupted locks — if active operations exist but are
@@ -450,10 +452,10 @@ export class MutationOrchestrator {
       const operation = tx.session.activeOperations[input.callID];
       if (operation) operation.baseline = frame;
 
-      // Save stage BEFORE mutation for post-mutation transition validation.
-      // `currentStage` is always set — `workflow-create` writes the compiled
-      // workflow's own first stage — so there is nothing to fall back to, and
-      // the base profile's `planning` would have been the wrong thing anyway.
+      // Сохранить стадию ДО мутации для постфактум валидации перехода.
+      // `currentStage` всегда установлен — `workflow-create` пишет первую
+      // стадию скомпилированного workflow — так что фоллбека нет, и
+      // базовый профиля `planning` был бы неправильным в любом случае.
       const stageBefore = tx.session.currentStage;
       this.liveMutations.set(input.callID, { rootSessionId: input.sessionID, stageBefore });
     });
@@ -506,7 +508,7 @@ export class MutationOrchestrator {
       // ── 5. Единственный вызов finishMutation ──────────────────────
       domainFinishMutation(tx.session, finalPassed, input.callID);
 
-      // After mutation completes, check for auto-proceed transitions
+      // После завершения мутации проверить auto-proceed переходы
       try {
         const engine = await this.resolveEngine(tx.session.profileId, tx.session.schemaId);
         const transitionResult = engine.tryApplyTransitions(tx.session);
@@ -519,7 +521,7 @@ export class MutationOrchestrator {
         });
       }
 
-      // Post-factum transition validation: if stage changed, validate the transition
+      // Post-factum валидация перехода: если стадия изменилась, валидировать переход
       if (mutationInfo) {
         try {
           const engine = await this.resolveEngine(tx.session.profileId, tx.session.schemaId);
@@ -580,27 +582,27 @@ export class MutationOrchestrator {
   }
 
   /**
-   * Clear a live mutation whose tool call errored out (fired from the
-   * event hook). Self-contained: looks up the root session from
-   * liveMutations, no caller-supplied rootSessionId needed.
+   * Очистить живую мутацию, чей вызов инструмента ошибся (вызывается из
+   * event hook). Самодостаточная: ищет корневую сессию из
+   * liveMutations, caller-supplied rootSessionId не нужен.
    *
-   * P1-014: Also checks if the session's activeOperations contain the
-   * errored callId and clears it even when not tracked in liveMutations.
+   * P1-014: Также проверяет, содержат ли activeOperations сессии ошибочный
+   * callId и очищает его даже когда не отслеживается в liveMutations.
    */
   async clearOnError(callId: string): Promise<void> {
     const mutationInfo = this.liveMutations.get(callId);
     const rootSessionId = mutationInfo?.rootSessionId;
 
     if (!rootSessionId) {
-      // callId not in liveMutations — this can happen when beginMutation
-      // succeeded but its `this.liveMutations.set()` was never reached
-      // (e.g. the tool call errored before save completed). Only the
-      // active session's store entry has the orphaned active operation.
+      // callId not in liveMutations — может случиться, когда beginMutation
+      // прошло успешно, но `this.liveMutations.set()` не дожило до вызова
+      // (например, вызов инструмента упал до завершения save). Только
+      // запись активной сессии в сторе имеет orphaned active operation.
       //
-      // We do NOT scan all sessions here: that would be O(n) disk I/O per
-      // error event. Instead we rely on P1-014: the next beginMutation for
-      // the same session will find and release the interrupted lock via
-      // releaseInterruptedLock().
+      // Мы НЕ сканируем все сессии здесь: это O(n) дисковый I/O на каждый
+      // error event. Вместо этого полагаемся на P1-014: следующий
+      // beginMutation для той же сессии найдёт и освободит прерванный лок
+      // через releaseInterruptedLock().
       void this.log(
         'warn',
         `clearOnError: callId not in liveMutations, deferring to next beginMutation`,
@@ -620,9 +622,9 @@ export class MutationOrchestrator {
   }
 
   /**
-   * SDK-004: List active sessions from the OpenCode client.
-   * Used by dashboard-server to enumerate sessions. Returns empty array
-   * when client is unavailable.
+   * SDK-004: Список активных сессий из OpenCode клиента.
+   * Используется dashboard-server для перечисления сессий. Возвращает
+   * пустой массив когда клиент недоступен.
    */
   async listSessions(): Promise<Array<{ id: string; title?: string }>> {
     if (!this.client) return [];
@@ -640,14 +642,14 @@ export class MutationOrchestrator {
   }
 
   /**
-   * P1-014: Release an interrupted lock.
+   * P1-014: Освободить прерванный лок.
    *
-   * If the session has active operations whose callIDs are NOT tracked in
-   * this.liveMutations, the mutation is considered dead (interrupted — e.g.,
-   * the tool call never reached handleToolAfter, or the process crashed).
+   * Если у сессии есть активные операции, чьи callIDs НЕ отслеживаются в
+   * this.liveMutations, мутация считается мёртвой (прерванной — например,
+   * вызов инструмента никогда не достиг handleToolAfter, или процесс упал).
    *
-   * Also clears expired mutations regardless of tracking status, since
-   * finishMutation is guaranteed to complete within MUTATION_TTL_MS.
+   * Также очищает истёкшие мутации независимо от статуса отслеживания, так как
+   * finishMutation гарантированно завершается в пределах MUTATION_TTL_MS.
    */
   private releaseInterruptedLock(
     session: Parameters<typeof isExpiredMutation>[0],
@@ -656,21 +658,21 @@ export class MutationOrchestrator {
     const operations = Object.values(session.activeOperations);
     if (operations.length === 0) return;
 
-    // Don't release if the same callID is trying to start — it's a retry
+    // Не отпускать если тот же callID пытается начать — это ретрай
     if (session.activeOperations[incomingCallID]) return;
 
     for (const operation of operations) {
-      // Don't release if we're still tracking it in liveMutations
+      // Не отпускать если мы его всё ещё отслеживаем в liveMutations
       if (this.liveMutations.has(operation.callId)) continue;
 
-      // A dispatched `task` is never registered in liveMutations, so absence
-      // from that map proves nothing about it. Releasing one deleted a running
-      // task's operation and replaced it with the write — the task's own
-      // result then had nothing to attribute itself to and its run stayed put.
-      // Only the expiry below may end a task call.
+      // Диспатченный `task` никогда не регистрируется в liveMutations, поэтому
+      // отсутствие в мапе ничего не доказывает о нём. Освобождение удаляло
+      // запущенную task-операцию и заменяло её на write — у результата задачи
+      // тогда не было чему атрибутироваться и её прогон застрял.
+      // Только истечение ниже может закончить task-вызов.
       if (operation.kind === 'task' && !isExpiredMutation(session, operation.callId)) continue;
 
-      // Release if the mutation is expired
+      // Освободить если мутация истекла
       if (isExpiredMutation(session, operation.callId)) {
         clearActiveMutation(session, operation.callId);
         void this.log('info', `Released expired mutation lock`, {
@@ -679,8 +681,8 @@ export class MutationOrchestrator {
         continue;
       }
 
-      // Release if the mutation is NOT in liveMutations AND not expired
-      // but the callID is unknown — treat as interrupted.
+      // Освободить если мутация НЕ в liveMutations И не истекла
+      // но callID неизвестен — считать прерванной.
       clearActiveMutation(session, operation.callId);
       void this.log('warn', `Released interrupted mutation lock`, {
         id: operation.callId,
@@ -689,7 +691,7 @@ export class MutationOrchestrator {
   }
 
   /**
-   * Clean up all resources.
+   * Очистить все ресурсы.
    */
   dispose(): void {
     this.liveMutations.clear();

@@ -1,17 +1,18 @@
 /**
- * Rule metadata parsing and frontmatter extraction
+ * Парсинг rule metadata и извлечение frontmatter
  */
 
 const { parse: parseYaml } = await import('yaml');
 import { logWarning } from './debug.js';
 
 /**
- * Metadata extracted from .mdc file frontmatter
+ * Метаданные, извлечённые из .mdc file frontmatter
  */
 export interface RuleMetadata {
   name?: string;
   globs?: string[];
-  /** Case-sensitive literal substrings; empty array means declared but invalid (fail-closed). */
+  /** Case-sensitive literal подстроки; пустой массив значит декларирован но
+   * невалиден (fail-closed). */
   fileContains?: string[];
   keywords?: string[];
   tools?: string[];
@@ -35,7 +36,7 @@ export interface RuleHook {
 }
 
 /**
- * Raw parsed YAML frontmatter structure
+ * Raw распарсенная YAML frontmatter структура
  */
 interface ParsedFrontmatter {
   name?: unknown;
@@ -59,11 +60,11 @@ type StringArrayField =
   'globs' | 'keywords' | 'tools' | 'model' | 'agent' | 'command' | 'project' | 'branch' | 'os';
 
 /**
- * Normalize a declared `fileContains` field. Accepts a scalar string
- * (shorthand for a one-element array) or an array; trims entries, drops
- * non-strings and empties, and deduplicates exact case-sensitive strings.
- * A declared field that yields no valid literal returns an empty array so
- * the rule fails closed instead of degrading to unconditional.
+ * Нормализовать декларированное поле `fileContains`. Принимает скалярную строку
+ * (шортхенд для одноэлементного массива) или массив; тримит записи, дропает
+ * не-строки и пустые, и дедуплицирует точные case-sensitive строки.
+ * Декларированное поле, которое не даёт валидный литерал, возвращает пустой
+ * массив так что правило fail closed вместо деградации к безусловному.
  */
 function extractFileContains(value: unknown): string[] {
   const entries = typeof value === 'string' ? [value] : Array.isArray(value) ? value : [];
@@ -78,11 +79,11 @@ function extractFileContains(value: unknown): string[] {
 }
 
 /**
- * Extract and normalize a string array from parsed frontmatter.
- * Filters non-strings, trims whitespace, and removes empty values.
+ * Извлечь и нормализовать string array из распарсенного frontmatter.
+ * Фильтрует не-строки, тримит пробелы, и удаляет пустые значения.
  *
- * @param value - Raw value from parsed YAML (may be array or undefined)
- * @returns Normalized string array, or undefined if empty after filtering
+ * @param value - Raw значение из распарсенного YAML (может быть array или undefined)
+ * @returns Нормализованный string array, или undefined если пустой после фильтрации
  */
 function extractStringArray(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) {
@@ -96,8 +97,8 @@ function extractStringArray(value: unknown): string[] | undefined {
 }
 
 /**
- * Parse YAML metadata from rule file content using the yaml package.
- * Extracts frontmatter (---) and returns metadata object.
+ * Распарсить YAML метаданные из контента rule file используя yaml пакет.
+ * Извлекает frontmatter (---) и возвращает metadata объект.
  */
 export function parseRuleMetadata(content: string): RuleMetadata | null {
   if (!content.startsWith('---')) {
@@ -199,7 +200,7 @@ export function parseRuleMetadata(content: string): RuleMetadata | null {
 }
 
 /**
- * Strip YAML frontmatter from rule content
+ * Убрать YAML frontmatter из контента правила
  */
 export function stripFrontmatter(content: string): string {
   if (!content.startsWith('---')) {
@@ -215,7 +216,7 @@ export function stripFrontmatter(content: string): string {
 }
 
 /**
- * Check if metadata has any conditional fields set.
+ * Проверить, есть ли в метаданных какие-либо условные поля.
  */
 export function hasConditions(meta: RuleMetadata | null | undefined): boolean {
   if (!meta) return false;

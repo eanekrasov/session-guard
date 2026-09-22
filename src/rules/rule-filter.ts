@@ -1,5 +1,5 @@
 /**
- * Rule matching and lifetime classification utilities
+ * Утилиты матчинга правил и классификации lifetime
  */
 
 import { minimatch } from 'minimatch';
@@ -12,13 +12,13 @@ import type { FileObservation } from './file-observation.js';
 const debugLog = createDebugLog();
 
 /**
- * Delivery lifetime of a matched rule. Durable rules are persisted as
- * synthetic parts in session history; ephemeral rules are delivered only
- * as request-scoped transient messages.
+ * Delivery lifetime сматченного правила. Durable правила персистятся как
+ * синтетические части в истории сессии; ephemeral правила доставляются только
+ * как request-scoped transient сообщения.
  */
 export type RuleLifetime = 'durable' | 'ephemeral';
 
-/** The condition dimensions a rule can declare. */
+/** Измерения условий, которые может декларировать правило. */
 export type RuleConditionKind =
   | 'globs'
   | 'fileContains'
@@ -55,10 +55,10 @@ function lifetimeForKind(kind: RuleConditionKind): RuleLifetime {
 }
 
 /**
- * Classify the delivery lifetime of a matched rule from its condition
- * results. Unconditional rules are durable. `match: all` is ephemeral when
- * any required condition is ephemeral; `match: any` is durable when at
- * least one satisfied condition is durable.
+ * Классифицировать delivery lifetime сматченного правила из его
+ * результатов условий. Безусловные правила — durable. `match: all` —
+ * ephemeral когда любой required condition — ephemeral; `match: any` —
+ * durable когда хотя бы один удовлетворённый condition — durable.
  */
 export function classifyRuleLifetime(
   mode: 'any' | 'all',
@@ -74,27 +74,27 @@ export function classifyRuleLifetime(
 }
 
 /**
- * Check if a file path matches any of the given glob patterns
+ * Проверить, матчит ли путь файла любое из данных glob patterns
  */
 function fileMatchesGlobs(filePath: string, globs: string[]): boolean {
   return globs.some((glob) => minimatch(filePath, glob, { matchBase: true }));
 }
 
 /**
- * Check if observation content contains any of the case-sensitive literal
- * substrings.
+ * Проверить, содержит ли контент наблюдения любые из данных case-sensitive
+ * литеральных подстрок.
  */
 function contentMatchesLiterals(content: string, literals: string[]): boolean {
   return literals.some((literal) => content.includes(literal));
 }
 
 /**
- * Check if a user prompt matches any of the given keywords.
- * Uses case-insensitive word-boundary matching.
+ * Проверить, матчит ли пользовательский промпт любое из данных ключевых слов.
+ * Использует case-insensitive word-boundary матчинг.
  *
- * @param prompt - The user's prompt text
- * @param keywords - Array of keywords to match
- * @returns true if any keyword matches the prompt
+ * @param prompt - Текст промпта пользователя
+ * @param keywords - Массив ключевых слов для матчинга
+ * @returns true если любое ключевое слово матчит промпт
  */
 export function promptMatchesKeywords(prompt: string, keywords: string[]): boolean {
   const lowerPrompt = prompt.toLowerCase();
@@ -109,26 +109,26 @@ export function promptMatchesKeywords(prompt: string, keywords: string[]): boole
   });
 }
 
-/** Check if any required tool is in the available set. */
+/** Проверить, есть ли любой required tool в available set. */
 export function toolsMatchAvailable(availableToolIDs: string[], requiredTools: string[]): boolean {
   const availableSet = new Set(availableToolIDs);
   return requiredTools.some((tool) => availableSet.has(tool));
 }
 
-/** True when the rule declares any file-observation-family condition
- * (`globs`, `fileContains`, or both). Shared by live matching and the
- * runtime's observation-time admission filter. */
+/** True когда правило декларирует любое file-observation-family условие
+ * (`globs`, `fileContains`, или оба). Общее для live matching и
+ * runtime observation-time admission filter. */
 export function hasFileObservationFamily(metadata: RuleMetadata | null | undefined): boolean {
   return metadata?.globs !== undefined || metadata?.fileContains !== undefined;
 }
 
 /**
- * Evaluate the file-observation family: `globs` and `fileContains` over one
- * observation. With both declared, one observation must satisfy its path
- * pattern AND contain a literal. `globs` alone keeps legacy behavior across
- * the observation set. `fileContains` without `globs` matches content alone.
- * A declared but empty `fileContains` fails closed: the rule never matches
- * and one warning is logged.
+ * Оценить file-observation family: `globs` и `fileContains` над одним
+ * observation. С обоими декларированными, одно observation должно удовлетворять
+ * свой path pattern И содержать литерал. `globs` в одиночку сохраняет legacy
+ * поведение по observation set. `fileContains` без `globs` матчит только
+ * контент. Декларированный но пустой `fileContains` fails closed: правило
+ * никогда не матчит и одно предупреждение логируется.
  */
 function evaluateFileObservationFamily(
   metadata: RuleMetadata,
@@ -164,8 +164,8 @@ function evaluateFileObservationFamily(
 }
 
 /**
- * Evaluate all declared condition checks for a rule against runtime context.
- * Returns one evaluation per declared condition with its kind and lifetime.
+ * Оценить все декларированные condition checks для правила против runtime context.
+ * Возвращает одну оценку на декларированное условие с его kind и lifetime.
  */
 function evaluateConditionChecks(
   metadata: RuleMetadata,
@@ -275,58 +275,59 @@ function evaluateConditionChecks(
 }
 
 /**
- * Runtime match context for conditional rule matching
+ * Runtime match context для условного rule matching
  */
 export interface RuleMatchContext {
-  /** Normalized file observations (for glob and fileContains matching) */
+  /** Нормализованные файловые наблюдения (для glob и fileContains матчинга) */
   fileObservations?: FileObservation[];
-  /** User's prompt text (for keyword matching) */
+  /** Текст промпта пользователя (для keyword матчинга) */
   userPrompt?: string;
-  /** Available tool IDs (for tool-based matching) */
+  /** Доступные tool IDs (для tool-based матчинга) */
   availableToolIDs?: string[];
-  /** Current model ID */
+  /** Текущий model ID */
   modelID?: string;
-  /** Current agent type */
+  /** Текущий agent type */
   agentType?: string;
-  /** Current slash command (e.g., /plan, /review) */
+  /** Текущая slash command (например /plan, /review) */
   command?: string;
-  /** Detected project tags (e.g., node, python, monorepo) */
+  /** Обнаруженные project теги (например node, python, monorepo) */
   projectTags?: string[];
-  /** Current git branch name */
+  /** Текущее имя git branch */
   gitBranch?: string;
-  /** Current operating system (e.g., linux, darwin, win32) */
+  /** Текущая операционная система (например linux, darwin, win32) */
   os?: string;
-  /** Whether running in CI environment */
+  /** Работает ли в CI окружении */
   ci?: boolean;
 }
 
 /**
- * A single rule file that matched the runtime context
+ * Один файл правила, который сматчился runtime context
  */
 export interface MatchedRuleEntry {
-  /** Absolute path to the rule file */
+  /** Абсолютный путь к файлу правила */
   filePath: string;
-  /** Relative path from the rules directory root */
+  /** Относительный путь от корня директории правил */
   relativePath: string;
-  /** Short display name from frontmatter or the file name without extension */
+  /** Короткое отображаемое имя из frontmatter или имя файла без расширения */
   name: string;
-  /** Rule content with frontmatter stripped */
+  /** Контент правила без frontmatter */
   strippedContent: string;
-  /** Per-condition evaluation results with delivery-lifetime provenance */
+  /** Per-condition evaluation results с delivery-lifetime provenance */
   conditionResults: ConditionEvaluation[];
-  /** Delivery lifetime classification for this evaluation */
+  /** Delivery lifetime классификация для этой оценки */
   lifetime: RuleLifetime;
 }
 
 /**
- * Match already-loaded rule snapshots against the runtime context.
- * Performs no filesystem I/O: callers load snapshots first (live delivery
- * uses loadRuleSnapshots, which is mtime-cached per session). Unconditional
- * rules are always included; conditional rules are included when their
- * declared checks pass (match: any|all). Entry order follows snapshot order.
+ * Заматчить уже загруженные rule snapshots против runtime context.
+ * Не выполняет filesystem I/O: вызывающие загружают snapshots первыми (live
+ * delivery использует loadRuleSnapshots, который mtime-кэшируется на сессию).
+ * Безусловные правила всегда включены; условные правила включены когда их
+ * декларированные checks проходят (match: any|all). Порядок записей следует
+ * порядку snapshot.
  *
- * @param snapshots - Rule snapshots loaded by the caller
- * @param context - Optional RuleMatchContext for conditional rule matching
+ * @param snapshots - Rule snapshots загруженные вызывающим
+ * @param context - Опциональный RuleMatchContext для условного rule matching
  */
 export function matchRuleSnapshots(
   snapshots: readonly RuleSnapshot[],

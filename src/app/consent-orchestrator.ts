@@ -19,9 +19,9 @@ import type { SessionClient } from './runtime-types.ts';
 // ─── ConsentOrchestrator ─────────────────────────────────────────────────────
 
 /**
- * Owns the Question-tool consent lifecycle: parsing a consent-request tag
- * before the question is shown, verifying plan-file evidence, and
- * classifying the user's answer after it comes back.
+ * Владение lifecycle согласия Question-tool: парсинг тега consent-request
+ * до показа вопроса, верификация доказательств план-файла, и классификация
+ * ответа пользователя после его возвращения.
  */
 export class ConsentOrchestrator {
   private log: LogFn;
@@ -38,12 +38,12 @@ export class ConsentOrchestrator {
   }
 
   /**
-   * Parse a consent request from question text and verify plan integrity.
-   * If the question contains a consent-request tag, validate it and store a
-   * pending approval record on the session.
+   * Распарсить запрос согласия из текста вопроса и проверить целостность плана.
+   * Если вопрос содержит тег consent-request, валидировать его и сохранить
+   * запись pending approval в сессию.
    *
-   * I/O (readPlanFile, client.session.messages) is performed BEFORE
-   * queue.enqueue to avoid blocking the session lock with I/O.
+   * I/O (readPlanFile, client.session.messages) выполняется ДО
+   * queue.enqueue чтобы не блокировать лок сессии с I/O.
    */
   async before(sessionID: string, callID: string, questionText: string): Promise<void> {
     const consentRequest = parseConsentRequest(questionText);
@@ -53,8 +53,8 @@ export class ConsentOrchestrator {
     const computedEvidence = evidenceOf(consentRequest.manifest);
     if (computedEvidence !== consentRequest.evidence) return;
 
-    // SDK-004: Read session messages to verify the question context
-    // (e.g., confirm the question was actually shown to the user).
+    // SDK-004: Прочитать сообщения сессии чтобы проверить контекст вопроса
+    // (например, подтвердить что вопрос действительно показывался пользователю).
     try {
       const messages = await this.client.messages({ path: { id: sessionID }, query: { limit: 5 } });
       // SDK возвращает discriminated union: { data: T; error: undefined } | { data: undefined; error: E }
@@ -80,9 +80,9 @@ export class ConsentOrchestrator {
       summary: consentRequest.manifest.summary,
     });
 
-    // Resolve and read every document the manifest names, BEFORE enqueue.
-    // Only the first was read and hashed, so a second document edited between
-    // the question and the answer was invisible and the consent went through.
+    // Разрешить и прочитать каждый документ, который называет манифест, ДО enqueue.
+    // Читался и хешировался только первый, так что второй документ, отредактированный
+    // между вопросом и ответом, был невидим и согласие проходило.
     const documentRefs = [...consentRequest.manifest.files];
     if (documentRefs.length === 0) return;
 
@@ -100,8 +100,8 @@ export class ConsentOrchestrator {
       documents.push([ref, content]);
     }
 
-    // The primary document is the one shown to the operator; the evidence
-    // is over every file the manifest named.
+    // Основной документ — тот, что показан оператору; доказательство — над каждым
+    // файлом, который назвал манифест.
     const documentRef =
       documentRefs.find((f) => f.includes('plan') && f.endsWith('plan.md')) ?? documentRefs[0]!;
     const documentPath = resolve(this.projectDir, documentRef);
@@ -114,22 +114,22 @@ export class ConsentOrchestrator {
       // Dedup: already consented for this callID
       if (tx.session.consentedCallIDs.includes(callID)) return;
 
-      // One record per type. `approve` and `decline` both upsert by type, so a
-      // second record left them updating the wrong one — and, worse, a
-      // standing `granted` from an earlier document survived a decline of this
-      // one while `refs[<type>]` had already been repointed at the new
-      // document. Every `session.approved(<type>)` guard then passed on
-      // authority nobody had given for the work in hand.
+      // One record per type. `approve` и `decline` оба upsert по типу, поэтому
+      // вторая запись заставляла их обновлять не ту — и, что хуже, стоящий
+      // `granted` от более раннего документа выживал после decline этого,
+      // пока `refs[<type>]` уже был переустановлен на новый документ. Каждый
+      // `session.approved(<type>)` гард тогда проходил на авторизации, которой
+      // никто не давал для работы на руках.
       //
-      // Asking again withdraws the standing verdict, which is the honest
-      // reading: the document under discussion has changed.
+      // Снова спросить — отозвать стоящий вердикт, что честно: документ в
+      // обсуждении изменился.
       //
-      // The withdrawal is by `consentType`, not by a literal name. It used to
-      // read `!== 'plan'`, so a consent under any other name was never
-      // withdrawn: the new pending record joined a standing one of the same
-      // type, `approve` found the first and left the second pending, and
-      // `approved(<type>)` stayed true on authority given for an older
-      // document.
+      // Отзыв по `consentType`, а не по литеральному имени. Раньше читало
+      // `!== 'plan'`, так что согласие под любым другим именем никогда не
+      // отзывалось: новая pending запись присоединялась к стоящей той же
+      // типа, `approve` находила первую и оставляла вторую pending, и
+      // `approved(<type>)` оставалось true на авторизации, данной для
+      // старого документа.
       tx.session.approvals = tx.session.approvals.filter(
         (approval) => approval.type !== consentType
       );
@@ -165,13 +165,13 @@ export class ConsentOrchestrator {
   }
 
   /**
-   * P1-015: Verify that the plan file evidence hasn't changed between when the
-   * question was shown and when the user answers. Re-reads the plan file and
-   * compares its evidence hash against the one stored at question time.
+   * P1-015: Проверить, что доказательства план-файла не изменились между
+   * показом вопроса и ответом пользователя. Перечитывает план-файл и сравнивает
+   * его хеш доказательств с тем, что хранился во время вопроса.
    *
-   * Returns `true` when evidence still matches (or when re-read fails — fail
-   * closed to prevent approving a stale plan). Returns `false` when evidence
-   * has changed.
+   * Возвращает `true` когда доказательства всё ещё совпадают (или когда
+   * перечтение фейлит — fail closed чтобы не одобрить старый план).
+   * Возвращает `false` когда доказательства изменились.
    */
   private verifyPlanEvidenceAtDecision(
     session: {
@@ -182,13 +182,14 @@ export class ConsentOrchestrator {
     sessionID?: string
   ): boolean {
     const pendingApproval = this.findOpenApproval(session.approvals ?? [], callID);
-    // Only the manifest's own file list. There used to be a fallback to
-    // `refs.plan` here, for records written before the list existed — but it
-    // read the plan document whatever consent was being decided, so a consent
-    // under another name was verified against a file it never named. Records
-    // this can reach are the pending ones this orchestrator pushed at question
-    // time, and those always carry `files`; an approval without one is a
-    // record nothing here can verify, and it fails closed below.
+    // Только список файлов самого манифеста. Раньше был фоллбек на
+    // `refs.plan` здесь, для записей, написанных до того, как список существовал —
+    // но он читал план-документ какой бы consent ни решался, так что согласие
+    // под другим именом верифицировалось против файла, которое оно никогда не
+    // называло. Записи, которые могут попасть сюда — это pending те, которые
+    // этот оркестратор засунул во время вопроса, и они всегда несут `files`;
+    // approval без одного — запись, которую тут никто не может верифицировать,
+    // и она фейлит закрыто ниже.
     const documentRefs = pendingApproval?.files ?? [];
     const documentRef = documentRefs[0];
     if (!documentRef || !pendingApproval?.evidence) {
@@ -259,9 +260,9 @@ export class ConsentOrchestrator {
   }
 
   /**
-   * Classify the consent answer and update the session.
-   * On grant, verifies plan evidence at decision time, then injects a
-   * synthetic message via client.session.prompt().
+   * Классифицировать ответ согласия и обновить сессию.
+   * При гранте, верифицирует доказательства плана в момент решения, затем
+   * инжектит синтетическое сообщение через client.session.prompt().
    */
   async after(
     sessionID: string,
@@ -280,7 +281,7 @@ export class ConsentOrchestrator {
       const pendingApproval = this.findOpenApproval(tx.session.approvals, callID);
       if (!pendingApproval) return;
 
-      // Extract user answer from output metadata
+      // Извлечь ответ пользователя из метаданных output
       const answers: string[] = [];
       if (output.metadata && typeof output.metadata === 'object') {
         const meta = output.metadata as Record<string, unknown>;
@@ -292,8 +293,8 @@ export class ConsentOrchestrator {
         }
       }
 
-      // The tag is in the question that was asked, not in the answer that came
-      // back. `output.output` is kept as a fallback for hosts that echo it.
+      // Тег в вопросе, который спрашивали, а не в ответе, который пришёл
+      // обратно. `output.output` оставлен как фоллбек для хостов, которые его эхают.
       const request =
         parseConsentRequest(questionTextOf(args)) ?? parseConsentRequest(output.output ?? '');
       if (!request) {
@@ -348,7 +349,7 @@ export class ConsentOrchestrator {
       }
     });
 
-    // SDK-004: Inject synthetic message on grant (outside enqueue — I/O after lock released)
+    // SDK-004: Инжектить синтетическое сообщение при гранте (снаружи enqueue — I/O после освобождения лка)
     if (wasGranted) {
       try {
         await this.client.prompt({

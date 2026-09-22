@@ -15,11 +15,11 @@ function git(cwd: string, args: string[], trim = true): string {
 }
 
 function dirtyPaths(cwd: string, moduleRoot?: string): string[] {
-  // `core.quotepath` is on by default, so git returns a non-ASCII path
-  // C-quoted — `"\321\202\320\265\321\201\321\202.ts"` for `тест.ts`.
-  // Taken literally the file does not exist, its hash is null, and the change
-  // is silently outside every scope. Asking git not to quote is the fix; the
-  // alternative is re-implementing its escaping.
+  // `core.quotepath` on by default, поэтому git возвращает не-ASCII путь
+  // C-quoted — `"\321\202\320\265\321\201\321\202.ts"` для `тест.ts`.
+  // Взятое буквально файл не существует, его хеш null, и изменение молча
+  // снаружи любого скоупа. Просьба к git не квотировать — фикс; альтернатива
+  // — реимплементировать его эскейпинг.
   const output = git(
     cwd,
     ['-c', 'core.quotepath=false', 'status', '--porcelain', '--untracked-files=all'],
@@ -51,13 +51,13 @@ async function hash(cwd: string, path: string): Promise<string | null> {
 }
 
 /**
- * What differs from `HEAD` right now — the net change set, not a history.
+ * Что отличается от `HEAD` прямо сейчас — чистый change set, не история.
  *
- * `session.changedFiles` accumulates one move at a time, so a file edited and
- * then put back stayed on the list. The delivery permit is built from that
- * list, so it expected a file the commit could not contain, and a correct
- * commit was refused. Intersecting with this is what turns the record of
- * everything touched into the set of what actually changed.
+ * `session.changedFiles` аккумулируется по одному ходу за раз, так что файл,
+ * отредактированный и потом возвращённый, оставался в списке. Delivery permit
+ * строится из этого списка, поэтому он ждал файл, которого коммит не мог
+ * содержать, и правильный коммит отвергался. Пересечение с этим — что превращает
+ * запись всего затронутого в сет того, что реально изменилось.
  */
 export function changedAgainstHead(cwd: string, moduleRoot = ''): string[] {
   return dirtyPaths(cwd, moduleRoot);
@@ -79,11 +79,11 @@ export async function computeChangeScope(
   const root = resolve(cwd);
   const result: string[] = [];
 
-  // The union of what is dirty now and what was dirty at the baseline. Walking
-  // only the current dirty set missed the reverse direction: a file the
-  // operator had edited, which the operation put back to HEAD, is no longer
-  // dirty — so it was never compared, and undoing somebody's work registered
-  // as no change at all.
+  // Объединение того, что грязно сейчас, и того, что было грязно в базлайне. Ходьба
+  // только по текущему грязному сету пропустила обратное направление: файл,
+  // который оператор отредактировал, а операция вернула к HEAD, уже не грязен —
+  // так что он никогда не сравнивался, и отмена чужой работы регестрировалась
+  // как никаких изменений вовсе.
   const candidates = new Set<string>(dirtyPaths(cwd, moduleRoot));
   for (const path of Object.keys(baseline)) {
     if (moduleRoot && !path.startsWith(moduleRoot)) continue;

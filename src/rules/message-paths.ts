@@ -1,11 +1,11 @@
 import { parsePatch } from './file-observation.ts';
 
 /**
- * Message path extraction utilities
+ * Утилиты извлечения путей из сообщений
  */
 
 /**
- * Message part types from OpenCode plugin API
+ * Типы частей сообщения из OpenCode plugin API
  */
 interface ToolInvocationPart {
   type: 'tool-invocation';
@@ -37,11 +37,12 @@ export interface Message {
 }
 
 /**
- * Extract file paths from conversation messages for conditional rule filtering.
- * Parses tool call arguments and scans message content for path-like strings.
+ * Извлечь пути к файлам из сообщений разговора для условной фильтрации правил.
+ * Парсит аргументы вызовов инструментов и сканирует контент сообщений на
+ * похожие на пути строки.
  *
- * @param messages - Array of conversation messages
- * @returns Deduplicated array of file paths found in messages
+ * @param messages - Массив сообщений разговора
+ * @returns Дедуплицированный массив путей к файлам, найденных в сообщениях
  */
 export function extractFilePathsFromMessages(messages: Message[]): string[] {
   const paths = new Set<string>();
@@ -81,16 +82,16 @@ export function extractFilePathsFromMessages(messages: Message[]): string[] {
 }
 
 /**
- * Tool-name to context-path argument mapping, shared by live tool execution
- * and history extraction so identical calls contribute identical paths either
- * way:
+ * Маппинг tool-name к аргументам контекстных путей, общее для live tool execution
+ * и history extraction чтобы идентичные вызовы вносили идентичные пути обоими
+ * способами:
  *
  * - read / edit / write -> filePath
- * - grep -> path only (pattern/include are search terms, not paths)
- * - glob -> directory derived from pattern, plus explicit path
+ * - grep -> path only (pattern/include — search terms, не пути)
+ * - glob -> directory из pattern, плюс явный path
  * - bash -> workdir
- * - apply_patch -> patchText (parsed for paths)
- * - unknown tools -> nothing
+ * - apply_patch -> patchText (распарсенный для путей)
+ * - неизвестные инструменты -> ничего
  */
 const PATH_ARG_TOOLS: ReadonlyMap<string, readonly string[]> = new Map([
   ['read', ['filePath']],
@@ -103,7 +104,7 @@ const PATH_ARG_TOOLS: ReadonlyMap<string, readonly string[]> = new Map([
 ]);
 
 /**
- * Extract the context paths a single tool call contributes.
+ * Извлечь контекстные пути, которые вносит один вызов инструмента.
  */
 export function extractToolCallPaths(toolName: string, args: unknown): string[] {
   if (!args || typeof args !== 'object') return [];
@@ -134,7 +135,7 @@ export function extractToolCallPaths(toolName: string, args: unknown): string[] 
 }
 
 /**
- * Extract directory path from a glob pattern
+ * Извлечь путь директории из glob pattern
  */
 function extractDirFromGlob(pattern: string): string | null {
   // Find the first glob character
@@ -163,7 +164,7 @@ function extractDirFromGlob(pattern: string): string | null {
 }
 
 /**
- * Extract file paths from text content using regex
+ * Извлечь пути к файлам из текстового контента через regex
  */
 function extractPathsFromText(text: string, paths: Set<string>): void {
   // Match paths that look like file paths:

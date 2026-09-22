@@ -5,19 +5,20 @@ import type { WorkflowStore } from '../session/session-store.ts';
 import type { LogFn } from './logger.ts';
 
 /**
- * Ask the host for a session's parent. Returns the parent id, or null when the
- * session is a root, unknown, or the host could not be reached.
+ * Спросить у хоста родителя сессии. Вернуть id родителя или null, когда
+ * сессия — корень, неизвестна, или хост недоступен.
  */
 export type ResolveParentFn = (_sessionID: string) => Promise<string | null>;
 
 // ─── Transaction ──────────────────────────────────────────────────────────────
 
 /**
- * A scoped handle to a loaded workflow session inside `executor.run()`.
+ * Скоповый хендл к загруженной workflow сессии внутри `executor.run()`.
  *
- * The `session` may be `null` — the caller decides what that means (opt-out,
- * creation, no-op). `deferAfterSave` registers a callback that runs only after
- * `WorkflowStore.save()` has succeeded for the outer transaction.
+ * `session` может быть `null` — вызывающий код решает, что это значит
+ * (opt-out, создание, no-op). `deferAfterSave` регистрирует колбэк, который
+ * запускается только после того, как `WorkflowStore.save()` успешно завершился
+ * для внешней транзакции.
  */
 export interface SessionTransaction {
   /** The loaded workflow session, or `null` when none exists (creation path). */
@@ -33,35 +34,36 @@ export interface SessionTransaction {
 // ─── SessionExecutor ──────────────────────────────────────────────────────────
 
 /**
- * SessionExecutor — transaction-scoped session lifecycle.
+ * SessionExecutor — жизненный цикл сессии в скоупе транзакции.
  *
- * Owns root resolution, the per-root promise queue, ALS-based reentrancy, and
- * the load → snapshot → action → compare → conditional save cycle.
+ * Владет резолвингом корня, очередью промисов на корень, реенрантностью на
+ * ALS, и циклом load → snapshot → action → compare → условный save.
  *
- * The run() lifecycle for a top-level (non-reentrant) call:
- *   1. resolve the root session id (parent chain walking)
- *   2. join the per-root promise queue (serialises concurrent outer calls)
- *   3. load the session from the store once
+ * Жизненный цикл run() для top-level (не-реенрантного) вызова:
+ *   1. резолвить root session id (ходьба по цепочке родителей)
+ *   2. встать в очередь промисов на корень (сериализует конкурентные outer вызовы)
+ *   3. загрузить сессию из стора один раз
  *   4. JSON.stringify snapshot (pre-action)
- *   5. ALS.run with the loaded session
- *   6. invoke the action
- *   7. compare post-action JSON.stringify to pre-action snapshot
- *   8. call store.save() only when the serialized form changed
- *   9. run deferred effects (only after a successful save)
- *  10. release the queue tail in finally (no return value!)
+ *   5. ALS.run с загруженной сессией
+ *   6. вызвать action
+ *   7. сравнить post-action JSON.stringify с pre-action snapshot
+ *   8. вызвать store.save() только когда сериализованная форма изменилась
+ *   9. запустить deferred эффекты (только после успешного save)
+ *  10. отпустить хвост очереди в finally (нет возвращаемого значения!)
  *
- * Reentrant calls (same root, same async context) execute inline with the
- * existing transaction — no load, no save, no queue.
+ * Реенрантные вызовы (тот же корень, тот же async контекст) выполняются
+ * инлайн в существующей транзакции — нет load, нет save, нет очереди.
  */
 export class SessionExecutor {
-  /** Per-root-session serialisation queue (key = resolved root session ID). */
+  /** Очередь сериализации на root-сессию (ключ = резолвленный root session ID). */
   private queues = new Map<string, Promise<void>>();
 
   /**
-   * Active transaction for the current async call context, if any.
+   * Активная транзакция для текущего async call контекста, если есть.
    *
-   * Async-local, so only a call stack started by an outer `run()` can see it —
-   * an unrelated concurrent caller gets no store and queues normally.
+   * Async-local, поэтому видит её только стек вызовов, начатый outer `run()` —
+   * неподвязанный конкурентный вызывающий код не получает стор и встаёт в очередь
+   * нормально.
    */
   private readonly active = new AsyncLocalStorage<{
     root: string;
@@ -73,11 +75,11 @@ export class SessionExecutor {
   private resolveParent?: ResolveParentFn;
 
   /**
-   * Cache: sessionID → resolved root session ID.
+   * Кэш: sessionID → резолвленный root session ID.
    *
-   * Every node walked in the parent chain is memoised to its root, so
-   * re-entering with any intermediate id produces the same answer without
-   * further I/O.
+   * Каждый пройденный узел в цепочке родителей мемоизируется сразу в корень,
+   * поэтому повторный вход с любым промежуточным id даёт тот же ответ без
+   * дополнительного I/O.
    */
   private readonly parentCache = new Map<string, string>();
 
@@ -88,20 +90,20 @@ export class SessionExecutor {
   }
 
   /**
-   * Run an action inside a session transaction.
+   * Запустить action внутри транзакции сессии.
    *
-   * @param sessionID - The session id to scope the transaction to (resolved to
-   *   its root via the parent chain before any I/O).
-   * @param action - The action to execute, receiving a `SessionTransaction`
-   *   (never null — the session inside the tx may be null when no workflow
-   *   session file exists).
-   * @returns The action's return value.
+   * @param sessionID - id сессии для скоупа транзакции (резолвится к её корню
+   *   через цепочку родителей до любого I/O).
+   * @param action - action для выполнения, получает `SessionTransaction`
+   *   (никогда не null — сессия внутри tx может быть null, когда файла workflow
+   *   сессии не существует).
+   * @returns Возвращаемое значение action.
    */
   async run<T>(sessionID: string, action: (tx: SessionTransaction) => Promise<T>): Promise<T> {
     const rootSessionId = await this.resolveRoot(sessionID);
 
-    // Reentrant path: this call is nested inside a run() for the same root.
-    // Execute inline on the existing transaction — no I/O, no queue.
+    // Reentrant path: этот вызов вложен в run() для того же корня.
+    // Выполнить инлайн в существующей транзакции — нет I/O, нет очереди.
     const current = this.active.getStore();
     if (current && current.root === rootSessionId) {
       return action(current.tx);
@@ -125,13 +127,13 @@ export class SessionExecutor {
 
       const result = await this.active.run({ root: rootSessionId, tx }, () => action(tx));
 
-      // Snapshot comparison — conditional save only when the session was
-      // mutated (or created from null by the action).
+      // Сравнение снимков — условный save только когда сессия мутировала
+      // (или была создана из null action'ом).
       if (loaded !== null) {
         const after = JSON.stringify(loaded);
         if (after !== snapshot) {
           await this.store.save(loaded);
-          // Deferred effects run only after a successful save.
+          // Отложенные эффекты запускаются только после успешного save.
           for (const fn of deferredFns) {
             await fn();
           }
@@ -148,7 +150,7 @@ export class SessionExecutor {
       return result;
     });
 
-    // The stored tail drops itself once it is the last one for this root.
+    // Хвост очереди сам удаляется, когда становится последним для этого корня.
     const tail: Promise<void> = currentPromise
       .catch((err) => {
         this.log('error', `SessionExecutor action failed for root ${rootSessionId}`, {
@@ -164,26 +166,26 @@ export class SessionExecutor {
   }
 
   /**
-   * The root of a session's parent chain — the session the plugin governs.
+   * Корень цепочки родителей сессии — сессия, которой плагин управляет.
    */
   async rootOf(sessionID: string): Promise<string> {
     return this.resolveRoot(sessionID);
   }
 
   /**
-   * Clear all per-root promise queues. In-flight calls complete normally, but
-   * any future call starts a fresh chain.
+   * Очистить все очереди промисов на корень. In-flight вызовы завершаются
+   * нормально, но любой будущий вызов начинает новую цепочку.
    */
   clear(): void {
     this.queues.clear();
   }
 
   /**
-   * Walk the parent chain, cache first and the host for anything it misses.
+   * Пройти цепочку родителей, кэш сначала и хост для всего, что он пропустил.
    *
-   * Every node walked is memoised straight to the root, so re-entering with any
-   * intermediate id produces the same answer without further I/O. A host that
-   * cannot answer leaves the session as its own root.
+   * Каждый пройденный узел мемоизируется сразу в корень, поэтому повторный вход
+   * с любым промежуточным id даёт тот же ответ без дополнительного I/O. Хост,
+   * который не может ответить, оставляет сессию своим собственным корнем.
    */
   private async resolveRoot(sessionID: string): Promise<string> {
     const walked: string[] = [];
@@ -202,8 +204,8 @@ export class SessionExecutor {
           void this.log('debug', `SessionExecutor: parent lookup failed for ${current}`, {
             error: err instanceof Error ? err.message : String(err),
           });
-          // A transient host failure is not evidence that this session is a
-          // root. Do not memoise the fallback: the next request must retry.
+          // Временный фейл хоста не является доказательством, что эта сессия — корень.
+          // Не мемоизировать фоллбек: следующий запрос должен повторить попытку.
           return sessionID;
         }
         this.parentCache.set(current, parentID);

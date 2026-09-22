@@ -7,13 +7,13 @@ import type {
   ActiveOperation,
 } from '../session/session-schema.ts';
 
-// ─── BaseSessionFacts — common shape for both interfaces ────────────────────────
+// ─── BaseSessionFacts — общая форма для обоих интерфейсов ────────────────────────
 
 interface BaseSessionFacts {
-  /** Current stage name (e.g. "planning", "validation") */
+  /** Имя текущей стадии (например "planning", "validation") */
   currentStage?: string;
 
-  /** Last approval record, or null if none */
+  /** Последняя запись одобрения или null, если нет */
   lastApproval: {
     type?: string;
     callId?: string;
@@ -23,60 +23,61 @@ interface BaseSessionFacts {
     feedback?: string;
   } | null;
 
-  /** Approval records for guard expressions like `session.approved('plan')` */
+  /** Записи одобрений для гард-выражений вроде `session.approved('plan')` */
   approvals: ReadonlyArray<{ type: string; status: string }>;
 
-  /** Task records — flat array {id, status} (always array from toSessionFacts) */
+  /** Записи задач — плоский массив {id, status} (всегда массив из toSessionFacts) */
   tasks: ReadonlyArray<{ id: string; status: TaskStatus }>;
 
-  /** Active operations — flat array from session.activeOperations */
+  /** Активные операции — плоский массив из session.activeOperations */
   activeOperations: ReadonlyArray<ActiveOperation>;
 
-  /** Verification records */
+  /** Записи верификаций */
   verifications: ReadonlyArray<Verification>;
 
-  /** Gates map — Record<string, GateStatus> */
+  /** Мапа гейтов — Record<string, GateStatus> */
   gates: Record<string, GateStatus>;
 
-  /** Profile ID string */
+  /** ID профиля строкой */
   profileId: string;
 
-  /** Session revision number */
+  /** Номер ревизии сессии */
   revision: number;
 
-  /** Delivery receipt, null until delivery model implemented */
+  /** Квитанция доставки, null пока модель доставки не реализована */
   deliveryReceipt: string | null;
 
-  /** Delivery permit from consent model */
+  /** Разрешение на доставку из модели consent */
   deliveryPermit?: WorkflowSession['deliveryPermit'];
 
-  /** Document references (plan, spec, etc.) */
+  /** Ссылки на документы (plan, spec и т.д.) */
   refs: Record<string, string>;
 
-  /** Retry budgets — keyed by task ID or budget name */
+  /** Бюджеты ретраев — по ключу задачи или имени бюджета */
   retryBudgets: Record<string, { attempts: number; maximum: number }>;
 
-  /** Core guard status outside loops */
+  /** Статус основного гарда вне лупов */
   checks?: GateStatus;
 
-  /** Allow extra properties for GuardEvaluator compatibility */
+  /** Разрешить дополнительные свойства для совместимости с GuardEvaluator */
   [key: string]: unknown;
 }
 
-// ─── GuardEvaluationSession — permissive for test mocks and partial data ────────
+// ─── GuardEvaluationSession — пермиссивный для тестовых моков и частичных данных ────────
 
 /**
- * Data-only subset for GuardEvaluator constructor.
+ * Data-only subset для конструктора GuardEvaluator.
  *
- * All properties optional to accept:
- * 1. Test mock objects with varying shapes
- * 2. Partial data from other sources
+ * Все свойства опциональны чтобы принять:
+ * 1. Тестовые мок-объекты с разными формами
+ * 2. Частичные данные из других источников
  *
- * GuardEvaluator internally casts to Record<string, unknown> and reads
- * only the properties it needs — so missing/extra properties are harmless.
+ * GuardEvaluator внутри кастит к Record<string, unknown> и читает
+ * только те свойства, которые ему нужны — поэтому отсутствующие/лишние
+ * свойства безвредны.
  *
- * Note: Some properties accept union types (array | Record) to accommodate
- * different mock shapes used in tests.
+ * Note: Некоторые свойства принимают union типы (array | Record) чтобы
+ * вместить разные формы моков, используемые в тестах.
  */
 export interface GuardEvaluationSession {
   currentStage?: string;
@@ -110,13 +111,13 @@ export interface GuardEvaluationSession {
 // ─── SessionFacts interface ──────────────────────────────────────────────────────
 
 /**
- * The full session facts interface used for guard expressions and UI display.
- * Always fully populated by toSessionFacts().
+ * Полный интерфейс фактов сессии для гард-выражений и отображения в UI.
+ * Всегда полностью заполнен toSessionFacts().
  *
- * Methods:
- *   - `verified(gate, status)` — check if a verdict was granted for a gate
- *   - `isExhausted(budgetKey)` — check if a retry budget is exhausted
- *   - `approved(type)` — check if an approval of given type was granted
+ * Методы:
+ *   - `verified(gate, status)` — проверить, был ли вердикт дан для гейта
+ *   - `isExhausted(budgetKey)` — проверить, израсходован ли бюджет ретрая
+ *   - `approved(type)` — проверить, было ли одобрение данного типа грантед
  */
 export interface SessionFacts extends BaseSessionFacts {
   /** Guard-expression helper: `session.verified('bug', 'confirmed')` */
@@ -130,12 +131,12 @@ export interface SessionFacts extends BaseSessionFacts {
 // ─── Projection function ───────────────────────────────────────────────────────
 
 /**
- * Project a WorkflowSession into SessionFacts — a flat data structure without
- * session-internal tracking (task ownership, loop state, etc.).
+ * Проецировать WorkflowSession в SessionFacts — плоскую структуру данных без
+ * внутреннего трекинга сессии (владение задачами, состояние лупов и т.д.).
  *
- * The result is a plain data object suitable for guard evaluation and UI display.
- * Methods (`verified`, `isExhausted`, `approved`) are bound to the data so they
- * can be called directly on the returned object.
+ * Результат — plain data объект, подходящий для оценки гардов и отображения в UI.
+ * Методы (`verified`, `isExhausted`, `approved`) привязаны к данным, чтобы их
+ * можно было вызывать напрямую на возвращённом объекте.
  */
 export function toSessionFacts(session: WorkflowSession): SessionFacts {
   const tasks = session.tasks ?? {};

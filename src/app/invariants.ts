@@ -52,20 +52,20 @@ async function importFirst(paths: string[]): Promise<InvariantCheck[]> {
 }
 
 /**
- * P0-004: Load all invariants for a given profile.
+ * P0-004: Загрузить все инварианты для данного профиля.
  *
- * Resolves the profile's metadata via ProfileResolver, then dynamically
- * imports `invariants.ts` from the profile directory. The profile's
- * `invariants` field lists which invariant IDs to use; all live in the
- * profile's `invariants.ts` file together.
+ * Резолвит метаданные профиля через ProfileResolver, затем динамически
+ * импортирует `invariants.ts` из директории профиля. Поле профиля
+ * `invariants` перечисляет ID инвариантов для использования; все живут в
+ * `invariants.ts` профиля вместе.
  *
- * @param profileId   — profile ID (e.g. "android", "harness")
- * @param profilesDir — path to the profiles directory
+ * @param profileId   — ID профиля (например "android", "harness")
+ * @param profilesDir — путь к директории профилей
  */
 /**
- * The invariants could not be loaded, which is not the same as there being
- * none. Both used to return `[]`, and a caller reading "nothing to check" as
- * "everything passed" turned a broken profile into a green gate.
+ * Инварианты не удалось загрузить, что не то же самое что их отсутствия.
+ * Оба раньше возвращали `[]`, и вызывающий код, читавший "nothing to check" как
+ * "everything passed", превращал сломанный профиль в зелёный гейт.
  */
 export class InvariantsUnavailableError extends Error {
   readonly name = 'InvariantsUnavailableError';
@@ -81,9 +81,9 @@ export async function getAllProfileInvariants(
     const resolved = await resolver.resolve(profileId);
     enabledIds = new Set(resolved.metadata.invariants ?? []);
   } catch (err) {
-    // Fail closed. A profile that cannot be resolved has not told us it has no
-    // invariants — it has told us nothing, and an unrun check is not a passed
-    // one. Returning [] here made a missing profile look like a clean file.
+    // Fail closed. Профиль, который не резолвится, не сказал нам, что у него нет
+    // инвариантов — он сказал нам ничего, и незапущенная проверка не пройденная.
+    // Возврат [] тут заставил отсутствующий профиль выглядеть как чистый файл.
     throw new InvariantsUnavailableError(
       `Cannot load invariants for profile "${profileId}" from ${profilesDir}: ` +
         `${err instanceof Error ? err.message : String(err)}`
@@ -108,8 +108,9 @@ export async function getAllProfileInvariants(
     try {
       allChecks = await importFirst(candidates.map((path) => `file://${path}`));
     } catch {
-      // The profile declares invariants it cannot load. Same rule: silence
-      // here would report the file as clean against checks that never ran.
+      // Профиль декларирует инварианты, которые не может загрузить. То же правило:
+      // тишина тут репортит файл как чистый против проверок, которые никогда не
+      // бегали.
       throw new InvariantsUnavailableError(
         `Profile "${profileId}" declares ${enabledIds.size} invariant(s) but ${invariantsPath} ` +
           `cannot be loaded: ${err instanceof Error ? err.message : String(err)}`
@@ -122,8 +123,8 @@ export async function getAllProfileInvariants(
 }
 
 /**
- * P0-004: Load invariants for a profile and validate files against them.
- * Async overload — resolves invariants from profile, then validates.
+ * P0-004: Загрузить инварианты для профиля и проверить файлы против них.
+ * Async overload — резолвит инварианты из профиля, затем валидирует.
  *
  * @param filePaths   — массив путей к файлам для проверки
  * @param profileId   — profile ID (e.g. "android", "harness")
@@ -214,16 +215,16 @@ export function validateFiles(
 
 /** Расширения файлов, на которых запускаются инварианты. */
 /**
- * Which files an invariant is ever offered.
+ * На каких файлах инвариант когда-либо предлагается.
  *
- * The list existed twice — here and as a literal inside `validateFiles` — and
- * both were narrow enough to hide real violations: identical CRLF raised
- * LF_ONLY in a `.ts` file and reported `checked: 0, errors: []` for the same
- * content in `.tsx`. A general rule about text has no business caring whether
- * the text is JSX.
+ * Список существовал дважды — тут и как литерал внутри `validateFiles` — и
+ * оба были достаточно узкими чтобы прятать реальные нарушения: одинаковые
+ * CRLF поднимали LF_ONLY в `.ts` файле и репортили `checked: 0, errors: []`
+ * для того же контента в `.tsx`. Общее правило про текст не должно заботиться,
+ * JSX ли текст.
  *
- * This is a guard against reading a binary as UTF-8, not a policy about which
- * files matter — that is each invariant's own `appliesTo`.
+ * Это защита от чтения бинарника как UTF-8, не политика о том, какие файлы
+ * важны — это `appliesTo` каждого инварианта сам решает.
  */
 export const SUPPORTED_EXTENSIONS =
   /\.(kt|kts|java|ts|tsx|mts|cts|js|jsx|mjs|cjs|json|jsonc|md|mdx|ya?ml|toml|css|scss|html|sql|sh|swift|py|go|rs|rb|gradle|properties|txt)$/i;

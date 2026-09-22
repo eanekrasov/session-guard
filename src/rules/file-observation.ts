@@ -1,10 +1,10 @@
 /**
- * File observation normalization.
+ * Нормализация файловых наблюдений.
  *
- * One successful file-handling tool event yields one File observation per
- * file: a flat `{ path, tool, content }` record where `content` is that
- * file's contribution text. Both `globs` and `fileContains` evaluate the
- * same record. Paths are consumed verbatim as the after-hook receives them.
+ * Один успешный файловый инструмент даёт одно File observation на файл:
+ * плоский `{ path, tool, content }` record где `content` — текст вклада этого
+ * файла. И `globs` и `fileContains` оценивают одну и ту же запись. Пути
+ * потребляются verbatim как after-hook их получает.
  */
 
 import type { ToolArgsMap } from '../app/tool-args.ts';
@@ -15,14 +15,14 @@ export interface FileObservation {
   content: string;
 }
 
-/** What the runtime's tool hooks and history tool parts share. */
+/** То, что делят рантайм tool hooks и history tool parts. */
 export interface RawToolEvent {
   tool: string;
   args: unknown;
   output?: string;
 }
 
-/** A persisted OpenCode tool part with a completed state. */
+/** Сохранённый OpenCode tool part с завершённым состоянием. */
 export interface HistoryToolPart {
   type?: unknown;
   tool?: unknown;
@@ -40,7 +40,7 @@ export interface HistoryToolPart {
 
 const OBSERVATION_TOOLS = new Set(['read', 'write', 'edit', 'apply_patch', 'lsp']);
 
-/** Only completed history parts are successful events. */
+/** Только завершённые history parts — успешные события. */
 function completedInput(part: HistoryToolPart): unknown {
   if (typeof part.tool !== 'string') return undefined;
   if (part.state?.status !== 'completed') return undefined;
@@ -54,10 +54,10 @@ function asString(value: unknown): string | undefined {
 }
 
 /**
- * Reconstruct read content: strip wrapper tags and `{lineNumber}: `
- * prefixes, join returned lines with newlines. Directory output yields no
- * observation; binary, image, PDF, and unrecognized formats fail closed
- * with empty content (path still matches globs).
+ * Восстановить контент read: убрать wrapper теги и префиксы `{lineNumber}: `,
+ * склеить возвращённые строки с newlines. Directory output не даёт
+ * observation; binary, image, PDF и неузнаваемые форматы fail closed с
+ * пустым контентом (путь всё ещё матчит globs).
  */
 function readContent(output: string | undefined): string | null | undefined {
   if (output === undefined) return undefined;
@@ -77,9 +77,9 @@ function readContent(output: string | undefined): string | null | undefined {
 }
 
 /**
- * Parse codex-style patch text into per-file content contributions.
- * Delete File sections are path-only: their lines never become content.
- * Returns undefined when the patch does not parse.
+ * Распарсить codex-style patch текст в per-file content вклады.
+ * Delete File секции — path-only: их строки никогда не становятся контентом.
+ * Возвращает undefined когда патч не парсится.
  */
 export function parsePatch(patchText: string): FileObservation[] | undefined {
   const isPatch = patchText.includes('*** Begin Patch') || patchText.includes('*** Update File:');
@@ -108,7 +108,7 @@ export function parsePatch(patchText: string): FileObservation[] | undefined {
     const add = /\*\*\* Add File: (.+)/.exec(line);
     const del = /\*\*\* Delete File: (.+)/.exec(line);
     const update = /\*\*\* Update File: (.+)/.exec(line);
-    // Upstream emits `*** Move to:`; older peers used `*** Move To:`.
+    // Upstream эмитит `*** Move to:`; старые пиры использовали `*** Move To:`.
     const moveTo = /\*\*\* Move (?:to|To): (.+)/.exec(line);
     if (add || del || update) {
       flush();
@@ -150,7 +150,7 @@ function summaryPaths(output: string | undefined): FileObservation[] {
   return result;
 }
 
-/** Normalize one live tool event into zero or more File observations. */
+/** Нормализовать один live tool event в ноль или более File observations. */
 export function normalizeObservations(event: RawToolEvent): FileObservation[] {
   if (!OBSERVATION_TOOLS.has(event.tool)) return [];
   if (!event.args || typeof event.args !== 'object') return [];
@@ -203,8 +203,8 @@ export function normalizeObservations(event: RawToolEvent): FileObservation[] {
 }
 
 /**
- * Extract File observations from persisted history tool parts. Only
- * successfully completed parts with string tool names contribute.
+ * Извлечь File observations из сохранённых history tool parts. Только
+ * успешно завершённые parts с строковыми именами инструментов вносят вклад.
  */
 export function extractObservationsFromMessageParts(parts: readonly unknown[]): FileObservation[] {
   const result: FileObservation[] = [];
@@ -214,7 +214,7 @@ export function extractObservationsFromMessageParts(parts: readonly unknown[]): 
     if (value === null || typeof value !== 'object') continue;
     const part = value as HistoryToolPart;
 
-    // Current shape: completed tool parts carrying state.input.
+    // Current shape: завершённые tool parts несущие state.input.
     if (part.type === undefined || part.type === 'tool') {
       const input = completedInput(part);
       if (input !== undefined && typeof input === 'object') {
@@ -234,7 +234,7 @@ export function extractObservationsFromMessageParts(parts: readonly unknown[]): 
       }
     }
 
-    // Legacy shape: AI SDK tool-invocation parts (no observable output).
+    // Legacy shape: AI SDK tool-invocation parts (нет observable output).
     if (part.type === 'tool-invocation') {
       const invocation = part.toolInvocation;
       const toolName = typeof invocation?.toolName === 'string' ? invocation.toolName : undefined;

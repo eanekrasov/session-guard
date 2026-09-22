@@ -14,9 +14,9 @@ import { SchemaLoader } from '../schema/schema-loader.ts';
 import { qualifyAgentName } from './agent-names.ts';
 
 /**
- * ProfileResolver — resolves a profile's full configuration by:
- * 1. Loading profile metadata
- * 2. Resolving the extends chain (profile-level + schema-level)
+ * ProfileResolver — резолвит полную конфигурацию профиля:
+ * 1. Загружает метаданные профиля
+ * 2. Резолвит цепочку extends (на уровне профиля + на уровне схемы)
  */
 export class ProfileResolver {
   private readonly profilesDir: string;
@@ -29,8 +29,8 @@ export class ProfileResolver {
   }
 
   /**
-   * Resolve a profile's full configuration.
-   * Returns merged metadata + resolved schemas.
+   * Резолвить полную конфигурацию профиля.
+   * Возвращает смерженные метаданные + резолвленные схемы.
    */
   async resolve(profileId: string): Promise<ResolvedProfile> {
     const chain = await this.resolveProfileExtends(profileId);
@@ -41,12 +41,11 @@ export class ProfileResolver {
     const skillsDir = primary.skillsDir;
     const description = primary.description;
 
-    // A profile's schemas are its own. Schemas combine only through a
-    // schema-level `extends`, so unioning the chain's lists would put a
-    // parent's workflow beside the child's delta as a second, independent
-    // schema — and the session would then have to choose between them.
-    // A profile that declares none inherits the nearest ancestor's list, the
-    // same way its agents and skills are inherited.
+    // Схемы профиля — свои. Схемы комбинируются только через schema-level `extends`,
+    // так что объединение списков цепочки положило бы workflow родителя рядом с
+    // дельтой ребёнка как вторую независимую схему — и сессии пришлось бы
+    // выбирать между ними. Профиль, не декларирующий своих, наследует список
+    // ближайшего предка, так же как его агенты и скиллы.
     let schemaFiles = primary.schemas;
     if (schemaFiles === undefined) {
       for (let i = 1; i < chain.length; i++) {
@@ -62,17 +61,18 @@ export class ProfileResolver {
     let invariants = primary.invariants;
 
     /**
-     * Agents accumulate down the chain; they are not inherited whole.
+     * Агенты аккумулируются вниз по цепочке; они не наследуются целиком.
      *
-     * This used to take the nearest ancestor that declared any, so a child
-     * naming one agent of its own silently lost every agent its parent
-     * shipped, and a child naming none inherited the parent's list rather than
-     * its own files. Both readings were surprising in the same direction: a
-     * profile could not add to what it extends.
+     * Раньше это брало ближайшего предка, который декларировал хоть что-то,
+     * так что ребёнок, называющий своего агента, молча терял всех агентов,
+     * которых шел родитель, а ребёнок, не называющий своих, наследовал список
+     * родителя вместо своих файлов. Оба чтения были удивительны в одном
+     * направлении: профиль не мог добавить к тому, что он расширяет.
      *
-     * Each link contributes what it ships — its declared `agents`, or the
-     * prompts in its own agents directory when it declares none. The child
-     * comes first, so a name both of them carry resolves to the child's.
+     * Каждая звено вносит то, что у него — его декларированные `agents`, или
+     * промпты в его собственной agents директории когда он декларирует никого.
+     * Ребёнок идёт первым, так что имя, которое несут оба, резолвится в
+     * ребёнка.
      */
     const agents: string[] = [];
     for (const link of chain) {
@@ -120,7 +120,7 @@ export class ProfileResolver {
   }
 
   /**
-   * List all available profiles (flat, no extends resolution).
+   * Список всех доступных профилей (плоский, без резолва extends).
    */
   async listProfiles(): Promise<ProfileMetadata[]> {
     const loaded = await this.loadAll();
@@ -138,7 +138,7 @@ export class ProfileResolver {
   }
 
   /**
-   * Load all profiles from disk. Cached after first call.
+   * Загрузить все профили с диска. Кэшируется после первого вызова.
    */
   private async loadAll(): Promise<LoadedProfile[]> {
     if (this.profileCache) return this.profileCache;
@@ -190,13 +190,14 @@ export class ProfileResolver {
   }
 
   /**
-   * Resolve a profile's extends chain: [extending, ...extended].
+   * Резолвить цепочку extends профиля: [расширяющий, ...расширенные].
    *
-   * A cycle is a configuration error and is reported as one. It used to end
-   * the walk with a bare `break`, which kept the loop finite and told nobody:
-   * `a extends b` and `b extends a` resolved to a half-assembled profile that
-   * then ran. The missing-parent case two lines below has always thrown — a
-   * cycle is the same mistake by the same author and deserves the same answer.
+   * Цикл — ошибка конфигурации и репортится как таковая. Раньше это
+   * завершало прогулку голым `break`, что держало цикл конечным и никому не
+   * говорило: `a extends b` и `b extends a` резолвилось в наполовину
+   * собранный профиль, который потом запускался. Случай отсутствующего
+   * родителя в двух строчках ниже всегда бросал — цикл та же ошибка того же
+   * автора и заслуживает того же ответа.
    */
   /**
    * Цепочка профилей от самого до корня предка, в порядке наследования.
@@ -249,8 +250,8 @@ export class ProfileResolver {
   }
 
   /**
-   * Resolve all schemas across the extends chain.
-   * For each schema file, find it in the chain and resolve its schema-level extends.
+   * Резолвить все схемы через цепочку extends.
+   * Для каждого файла схемы найти его в цепочке и резолвить её schema-level extends.
    */
   private async resolveSchemas(
     chain: LoadedProfile[],
@@ -266,7 +267,7 @@ export class ProfileResolver {
   }
 
   /**
-   * Resolve a single schema file: load from the chain, merge schema-level extends.
+   * Резолвить один файл схемы: загрузить из цепочки, смержить schema-level extends.
    */
   private async resolveSingleSchema(
     schemaFile: string,
@@ -278,10 +279,10 @@ export class ProfileResolver {
       : null;
 
     if (!currentSchema) {
-      // A schema a profile declares and does not have is a defect in the
-      // profile, not an empty workflow. Returning a stub here made
-      // `workflow-create` report success and persist a session with
-      // `currentStage: ''` — a session under a state machine with no states.
+      // Схема, которую профиль декларирует и не имеет — дефект в профиле,
+      // а не пустой workflow. Возврат стаба тут заставил `workflow-create`
+      // репортить успех и персистить сессию с `currentStage: ''` — сессию
+      // под state machine без стадий.
       throw new Error(
         `Profile "${chain[0].id}" declares schema "${schemaFile}", but no profile in its ` +
           `extends chain [${chain.map((profile) => profile.id).join(' → ')}] has that file`
@@ -300,16 +301,16 @@ export class ProfileResolver {
   }
 
   /**
-   * Load a schema from the first profile in the chain that has it.
+   * Загрузить схему из первого профиля в цепочке, у которого она есть.
    */
   /**
-   * One schema with its whole `extends` chain folded in.
+   * Одна схема со всей своей цепочкой `extends`, свёрнутой внутрь.
    *
-   * The parent used to be loaded raw — `loadSchemaFile`, not resolved — so
-   * only one level of inheritance survived. In a chain C → B → A, B kept A's
-   * stages and C lost them: a stage declared in the grandparent simply
-   * disappeared. Resolving the parent the same way this resolves the child is
-   * what makes the chain a chain.
+   * Родитель раньше загружался как есть — `loadSchemaFile`, не резолвленный —
+   * так что выживал только один уровень наследования. В цепочке C → B → A,
+   * B держал стадии A, а C их терял: стадия, декларированная в дедушке,
+   * просто исчезала. Резолвинг родителя так же, как этот резолвит ребёнка,
+   * и делает цепочку цепочкой.
    */
   private async resolveInheritedSchema(
     profileId: string,
@@ -343,21 +344,21 @@ export class ProfileResolver {
 }
 
 /**
- * A schema's name within its profile: the file name without its extension.
+ * Имя схемы внутри профиля: имя файла без расширения.
  *
- * Profiles declare their schemas as file names, but a session names one as
- * `<profileId>/<schemaId>`, and an extension there would be noise.
+ * Профили декларируют свои схемы как имена файлов, а сессия называет одну
+ * `<profileId>/<schemaId>`, и расширение там было бы шумом.
  */
 export function schemaId(schemaFile: string): string {
   return schemaFile.replace(/\.ya?ml$/i, '');
 }
 
 /**
- * Qualify every `allowedAgents` entry with the owning profile id.
+ * Квалифицировать каждую запись `allowedAgents` owning profile id.
  *
- * Schemas are authored with bare agent names, but synced agents register under
- * `<profileId>_<name>` (see agent-names.ts). Qualifying at resolution keeps the
- * YAML readable while letting the runtime compare against the host's names.
+ * Схемы пишутся с голыми именами агентов, но синкаемые агенты регистрируются под
+ * `<profileId>_<name>` (см. agent-names.ts). Квалификация при резолве держит
+ * YAML читаемым, позволяя рантайму сравнивать с именами хоста.
  */
 function qualifyStageAgents(
   profileId: string,
@@ -371,7 +372,7 @@ function qualifyStageAgents(
       ...(def.allowedAgents
         ? { allowedAgents: def.allowedAgents.map((a) => qualifyAgentName(profileId, a)) }
         : {}),
-      // Nested stages are stages: the same qualification applies at any depth.
+      // Вложенные стадии — это стадии: та же квалификация применяется на любой глубине.
       ...(def.stages ? { stages: qualifyStageAgents(profileId, def.stages) } : {}),
     };
   }

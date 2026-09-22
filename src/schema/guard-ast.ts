@@ -24,12 +24,12 @@ const MAX_EVAL_STEPS = 10_000;
 const MAX_CALLBACK_CALLS = 128;
 
 /**
- * Methods a guard may call, by name.
+ * Методы, которые гард может вызывать, по имени.
  *
- * An allowlist, not a denylist. Guards are expressions from a YAML file that
- * decide whether the workflow may advance, so the language they run in says
- * "no" by default: a method that is not named here is not reachable, and
- * adding one is a deliberate edit rather than an accident of the runtime.
+ * Allowlist, не denylist. Гарды — выражения из YAML файла, решающие, может ли
+ * workflow продвинуться, так что язык, в котором они бегают, говорит "нет" по
+ * дефолту: метод, не названный тут, недостижим, и добавление одного —
+ * намеренный edit, а не случайность рантайма.
  */
 const ALLOWED_METHODS = new Set([
   'every',
@@ -49,19 +49,19 @@ const ALLOWED_METHODS = new Set([
   'trim',
 ]);
 
-/** Names that reach the prototype chain. Never readable, however they are written. */
+/** Имена, достигающие прототипную цепочку. Никогда не читаемые, как бы они ни писались. */
 const FORBIDDEN_PROPERTIES = new Set(['__proto__', 'prototype', 'constructor']);
 
 const MISSING = Symbol('missing');
 
 /**
- * Read one property under the allowlist.
+ * Прочитать одно свойство под allowlist.
  *
- * Own data is readable by its own name — that is what guards are written
- * against. Anything inherited is only readable when it is an allowed method,
- * and everything else reads as missing, so a name that is not on the list can
- * never hand a guard a capability it was not given. Dynamic keys (`obj[expr]`)
- * come through here too, so a computed name reaches no further than a literal.
+ * Own data читается по своему имени — против этого гарды и пишутся. Что угодно
+ * унаследованное читается только когда это allowed метод, а всё остальное
+ * читается как missing, так что имя, не в листе, никогда не даст гарду
+ * capability, которого у него не было. Динамические ключи (`obj[expr]`)
+ * тоже проходят через это, так что вычисленное имя не идёт дальше литерала.
  */
 function readProperty(obj: unknown, key: string): unknown | typeof MISSING {
   if (FORBIDDEN_PROPERTIES.has(key)) {
@@ -430,10 +430,10 @@ function parseUnary(tokens: Token[], depth: number): AstNode {
 }
 
 /**
- * Read `(a, b)` followed by `=>` without consuming anything otherwise.
+ * Прочитать `(a, b)` за которым следует `=>` не потребляя иначе ничего.
  *
- * Returns the parameter names, or `undefined` when the parentheses are an
- * ordinary grouping — the caller then parses them as an expression.
+ * Возвращает имена параметров, или `undefined` когда скобки — обычное
+ * группирование — вызывающий код потом парсит их как выражение.
  */
 function tryParseArrowParams(tokens: Token[], depth: number): string[] | undefined {
   let index = 1; // tokens[0] is the '('
@@ -461,10 +461,10 @@ function tryParseArrowParams(tokens: Token[], depth: number): string[] | undefin
 function parsePrimary(tokens: Token[], depth: number): AstNode {
   const token = peek(tokens, depth);
 
-  // Parenthesised expression, or an arrow function's parameter list.
-  // `(t) => …` and `(a, b) => …` are the forms people actually write; only the
-  // bare `t => …` form used to parse, and a guard using the parenthesised one
-  // failed to compile and silently evaluated to false.
+  // Родиффицированное выражение или список параметров arrow-функции.
+  // `(t) => …` и `(a, b) => …` — формы, которые реально пишут; только голый
+  // `t => …` парсился, и гард, использующий родиффицированную форму, фейлил
+  // компиляцию и молча оценивался в false.
   if (token === '(') {
     const params = tryParseArrowParams(tokens, depth);
     if (params) {
@@ -679,7 +679,7 @@ function evaluateNode(node: AstNode, ctx: EvalContext): unknown {
       return node.value;
 
     case 'identifier': {
-      // Check builtins first, then context, then guards
+      // Сначала builtins, потом context, потом guards
       if (node.name in ctx.builtins) return ctx.builtins[node.name];
       if (node.name === 'session') return ctx.session;
       if (node.name in ctx.guards) return ctx.guards[node.name];
@@ -703,7 +703,7 @@ function evaluateNode(node: AstNode, ctx: EvalContext): unknown {
     }
 
     case 'call': {
-      // Evaluate the object first (for method calls with this binding)
+      // Сначала оценить объект (для вызовов методов с this binding)
       let thisArg: unknown = undefined;
       if (node.callee.type === 'member') {
         thisArg = evaluateNode(node.callee.object, ctx);
@@ -748,7 +748,7 @@ function evaluateNode(node: AstNode, ctx: EvalContext): unknown {
 
     case 'binary': {
       const left = evaluateNode(node.left, ctx);
-      // Short-circuit: only evaluate right when needed
+      // Short-circuit: только оценивать right когда нужно
       switch (node.operator) {
         case '&&':
           return left ? evaluateNode(node.right, ctx) : left;
@@ -776,9 +776,9 @@ function evaluateNode(node: AstNode, ctx: EvalContext): unknown {
       // Arrow functions capture the current ctx via closure
       const capturedCtx = ctx;
       return (...args: unknown[]) => {
-        // The budget is shared with the enclosing evaluation: a per-call budget
-        // makes MAX_EVAL_STEPS a limit on the smallest arrow rather than on the
-        // guard, and a nested callback could then run without bound.
+        // Бюджет разделяется с окружающей оценкой: per-call бюджет делает
+        // MAX_EVAL_STEPS лимитом на наименьший arrow вместо всего гарда, и
+        // вложенный колбэк мог бы тогда бегать без границ.
         const localCtx: EvalContext = {
           ...capturedCtx,
           session: { ...capturedCtx.session },
@@ -842,8 +842,8 @@ export class EvalError extends Error {
 }
 
 /**
- * Parse and evaluate a guard expression against the given context.
- * Returns `false` for any error, timeout, or limit exceeded (fail-closed).
+ * Распарсить и оценить выражение гарда против данного контекста.
+ * Возвращает `false` для любой ошибки, таймаута, или превышения лимита (fail-closed).
  */
 export function evaluateGuard(
   expression: string,
@@ -859,9 +859,9 @@ export function evaluateGuard(
     const result = evaluateNode(node, ctx);
     return Boolean(result);
   } catch (error) {
-    // Still fail closed — a guard that cannot be evaluated must not open a
-    // transition. But a guard that is *broken* and a guard that is *false* are
-    // different facts, and only one of them is a defect: report it.
+    // Всё равно fail closed — гард, который не может быть оценён, не должен
+    // открывать переход. Но гард, который *сломан*, и гард, который *false* —
+    // разные факты, и только один из них дефект: репортим его.
     onError?.(error instanceof Error ? error : new Error(String(error)), expression);
     return false;
   }

@@ -35,29 +35,29 @@ function buildStateFilePath(sessionID: string, stateDir: string): string {
 }
 
 /**
- * Which rules matched in a session, remembered for the sidebar.
+ * Какие правила сматчились в сессии, запомненные для сайдбара.
  *
- * **Writing is best-effort and says so here rather than in its return type.**
- * A filesystem failure is warned about and then dropped: the caller gets a
- * resolved promise and cannot tell the write did not happen. That is deliberate
- * — both writers are hook handlers with nothing to retry and nobody to tell,
- * and the reader already treats missing state as normal, because a session that
- * has not been evaluated yet has none.
+ * **Запись — best-effort и так сказано здесь, а не в типе возврата.**
+ * Файловая ошибка предупреждается и отбрасывается: вызывающий получает
+ * resolved promise и не может узнать, что запись не случилась. Это намеренно
+ * — оба писателя — хук хендлеры без чего ретраить и кого уведомить,
+ * а читатель уже трактует отсутствующее состояние как нормальное, потому что
+ * сессия, которая ещё не оценивалась, его не имеет.
  *
- * The same goes for concurrency. `writeQueues` serialises writes within one
- * instance, and that is all it does: two instances sharing a state directory
- * both read the old state, both add their own paths and both rename their own
- * file over it, so one merge is lost every time. The atomic rename protects
- * the file from being torn, never the read-modify-write around it. Production
- * builds one store per runtime, so nothing reaches this today — `WorkflowStore`
- * is where a cross-process lock lives, because losing one of its writes loses
- * workflow state.
+ * То же касается конкурентности. `writeQueues` сериализует записи в пределах
+ * одного экземпляра, и это всё что он делает: два экземпляра, делящие
+ * state-директорию, оба читают старое состояние, оба добавляют свои пути и оба
+ * переименовывают свой файл поверх, так что один мерж теряется каждый раз.
+ * Атомарный rename защищает файл от разрыва, но никогда не read-modify-write
+ * вокруг него. Продакшн строит один стор на рантайм, так что сюда ничего
+ * не доходит сегодня — `WorkflowStore` это где живёт кросс-процессный лок,
+ * потому что потеря одного из его записей теряет workflow state.
  *
- * What follows from all of it: this is a hint, not a source of truth. Nothing
- * that decides anything may depend on it. If something ever needs to know
- * whether the state survived, this class has to start reporting failure and
- * holding a lock across processes, and both callers have to grow somewhere to
- * report to.
+ * Из всего этого следует: это подсказка, не источник истины. Ничто,
+ * что что-то решает, не может зависеть от этого. Если когда-нибудь нужно
+ * будет знать, выжило ли состояние, этот класс должен начать репортить
+ * фейл и держать лок через процессы, и оба вызывающих должны вырасти
+ * куда-то репортить.
  */
 export class MatchedRulesStateStore {
   private readonly stateDir: string;
@@ -68,12 +68,12 @@ export class MatchedRulesStateStore {
   }
 
   /**
-   * Replace semantics for full durable turns.
+   * Replace семантика для полных durable turns.
    *
-   * Best-effort: a filesystem failure resolves like a success (see the class
-   * doc). Only an invalid sessionID rejects.
+   * Best-effort: файловая ошибка резолвится как успех (см. класс
+   * doc). Только невалидный sessionID реджектит.
    *
-   * @throws {Error} If sessionID fails validation.
+   * @throws {Error} Если sessionID не проходит валидацию.
    */
   write(sessionID: string, matchedPaths: readonly string[]): Promise<void> {
     this.assertValidSessionID(sessionID);
@@ -85,13 +85,14 @@ export class MatchedRulesStateStore {
   }
 
   /**
-   * Union semantics for mid-session admissions: atomically merges the new
-   * paths with the persisted state so existing matched rules survive.
+   * Union семантика для mid-session admissions: атомарно мержит новые
+   * пути с персистнутым состоянием так что существующие матченные правила
+   * выживают.
    *
-   * Best-effort: a filesystem failure resolves like a success (see the class
-   * doc). Only an invalid sessionID rejects.
+   * Best-effort: файловая ошибка резолвится как успех (см. класс
+   * doc). Только невалидный sessionID реджектит.
    *
-   * @throws {Error} If sessionID fails validation.
+   * @throws {Error} Если sessionID не проходит валидацию.
    */
   merge(sessionID: string, matchedPaths: readonly string[]): Promise<void> {
     this.assertValidSessionID(sessionID);
@@ -113,8 +114,9 @@ export class MatchedRulesStateStore {
     }
   }
 
-  /** Serialize per-session writes; each operation computes its state inside
-   * the queue so concurrent merges cannot interleave read-modify-write. */
+  /** Сериализовать per-session записи; каждая операция вычисляет своё состояние
+   * внутри очереди так что конкурентные мержи не могут переплести
+   * read-modify-write. */
   private enqueue(sessionID: string, operation: () => Promise<MatchedRulesState>): Promise<void> {
     const previous = this.writeQueues.get(sessionID) ?? Promise.resolve();
     const current = previous
@@ -155,7 +157,7 @@ export class MatchedRulesStateStore {
   }
 }
 
-/** Read matched rules state. @throws {Error} If sessionID fails validation. */
+/** Прочитать матченные правила состояние. @throws {Error} Если sessionID не проходит валидацию. */
 export async function readMatchedRulesState(
   sessionID: string,
   options: { stateDir?: string } = {}

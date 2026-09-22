@@ -1,6 +1,6 @@
 /**
- * Shared test fixtures, builders, and helpers for opencode-rules tests.
- * Extracted to reduce duplication and tighten typing across test files.
+ * Общие тестовые фикстуры, билдеры и хелперы для тестов opencode-rules.
+ * Вынесены чтобы сократить дублирование и усилить типизацию в тестовых файлах.
  */
 import path from 'node:path';
 import os from 'node:os';
@@ -108,7 +108,7 @@ interface MockPluginInput {
 }
 
 /**
- * Creates a typed mock input object for the plugin function.
+ * Создаёт типизированный мок-объект ввода для функции плагина.
  */
 export function createMockPluginInput(opts: MockPluginInput): {
   client: {
@@ -167,9 +167,9 @@ export function createMockPluginInput(opts: MockPluginInput): {
 // ============================================================================
 
 /**
- * Creates plugin hooks with an injected matched-rules state store so tests
- * never touch the real ~/.opencode state directory. Accepts a pre-built mock
- * input so tests can pass a custom `sessionPrompt` spy.
+ * Создаёт plugin hooks с инжектед matched-rules state store так что тесты
+ * никогда не трогают настоящий ~/.opencode state directory. Принимает pre-built
+ * mock input так что тесты могут передать кастомный `sessionPrompt` spy.
  */
 export async function createHooksWithStore(
   mockInput: ReturnType<typeof createMockPluginInput>,
@@ -208,27 +208,28 @@ export type HookChatOutput = {
 // ============================================================================
 
 /**
- * Snapshot of environment variables. Uses a symbol marker to distinguish
- * between "key was undefined" vs "key not tracked".
+ * Снимок переменных окружения. Использует символ-маркер чтобы отличать
+ * "ключ был undefined" от "ключ не отслеживался".
  */
 export type EnvSnapshot = Map<string, string | undefined>;
 
 /**
- * Saves the current value of specified environment keys (including undefined).
- * Returns a snapshot that can be passed to restoreEnv() to restore original state.
+ * Сохранить текущее значение указанных env ключей (включая undefined).
+ * Возвращает снимок который можно передать в restoreEnv() для восстановления
+ * исходного состояния.
  */
 export function saveEnv(...keys: string[]): EnvSnapshot {
   const saved: EnvSnapshot = new Map();
   for (const key of keys) {
-    // Store the value even if undefined - this is crucial for proper restore
+    // Сохранить значение даже если undefined - это критично для правильного restore
     saved.set(key, process.env[key]);
   }
   return saved;
 }
 
 /**
- * Restores environment variables to their snapshotted state.
- * Keys that were undefined in the snapshot are deleted from process.env.
+ * Восстановить env переменные в их снимкованное состояние.
+ * Ключи, которые были undefined в снимке, удаляются из process.env.
  */
 export function restoreEnv(saved: EnvSnapshot): void {
   for (const [key, value] of saved) {

@@ -48,7 +48,7 @@ export interface TaskStageConfig {
   exitGuards?: string[];
 }
 
-// ─── Engine config ────────────────────────────────────────────────────────────
+// ─── Конфиг движка ────────────────────────────────────────────────────────────
 
 export interface EngineConfig {
   stages?: Record<string, StageDef>;
@@ -57,12 +57,12 @@ export interface EngineConfig {
   /** agents allowed to drive workflow task state (schema-level, last wins) */
   taskControlAgents?: string[];
   /**
-   * The agents this workflow considers editors.
+   * Агенты, которые этот workflow считает редакторами.
    *
-   * Carried through resolution and read by nobody until now, which is why a
-   * stage could not say whether it mutates. A stage whose roster admits an
-   * editor is a stage where work happens; one whose roster admits none is a
-   * verification stage.
+   * Прошли через резолвинг и никто их не читал до сих пор, поэтому стадия не
+   * могла сказать, мутирует ли она. Стадия, чей ростер допускает редактора —
+   * стадия, где происходит работа; та, чей ростер не допускает никого — стадия
+   * верификации.
    */
   editingAgents?: string[];
 }
@@ -89,15 +89,15 @@ function deriveDefaultEvaluateGuard(expr: string, facts: SessionFacts): boolean 
 }
 
 /**
- * The context every guard is evaluated against.
+ * Контекст, против которого оценивается каждый гард.
  *
- * One normalisation for all of them. A guard reading `session.gates.review`
- * must mean the same thing at any level: outer transitions were handed the
- * normalised facts, where gates are a map, while inner ones were handed the raw
- * session, where gates are an array of records — so the same expression read a
- * status outside the loop and `undefined` inside it, silently and for ever.
+ * Одна нормализация для всех. Гард, читающий `session.gates.review`,
+ * должен означать одно и то же на любом уровне: внешние переходы получали
+ * нормализованные факты, где гейты — мапа, а внутренние — сырую сессию,
+ * где гейты — массив записей — так что то же выражение читало статус снаружи
+ * цикла и `undefined` внутри, молча и навсегда.
  *
- * `task` is the facts of the task being moved, present only inside a loop.
+ * `task` — факты задачи, которую двигают, присутствует только внутри цикла.
  */
 export function toGuardContext(
   session: WorkflowSession,
@@ -113,18 +113,19 @@ export function toGuardContext(
 }
 
 /**
- * Which stage a session is in, by its workflow's own assignment rules.
+ * В какой стадии сессия, по правилам назначения её workflow.
  *
- * Both fallbacks used to be the literal `'PLANNING'`. Stage ids are lowercase
- * everywhere a profile writes them, so that value matched no stage in any
- * workflow: `getStages()['PLANNING']` is `undefined`, task admission refused
- * with "does not declare an executable task loop", and `checkTransition`
- * reported an illegal transition naming a stage that does not exist. It failed
- * closed, but every message about it was a lie.
+ * Оба фоллбека раньше были литералом `'PLANNING'`. ID стадий везде в профиле
+ * в нижнем регистре, поэтому это значение не матчило ни одну стадию ни в одном
+ * workflow: `getStages()['PLANNING']` — `undefined`, допуск задачи отказывал
+ * с "does not declare an executable task loop", а `checkTransition`
+ * сообщал о нелегальном переходе, называя стадию, которой нет. Оно падало
+ * закрыто, но каждое сообщение об этом лгало.
  *
- * A stage nobody selected has not been left. When no rule applies — because
- * there are none, or because none matched — the answer is the stage the
- * session is already in, which is the only stage we know the workflow has.
+ * Стадию, которую никто не выбрал, не покидали. Когда ни одно правило не
+ * сработало — потому что их нет, или потому что ни одно не матчилось — ответ
+ * это стадия, в которой сессия уже находится, единственная стадия, которой мы
+ * знаем, что у workflow есть.
  */
 export function deriveStageFn(
   facts: SessionFacts,
@@ -148,21 +149,22 @@ export function deriveStageFn(
 // ─── Inlined checkTransition (from validate-transition.ts) ───────────────────
 
 /**
- * Check whether *any* edge between two stages may be taken.
+ * Проверить, может ли *любое* ребро между двумя стадиями быть взято.
  *
- * A schema may declare several edges between the same pair, distinguished by
- * their guards (e.g. one that requires gates == 'passed' and another that
- * checks for 'failed'). This used to return the result of only the *first*
- * matching edge, silently skipping alternatives — so a schema with
+ * Схема может объявлять несколько ребер между одной и той же парой,
+ * отличающихся гардами (например, одно требует gates == 'passed', а другое
+ * проверяет 'failed'). Раньше возвращался результат только *первого*
+ * подходящего ребра, молча пропуская альтернативы — так что схема с
  *
  *   { from: 'a', to: 'b', guard: 'false' },
  *   { from: 'a', to: 'b', guard: 'condition == true' },
  *
- * would never reach the second edge because `find()` always returned the first.
+ * никогда не доходила до второго ребра, потому что `find()` всегда возвращал
+ * первое.
  *
- * Now it evaluates every candidate edge from→to in schema order and returns
- * the first that passes. If none passes, it returns the first failure with a
- * reason that lists all evaluated guards for diagnostics.
+ * Теперь оно оценивает каждое кандидат-ребро from→to в порядке схемы и
+ * возвращает первое, что прошло. Если ни одно не прошло, возвращает первый
+ * фейл с причиной, в которой перечислены все оценённые гарды для диагностики.
  */
 export function checkTransition(
   from: string,
@@ -187,7 +189,7 @@ export function checkTransition(
   return firstFailure!;
 }
 
-/** Whether this exact edge may be taken. */
+/** Можно ли взять именно это ребро. */
 export function evaluateTransition(
   transition: TransitionDef,
   session?: SessionFacts,
@@ -197,12 +199,11 @@ export function evaluateTransition(
   const to = transition.to;
   const guard = transition.guard;
 
-  // Without a session there is nothing to evaluate a condition against, and an
-  // unevaluated condition is not a satisfied one. Every conditional clause
-  // below used to be written `if (… && session)`, so a caller with no session
-  // was told every conditional edge was allowed. An edge that carries no
-  // condition at all is still allowed: that answer is about the shape of the
-  // graph and needs no session.
+  // Без сессии нечего оценивать условие против, а неоценённое условие не
+  // удовлетворено. Каждый условный блок ниже раньше писали `if (… && session)`,
+  // так что вызывающий код без сессии получал ответ, что каждое условное ребро
+  // разрешено. Ребро, не несущее никакого условия, всё ещё разрешено: этот
+  // ответ о форме графа и не требует сессии.
   const conditions: string[] = [];
   if (guard && guard.trim() !== '') conditions.push('a guard');
   if (transition.consent) conditions.push('consent');
@@ -236,13 +237,13 @@ export function evaluateTransition(
     };
   }
 
-  // `onFailure: retry` is the pair of clauses `base.yaml` writes by hand —
-  // `!isExhausted(key)` on the edge that goes round again, and a `bumpRetry`
-  // effect on it — said once. The budget is the stage being retried, so the
-  // key is `from`; spending an attempt happens where the edge is taken.
+  // `onFailure: retry` — это пара клауз, которые `base.yaml` пишет руками —
+  // `!isExhausted(key)` на ребре, что уходит по кругу, и эффект `bumpRetry`
+  // на нём — сказано один раз. Бюджет — это стадия, которую ретраят, поэтому
+  // ключ — `from`; трата попытки происходит там, где ребро берётся.
   //
-  // The `terminal` half needs nothing: once the retry edge closes, the first
-  // still-open edge out of the stage is the one that leads away from it.
+  // `terminal` половине ничего не нужно: как только ребро ретрая закрывается,
+  // первое ещё открытое ребро из стадии — то, что уводит от неё.
   if (transition.onFailure === 'retry' && session?.isExhausted(from)) {
     return {
       allowed: false,
@@ -279,8 +280,8 @@ export class SessionGuardEngine {
   }
 
   /**
-   * Evaluate a guard expression against a session context.
-   * Single point of change for guard evaluation logic (DSL compatibility, etc.).
+   * Оценить выражение гарда против контекста сессии.
+   * Единая точка изменения для логики оценки гардов (совместимость DSL и т.д.).
    */
   evaluateGuard(
     expression: string,
@@ -296,7 +297,7 @@ export class SessionGuardEngine {
   }
 
   /**
-   * Derive the current stage from a WorkflowSession.
+   * Вывести текущую стадию из WorkflowSession.
    */
   deriveStage(session: WorkflowSession, evaluationContext: GuardEvaluationContext = {}): StageId {
     const facts = toSessionFacts(session);
@@ -307,11 +308,11 @@ export class SessionGuardEngine {
   }
 
   /**
-   * Validate a stage transition. Evaluates every candidate edge from→to in
-   * schema order — a schema may declare several edges between the same pair
-   * with different guards. Returns the first that passes, or the first failure.
+   * Валидировать переход стадии. Оценивает каждое кандидат-ребро from→to в
+   * порядке схемы — схема может объявлять несколько ребер между одной парой
+   * с разными гардами. Возвращает первое, что прошло, или первый фейл.
    *
-   * Converts session to SessionFacts internally if a session is provided.
+   * Конвертирует сессию в SessionFacts внутри, если сессия передана.
    */
   checkTransition(
     from: StageId,
@@ -330,46 +331,47 @@ export class SessionGuardEngine {
   }
 
   /**
-   * Agents allowed to drive workflow task state.
+   * Агентам разрешено драйвить состояние задач workflow.
    *
-   * Task status is what `allTasksCompleted()` and `hasPendingTasks()` read, so
-   * an agent that can set it can close its own stage. Control therefore sits
-   * with the orchestrator unless a schema says otherwise.
+   * Статус задачи — это то, что читают `allTasksCompleted()` и
+   * `hasPendingTasks()`, поэтому агент, который может его сетить, может
+   * закрыть свою стадию. Контроль поэтому у оркестратора, если схема не говорит
+   * иначе.
    */
   /**
-   * The workflow's stages, merged across every schema the profile resolves to.
+   * Стадии workflow, смерженные во всех схемах, в которые резолвится профиль.
    *
-   * The single source for stage lookups: a profile resolves to several schema
-   * files, and searching them one by one gives whichever the search order
-   * happened to reach — a parent's guard here, a child's roster there.
+   * Единый источник для поиска стадий: профиль резолвится в несколько файлов
+   * схем, и поиск их по одному даёт тот, которого порядок поиска случайно
+   * достиг — гард родителя здесь, ростер ребёнка там.
    */
   getStages(): Record<string, StageDef> {
     return this.config.stages ?? {};
   }
 
   /**
-   * The stage a session starts in — the first one the workflow declares.
+   * Стадия, в которой сессия стартует — первая, которую объявляет workflow.
    *
-   * `compileWorkflow` computed this and nobody read it, so session creation
-   * wrote the literal `'planning'`. A schema declaring `start → done` then
-   * produced a session parked in a stage it does not declare: no outgoing
-   * edge, no admission, and no error to say why. `deriveStage` answers the
-   * different question of where an existing session is now.
+   * `compileWorkflow` это вычислил, а никто не читал, поэтому создание сессии
+   * писало литерал `'planning'`. Схема, объявляющая `start → done`, затем
+   * создавала сессию, припаркованную в стадии, которой она не объявляет: нет
+   * исходящего ребра, нет допуска, и нет ошибки, чтобы сказать почему.
+   * `deriveStage` отвечает на другой вопрос — где существующая сессия сейчас.
    */
   getInitialStage(): string {
     return initialStageOf(this.config.stages);
   }
 
   /**
-   * The stage that cycles over the named task list, if any.
+   * Стадия, которая циклится над именованным списком задач, если есть.
    *
-   * Loops nest, and this searched only the top level — so admission could
-   * start a nested loop's task while the result handler, asking the same
-   * question here, got nothing: the task reported success and stayed
-   * `running` behind `no loop stage resolved`.
+   * Лупы гнездятся, а это искало только верхний уровень — поэтому допуск мог
+   * запустить задачу вложенного лупа, пока обработчик результата, спрашивая
+   * то же самое здесь, получал ничего: задача сообщала об успехе и оставалась
+   * `running` за `no loop stage resolved`.
    *
-   * `$currentTask.id` also used to match any key at all. It names the list of
-   * the task being worked on, whose key is that task's id, so it matches one.
+   * `$currentTask.id` раньше матчил любой ключ. Оно называет список задачи,
+   * над которой работают, чей ключ — id этой задачи, так что матчит один.
    */
   /**
    * Заканчивается ли workflow этой стадией.
@@ -404,20 +406,21 @@ export class SessionGuardEngine {
     return this.config.taskControlAgents ?? ['orchestrator'];
   }
 
-  /** The agents this workflow declares as editors. */
+  /** Агенты, которых этот workflow объявляет редакторами. */
   getEditingAgents(): string[] {
     return this.config.editingAgents ?? [];
   }
 
   /**
-   * Try to apply the first matching outgoing transition from the current stage.
+   * Попробовать применить первое подходящее исходящее переход из текущей стадии.
    *
-   * Scans ALL transitions from the current derived stage,
-   * validates each one's guard and gate requirements, and applies the first
-   * that passes by setting `session.currentStage`.
+   * Сканирует ВСЕ переходы из текущей выведенной стадии,
+   * валидирует гарды и требования гейтов каждого, и применяет первый
+   * прошедший, выставляя `session.currentStage`.
    *
-   * Returns the result of the transition that was applied (if any).
-   * Returns `{ allowed: false, applied: false }` when no outgoing transition matches.
+   * Возвращает результат применённого перехода (если был).
+   * Возвращает `{ allowed: false, applied: false }`, когда ни один исходящий
+   * переход не подошёл.
    */
   tryApplyTransitions(
     session: WorkflowSession,
@@ -457,10 +460,10 @@ export class SessionGuardEngine {
         continue;
       }
 
-      // The candidate in hand, not one looked up again by its endpoints: a
-      // schema may declare several edges between the same two stages, and
-      // re-finding by `from`/`to` judges the first of them every time — so an
-      // alternative edge whose guard does hold is never reached.
+      // Кандидат в руках, а не снова ищённый по эндпоинтам: схема может
+      // объявлять несколько ребер между теми же двумя стадиями, и повторный
+      // поиск по `from`/`to` судит первый из них каждый раз — так что
+      // альтернативное ребро, чей гард выполняется, никогда не достигается.
       const result = evaluateTransition(transition, facts, (expr) =>
         this.evaluateGuard(expr, facts, evaluationContext)
       );
@@ -507,10 +510,10 @@ export class SessionGuardEngine {
   }
 
   /**
-   * A loop stage represents a new round of work when entered again. Without
-   * resetting its task list, a rejected outer validation re-enters execution
-   * with completed tasks; the next read immediately satisfies
-   * allTasksCompleted() and consumes another retry without doing any work.
+   * Стадия-луп представляет новый раунд работы при повторном входе. Без
+   * сброса её списка задач отклонённая внешняя валидация повторно входит в
+   * выполнение с завершёнными задачами; следующее чтение сразу удовлетворяет
+   * allTasksCompleted() и сжирает ещё один ретрай без какой-либо работы.
    */
   private resetLoopTasksOnEntry(session: WorkflowSession, stageId: string): void {
     const loop = this.getStages()[stageId]?.loop;

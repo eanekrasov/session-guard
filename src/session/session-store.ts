@@ -11,15 +11,15 @@ import type { LogFn } from '../app/logger.ts';
 // ─── Factory ──────────────────────────────────────────────────────────────────
 
 /**
- * A new session, parked in the stage its own workflow starts in.
+ * Новая сессия, припаркованная в стадии, с которой начинается её workflow.
  *
- * `initialStage` used to be the literal `'planning'`, which is the base
- * profile's first stage written into the core. A schema declaring
- * `start → done` produced a session in a stage it does not have: no outgoing
- * edge, no admission, and nothing said so. Production passes the compiled
- * initial stage (`SessionGuardEngine.getInitialStage`); the default is a
- * convenience for fixtures whose first stage is `planning`, and a caller that
- * relies on it for anything else gets the same defect back.
+ * `initialStage` раньше был литералом `'planning'` — первой стадией базового
+ * профиля, записанной в ядро. Схема, объявляющая `start → done`, создавала
+ * сессию в стадии, которой у неё нет: нет исходящего ребра, нет допуска,
+ * и ничего не говорилось об ошибке. Продакшн передаёт скомпилированную
+ * начальную стадию (`SessionGuardEngine.getInitialStage`); дефолт — удобство
+ * для фикстур, чья первая стадия `planning`, а вызывающий код, полагающийся
+ * на него для чего-либо ещё, получает тот же дефект обратно.
  */
 export function createSession(
   sessionId: string,
@@ -56,13 +56,13 @@ export function createSession(
   };
 }
 
-/** How long a write waits for another process's lock before giving up. */
+/** Как долго запись ждёт лок другого процесса перед сдачей. */
 const LOCK_TIMEOUT_MS = 5_000;
 
-/** A lock older than this belonged to a process that died holding it. */
+/** Лок старше этого принадлежал процессу, умершему с локом в руках. */
 const LOCK_STALE_MS = 30_000;
 
-/** A save built on a revision the file no longer holds. */
+/** Сохранение, построенное на ревизии, которой в файле уже нет. */
 export class WorkflowSessionConflictError extends Error {
   readonly name = 'WorkflowSessionConflictError';
   readonly expectedRevision: number;
@@ -83,17 +83,17 @@ export class WorkflowStore {
   private log: LogFn;
 
   /**
-   * Cache: sessionID → parentID (or sessionID itself for root).
+   * Кэш: sessionID → parentID (или сам sessionID для корня).
    *
-   * Filled only by `SessionQueue.resolveRoot` from what the host answered.
-   * `save()` used to seed it from `session.testStatus['parentID']` before the
-   * session had even been validated — a field no code ever wrote, and since
-   * removed, so the entry it produced was always `sessionId → sessionId`.
-   * That is the one answer that
-   * must never be guessed: it marks the session as its own root and stops the
-   * host from ever being asked, which is how a child would slip out of its
-   * parent's workflow. The parent chain belongs to the host; only its reply
-   * lands here.
+   * Заполняется только `SessionQueue.resolveRoot` из того, что ответил хост.
+   * `save()` раньше засеял его из `session.testStatus['parentID']` до того,
+   * как сессия вообще была провалидирована — поле, в которое никогда никто не
+   * писал, и которое с тех пор убрали, поэтому запись всегда была
+   * `sessionId → sessionId`. Это единственный ответ,
+   * который никогда нельзя угадывать: он помечает сессию как свой корень и
+   * останавливает опрос хоста, именно так дочерняя сессия вылезала бы из
+   * workflow родителя. Цепочка родителей принадлежит хосту; сюда попадает
+   * только его ответ.
    */
   readonly onSave = new Set<() => void>();
 
@@ -125,7 +125,7 @@ export class WorkflowStore {
     const json = JSON.stringify(clean, null, 2) + '\n';
     const targetPath = this.sessionPath(session.sessionId);
     const tmpPath = `${targetPath}.${process.pid}.${randomUUID()}.tmp`;
-    void this.log('debug', 'Session saving', {
+    void this.log('debug', 'Сохранение сессии', {
       sessionId: session.sessionId,
       dir: this.directory,
     });
@@ -134,11 +134,11 @@ export class WorkflowStore {
     const prev = this.locks.get(key) ?? Promise.resolve();
     const chain = prev
       .then(() => mkdir(this.directory, { recursive: true }))
-      // The revision check and the write are one step or they are nothing.
-      // The in-process chain above serialises this instance; it says nothing
-      // about a second WorkflowStore, a second plugin instance, or a second
-      // host. Two of them each read the same revision, each passed the check
-      // and each wrote — both reported success and one update vanished.
+      // Проверка ревизии и запись — один шаг, или они ничего не значат.
+      // Цепочка в процессе выше сериализует этот экземпляр; она ничего не
+      // говорит о втором WorkflowStore, втором экземпляре плагина или втором
+      // хосте. Два из них прочитали одну и ту же ревизию, оба прошли проверку
+      // и оба записали — оба сообщили об успехе, и одно обновление пропало.
       .then(() =>
         this.withFileLock(session.sessionId, async () => {
           await this.assertNotStale(session.sessionId, revisionBefore);
@@ -147,22 +147,22 @@ export class WorkflowStore {
         })
       )
       .catch((err) => {
-        // Undo the in-memory bump so the caller can reload and retry on a
-        // clean object, exactly as the validation failure above does.
+        // Откатить in-memory бамп, чтобы вызывающий код мог перезагрузить
+        // и повторить на чистом объекте, точно так же, как при ошибке валидации выше.
         session.revision = revisionBefore;
         session.updatedAt = updatedAtBefore;
         if (!(err instanceof WorkflowSessionConflictError)) {
-          void this.log('error', `Session save I/O failed for ${session.sessionId}`, {
+          void this.log('error', `Ошибка I/O при сохранении сессии ${session.sessionId}`, {
             error: err instanceof Error ? err.message : String(err),
           });
         }
         throw err;
       })
       .finally(() => {
-        // Always release the lock — even if I/O failed. Without .finally(),
-        // a failed writeFile/rename would leak a stale rejected promise in
-        // `this.locks`, causing every subsequent `save()` for this key to
-        // hang or fail permanently.
+        // Всегда освобождать лок — даже если I/O упал. Без .finally()
+        // неудачный writeFile/rename оставил бы отклонённый промис в
+        // `this.locks`, из-за чего каждый последующий `save()` для этого ключа
+        // бы вешал или падал навсегда.
         if (this.locks.get(key) === chain) {
           this.locks.delete(key);
         }
@@ -182,13 +182,13 @@ export class WorkflowStore {
   }
 
   /**
-   * Hold the session's cross-process lock for the length of one write.
+   * Удержать кросс-процессный лок сессии на время одной записи.
    *
-   * `open(path, 'wx')` fails when the file exists, which is the only
-   * compare-and-swap the filesystem offers. A lock older than
-   * `LOCK_STALE_MS` belonged to a process that died holding it and is broken
-   * rather than waited on — a write that cannot finish must not stop every
-   * later one for ever.
+   * `open(path, 'wx')` падает, когда файл существует — это единственный
+   * compare-and-swap, который даёт файловая система. Лок старше
+   * `LOCK_STALE_MS` принадлежал процессу, умершему с локом в руках, и его
+   * ломают, а не ждут — запись, которая не может завершиться, не должна
+   * останавливать все последующие навсегда.
    */
   private async withFileLock<T>(sessionId: string, write: () => Promise<T>): Promise<T> {
     const lockPath = `${this.sessionPath(sessionId)}.lock`;
@@ -203,7 +203,7 @@ export class WorkflowStore {
 
         const age = await stat(lockPath).then(
           (info) => Date.now() - info.mtimeMs,
-          () => null // it went away underneath us; try to take it
+          () => null // он исчез под нами; пробуем захватить
         );
         if (age !== null && age > LOCK_STALE_MS) {
           void this.log('warn', `Breaking a stale session lock`, { sessionId, ageMs: age });
@@ -227,16 +227,16 @@ export class WorkflowStore {
   }
 
   /**
-   * Refuse a write built on a revision somebody else has already replaced.
+   * Отклонить запись, построенную на ревизии, которую кто-то уже заменил.
    *
-   * `revision` was incremented on every save and compared against nothing, so
-   * the field recorded how many times this process had written and said
-   * nothing about whether the write was still valid. Two writers — a second
-   * plugin instance, a second host — each loaded revision N and each wrote
-   * N+1, and the later one silently erased the earlier one's work.
+   * `revision` инкрементировался при каждом сохранении и сравнивался с ничем,
+   * поэтому поле записывало, сколько раз этот процесс писал, и ничего не
+   * говорило о том, всё ещё валидна ли запись. Два писателя — второй экземпляр
+   * плагина, второй хост — каждый загружал ревизию N и каждый писал N+1, и
+   * более поздний беззвучно стирал работу более раннего.
    *
-   * Runs inside the per-session lock chain, so it is atomic against this
-   * process's own writes as well.
+   * Запускается внутри цепочки локов на сессию, поэтому атомарно и против
+   * собственных записей этого процесса.
    */
   private async assertNotStale(sessionId: string, revisionBefore: number): Promise<void> {
     const filePath = this.sessionPath(sessionId);
@@ -248,8 +248,8 @@ export class WorkflowStore {
       const value = (parsed as { revision?: unknown }).revision;
       if (typeof value === 'number') onDisk = value;
     } catch {
-      // An unreadable or corrupt file carries no revision to conflict with.
-      // Overwriting it is the repair, not the race.
+      // Нечитаемый или повреждённый файл не несет ревизии для конфликта.
+      // Перезапись — это ремонт, а не гонка.
       return;
     }
 
@@ -305,17 +305,17 @@ export class WorkflowStore {
   }
 
   /**
-   * Remove a session, ordered against every write to it.
+   * Удалить сессию, упорядоченно относительно каждой записи в неё.
    *
-   * A bare `unlink` took neither the in-process chain nor the file lock, so a
-   * `save()` already holding its payload finished afterwards and renamed the
-   * session back into place — the delete reported success and the file was
-   * there. Sharing both locks makes the two operations ordered rather than
-   * racing: whichever is queued last is the one that decides.
+   * Голое `unlink` не задело ни in-process цепочку, ни файловый лок, поэтому
+   * `save()`, уже державший свою полезную нагрузку, завершался после и
+   * переименовывал сессию обратно на место — удаление сообщало об успехе, а
+   * файл был на месте. Совместное использование обоих локов делает две операции
+   * упорядоченными, а не гонкой: та, что встала в очередь последней, и решает.
    *
-   * A previous write that failed does not stop a delete, so this chains on
-   * `prev.catch()` where `save()` chains on `prev` — a session nobody could
-   * write must still be removable.
+   * Предыдущая запись, упавшая с ошибкой, не останавливает удаление, поэтому
+   * это цепляется на `prev.catch()`, где `save()` цепляется на `prev` — сессию,
+   * в которую никто не мог писать, всё равно должно быть можно удалить.
    */
   async delete(sessionId: string): Promise<void> {
     const filePath = this.sessionPath(sessionId);
@@ -418,14 +418,14 @@ export class WorkflowStore {
     const ids: string[] = [];
     for (const entry of entries) {
       if (!entry.isFile()) continue;
-      // A name that will not decode was not written by this store. It used to
-      // throw `URIError` out of the loop, and one stray file made every
-      // session invisible.
+      // Имя, которое не декодируется, не было записано этим стором. Раньше
+      // оно выбрасывало `URIError` из цикла, и один случайный файл делал
+      // невидимыми все сессии.
       const decoded = sessionIdFromFileName(entry.name);
       if (decoded === null) continue;
       ids.push(decoded);
     }
-    void this.log('info', `Listed sessions: ${ids.length} found`);
+    void this.log('info', `Найдено сессий: ${ids.length}`);
     return ids.sort();
   }
 

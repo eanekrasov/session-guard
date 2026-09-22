@@ -1,8 +1,8 @@
 /**
- * OpenCode Rules — test utilities export.
+ * OpenCode Rules — экспорт тестовых утилит.
  *
- * This module is no longer a plugin entry point. The rules subsystem
- * is instantiated inside SessionGuardRuntime.
+ * Этот модуль больше не является точкой входа плагина. Подсистема правил
+ * инстанцируется внутри SessionGuardRuntime.
  */
 
 import { SessionStore, type SessionState } from './session-store.js';
@@ -14,7 +14,7 @@ const sessionStore = new SessionStore();
 const matchedRulesStateStore = new MatchedRulesStateStore();
 
 /**
- * Test-only exports for accessing internal state and functions.
+ * Test-only экспорты для доступа к внутреннему состоянию и функциям.
  * @internal - Test utilities only. Not part of public API.
  */
 const __testOnly = Object.freeze(
@@ -60,11 +60,12 @@ const __testOnly = Object.freeze(
   })
 );
 
-// Retained for test compatibility — tests destructure { default: { id, server } }
-// The server() function returns plugin hooks built from the shared runtime,
-// so legacy tests that call `await plugin(input)` get real hooks.
+// Удержан для совместимости с тестами — тесты деструктурируют { default: { id, server } }
+// Функция server() возвращает plugin hooks построенные из shared runtime,
+// так что legacy тесты вызывающие `await plugin(input)` получают настоящие hooks.
 const server = async (pluginInput?: unknown): Promise<Record<string, unknown>> => {
-  // Clear any cached rule discovery so tests that write rules between calls get fresh results
+  // Очистить кэш rule discovery чтобы тесты пишущие правила между вызовами
+  // получали свежие результаты
   clearRuleCache();
   const ruleFiles = await discoverRuleFiles();
   const input = pluginInput as

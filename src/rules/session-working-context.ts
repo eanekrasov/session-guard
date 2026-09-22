@@ -9,18 +9,19 @@ import type { RawHistoryResult } from './rule-delivery-history.js';
 import type { SessionStore } from './session-store.js';
 import type { DebugLog } from './debug.js';
 
-/** Prefetched history entries are consumed by the first durable turn; a
- * transform-first seed can leave them unconsumed. A small bound keeps the
- * worst case (full histories per session) negligible. */
+/** Префетченные history записи потребляются первым durable turn; transform-first
+ * seed может оставить их непотреблёнными. Малый bound держит worst case
+ * (полные истории на сессию) пренебрежимо малым. */
 const MAX_PENDING_HISTORY_PREFETCH = 8;
 
 const COMPACT_PROJECTION_MAX_PATHS = 20;
 
 /**
- * Runtime-owned per-session Working context: the monotonic set of observed
- * file paths retained for compaction projection. It is rebuilt from eligible
- * history parts but is never a Rule-matching source; live File observations
- * in the separate FileObservationContext are the only matching input.
+ * Runtime-owned per-session Working context: монотонный набор наблюдаемых
+ * путей файлов, удерживаемых для компакции проекции. Он перестраивается из
+ * eligible history parts но никогда не является Rule-matching источником; live
+ * File observations в отдельном FileObservationContext — единственный
+ * матчинг ввод.
  */
 export interface WorkingContext {
   /** Seed from the supplied transform messages. First successful source
@@ -42,9 +43,9 @@ export interface WorkingContext {
   prepareForCompaction(sessionID: string): string | undefined;
 }
 
-/** Construction returns two narrow facets backed by one implementation:
- * the runtime learns Working-context operations, RuleDelivery only learns
- * raw-history reads. */
+/** Construction возвращает два узких фасета, подкреплённых одной
+ * имплементацией: runtime учит Working-context операции, RuleDelivery только
+ * учит raw-history reads. */
 export interface SessionWorkingContext {
   workingContext: WorkingContext;
   rawHistory: { readHistory(sessionID: string): Promise<RawHistoryResult> };
@@ -69,12 +70,12 @@ export function createSessionWorkingContext(
 ): SessionWorkingContext {
   const { sessionStore, projectDirectory, readHistory, debugLog } = opts;
 
-  /** Completed, unconsumed history reads retained once for RuleDelivery. */
+  /** Завершённые, непотреблённые history reads, удержанные один раз для RuleDelivery. */
   const pendingHistoryPrefetch = new Map<string, RawHistoryResult>();
-  /** Bumped on message removal and compaction so settled reads from before
-   * the invalidation can no longer apply. */
+  /** Накачаный на message removal и компакции так что settled reads до
+   * инвалидации больше не могут апплаиться. */
   const historyRevisions = new Map<string, number>();
-  /** Shared in-flight reads, keyed by session. */
+  /** Общие in-flight reads, закеированные по сессии. */
   const inFlightReads = new Map<string, Promise<SettledRead>>();
 
   const addObservations = (
@@ -191,8 +192,9 @@ export function createSessionWorkingContext(
 
     const currentRevision = historyRevisions.get(sessionID) ?? 0;
     if (currentRevision !== settled.revision) {
-      // The read was invalidated by message removal or compaction after it
-      // started: it may not seed Working context or refill the prefetch.
+      // Read был инвалидирован message removal или компакцией после того
+      // как он стартовал: он может не засеять Working context или не
+      // пополнить префетч.
       return;
     }
     if (seeded(sessionID)) {

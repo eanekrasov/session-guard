@@ -1,7 +1,7 @@
 import type { WorkflowSession } from '../session/session-schema.ts';
 
 /**
- * Approve a session action (plan, commit, etc.). Upsert by type — одна запись на тип.
+ * Одобрить действие сессии (plan, commit и т.д.). Upsert по типу — одна запись на тип.
  */
 export function approve(
   session: WorkflowSession,
@@ -30,7 +30,7 @@ export function approve(
 }
 
 /**
- * Decline a session action. Upsert by type — одна запись на тип.
+ * Отклонить действие сессии. Upsert по типу — одна запись на тип.
  */
 export function decline(
   session: WorkflowSession,

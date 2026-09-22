@@ -1,11 +1,11 @@
 import type { RuleSnapshot } from './rule-discovery.js';
 export interface SessionState {
-  /** Working context: monotonic set of observed file paths. Only
-   * SessionWorkingContext production code reads or mutates these fields. */
+  /** Working context: монотонный набор наблюдаемых путей файлов. Только
+   * SessionWorkingContext production код читает или мутирует эти поля. */
   workingContextPaths: Set<string>;
   lastUserPrompt?: string;
   lastUpdated: number;
-  /** True when the first successful seeding source has completed. */
+  /** True когда первый успешный seeding источник завершился. */
   workingContextSeeded: boolean;
   lastModelID?: string;
   lastAgentType?: string;
@@ -65,7 +65,7 @@ export class SessionStore {
 
     mutator(state);
 
-    // Match existing semantics: overwrite lastUpdated after mutation.
+    // Match existing semantics: перезаписать lastUpdated после мутации.
     state.lastUpdated = ++this.tick;
 
     while (this.stateMap.size > this.max) {
@@ -86,7 +86,7 @@ export class SessionStore {
   }
 
   private createDefaultState(): SessionState {
-    // Match existing semantics: tick increments on creation, then again on upsert.
+    // Match existing semantics: tick инкрементится на создании, потом снова на upsert.
     return {
       workingContextPaths: new Set<string>(),
       lastUpdated: ++this.tick,
