@@ -3,6 +3,7 @@ import type { Context } from '@opencode/plugin/promise/plugin';
 import { Tool } from '@opencode/schema/tool';
 import {
   V2_CAPABILITIES,
+  v2ParentResolver,
   v2ProjectDirectory,
   v2ToolAfterEvent,
   v2ToolBeforeEvent,
@@ -10,6 +11,8 @@ import {
   type V2ToolAfterEvent,
   type V2ToolBeforeEvent,
 } from '../../src/app/v2-plugin-contract.ts';
+
+type V2SessionGetInput = Parameters<Context['session']['get']>[0];
 
 describe('V2 plugin contract', () => {
   test('derives project and worktree identity from the V2 location contract', () => {
@@ -105,5 +108,19 @@ describe('V2 plugin contract', () => {
       ])
     );
     expect(V2_CAPABILITIES.every((capability) => capability.reason.length > 0)).toBe(true);
+  });
+
+  test('uses typed session inputs and projects only non-empty V2 parent IDs', async () => {
+    const calls: Array<{ sessionID: string }> = [];
+    const resolveParent = v2ParentResolver({
+      get: async ({ sessionID }: V2SessionGetInput) => {
+        calls.push({ sessionID });
+        return sessionID === 'child' ? ({ parentID: 'root' } as never) : ({} as never);
+      },
+    } as never);
+
+    await expect(resolveParent('child')).resolves.toBe('root');
+    await expect(resolveParent('root')).resolves.toBeNull();
+    expect(calls).toEqual([{ sessionID: 'child' }, { sessionID: 'root' }]);
   });
 });

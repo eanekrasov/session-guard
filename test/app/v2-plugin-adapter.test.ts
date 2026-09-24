@@ -49,6 +49,26 @@ function v2Context(
   } as unknown as Context;
 }
 
+function v2ContextWithParents(
+  parents: Record<string, string | undefined>,
+  onHook: (
+    name: 'execute.before' | 'execute.after',
+    callback: BeforeCallback | AfterCallback
+  ) => void,
+  calls: Array<{ sessionID: string }>
+): Context {
+  const context = v2Context(onHook) as unknown as {
+    session: { get(input: { sessionID: string }): Promise<{ parentID?: string }> };
+  };
+  context.session = {
+    get: async ({ sessionID }) => {
+      calls.push({ sessionID });
+      return parents[sessionID] === undefined ? {} : { parentID: parents[sessionID] };
+    },
+  };
+  return context as unknown as Context;
+}
+
 function executionSession(sessionID: string) {
   const session = createSession(sessionID, 'test-profile', 'cycle');
   session.currentStage = 'EXECUTION';
@@ -351,6 +371,139 @@ describe('V2 plugin setup adapter', () => {
       else process.env.SESSION_GUARD_STORE_DIR = previousStore;
       if (previousProfiles === undefined) delete process.env.SESSION_GUARD_PROFILES_DIR;
       else process.env.SESSION_GUARD_PROFILES_DIR = previousProfiles;
+      await rm(storeDirectory, { recursive: true, force: true });
+    }
+  });
+
+  test('resolves a V2 child through ctx.session.get and mutates its workflow root', async () => {
+    const previousStore = process.env.SESSION_GUARD_STORE_DIR;
+    const previousProfiles = process.env.SESSION_GUARD_PROFILES_DIR;
+    const storeDirectory = await mkdtemp(join(tmpdir(), 'v2-parent-store-'));
+    process.env.SESSION_GUARD_STORE_DIR = storeDirectory;
+    process.env.SESSION_GUARD_PROFILES_DIR = resolve(import.meta.dir, '../fixtures/profiles');
+
+    try {
+      const store = new WorkflowStore(storeDirectory);
+      await store.save(executionSession('workflow-root'));
+      const calls: Array<{ sessionID: string }> = [];
+      let before: BeforeCallback | undefined;
+      const cleanup = await SessionGuardPluginV2(
+        v2ContextWithParents(
+          { child: 'intermediate', intermediate: 'workflow-root' },
+          (name, registered) => {
+            if (name === 'execute.before') before = registered as BeforeCallback;
+          },
+          calls
+        )
+      );
+
+      await before!({
+        tool: 'task',
+        sessionID: 'child',
+        agent: 'code',
+        messageID: 'message-child',
+        id: 'child-call',
+        input: { subagent_type: 'code', description: '[workflow-task:task-1] implement' },
+      });
+
+      expect(calls).toEqual([
+        { sessionID: 'child' },
+        { sessionID: 'intermediate' },
+        { sessionID: 'workflow-root' },
+      ]);
+      expect((await store.load('workflow-root'))?.activeOperations['child-call']).toMatchObject({
+        callId: 'child-call',
+      });
+      expect(await store.load('child')).toBeNull();
+      await cleanup();
+    } finally {
+      if (previousStore === undefined) delete process.env.SESSION_GUARD_STORE_DIR;
+      else process.env.SESSION_GUARD_STORE_DIR = previousStore;
+      if (previousProfiles === undefined) delete process.env.SESSION_GUARD_PROFILES_DIR;
+      else process.env.SESSION_GUARD_PROFILES_DIR = previousProfiles;
+      await rm(storeDirectory, { recursive: true, force: true });
+    }
+  });
+
+  test('reuses successful V2 parent lookups across repeated child operations', async () => {
+    const calls: Array<{ sessionID: string }> = [];
+    let before: BeforeCallback | undefined;
+    const cleanup = await SessionGuardPluginV2(
+      v2ContextWithParents(
+        { child: 'root' },
+        (name, registered) => {
+          if (name === 'execute.before') before = registered as BeforeCallback;
+        },
+        calls
+      )
+    );
+
+    await expect(
+      before!({
+        tool: 'unknown',
+        sessionID: 'child',
+        agent: 'code',
+        messageID: 'message-one',
+        id: 'call-one',
+        input: {},
+      })
+    ).resolves.toBeUndefined();
+    await expect(
+      before!({
+        tool: 'unknown',
+        sessionID: 'child',
+        agent: 'code',
+        messageID: 'message-two',
+        id: 'call-two',
+        input: {},
+      })
+    ).resolves.toBeUndefined();
+
+    expect(calls).toEqual([{ sessionID: 'child' }, { sessionID: 'root' }]);
+    await cleanup();
+  });
+
+  test('retries a rejected V2 parent lookup without mutating another workflow session', async () => {
+    const previousStore = process.env.SESSION_GUARD_STORE_DIR;
+    const storeDirectory = await mkdtemp(join(tmpdir(), 'v2-parent-rejection-store-'));
+    process.env.SESSION_GUARD_STORE_DIR = storeDirectory;
+
+    try {
+      const store = new WorkflowStore(storeDirectory);
+      await store.save(executionSession('unrelated-root'));
+      let attempts = 0;
+      let before: BeforeCallback | undefined;
+      const context = v2Context((name, registered) => {
+        if (name === 'execute.before') before = registered as BeforeCallback;
+      }) as unknown as {
+        session: { get(input: { sessionID: string }): Promise<{ parentID?: string }> };
+      };
+      context.session = {
+        get: async () => {
+          attempts += 1;
+          throw new Error('lookup rejected');
+        },
+      };
+      const cleanup = await SessionGuardPluginV2(context as unknown as Context);
+
+      for (const id of ['first-call', 'second-call']) {
+        await before!({
+          tool: 'unknown',
+          sessionID: 'failing-child',
+          agent: 'code',
+          messageID: `message-${id}`,
+          id,
+          input: {},
+        });
+      }
+
+      expect(attempts).toBe(2);
+      expect((await store.load('unrelated-root'))?.activeOperations).toEqual({});
+      expect(await store.load('failing-child')).toBeNull();
+      await cleanup();
+    } finally {
+      if (previousStore === undefined) delete process.env.SESSION_GUARD_STORE_DIR;
+      else process.env.SESSION_GUARD_STORE_DIR = previousStore;
       await rm(storeDirectory, { recursive: true, force: true });
     }
   });

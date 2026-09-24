@@ -402,6 +402,25 @@ describe('SessionExecutor', () => {
   });
 
   describe('root resolution', () => {
+    it('preserves the V1 request/result parent adapter shape', async () => {
+      const { store, setLoadResult } = mockStore();
+      setLoadResult(makeSession('v1-root'));
+      const requests: unknown[] = [];
+
+      const { SessionExecutor } = await import('../../src/app/session-executor.ts');
+      const resolveV1Parent: ResolveParentFn = async (sessionID) => {
+        const request = { path: { id: sessionID } };
+        requests.push(request);
+        const result = { data: sessionID === 'v1-child' ? { parentID: 'v1-root' } : {} };
+        const parentID = result.data.parentID;
+        return typeof parentID === 'string' && parentID !== '' ? parentID : null;
+      };
+      const executor = new SessionExecutor(store, noopLog(), resolveV1Parent);
+
+      await expect(executor.rootOf('v1-child')).resolves.toBe('v1-root');
+      expect(requests).toEqual([{ path: { id: 'v1-child' } }, { path: { id: 'v1-root' } }]);
+    });
+
     it('resolves root through parent chain', async () => {
       const { store, setLoadResult } = mockStore();
       const session = makeSession('parent-root');
@@ -445,6 +464,25 @@ describe('SessionExecutor', () => {
       const prev = hostCalls;
       await executor.rootOf('cached-child');
       expect(hostCalls).toBe(prev); // no new host calls
+    });
+
+    it('does not cache a root when parent lookup rejects', async () => {
+      const { store, loadCalls, saveCalls, setLoadResult } = mockStore();
+      setLoadResult(makeSession('unrelated-root'));
+      let attempts = 0;
+
+      const { SessionExecutor } = await import('../../src/app/session-executor.ts');
+      const executor = new SessionExecutor(store, noopLog(), async () => {
+        attempts += 1;
+        throw new Error('V2 session lookup failed');
+      });
+
+      await expect(executor.rootOf('failing-child')).resolves.toBe('failing-child');
+      await expect(executor.rootOf('failing-child')).resolves.toBe('failing-child');
+
+      expect(attempts).toBe(2);
+      expect(loadCalls).toEqual([]);
+      expect(saveCalls).toEqual([]);
     });
   });
 
