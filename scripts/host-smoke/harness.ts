@@ -204,32 +204,66 @@ function resolveProviderKeys(provider: unknown): unknown {
   return provider;
 }
 
+function providerContainsModel(provider: unknown, model: string): boolean {
+  if (typeof provider !== 'object' || provider === null) return false;
+  const models = (provider as { models?: unknown }).models;
+  if (typeof models !== 'object' || models === null) return false;
+  const localModel = model.includes('/') ? model.slice(model.lastIndexOf('/') + 1) : model;
+  return (
+    Object.prototype.hasOwnProperty.call(models, model) ||
+    Object.prototype.hasOwnProperty.call(models, localModel)
+  );
+}
+
+export function filterProviders(providers: unknown, model: string): unknown {
+  if (typeof providers !== 'object' || providers === null || Array.isArray(providers)) {
+    return providers;
+  }
+
+  const entries = Object.entries(providers as Record<string, unknown>);
+  return Object.fromEntries(
+    entries.filter(([, provider]) => providerContainsModel(provider, model))
+  );
+}
+
 /**
  * Provider definitions from the operator's own opencode config.
  *
  * A provider is a URL, a model list and a key — the harness needs them so the
  * run talks to a real model. Nothing else is carried over.
  */
-async function operatorProviders(): Promise<{
+async function operatorProviders(requestedModel?: string): Promise<{
   provider?: unknown;
+  providers?: unknown;
   disabled_providers?: unknown;
   model?: string;
 }> {
   const configHome =
     process.env.HOST_SMOKE_OPERATOR_CONFIG ?? join(homedir(), '.config', 'opencode');
-  const merged: { provider?: unknown; disabled_providers?: unknown; model?: string } = {};
+  const merged: {
+    provider?: unknown;
+    providers?: unknown;
+    disabled_providers?: unknown;
+    model?: string;
+  } = {};
   for (const name of ['opencode.json', 'opencode.jsonc']) {
     const file = join(configHome, name);
     if (!existsSync(file)) continue;
     try {
       const parsed = parseJsonc<Record<string, unknown>>(await readFile(file, 'utf-8'));
       if (parsed.provider) merged.provider = resolveProviderKeys(parsed.provider);
+      if (parsed.providers) merged.providers = resolveProviderKeys(parsed.providers);
       if (parsed.disabled_providers) merged.disabled_providers = parsed.disabled_providers;
       if (typeof parsed.model === 'string') merged.model = parsed.model;
     } catch {
       // A config we cannot read is not a reason to fail: the run will simply
       // report the model as unavailable.
     }
+  }
+  const model = requestedModel ?? merged.model;
+  if (model) {
+    if (merged.provider) merged.provider = filterProviders(merged.provider, model);
+    if (merged.providers) merged.providers = filterProviders(merged.providers, model);
   }
   return merged;
 }
@@ -262,7 +296,7 @@ export async function startHost(options: HostOptions): Promise<Host> {
   if (existsSync(auth)) await cp(auth, join(dataDir, 'opencode', 'auth.json'));
 
   const pluginSpec = process.env.HOST_SMOKE_PLUGIN ?? buildPlugin();
-  const operator = await operatorProviders();
+  const operator = await operatorProviders(options.model);
   await writeFile(
     join(configDir, 'opencode', 'opencode.json'),
     JSON.stringify(
@@ -273,6 +307,7 @@ export async function startHost(options: HostOptions): Promise<Host> {
         // config — the model has to be live. Their agents, plugins, MCP servers
         // and commands are deliberately left out of this run.
         ...(operator.provider ? { provider: operator.provider } : {}),
+        ...(operator.providers ? { providers: operator.providers } : {}),
         ...(operator.disabled_providers ? { disabled_providers: operator.disabled_providers } : {}),
         // Consent runs through the host's `question` tool, which is denied by
         // default outside an interactive client.
