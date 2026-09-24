@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test';
+import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
 import type { Context } from '@opencode/plugin/promise/plugin';
 import { Tool } from '@opencode/schema/tool';
 import {
@@ -98,7 +100,7 @@ describe('V2 plugin contract', () => {
     expect(failed).toMatchObject({ status: 'error', error: { message: 'failed' } });
   });
 
-  test('makes unsupported and deferred V2 capabilities explicit', () => {
+  test('gives each V2 capability an evidence path or an explicit deferred reason', () => {
     expect(V2_CAPABILITIES).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ name: 'Tool before policy', status: 'supported' }),
@@ -107,7 +109,16 @@ describe('V2 plugin contract', () => {
         expect.objectContaining({ name: 'Runtime disposal', status: 'supported' }),
       ])
     );
-    expect(V2_CAPABILITIES.every((capability) => capability.reason.length > 0)).toBe(true);
+    for (const capability of V2_CAPABILITIES) {
+      expect(capability.reason.length).toBeGreaterThan(0);
+
+      if (capability.status === 'supported') {
+        expect(capability.testPath).toBeDefined();
+        expect(existsSync(resolve(import.meta.dir, '../..', capability.testPath!))).toBe(true);
+      } else {
+        expect(capability.testPath).toBeUndefined();
+      }
+    }
   });
 
   test('uses typed session inputs and projects only non-empty V2 parent IDs', async () => {
