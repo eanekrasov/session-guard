@@ -3,6 +3,7 @@ import { Plugin } from '@opencode/plugin';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { opencodeStateDir, profilesDir, sessionsDir } from './app/paths.ts';
 import type { Cleanup, Context } from '@opencode/plugin/promise/plugin';
+import { setupV2Runtime } from './app/v2-plugin-adapter.ts';
 
 export const SessionGuardPluginV1: PluginV1 = async (ctx: PluginInput): Promise<Hooks> => {
   console.error('[session-guard] plugin v1');
@@ -47,13 +48,7 @@ export const SessionGuardPluginV1: PluginV1 = async (ctx: PluginInput): Promise<
 };
 
 export const SessionGuardPluginV2 = async (ctx: Context): Promise<Cleanup> => {
-  await ctx.tool.hook('execute.before', () => {
-    console.error('A tool is about to run');
-  });
-
-  return () => {
-    console.error('unloaded');
-  };
+  return setupV2Runtime(ctx);
 };
 
 export default {
