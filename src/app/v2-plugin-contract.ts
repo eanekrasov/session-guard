@@ -37,6 +37,7 @@ export interface V2Capability {
   readonly v2Mapping: string;
   readonly status: V2CapabilityStatus;
   readonly reason: string;
+  readonly testPath?: string;
 }
 
 export const V2_CAPABILITIES: readonly V2Capability[] = [
@@ -47,6 +48,7 @@ export const V2_CAPABILITIES: readonly V2Capability[] = [
     status: 'supported',
     reason:
       'The adapter preserves tool, session, call, input, agent, and message identity and propagates policy rejection.',
+    testPath: 'test/app/v2-plugin-adapter.test.ts',
   },
   {
     name: 'Tool after lifecycle',
@@ -55,6 +57,7 @@ export const V2_CAPABILITIES: readonly V2Capability[] = [
     status: 'supported',
     reason:
       'Completed results are sanitized before shared processing; errors use an explicit failure closure without success processing.',
+    testPath: 'test/app/v2-plugin-adapter.test.ts',
   },
   {
     name: 'Custom workflow tools',
@@ -63,6 +66,7 @@ export const V2_CAPABILITIES: readonly V2Capability[] = [
     status: 'supported',
     reason:
       'workflow-list is registered through ctx.tool.transform with a V2 JSON schema and read-only Effect result.',
+    testPath: 'test/app/v2-plugin-adapter.test.ts',
   },
   {
     name: 'Session parent lookup',
@@ -71,6 +75,7 @@ export const V2_CAPABILITIES: readonly V2Capability[] = [
     status: 'supported',
     reason:
       'The adapter projects non-empty parentID values through the shared resolver; failed lookups remain retryable.',
+    testPath: 'test/app/v2-plugin-adapter.test.ts',
   },
   {
     name: 'Host events',
@@ -106,6 +111,7 @@ export const V2_CAPABILITIES: readonly V2Capability[] = [
     v2Mapping: 'setup cleanup and Registration.dispose',
     status: 'supported',
     reason: 'The installed contract exposes setup Cleanup and disposable registrations.',
+    testPath: 'test/app/v2-plugin-adapter.test.ts',
   },
 ];
 
