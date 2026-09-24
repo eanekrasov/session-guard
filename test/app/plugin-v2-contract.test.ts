@@ -4,6 +4,8 @@ import { Tool } from '@opencode/schema/tool';
 import {
   V2_CAPABILITIES,
   v2ProjectDirectory,
+  v2ToolAfterEvent,
+  v2ToolBeforeEvent,
   v2WorktreeDirectory,
   type V2ToolAfterEvent,
   type V2ToolBeforeEvent,
@@ -49,11 +51,55 @@ describe('V2 plugin contract', () => {
     expect(completed.callID).toBe(failed.callID);
   });
 
+  test('preserves required V2 tool identity', () => {
+    expect(
+      v2ToolBeforeEvent({
+        tool: 'edit',
+        sessionID: 'session-1',
+        agent: 'agent-1',
+        messageID: 'message-1',
+        id: 'call-1',
+        input: { filePath: 'src/index.ts' },
+      })
+    ).toMatchObject({ agent: 'agent-1', messageID: 'message-1', callID: 'call-1' });
+  });
+
+  test('extracts only text output for completed events and preserves errors as errors', () => {
+    const completed = v2ToolAfterEvent({
+      tool: 'edit',
+      sessionID: 'session-1',
+      agent: 'agent-1',
+      messageID: 'message-1',
+      id: 'call-1',
+      input: { filePath: 'src/index.ts' },
+      status: 'completed',
+      result: {
+        content: [
+          { type: 'text', text: 'safe output' },
+          { type: 'file', uri: 'file:///secret', mime: 'text/plain' },
+        ],
+      },
+    });
+    const failed = v2ToolAfterEvent({
+      tool: 'edit',
+      sessionID: 'session-1',
+      agent: 'agent-1',
+      messageID: 'message-1',
+      id: 'call-1',
+      input: {},
+      status: 'error',
+      error: new Tool.Error({ message: 'failed' }),
+    });
+
+    expect(completed).toMatchObject({ status: 'completed', result: { output: 'safe output' } });
+    expect(failed).toMatchObject({ status: 'error', error: { message: 'failed' } });
+  });
+
   test('makes unsupported and deferred V2 capabilities explicit', () => {
     expect(V2_CAPABILITIES).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ name: 'Tool before policy', status: 'out-of-scope' }),
-        expect.objectContaining({ name: 'Tool after lifecycle', status: 'out-of-scope' }),
+        expect.objectContaining({ name: 'Tool before policy', status: 'supported' }),
+        expect.objectContaining({ name: 'Tool after lifecycle', status: 'supported' }),
         expect.objectContaining({ name: 'Chat message processing', status: 'deferred' }),
         expect.objectContaining({ name: 'Runtime disposal', status: 'supported' }),
       ])

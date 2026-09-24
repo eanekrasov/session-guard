@@ -30,6 +30,8 @@ import { createTaskAdmission, type TaskAdmission } from './task-admission.ts';
 import { createChangeEnforcement, type ChangeEnforcement } from './change-enforcement.ts';
 import { createToolExecutionPolicy, type ToolExecutionPolicy } from './tool-execution-policy.ts';
 import { createWorkflowLifecycle, type WorkflowLifecycle } from './workflow-lifecycle.ts';
+import type { SessionClient } from './runtime-types.ts';
+import { finishMutation as finishDomainMutation } from '../domain/operation-lifecycle.ts';
 
 export { schemaToEngineConfig };
 
@@ -92,7 +94,7 @@ class SessionGuardRuntime {
   private readonly profilesDir: string;
   private readonly projectDir: string;
 
-  constructor(context: PluginInput, paths?: RuntimePaths) {
+  constructor(context: RuntimeContext, paths?: RuntimePaths) {
     this.log = createLogFn(context.client);
     this.report = createReporter(context.client, this.log);
     // Стор живёт вне проекта, под собственной стейт-директорией OpenCode.
@@ -103,7 +105,8 @@ class SessionGuardRuntime {
     this.store = new WorkflowStore(storeDir, this.log);
     const resolveHostParent = async (sessionID: string): Promise<string | null> => {
       try {
-        const result = await context.client.session.get({ path: { id: sessionID } });
+        const result = await context.client.session?.get({ path: { id: sessionID } });
+        if (!result) return null;
         const session = result.data;
         const parent = session?.parentID;
         return typeof parent === 'string' && parent !== '' ? parent : null;
@@ -286,7 +289,13 @@ class SessionGuardRuntime {
    * P1-012: Обработать tool.execute.before — запускает гардрейлы, consent или мутацию.
    */
   async handleToolBefore(
-    input: { tool: string; sessionID: string; callID: string },
+    input: {
+      tool: string;
+      sessionID: string;
+      callID: string;
+      agent?: string;
+      messageID?: string;
+    },
     output: { args: unknown }
   ): Promise<void> {
     await this.executor.run(input.sessionID, async (tx) => {
@@ -366,6 +375,18 @@ class SessionGuardRuntime {
 
       // 6. Try transitions — после любого инструмента проверяем, можно ли перейти
       await this.workflowLifecycle.afterTool(tx.session, tx);
+    });
+  }
+
+  /**
+   * Closes only the matching operation after a host-reported tool failure.
+   * Failed calls intentionally bypass successful-output processing and never
+   * evaluate workflow transitions.
+   */
+  async handleToolFailure(input: { sessionID: string; callID: string }): Promise<void> {
+    await this.executor.run(input.sessionID, async (tx) => {
+      if (!tx.session?.activeOperations[input.callID]) return;
+      finishDomainMutation(tx.session, false, input.callID);
     });
   }
 
@@ -650,7 +671,36 @@ export interface RuntimePaths {
   profilesDir?: string;
 }
 
-export function createRuntime(context: PluginInput, paths?: RuntimePaths): Hooks {
-  const runtime = new SessionGuardRuntime(context, paths);
-  return runtime.hooks;
+export interface RuntimeContext {
+  readonly client: {
+    readonly session?: Pick<SessionClient, 'get' | 'list' | 'messages' | 'prompt'>;
+    readonly app?: Pick<PluginInput['client']['app'], 'log'>;
+    readonly post?: (
+      path: string,
+      input: { body: { message: string; variant: 'error' } }
+    ) => Promise<unknown>;
+    readonly tool?: PluginInput['client']['tool'];
+    readonly mcp?: PluginInput['client']['mcp'];
+  };
+  readonly directory: string;
+  readonly project?: unknown;
+  readonly worktree?: string;
+}
+
+export interface RuntimeHooks extends Hooks {
+  handleToolFailure(input: { sessionID: string; callID: string }): Promise<void>;
+}
+
+export function createRuntime(
+  context: PluginInput | RuntimeContext,
+  paths?: RuntimePaths
+): RuntimeHooks {
+  const runtime = new SessionGuardRuntime(
+    { client: context.client, directory: context.directory },
+    paths
+  );
+  return {
+    ...runtime.hooks,
+    handleToolFailure: (input) => runtime.handleToolFailure(input),
+  };
 }

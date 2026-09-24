@@ -31,7 +31,7 @@ export class ConsentOrchestrator {
     private readonly executor: SessionExecutor,
     private readonly projectDir: string,
     private readonly profilesDir: string,
-    private readonly client: SessionClient,
+    private readonly client: Pick<SessionClient, 'messages' | 'prompt'> | undefined,
     log?: LogFn
   ) {
     this.log = log ?? (() => Promise.resolve());
@@ -56,6 +56,7 @@ export class ConsentOrchestrator {
     // SDK-004: Прочитать сообщения сессии чтобы проверить контекст вопроса
     // (например, подтвердить что вопрос действительно показывался пользователю).
     try {
+      if (!this.client?.messages) return;
       const messages = await this.client.messages({ path: { id: sessionID }, query: { limit: 5 } });
       // SDK возвращает discriminated union: { data: T; error: undefined } | { data: undefined; error: E }
       // Проверяем, что data не undefined.
@@ -352,6 +353,7 @@ export class ConsentOrchestrator {
     // SDK-004: Инжектить синтетическое сообщение при гранте (снаружи enqueue — I/O после освобождения лка)
     if (wasGranted) {
       try {
+        if (!this.client?.prompt) return;
         await this.client.prompt({
           path: { id: sessionID },
           body: {
