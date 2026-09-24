@@ -1,6 +1,6 @@
 import type { Config, Hooks, PluginInput } from '@opencode-ai/plugin';
 import { WorkflowStore } from '../session/session-store.ts';
-import { SessionExecutor } from './session-executor.ts';
+import { SessionExecutor, type ResolveParentFn } from './session-executor.ts';
 import { sanitizeToolOutput, validateUserInput } from './guardrails.ts';
 import {
   schemaToEngineConfig,
@@ -103,7 +103,7 @@ class SessionGuardRuntime {
     // том же процессе читал значение первого.
     const storeDir = paths?.storeDir ?? sessionsDir(opencodeStateDir());
     this.store = new WorkflowStore(storeDir, this.log);
-    const resolveHostParent = async (sessionID: string): Promise<string | null> => {
+    const resolveV1HostParent = async (sessionID: string): Promise<string | null> => {
       try {
         const result = await context.client.session?.get({ path: { id: sessionID } });
         if (!result) return null;
@@ -118,6 +118,7 @@ class SessionGuardRuntime {
         return null;
       }
     };
+    const resolveHostParent = context.resolveParent ?? resolveV1HostParent;
     this.executor = new SessionExecutor(this.store, this.log, resolveHostParent);
     this.sessionContext = new RuntimeSessionContextImpl(
       this.store,
@@ -685,6 +686,7 @@ export interface RuntimeContext {
   readonly directory: string;
   readonly project?: unknown;
   readonly worktree?: string;
+  readonly resolveParent?: ResolveParentFn;
 }
 
 export interface RuntimeHooks extends Hooks {
@@ -695,8 +697,14 @@ export function createRuntime(
   context: PluginInput | RuntimeContext,
   paths?: RuntimePaths
 ): RuntimeHooks {
+  const runtimeContext: RuntimeContext =
+    'resolveParent' in context ? context : { client: context.client, directory: context.directory };
   const runtime = new SessionGuardRuntime(
-    { client: context.client, directory: context.directory },
+    {
+      client: runtimeContext.client,
+      directory: runtimeContext.directory,
+      resolveParent: runtimeContext.resolveParent,
+    },
     paths
   );
   return {

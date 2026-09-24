@@ -5,6 +5,7 @@ import { opencodeStateDir, profilesDir, sessionsDir } from './paths.ts';
 import { createRuntime, type RuntimeContext } from './runtime.ts';
 import {
   v2ProjectDirectory,
+  v2ParentResolver,
   v2ToolAfterEvent,
   v2ToolBeforeEvent,
   v2WorktreeDirectory,
@@ -33,10 +34,9 @@ export async function setupV2Runtime(context: Context): Promise<() => Promise<vo
   ensureDirectory(sessionStoreDirectory);
 
   const runtimeContext: RuntimeContext = {
-    // The V2 tool lifecycle uses only location and tool-hook facilities. The
-    // shared policy has no verified dependency on V2 session operations.
     client: {},
     directory: worktreeDirectory,
+    resolveParent: v2ParentResolver(context.session),
   };
   const hooks = createRuntime(runtimeContext, {
     profilesDir: profileDirectory,

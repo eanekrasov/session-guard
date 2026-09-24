@@ -1,6 +1,7 @@
 import type { Context } from '@opencode/plugin/promise/plugin';
 import type { Registration } from '@opencode/plugin/promise/registration';
 import type { Tool } from '@opencode/schema/tool';
+import type { ResolveParentFn } from './session-executor.ts';
 
 export interface V2RuntimeContract {
   readonly projectDirectory: string;
@@ -65,9 +66,10 @@ export const V2_CAPABILITIES: readonly V2Capability[] = [
   {
     name: 'Session parent lookup',
     v1Hook: 'V1 client session API',
-    v2Mapping: 'ctx.session',
-    status: 'deferred',
-    reason: 'The V2 session lookup adapter is not part of V2.1/V2.2.',
+    v2Mapping: 'ctx.session.get({ sessionID })',
+    status: 'supported',
+    reason:
+      'The adapter projects non-empty parentID values through the shared resolver; failed lookups remain retryable.',
   },
   {
     name: 'Host events',
@@ -109,6 +111,25 @@ export const V2_CAPABILITIES: readonly V2Capability[] = [
 export interface V2ToolRegistration {
   readonly registration: Registration;
   readonly dispose: () => Promise<void>;
+}
+
+interface V2SessionLookup {
+  get(
+    input: Parameters<Context['session']['get']>[0],
+    requestOptions?: Parameters<Context['session']['get']>[1]
+  ): ReturnType<Context['session']['get']>;
+}
+
+/**
+ * Projects V2's typed session lookup onto the host-neutral parent resolver
+ * used by the shared executor. Lookup failures intentionally propagate so the
+ * executor can avoid caching an unproven self-root fallback.
+ */
+export function v2ParentResolver(session: V2SessionLookup): ResolveParentFn {
+  return async (sessionID) => {
+    const { parentID } = await session.get({ sessionID });
+    return typeof parentID === 'string' && parentID !== '' ? parentID : null;
+  };
 }
 
 export function v2ProjectDirectory(context: Context): string {
