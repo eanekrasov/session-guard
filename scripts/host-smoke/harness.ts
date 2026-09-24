@@ -215,14 +215,19 @@ function resolveProviderKeys(provider: unknown): unknown {
   return provider;
 }
 
-function providerContainsModel(provider: unknown, model: string): boolean {
+function providerContainsModel(providerName: string, provider: unknown, model: string): boolean {
   if (typeof provider !== 'object' || provider === null) return false;
   const models = (provider as { models?: unknown }).models;
   if (typeof models !== 'object' || models === null) return false;
-  const localModel = model.includes('/') ? model.slice(model.lastIndexOf('/') + 1) : model;
+
+  const [modelProvider, ...modelID] = model.split('/');
+  if (!modelProvider || modelID.length === 0 || modelProvider !== providerName) return false;
+
+  const upstreamModelID = modelID.join('/');
+  const modelAlias = modelID.at(-1)!;
   return (
-    Object.prototype.hasOwnProperty.call(models, model) ||
-    Object.prototype.hasOwnProperty.call(models, localModel)
+    Object.prototype.hasOwnProperty.call(models, upstreamModelID) ||
+    Object.prototype.hasOwnProperty.call(models, modelAlias)
   );
 }
 
@@ -233,8 +238,20 @@ export function filterProviders(providers: unknown, model: string): unknown {
 
   const entries = Object.entries(providers as Record<string, unknown>);
   return Object.fromEntries(
-    entries.filter(([, provider]) => providerContainsModel(provider, model))
+    entries.filter(([providerName, provider]) =>
+      providerContainsModel(providerName, provider, model)
+    )
   );
+}
+
+export function filterOperatorProviders(
+  operator: { provider?: unknown; providers?: unknown },
+  model: string
+): { provider?: unknown; providers?: unknown } {
+  return {
+    ...(operator.provider ? { provider: filterProviders(operator.provider, model) } : {}),
+    ...(operator.providers ? { providers: filterProviders(operator.providers, model) } : {}),
+  };
 }
 
 /**
@@ -273,8 +290,7 @@ async function operatorProviders(requestedModel?: string): Promise<{
   }
   const model = requestedModel ?? merged.model;
   if (model) {
-    if (merged.provider) merged.provider = filterProviders(merged.provider, model);
-    if (merged.providers) merged.providers = filterProviders(merged.providers, model);
+    Object.assign(merged, filterOperatorProviders(merged, model));
   }
   return merged;
 }

@@ -16,8 +16,11 @@ here is evidence the mechanism works in production.
 `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME` and `XDG_CACHE_HOME` point
 at a temp tree, so your own agents, plugins, MCP servers and sessions take no
 part in the run. Two things are borrowed from your setup, because without them
-there is no live model: the `provider` block from your opencode config, and
-`auth.json`. Both land in the temp tree and go away with it.
+there is no live model: matching entries from both `provider` and `providers`
+in your opencode config, and `auth.json`. The selected `HOST_SMOKE_MODEL` (or
+top-level config `model`) determines which provider name and model ID remain;
+unrelated providers are removed. Both land in the temp tree and go away with
+it.
 
 The project the host runs in is a fresh git repository holding the smoke
 profile, `commit-task.ts` and a plan file. It is deleted when the run ends.

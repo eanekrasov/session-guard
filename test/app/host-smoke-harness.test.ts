@@ -1,37 +1,28 @@
 import { describe, expect, test } from 'bun:test';
-import { filterProviders } from '../../scripts/host-smoke/harness.ts';
+import { filterOperatorProviders } from '../../scripts/host-smoke/harness.ts';
 
 describe('host smoke provider filtering', () => {
-  test('keeps only the provider containing the requested fully-qualified model', () => {
-    const providers = {
-      wanted: { models: { 'DeepSeek-V4-Flash-small': {} } },
+  test('keeps the named provider for a compound V1 model ID in both config maps', () => {
+    const model = 'crpt/deepseek-ai/DeepSeek-V4-Flash-small';
+    const provider = {
+      crpt: {
+        npm: '@ai-sdk/openai-compatible',
+        options: { baseURL: 'https://models.example.test/v1' },
+        models: { 'deepseek-ai/DeepSeek-V4-Flash-small': { name: 'DeepSeek Flash' } },
+      },
       unrelated: { models: { 'other-model': {} } },
     };
-
-    expect(filterProviders(providers, 'crpt/deepseek-ai/DeepSeek-V4-Flash-small')).toEqual({
-      wanted: providers.wanted,
-    });
-  });
-
-  test('keeps the provider when its model key is fully qualified', () => {
     const providers = {
-      wanted: { models: { 'crpt/deepseek-ai/DeepSeek-V4-Flash-small': {} } },
-      unrelated: { models: { 'other-model': {} } },
+      unrelated: { models: { 'deepseek-ai/DeepSeek-V4-Flash-small': {} } },
+      crpt: {
+        ...provider.crpt,
+        models: { 'DeepSeek-V4-Flash-small': { name: 'DeepSeek Flash alias' } },
+      },
     };
 
-    expect(filterProviders(providers, 'crpt/deepseek-ai/DeepSeek-V4-Flash-small')).toEqual({
-      wanted: providers.wanted,
-    });
-  });
-
-  test('filters legacy provider and modern providers independently', () => {
-    const providers = {
-      wanted: { models: { 'DeepSeek-V4-Flash-small': {} } },
-      unrelated: { models: { 'other-model': {} } },
-    };
-
-    expect(filterProviders(providers, 'DeepSeek-V4-Flash-small')).toEqual({
-      wanted: providers.wanted,
+    expect(filterOperatorProviders({ provider, providers }, model)).toEqual({
+      provider: { crpt: provider.crpt },
+      providers: { crpt: providers.crpt },
     });
   });
 });
