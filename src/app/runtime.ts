@@ -30,6 +30,7 @@ import { createTaskAdmission, type TaskAdmission } from './task-admission.ts';
 import { createChangeEnforcement, type ChangeEnforcement } from './change-enforcement.ts';
 import { createToolExecutionPolicy, type ToolExecutionPolicy } from './tool-execution-policy.ts';
 import { createWorkflowLifecycle, type WorkflowLifecycle } from './workflow-lifecycle.ts';
+import type { SessionClient } from './runtime-types.ts';
 
 export { schemaToEngineConfig };
 
@@ -103,7 +104,8 @@ class SessionGuardRuntime {
     this.store = new WorkflowStore(storeDir, this.log);
     const resolveHostParent = async (sessionID: string): Promise<string | null> => {
       try {
-        const result = await context.client.session.get({ path: { id: sessionID } });
+        const result = await context.client.session?.get({ path: { id: sessionID } });
+        if (!result) return null;
         const session = result.data;
         const parent = session?.parentID;
         return typeof parent === 'string' && parent !== '' ? parent : null;
@@ -286,7 +288,13 @@ class SessionGuardRuntime {
    * P1-012: Обработать tool.execute.before — запускает гардрейлы, consent или мутацию.
    */
   async handleToolBefore(
-    input: { tool: string; sessionID: string; callID: string },
+    input: {
+      tool: string;
+      sessionID: string;
+      callID: string;
+      agent?: string;
+      messageID?: string;
+    },
     output: { args: unknown }
   ): Promise<void> {
     await this.executor.run(input.sessionID, async (tx) => {
@@ -651,7 +659,16 @@ export interface RuntimePaths {
 }
 
 export interface RuntimeContext {
-  readonly client: PluginInput['client'];
+  readonly client: {
+    readonly session?: Pick<SessionClient, 'get' | 'list' | 'messages' | 'prompt'>;
+    readonly app?: Pick<PluginInput['client']['app'], 'log'>;
+    readonly post?: (
+      path: string,
+      input: { body: { message: string; variant: 'error' } }
+    ) => Promise<unknown>;
+    readonly tool?: PluginInput['client']['tool'];
+    readonly mcp?: PluginInput['client']['mcp'];
+  };
   readonly directory: string;
   readonly project?: unknown;
   readonly worktree?: string;
