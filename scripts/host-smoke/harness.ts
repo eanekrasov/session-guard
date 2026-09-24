@@ -16,6 +16,7 @@ import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { jsmin } from 'jsmin';
 
 export const REPO_ROOT = resolve(import.meta.dir!, '../..');
 
@@ -99,100 +100,40 @@ export function packPlugin(): string {
 }
 
 /**
- * Parse a .jsonc string as JSON, stripping // and /* * / comments, trailing
- * commas, and extra whitespace so JSON.parse works.
+ * Remove trailing commas after jsmin has removed JSONC comments. `jsmin` does
+ * not normalize commas, and the scan avoids treating commas in string values
+ * as syntax.
  */
-function parseJsonc<T = unknown>(text: string): T {
+function removeTrailingCommas(text: string): string {
   const out: string[] = [];
   let i = 0;
-  let line = 1;
-  let col = 0;
-
-  function err(msg: string): never {
-    throw new SyntaxError(`JSONC parse error at ${line}:${col}: ${msg}`);
-  }
+  let inString = false;
 
   while (i < text.length) {
     const ch = text[i];
-    col++;
-
-    if (ch === '/') {
-      const next = text[i + 1];
-      if (next === '/') {
-        // single-line comment
-        while (i < text.length && text[i] !== '\n') i++;
-        col = 0;
-        if (i < text.length) {
-          out.push('\n');
-          line++;
-          i++;
-        }
-        continue;
-      }
-      if (next === '*') {
-        // multi-line comment
-        i += 2;
-        while (i < text.length) {
-          if (text[i] === '*' && text[i + 1] === '/') {
-            i += 2;
-            break;
-          }
-          if (text[i] === '\n') {
-            out.push('\n');
-            line++;
-            col = 0;
-          }
-          i++;
-        }
-        continue;
-      }
-    }
-
-    if (ch === '"' || ch === "'") {
-      const quote = ch;
-      out.push('"');
-      i++;
-      while (i < text.length) {
-        const c = text[i];
-        if (c === '\\') {
-          out.push(c);
-          i++;
-          if (i < text.length) {
-            out.push(text[i]);
-            i++;
-          }
-          continue;
-        }
-        if (c === quote) {
-          out.push('"');
-          i++;
-          break;
-        }
-        if (c === '\n') err('newline in string literal');
-        out.push(c);
-        i++;
-      }
+    if (ch === '\\' && inString) {
+      out.push(ch, text[i + 1] ?? '');
+      i += 2;
       continue;
     }
-
-    if (ch === ',') {
-      // skip trailing comma before } or ]
+    if (ch === '"') inString = !inString;
+    if (ch === ',' && !inString) {
       const after = text.slice(i + 1).trimStart();
       if (after[0] === '}' || after[0] === ']') {
         i++;
         continue;
       }
     }
-
-    if (ch === '\n') {
-      line++;
-      col = 0;
-    }
     out.push(ch);
     i++;
   }
 
-  return JSON.parse(out.join('')) as T;
+  return out.join('');
+}
+
+/** Parse JSONC after `jsmin` has removed its comments. */
+function parseJsonc<T = unknown>(text: string): T {
+  return JSON.parse(removeTrailingCommas(jsmin(text))) as T;
 }
 
 /**
@@ -260,7 +201,7 @@ export function filterOperatorProviders(
  * A provider is a URL, a model list and a key — the harness needs them so the
  * run talks to a real model. Nothing else is carried over.
  */
-async function operatorProviders(requestedModel?: string): Promise<{
+export async function operatorProviders(requestedModel?: string): Promise<{
   provider?: unknown;
   providers?: unknown;
   disabled_providers?: unknown;
@@ -278,7 +219,10 @@ async function operatorProviders(requestedModel?: string): Promise<{
     const file = join(configHome, name);
     if (!existsSync(file)) continue;
     try {
-      const parsed = parseJsonc<Record<string, unknown>>(await readFile(file, 'utf-8'));
+      const text = await readFile(file, 'utf-8');
+      const parsed = name.endsWith('.jsonc')
+        ? parseJsonc<Record<string, unknown>>(text)
+        : (JSON.parse(text) as Record<string, unknown>);
       if (parsed.provider) merged.provider = resolveProviderKeys(parsed.provider);
       if (parsed.providers) merged.providers = resolveProviderKeys(parsed.providers);
       if (parsed.disabled_providers) merged.disabled_providers = parsed.disabled_providers;
