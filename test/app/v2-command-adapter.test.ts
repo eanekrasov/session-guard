@@ -1,6 +1,5 @@
 import { describe, expect, test } from 'bun:test';
 import type { Context } from '@opencode/plugin/promise/plugin';
-import type { Agent } from '@opencode/schema/agent';
 import {
   V1_SM_COMMANDS,
   V1_SESSION_GUARD_AGENT,
@@ -11,9 +10,6 @@ import {
   v1CommandToV2Definition,
 } from '../../src/app/v2-command-adapter.ts';
 import type { V1CommandDescriptor } from '../../src/app/v2-command-adapter.ts';
-import type { AgentEditor } from '@opencode/plugin/promise/agent';
-import { Transform } from 'node:stream';
-import type { TransformCallback } from 'stream';
 
 // ─── Helper: minimal Context stub with command transform ──────────────────────
 
@@ -25,7 +21,7 @@ function contextWithCommandCapture(
     location: { directory: '/tmp', project: { directory: '/tmp' } },
     command: {
       list: async () => ({ location: { directory: '/tmp' }, data: [] }),
-      transform: async (callback) => {
+      transform: async (callback: (editor: unknown) => void) => {
         callback({
           add: (def: unknown) => {
             const d = def as {
@@ -43,7 +39,7 @@ function contextWithCommandCapture(
     session: { prompt },
     agent: {
       list: async () => ({ data: [] }),
-      transform: async (callback) => {
+      transform: async (callback: (editor: unknown) => void) => {
         // agent transform — no-op default; tests that need it override ctx.agent.transform
       },
       reload: async () => {},
@@ -240,23 +236,31 @@ describe('V2 command adapter', () => {
   describe('createV2CommandAdapter', () => {
     test('returns registrations without throwing', async () => {
       const added: Array<{ name: string; description: string }> = [];
-      const ctx = minContext();
-      ctx.command.transform = async (callback) => {
-        callback({
-          add: (def: unknown) => added.push(def as { name: string; description: string }),
-        });
-        return { dispose: async () => {} };
-      };
-      ctx.agent.transform = async (callback) => {
-        callback({
-          get: () => undefined,
-          update: () => {},
-          list: () => [],
-          default: () => {},
-          remove: () => {},
-        });
-        return { dispose: async () => {} };
-      };
+      const ctx = {
+        ...minContext(),
+        command: {
+          ...minContext().command,
+          transform: async (callback: (editor: unknown) => void) => {
+            callback({
+              add: (def: unknown) => added.push(def as { name: string; description: string }),
+            });
+            return { dispose: async () => {} };
+          },
+        },
+        agent: {
+          ...minContext().agent,
+          transform: async (callback: (editor: unknown) => void) => {
+            callback({
+              get: () => undefined,
+              update: () => {},
+              list: () => [],
+              default: () => {},
+              remove: () => {},
+            });
+            return { dispose: async () => {} };
+          },
+        },
+      } as unknown as Context;
       const result = await createV2CommandAdapter(ctx);
       expect(result.registrations).toBeDefined();
       expect(result.registrations).toHaveLength(1);
@@ -267,23 +271,31 @@ describe('V2 command adapter', () => {
 
     test('all registrations are disposable without error', async () => {
       const added: Array<{ name: string; description: string }> = [];
-      const ctx = minContext();
-      ctx.command.transform = async (callback) => {
-        callback({
-          add: (def: unknown) => added.push(def as { name: string; description: string }),
-        });
-        return { dispose: async () => {} };
-      };
-      ctx.agent.transform = async (callback: TransformCallback) => {
-        callback({
-          get: () => undefined,
-          update: () => {},
-          list: () => [],
-          default: () => {},
-          remove: () => {},
-        });
-        return { dispose: async () => {} };
-      };
+      const ctx = {
+        ...minContext(),
+        command: {
+          ...minContext().command,
+          transform: async (callback: (editor: unknown) => void) => {
+            callback({
+              add: (def: unknown) => added.push(def as { name: string; description: string }),
+            });
+            return { dispose: async () => {} };
+          },
+        },
+        agent: {
+          ...minContext().agent,
+          transform: async (callback: (editor: unknown) => void) => {
+            callback({
+              get: () => undefined,
+              update: () => {},
+              list: () => [],
+              default: () => {},
+              remove: () => {},
+            });
+            return { dispose: async () => {} };
+          },
+        },
+      } as unknown as Context;
       const result = await createV2CommandAdapter(ctx);
       for (const reg of result.registrations) {
         await expect(reg.dispose()).resolves.toBeUndefined();
