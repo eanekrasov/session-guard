@@ -22,15 +22,19 @@ export function opencodeStateDir(): string {
 /**
  * Корневая директория харнесса в проекте (по умолчанию .opencode).
  */
-export function harnessDir(projectDir: string): string {
-  return absEnv(process.env.OPENCODE_HARNESS_DIR, projectDir) ?? `${projectDir}/.opencode`;
+export function harnessDir(projectDir: string, useOverride = true): string {
+  return useOverride && process.env.OPENCODE_HARNESS_DIR
+    ? absEnv(process.env.OPENCODE_HARNESS_DIR, projectDir)!
+    : `${projectDir}/.opencode`;
 }
 
 /**
  * Директория профилей — конфигурация проекта.
  */
-export function profilesDir(projectDir: string): string {
-  return process.env.SESSION_GUARD_PROFILES_DIR ?? `${harnessDir(projectDir)}/profiles`;
+export function profilesDir(projectDir: string, useOverride = true): string {
+  return useOverride && process.env.SESSION_GUARD_PROFILES_DIR
+    ? process.env.SESSION_GUARD_PROFILES_DIR
+    : `${harnessDir(projectDir, useOverride)}/profiles`;
 }
 
 /**

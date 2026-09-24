@@ -1,6 +1,7 @@
-import { describe, expect, test } from 'bun:test';
+import { afterAll, describe, expect, test } from 'bun:test';
 import type { Context } from '@opencode/plugin/promise/plugin';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { SessionGuardPluginV2 } from '../../src/index.ts';
@@ -26,6 +27,18 @@ type AfterEvent = BeforeEvent &
 
 type AfterCallback = (event: AfterEvent) => Promise<void>;
 
+const v2FixtureProject = mkdtempSync(join(tmpdir(), 'v2-fixture-project-'));
+mkdirSync(join(v2FixtureProject, '.opencode'), { recursive: true });
+symlinkSync(
+  resolve(import.meta.dir, '../fixtures/profiles'),
+  join(v2FixtureProject, '.opencode/profiles'),
+  'dir'
+);
+
+afterAll(() => {
+  rmSync(v2FixtureProject, { recursive: true, force: true });
+});
+
 function v2Context(
   onHook: (
     name: 'execute.before' | 'execute.after',
@@ -34,8 +47,8 @@ function v2Context(
 ): Context {
   return {
     location: {
-      directory: '/tmp/session-guard-worktree',
-      project: { directory: '/tmp/session-guard-project' },
+      directory: v2FixtureProject,
+      project: { directory: v2FixtureProject },
     },
     tool: {
       hook: async (
@@ -77,6 +90,101 @@ function executionSession(sessionID: string) {
 }
 
 describe('V2 plugin setup adapter', () => {
+  test('registers and executes a read-only workflow-list tool per project', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'v2-workflow-list-'));
+    const projectA = join(root, 'project-a');
+    const projectB = join(root, 'project-b');
+    await mkdir(join(projectA, '.opencode', 'profiles', 'alpha'), { recursive: true });
+    await mkdir(join(projectB, '.opencode', 'profiles', 'beta'), { recursive: true });
+    await writeFile(
+      join(projectA, '.opencode', 'profiles', 'alpha', 'profile.json'),
+      JSON.stringify({ id: 'alpha', description: 'Alpha profile', schemas: ['cycle.yaml'] })
+    );
+    await writeFile(
+      join(projectB, '.opencode', 'profiles', 'beta', 'profile.json'),
+      JSON.stringify({ id: 'beta', description: 'Beta profile', schemas: ['cycle.yaml'] })
+    );
+
+    const registrations: Array<{ dispose: () => Promise<void> }> = [];
+    const tools: Array<{
+      name: string;
+      input: unknown;
+      execute: (input: unknown, context: unknown) => Promise<unknown>;
+    }> = [];
+    const context = {
+      location: { directory: projectA, project: { directory: projectA } },
+      session: {},
+      tool: {
+        hook: async () => {
+          const registration = { dispose: async () => {} };
+          registrations.push(registration);
+          return registration;
+        },
+        transform: async (
+          callback: (editor: { add: (tool: (typeof tools)[number]) => void }) => void
+        ) => {
+          callback({ add: (tool) => tools.push(tool) });
+          const registration = { dispose: async () => {} };
+          registrations.push(registration);
+          return registration;
+        },
+      },
+    } as unknown as Context;
+
+    const cleanup = await SessionGuardPluginV2(context);
+    expect(tools).toHaveLength(1);
+    expect(tools[0]?.name).toBe('workflow-list');
+    expect(tools[0]?.input).toEqual({
+      type: 'object',
+      properties: {},
+      additionalProperties: false,
+    });
+    const result = await tools[0]!.execute({}, {});
+    expect(result).toEqual({
+      output:
+        `profilesDir: ${join(projectA, '.opencode', 'profiles')}\n` +
+        '  - alpha | desc: Alpha profile | schemas: cycle.yaml',
+    });
+    expect(registrations).toHaveLength(3);
+    await cleanup();
+    await cleanup();
+    expect(registrations).toHaveLength(3);
+    await rm(root, { recursive: true, force: true });
+  });
+
+  test('returns the empty profile result and maps listing errors to V2 errors', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'v2-workflow-list-empty-'));
+    const profileDirectory = join(root, '.opencode', 'profiles');
+    await mkdir(profileDirectory, { recursive: true });
+    let tool: { execute: (input: unknown, context: unknown) => Promise<unknown> } | undefined;
+    const context = {
+      location: { directory: root, project: { directory: root } },
+      session: {},
+      tool: {
+        hook: async () => ({ dispose: async () => {} }),
+        transform: async (callback: (editor: { add: (value: typeof tool) => void }) => void) => {
+          callback({ add: (value) => (tool = value!) });
+          return { dispose: async () => {} };
+        },
+      },
+    } as unknown as Context;
+    try {
+      const cleanup = await SessionGuardPluginV2(context);
+      await expect(tool!.execute({}, {})).resolves.toEqual({
+        output: `profilesDir: ${profileDirectory}\n  (no profiles found)`,
+      });
+      await cleanup();
+      await mkdir(join(profileDirectory, 'broken'), { recursive: true });
+      await writeFile(join(profileDirectory, 'broken', 'profile.json'), '{');
+      const second = await SessionGuardPluginV2(context);
+      await expect(tool!.execute({}, {})).rejects.toMatchObject({
+        message: expect.stringContaining('[ERROR] workflow-list failed'),
+      });
+      await second();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
   test('registers execute.before and disposes the registration and runtime once', async () => {
     let callback:
       | ((event: {
@@ -91,8 +199,8 @@ describe('V2 plugin setup adapter', () => {
     let disposed = 0;
     const context = {
       location: {
-        directory: '/tmp/session-guard-worktree',
-        project: { directory: '/tmp/session-guard-project' },
+        directory: v2FixtureProject,
+        project: { directory: v2FixtureProject },
       },
       session: {},
       tool: {
@@ -117,8 +225,8 @@ describe('V2 plugin setup adapter', () => {
   test('disposes the runtime when registration fails during setup', async () => {
     const context = {
       location: {
-        directory: '/tmp/session-guard-worktree-failure',
-        project: { directory: '/tmp/session-guard-project-failure' },
+        directory: v2FixtureProject,
+        project: { directory: v2FixtureProject },
       },
       session: {},
       tool: {
@@ -136,8 +244,8 @@ describe('V2 plugin setup adapter', () => {
     let registrations = 0;
     const context = {
       location: {
-        directory: '/tmp/session-guard-partial-worktree',
-        project: { directory: '/tmp/session-guard-partial-project' },
+        directory: v2FixtureProject,
+        project: { directory: v2FixtureProject },
       },
       session: {},
       tool: {
@@ -161,8 +269,8 @@ describe('V2 plugin setup adapter', () => {
     let disposed = 0;
     const context = {
       location: {
-        directory: '/tmp/session-guard-disposal-failure-worktree',
-        project: { directory: '/tmp/session-guard-disposal-failure-project' },
+        directory: v2FixtureProject,
+        project: { directory: v2FixtureProject },
       },
       session: {},
       tool: {

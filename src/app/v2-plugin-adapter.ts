@@ -1,8 +1,12 @@
 import type { Context } from '@opencode/plugin/promise/plugin';
 import type { Registration } from '@opencode/plugin/promise/registration';
+import { Effect } from 'effect';
+import { Tool } from '@opencode/schema/tool';
 import { mkdirSync } from 'node:fs';
 import { opencodeStateDir, profilesDir, sessionsDir } from './paths.ts';
 import { createRuntime, type RuntimeContext } from './runtime.ts';
+import { formatWorkflowList } from './workflow-tool-surface.ts';
+import { listProfiles } from '../public-api.ts';
 import {
   v2ProjectDirectory,
   v2ParentResolver,
@@ -27,7 +31,10 @@ function ensureDirectory(directory: string): void {
 export async function setupV2Runtime(context: Context): Promise<() => Promise<void>> {
   const projectDirectory = v2ProjectDirectory(context);
   const worktreeDirectory = v2WorktreeDirectory(context);
-  const profileDirectory = profilesDir(projectDirectory);
+  // V2 instances must derive project-local profiles independently. Reading the
+  // process-wide V1 override here would let another plugin instance redirect
+  // this adapter while tests or hosts initialize projects concurrently.
+  const profileDirectory = profilesDir(projectDirectory, false);
   const sessionStoreDirectory = sessionsDir(opencodeStateDir());
 
   ensureDirectory(profileDirectory);
@@ -93,6 +100,35 @@ export async function setupV2Runtime(context: Context): Promise<() => Promise<vo
       );
     });
     registrations.push(afterRegistration);
+    const transform = context.tool.transform;
+    if (typeof transform === 'function') {
+      const workflowListRegistration = await transform((editor) => {
+        editor.add({
+          name: 'workflow-list',
+          description:
+            'List all available workflow profiles (schemas). Returns profilesDir and profile IDs with descriptions.',
+          input: { type: 'object', properties: {}, additionalProperties: false },
+          execute: () =>
+            Effect.runPromise(
+              Effect.tryPromise({
+                try: async () => ({
+                  output: formatWorkflowList(
+                    profileDirectory,
+                    await listProfiles(profileDirectory)
+                  ),
+                }),
+                catch: (error) =>
+                  new Tool.Error({
+                    message: `[ERROR] workflow-list failed for ${profileDirectory}: ${
+                      error instanceof Error ? error.message : String(error)
+                    }`,
+                  }),
+              })
+            ),
+        });
+      });
+      registrations.push(workflowListRegistration);
+    }
   } catch (error) {
     await Promise.allSettled(registrations.map((registration) => registration.dispose()));
     await hooks.dispose!().catch(() => {});

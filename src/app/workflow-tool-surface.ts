@@ -259,17 +259,7 @@ class WorkflowToolSurfaceImpl implements WorkflowToolSurface {
 
   private async handleWorkflowList(): Promise<ToolResult> {
     const profiles = await listProfiles(this.ports.profilesDir);
-    const lines = [`profilesDir: ${this.ports.profilesDir}`];
-    for (const profile of profiles) {
-      const parts: string[] = [profile.id];
-      if (profile.description) parts.push(`desc: ${profile.description}`);
-      if (profile.extends) parts.push(`extends: ${profile.extends}`);
-      if (profile.schemas && profile.schemas.length > 0)
-        parts.push(`schemas: ${profile.schemas.join(', ')}`);
-      lines.push(`  - ${parts.join(' | ')}`);
-    }
-    if (profiles.length === 0) lines.push('  (no profiles found)');
-    return { output: lines.join('\n') };
+    return { output: formatWorkflowList(this.ports.profilesDir, profiles) };
   }
 
   private async handleWorkflowConsent(
@@ -623,4 +613,21 @@ class WorkflowToolSurfaceImpl implements WorkflowToolSurface {
 
 export function createWorkflowToolSurface(ports: WorkflowToolSurfacePorts): WorkflowToolSurface {
   return new WorkflowToolSurfaceImpl(ports);
+}
+
+export function formatWorkflowList(
+  profilesDir: string,
+  profiles: Awaited<ReturnType<typeof listProfiles>>
+): string {
+  const lines = [`profilesDir: ${profilesDir}`];
+  for (const profile of profiles) {
+    const parts: string[] = [profile.id];
+    if (profile.description) parts.push(`desc: ${profile.description}`);
+    if (profile.extends) parts.push(`extends: ${profile.extends}`);
+    if (profile.schemas && profile.schemas.length > 0)
+      parts.push(`schemas: ${profile.schemas.join(', ')}`);
+    lines.push(`  - ${parts.join(' | ')}`);
+  }
+  if (profiles.length === 0) lines.push('  (no profiles found)');
+  return lines.join('\n');
 }
