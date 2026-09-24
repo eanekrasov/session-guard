@@ -31,6 +31,7 @@ import { createChangeEnforcement, type ChangeEnforcement } from './change-enforc
 import { createToolExecutionPolicy, type ToolExecutionPolicy } from './tool-execution-policy.ts';
 import { createWorkflowLifecycle, type WorkflowLifecycle } from './workflow-lifecycle.ts';
 import type { SessionClient } from './runtime-types.ts';
+import { finishMutation as finishDomainMutation } from '../domain/operation-lifecycle.ts';
 
 export { schemaToEngineConfig };
 
@@ -378,6 +379,18 @@ class SessionGuardRuntime {
   }
 
   /**
+   * Closes only the matching operation after a host-reported tool failure.
+   * Failed calls intentionally bypass successful-output processing and never
+   * evaluate workflow transitions.
+   */
+  async handleToolFailure(input: { sessionID: string; callID: string }): Promise<void> {
+    await this.executor.run(input.sessionID, async (tx) => {
+      if (!tx.session?.activeOperations[input.callID]) return;
+      finishDomainMutation(tx.session, false, input.callID);
+    });
+  }
+
+  /**
    * SDK-005: Внедрить контекст workflow сессии в системный промпт.
    * Вызывается перед каждым запросом к модели — добавляет стадию, гейты и
    * одобрения, чтобы модель знала текущее состояние workflow.
@@ -674,10 +687,20 @@ export interface RuntimeContext {
   readonly worktree?: string;
 }
 
-export function createRuntime(context: PluginInput | RuntimeContext, paths?: RuntimePaths): Hooks {
+export interface RuntimeHooks extends Hooks {
+  handleToolFailure(input: { sessionID: string; callID: string }): Promise<void>;
+}
+
+export function createRuntime(
+  context: PluginInput | RuntimeContext,
+  paths?: RuntimePaths
+): RuntimeHooks {
   const runtime = new SessionGuardRuntime(
     { client: context.client, directory: context.directory },
     paths
   );
-  return runtime.hooks;
+  return {
+    ...runtime.hooks,
+    handleToolFailure: (input) => runtime.handleToolFailure(input),
+  };
 }

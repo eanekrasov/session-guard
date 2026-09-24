@@ -51,8 +51,9 @@ export const V2_CAPABILITIES: readonly V2Capability[] = [
     name: 'Tool after lifecycle',
     v1Hook: 'tool.execute.after',
     v2Mapping: "ctx.tool.hook('execute.after')",
-    status: 'out-of-scope',
-    reason: 'Completed/error result adaptation is implemented in a later work unit.',
+    status: 'supported',
+    reason:
+      'Completed results are sanitized before shared processing; errors use an explicit failure closure without success processing.',
   },
   {
     name: 'Custom workflow tools',
@@ -139,4 +140,45 @@ export function v2ToolBeforeEvent(event: {
     callID: event.id,
     input: event.input,
   };
+}
+
+function textOutput(result: Tool.Result): string {
+  if (typeof result.output === 'string') return result.output;
+  if (typeof result.content === 'string') return result.content;
+  if (Array.isArray(result.content)) {
+    return result.content
+      .filter(
+        (content): content is Extract<Tool.Content, { type: 'text' }> => content.type === 'text'
+      )
+      .map((content) => content.text)
+      .join('\n');
+  }
+  return '';
+}
+
+export function v2ToolAfterEvent(
+  event: {
+    readonly tool: string;
+    readonly sessionID: string;
+    readonly agent: string;
+    readonly messageID: string;
+    readonly id: string;
+    readonly input: unknown;
+  } & (
+    | { readonly status: 'completed'; readonly result: Tool.Result }
+    | { readonly status: 'error'; readonly error: Tool.Error }
+  )
+): V2ToolAfterEvent {
+  const identity = v2ToolBeforeEvent(event);
+  if (event.status === 'completed') {
+    return {
+      ...identity,
+      status: 'completed',
+      result: {
+        output: textOutput(event.result),
+        metadata: event.result.metadata,
+      },
+    };
+  }
+  return { ...identity, status: 'error', error: event.error };
 }

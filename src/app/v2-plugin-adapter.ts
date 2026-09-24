@@ -5,6 +5,7 @@ import { opencodeStateDir, profilesDir, sessionsDir } from './paths.ts';
 import { createRuntime, type RuntimeContext } from './runtime.ts';
 import {
   v2ProjectDirectory,
+  v2ToolAfterEvent,
   v2ToolBeforeEvent,
   v2WorktreeDirectory,
 } from './v2-plugin-contract.ts';
@@ -32,8 +33,8 @@ export async function setupV2Runtime(context: Context): Promise<() => Promise<vo
   ensureDirectory(sessionStoreDirectory);
 
   const runtimeContext: RuntimeContext = {
-    // Phase 3 only needs V2 location and tool-hook facilities. The shared
-    // before policy has no verified dependency on V2 session operations.
+    // The V2 tool lifecycle uses only location and tool-hook facilities. The
+    // shared policy has no verified dependency on V2 session operations.
     client: {},
     directory: worktreeDirectory,
   };
@@ -51,9 +52,13 @@ export async function setupV2Runtime(context: Context): Promise<() => Promise<vo
     },
     output: { args: unknown }
   ) => Promise<void>;
-  let registration: Registration;
+  const after = hooks['tool.execute.after'] as (
+    input: { tool: string; sessionID: string; callID: string; args: unknown },
+    output: { title: string; output: string; metadata: unknown }
+  ) => Promise<void>;
+  const registrations: Registration[] = [];
   try {
-    registration = await context.tool.hook('execute.before', async (event) => {
+    const beforeRegistration = await context.tool.hook('execute.before', async (event) => {
       const mapped = v2ToolBeforeEvent(event);
       await before(
         {
@@ -66,7 +71,30 @@ export async function setupV2Runtime(context: Context): Promise<() => Promise<vo
         { args: mapped.input }
       );
     });
+    registrations.push(beforeRegistration);
+    const afterRegistration = await context.tool.hook('execute.after', async (event) => {
+      const mapped = v2ToolAfterEvent(event);
+      if (mapped.status === 'error') {
+        await hooks.handleToolFailure({ sessionID: mapped.sessionID, callID: mapped.callID });
+        return;
+      }
+      await after(
+        {
+          tool: mapped.tool,
+          sessionID: mapped.sessionID,
+          callID: mapped.callID,
+          args: mapped.input,
+        },
+        {
+          title: mapped.tool,
+          output: typeof mapped.result.output === 'string' ? mapped.result.output : '',
+          metadata: mapped.result.metadata,
+        }
+      );
+    });
+    registrations.push(afterRegistration);
   } catch (error) {
+    await Promise.allSettled(registrations.map((registration) => registration.dispose()));
     await hooks.dispose!().catch(() => {});
     throw error;
   }
@@ -76,10 +104,12 @@ export async function setupV2Runtime(context: Context): Promise<() => Promise<vo
     if (disposed) return;
     disposed = true;
     let disposalError: unknown;
-    try {
-      await registration.dispose();
-    } catch (error) {
-      disposalError = error;
+    for (const registration of [...registrations].reverse()) {
+      try {
+        await registration.dispose();
+      } catch (error) {
+        disposalError ??= error;
+      }
     }
 
     await hooks.dispose!();
