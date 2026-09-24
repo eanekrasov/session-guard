@@ -13,7 +13,7 @@
  */
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -45,6 +45,11 @@ export interface HostOptions {
 }
 
 const activeHostStops = new Set<() => Promise<void>>();
+const packDirectories = new Set<string>();
+
+process.once('exit', () => {
+  for (const directory of packDirectories) rmSync(directory, { recursive: true, force: true });
+});
 
 /** Stop hosts that are running or still waiting for their listen URL. */
 export async function stopAllHosts(): Promise<void> {
@@ -75,16 +80,22 @@ export function buildPlugin(): string {
 /** Build and pack the plugin into a tarball. Kept for packaging checks. */
 export function packPlugin(): string {
   run('mise', ['run', 'build'], REPO_ROOT);
-  const destination = join(tmpdir(), 'host-smoke-pack');
-  const out = run('bun', ['pm', 'pack', '--destination', destination], REPO_ROOT);
-  // `bun pm pack` prints a file list and a summary; the tarball path is the one
-  // line that ends in .tgz on its own.
-  const line = out
-    .split('\n')
-    .map((entry) => entry.trim())
-    .findLast((entry) => entry.endsWith('.tgz') && !entry.startsWith('packed'));
-  if (!line) throw new Error(`could not read the packed tarball from:\n${out}`);
-  return line.startsWith('/') ? line : join(destination, line);
+  const destination = mkdtempSync(join(tmpdir(), 'host-smoke-pack-'));
+  try {
+    const out = run('bun', ['pm', 'pack', '--destination', destination], REPO_ROOT);
+    // `bun pm pack` prints a file list and a summary; the tarball path is the one
+    // line that ends in .tgz on its own.
+    const line = out
+      .split('\n')
+      .map((entry) => entry.trim())
+      .findLast((entry) => entry.endsWith('.tgz') && !entry.startsWith('packed'));
+    if (!line) throw new Error(`could not read the packed tarball from:\n${out}`);
+    packDirectories.add(destination);
+    return line.startsWith('/') ? line : join(destination, line);
+  } catch (error) {
+    rmSync(destination, { recursive: true, force: true });
+    throw error;
+  }
 }
 
 /**
@@ -204,32 +215,66 @@ function resolveProviderKeys(provider: unknown): unknown {
   return provider;
 }
 
+function providerContainsModel(provider: unknown, model: string): boolean {
+  if (typeof provider !== 'object' || provider === null) return false;
+  const models = (provider as { models?: unknown }).models;
+  if (typeof models !== 'object' || models === null) return false;
+  const localModel = model.includes('/') ? model.slice(model.lastIndexOf('/') + 1) : model;
+  return (
+    Object.prototype.hasOwnProperty.call(models, model) ||
+    Object.prototype.hasOwnProperty.call(models, localModel)
+  );
+}
+
+export function filterProviders(providers: unknown, model: string): unknown {
+  if (typeof providers !== 'object' || providers === null || Array.isArray(providers)) {
+    return providers;
+  }
+
+  const entries = Object.entries(providers as Record<string, unknown>);
+  return Object.fromEntries(
+    entries.filter(([, provider]) => providerContainsModel(provider, model))
+  );
+}
+
 /**
  * Provider definitions from the operator's own opencode config.
  *
  * A provider is a URL, a model list and a key — the harness needs them so the
  * run talks to a real model. Nothing else is carried over.
  */
-async function operatorProviders(): Promise<{
+async function operatorProviders(requestedModel?: string): Promise<{
   provider?: unknown;
+  providers?: unknown;
   disabled_providers?: unknown;
   model?: string;
 }> {
   const configHome =
     process.env.HOST_SMOKE_OPERATOR_CONFIG ?? join(homedir(), '.config', 'opencode');
-  const merged: { provider?: unknown; disabled_providers?: unknown; model?: string } = {};
+  const merged: {
+    provider?: unknown;
+    providers?: unknown;
+    disabled_providers?: unknown;
+    model?: string;
+  } = {};
   for (const name of ['opencode.json', 'opencode.jsonc']) {
     const file = join(configHome, name);
     if (!existsSync(file)) continue;
     try {
       const parsed = parseJsonc<Record<string, unknown>>(await readFile(file, 'utf-8'));
       if (parsed.provider) merged.provider = resolveProviderKeys(parsed.provider);
+      if (parsed.providers) merged.providers = resolveProviderKeys(parsed.providers);
       if (parsed.disabled_providers) merged.disabled_providers = parsed.disabled_providers;
       if (typeof parsed.model === 'string') merged.model = parsed.model;
     } catch {
       // A config we cannot read is not a reason to fail: the run will simply
       // report the model as unavailable.
     }
+  }
+  const model = requestedModel ?? merged.model;
+  if (model) {
+    if (merged.provider) merged.provider = filterProviders(merged.provider, model);
+    if (merged.providers) merged.providers = filterProviders(merged.providers, model);
   }
   return merged;
 }
@@ -253,153 +298,164 @@ export async function startHost(options: HostOptions): Promise<Host> {
   const workDir = join(root, 'work');
   const configDir = join(homeDir, 'config');
   const dataDir = join(homeDir, 'data');
-  for (const dir of [workDir, join(configDir, 'opencode'), join(dataDir, 'opencode')]) {
-    await mkdir(dir, { recursive: true });
-  }
-
-  // Credentials live in the data dir; copy them so the model is live.
-  const auth = join(homedir(), '.local/share/opencode/auth.json');
-  if (existsSync(auth)) await cp(auth, join(dataDir, 'opencode', 'auth.json'));
-
-  const pluginSpec = process.env.HOST_SMOKE_PLUGIN ?? buildPlugin();
-  const operator = await operatorProviders();
-  await writeFile(
-    join(configDir, 'opencode', 'opencode.json'),
-    JSON.stringify(
-      {
-        $schema: 'https://opencode.ai/config.json',
-        model: options.model,
-        // Only the provider definitions are borrowed from the operator's own
-        // config — the model has to be live. Their agents, plugins, MCP servers
-        // and commands are deliberately left out of this run.
-        ...(operator.provider ? { provider: operator.provider } : {}),
-        ...(operator.disabled_providers ? { disabled_providers: operator.disabled_providers } : {}),
-        // Consent runs through the host's `question` tool, which is denied by
-        // default outside an interactive client.
-        // The equivalent of `opencode run --auto` for a served session: nobody
-        // is at the keyboard, so a permission the host stops to ask about would
-        // hang the run instead of failing it. `serve` has no such flag, so the
-        // approval is declared in config. `question` is listed on its own
-        // because consent runs through it and it is denied by default outside
-        // an interactive client.
-        permission: { '*': 'allow', question: 'allow' },
-        plugin: [`file://${pluginSpec}`],
-        autoupdate: false,
-        share: 'disabled',
-      },
-      null,
-      2
-    ),
-    'utf-8'
-  );
-
-  // The profile the plugin governs this project with. `base` always comes
-  // along: every shipped profile is a delta over it.
-  const profileTarget = join(workDir, '.opencode', 'profiles');
-  await mkdir(profileTarget, { recursive: true });
-  const profileSource = existsSync(join(REPO_ROOT, 'profiles', options.profile))
-    ? join(REPO_ROOT, 'profiles', options.profile)
-    : join(import.meta.dir!, 'profile', options.profile);
-  await cp(profileSource, join(profileTarget, options.profile), { recursive: true });
-  await cp(join(REPO_ROOT, 'profiles', 'base'), join(profileTarget, 'base'), { recursive: true });
-
-  // The host reads its agent roster once, at startup, so the profile's agents
-  // are placed where opencode looks before the server comes up. They register
-  // under their bare names (`orchestrator`), which is one of the two forms the
-  // plugin accepts.
-  const agentSource = join(profileSource, 'agents');
-  if (existsSync(agentSource)) {
-    await cp(agentSource, join(workDir, '.opencode', 'agent'), { recursive: true });
-  }
-
-  for (const [path, contents] of Object.entries(options.files ?? {})) {
-    const target = join(workDir, path);
-    await mkdir(join(target, '..'), { recursive: true });
-    await writeFile(target, contents, 'utf-8');
-  }
-
-  if (options.git !== false) {
-    run('git', ['init', '-q'], workDir);
-    run('git', ['config', 'user.email', 'smoke@example.com'], workDir);
-    run('git', ['config', 'user.name', 'host smoke'], workDir);
-    await writeFile(join(workDir, 'README.md'), '# host smoke\n', 'utf-8');
-    run('git', ['add', '-A'], workDir);
-    run('git', ['commit', '-q', '-m', 'seed'], workDir);
-  }
-
-  const env = {
-    ...process.env,
-    ...(options.env ?? {}),
-    HOME: homeDir,
-    XDG_CONFIG_HOME: configDir,
-    XDG_DATA_HOME: dataDir,
-    XDG_STATE_HOME: join(homeDir, 'state'),
-    XDG_CACHE_HOME: join(homeDir, 'cache'),
-    OPENCODE_DISABLE_AUTOUPDATE: '1',
-    // The consent path runs through the host's `question` tool, which the
-    // server only registers for interactive clients unless this is set.
-    OPENCODE_ENABLE_QUESTION_TOOL: '1',
-  };
-
-  let buffer = '';
-  const child: ChildProcess = spawn(
-    '/opt/homebrew/bin/opencode',
-    ['serve', '--hostname', '127.0.0.1', '--port', '0', '--print-logs', '--log-level', 'INFO'],
-    { cwd: workDir, env, stdio: ['ignore', 'pipe', 'pipe'] }
-  );
-  child.stdout?.on('data', (chunk) => (buffer += chunk));
-  child.stderr?.on('data', (chunk) => (buffer += chunk));
-
-  let stopPromise: Promise<void> | undefined;
-  const stop = async (): Promise<void> => {
-    if (stopPromise) return stopPromise;
-    stopPromise = (async () => {
-      if (child.exitCode === null) {
-        child.kill('SIGTERM');
-        await new Promise((resolve) => setTimeout(resolve, 300));
-        if (child.exitCode === null) child.kill('SIGKILL');
-      }
-      await rm(root, { recursive: true, force: true });
-      activeHostStops.delete(stop);
-    })();
-    return stopPromise;
-  };
-  activeHostStops.add(stop);
-
-  let url: string;
+  let stop: (() => Promise<void>) | undefined;
   try {
-    url = await new Promise<string>((resolveUrl, rejectUrl) => {
-      const deadline = setTimeout(
-        () => rejectUrl(new Error(`opencode serve did not report a URL:\n${buffer}`)),
-        60_000
-      );
-      const poll = setInterval(() => {
-        const match = /(http:\/\/127\.0\.0\.1:\d+)/.exec(buffer);
-        if (!match) {
-          if (child.exitCode !== null) {
-            clearInterval(poll);
-            clearTimeout(deadline);
-            rejectUrl(new Error(`opencode serve exited (${child.exitCode}):\n${buffer}`));
-          }
-          return;
+    for (const dir of [workDir, join(configDir, 'opencode'), join(dataDir, 'opencode')]) {
+      await mkdir(dir, { recursive: true });
+    }
+
+    // Credentials live in the data dir; copy them so the model is live.
+    const auth = join(homedir(), '.local/share/opencode/auth.json');
+    if (existsSync(auth)) await cp(auth, join(dataDir, 'opencode', 'auth.json'));
+
+    const pluginSpec = process.env.HOST_SMOKE_PLUGIN ?? buildPlugin();
+    const operator = await operatorProviders(options.model);
+    await writeFile(
+      join(configDir, 'opencode', 'opencode.json'),
+      JSON.stringify(
+        {
+          $schema: 'https://opencode.ai/config.json',
+          model: options.model,
+          // Only the provider definitions are borrowed from the operator's own
+          // config — the model has to be live. Their agents, plugins, MCP servers
+          // and commands are deliberately left out of this run.
+          ...(operator.provider ? { provider: operator.provider } : {}),
+          ...(operator.providers ? { providers: operator.providers } : {}),
+          ...(operator.disabled_providers
+            ? { disabled_providers: operator.disabled_providers }
+            : {}),
+          // Consent runs through the host's `question` tool, which is denied by
+          // default outside an interactive client.
+          // The equivalent of `opencode run --auto` for a served session: nobody
+          // is at the keyboard, so a permission the host stops to ask about would
+          // hang the run instead of failing it. `serve` has no such flag, so the
+          // approval is declared in config. `question` is listed on its own
+          // because consent runs through it and it is denied by default outside
+          // an interactive client.
+          permission: { '*': 'allow', question: 'allow' },
+          plugin: [`file://${pluginSpec}`],
+          autoupdate: false,
+          share: 'disabled',
+        },
+        null,
+        2
+      ),
+      'utf-8'
+    );
+
+    // The profile the plugin governs this project with. `base` always comes
+    // along: every shipped profile is a delta over it.
+    const profileTarget = join(workDir, '.opencode', 'profiles');
+    await mkdir(profileTarget, { recursive: true });
+    const profileSource = existsSync(join(REPO_ROOT, 'profiles', options.profile))
+      ? join(REPO_ROOT, 'profiles', options.profile)
+      : join(import.meta.dir!, 'profile', options.profile);
+    await cp(profileSource, join(profileTarget, options.profile), { recursive: true });
+    await cp(join(REPO_ROOT, 'profiles', 'base'), join(profileTarget, 'base'), { recursive: true });
+
+    // The host reads its agent roster once, at startup, so the profile's agents
+    // are placed where opencode looks before the server comes up. They register
+    // under their bare names (`orchestrator`), which is one of the two forms the
+    // plugin accepts.
+    const agentSource = join(profileSource, 'agents');
+    if (existsSync(agentSource)) {
+      await cp(agentSource, join(workDir, '.opencode', 'agent'), { recursive: true });
+    }
+
+    for (const [path, contents] of Object.entries(options.files ?? {})) {
+      const target = join(workDir, path);
+      await mkdir(join(target, '..'), { recursive: true });
+      await writeFile(target, contents, 'utf-8');
+    }
+
+    if (options.git !== false) {
+      run('git', ['init', '-q'], workDir);
+      run('git', ['config', 'user.email', 'smoke@example.com'], workDir);
+      run('git', ['config', 'user.name', 'host smoke'], workDir);
+      await writeFile(join(workDir, 'README.md'), '# host smoke\n', 'utf-8');
+      run('git', ['add', '-A'], workDir);
+      run('git', ['commit', '-q', '-m', 'seed'], workDir);
+    }
+
+    const env = {
+      ...process.env,
+      ...(options.env ?? {}),
+      HOME: homeDir,
+      XDG_CONFIG_HOME: configDir,
+      XDG_DATA_HOME: dataDir,
+      XDG_STATE_HOME: join(homeDir, 'state'),
+      XDG_CACHE_HOME: join(homeDir, 'cache'),
+      OPENCODE_DISABLE_AUTOUPDATE: '1',
+      // The consent path runs through the host's `question` tool, which the
+      // server only registers for interactive clients unless this is set.
+      OPENCODE_ENABLE_QUESTION_TOOL: '1',
+    };
+
+    let buffer = '';
+    const child: ChildProcess = spawn(
+      '/opt/homebrew/bin/opencode',
+      ['serve', '--hostname', '127.0.0.1', '--port', '0', '--print-logs', '--log-level', 'INFO'],
+      { cwd: workDir, env, stdio: ['ignore', 'pipe', 'pipe'] }
+    );
+    child.stdout?.on('data', (chunk) => (buffer += chunk));
+    child.stderr?.on('data', (chunk) => (buffer += chunk));
+
+    let stopPromise: Promise<void> | undefined;
+    const hostStop = async (): Promise<void> => {
+      if (stopPromise) return stopPromise;
+      stopPromise = (async () => {
+        if (child.exitCode === null) {
+          child.kill('SIGTERM');
+          await new Promise((resolve) => setTimeout(resolve, 300));
+          if (child.exitCode === null) child.kill('SIGKILL');
         }
-        clearInterval(poll);
-        clearTimeout(deadline);
-        resolveUrl(match[1]!);
-      }, 100);
-    });
+        await rm(root, { recursive: true, force: true });
+        activeHostStops.delete(hostStop);
+      })();
+      return stopPromise;
+    };
+    stop = hostStop;
+    activeHostStops.add(hostStop);
+
+    let url: string;
+    try {
+      url = await new Promise<string>((resolveUrl, rejectUrl) => {
+        const deadline = setTimeout(
+          () => rejectUrl(new Error(`opencode serve did not report a URL:\n${buffer}`)),
+          60_000
+        );
+        const poll = setInterval(() => {
+          const match = /(http:\/\/127\.0\.0\.1:\d+)/.exec(buffer);
+          if (!match) {
+            if (child.exitCode !== null) {
+              clearInterval(poll);
+              clearTimeout(deadline);
+              rejectUrl(new Error(`opencode serve exited (${child.exitCode}):\n${buffer}`));
+            }
+            return;
+          }
+          clearInterval(poll);
+          clearTimeout(deadline);
+          resolveUrl(match[1]!);
+        }, 100);
+      });
+    } catch (error) {
+      await hostStop();
+      throw error;
+    }
+
+    return {
+      url,
+      workDir,
+      homeDir,
+      logs: () => buffer,
+      stop: hostStop,
+    };
   } catch (error) {
-    await stop();
+    if (stop) await stop();
+    else await rm(root, { recursive: true, force: true });
     throw error;
   }
-
-  return {
-    url,
-    workDir,
-    homeDir,
-    logs: () => buffer,
-    stop,
-  };
 }
 
 export async function api<T>(host: Host, method: string, path: string, body?: unknown): Promise<T> {
