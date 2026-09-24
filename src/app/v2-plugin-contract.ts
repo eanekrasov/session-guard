@@ -60,8 +60,9 @@ export const V2_CAPABILITIES: readonly V2Capability[] = [
     name: 'Custom workflow tools',
     v1Hook: 'hooks.tool',
     v2Mapping: 'ctx.tool.transform',
-    status: 'deferred',
-    reason: 'The V2 tool registration mapping is not part of V2.1/V2.2.',
+    status: 'supported',
+    reason:
+      'workflow-list is registered through ctx.tool.transform with a V2 JSON schema and read-only Effect result.',
   },
   {
     name: 'Session parent lookup',
