@@ -3,7 +3,11 @@ import type { Registration } from '@opencode/plugin/promise/registration';
 import { mkdirSync } from 'node:fs';
 import { opencodeStateDir, profilesDir, sessionsDir } from './paths.ts';
 import { createRuntime, type RuntimeContext } from './runtime.ts';
-import { v2ProjectDirectory, v2WorktreeDirectory } from './v2-plugin-contract.ts';
+import {
+  v2ProjectDirectory,
+  v2ToolBeforeEvent,
+  v2WorktreeDirectory,
+} from './v2-plugin-contract.ts';
 
 export interface V2SetupResult {
   readonly cleanup: () => Promise<void>;
@@ -28,23 +32,38 @@ export async function setupV2Runtime(context: Context): Promise<() => Promise<vo
   ensureDirectory(sessionStoreDirectory);
 
   const runtimeContext: RuntimeContext = {
-    client: context.session as unknown as RuntimeContext['client'],
+    // Phase 3 only needs V2 location and tool-hook facilities. The shared
+    // before policy has no verified dependency on V2 session operations.
+    client: {},
     directory: worktreeDirectory,
   };
   const hooks = createRuntime(runtimeContext, {
     profilesDir: profileDirectory,
     storeDir: sessionStoreDirectory,
   });
+  const before = hooks['tool.execute.before'] as (
+    input: {
+      tool: string;
+      sessionID: string;
+      callID: string;
+      agent?: string;
+      messageID?: string;
+    },
+    output: { args: unknown }
+  ) => Promise<void>;
   let registration: Registration;
   try {
     registration = await context.tool.hook('execute.before', async (event) => {
-      await hooks['tool.execute.before']!(
+      const mapped = v2ToolBeforeEvent(event);
+      await before(
         {
-          tool: event.tool,
-          sessionID: event.sessionID,
-          callID: event.id,
+          tool: mapped.tool,
+          sessionID: mapped.sessionID,
+          callID: mapped.callID,
+          agent: mapped.agent,
+          messageID: mapped.messageID,
         },
-        { args: event.input }
+        { args: mapped.input }
       );
     });
   } catch (error) {

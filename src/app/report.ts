@@ -1,4 +1,3 @@
-import type { PluginInput } from '@opencode-ai/plugin';
 import type { LogFn } from './logger.ts';
 
 /**
@@ -30,13 +29,11 @@ type ToastClient = {
   ) => Promise<unknown>;
 };
 
-export function createReporter(client: PluginInput['client'], log: LogFn): Reporter {
+export function createReporter(client: ToastClient, log: LogFn): Reporter {
   return (message, extra) => {
     void log('error', message, extra);
     if (!toastsEnabled()) return;
-    void (client as unknown as ToastClient)
-      .post?.('/tui/show-toast', { body: { message, variant: 'error' } })
-      ?.catch(() => {});
+    void client.post?.('/tui/show-toast', { body: { message, variant: 'error' } })?.catch(() => {});
   };
 }
 

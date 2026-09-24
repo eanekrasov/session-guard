@@ -254,7 +254,7 @@ export class MutationOrchestrator {
   private liveMutations = new Map<string, { rootSessionId: string; stageBefore: string }>();
   private logNoop: LogFn;
   private readonly projectDir: string;
-  private readonly client?: SessionClient;
+  private readonly client?: Pick<SessionClient, 'list'>;
 
   constructor(
     private readonly store: WorkflowStore,
@@ -262,7 +262,7 @@ export class MutationOrchestrator {
     projectDir: string | undefined,
     private readonly profilesDir: string,
     log?: LogFn,
-    client?: SessionClient | string
+    client?: Pick<SessionClient, 'list'> | string
   ) {
     // Сохранить совместимость с pre-merge конструктором, где директория проекта
     // занимала последний аргумент.

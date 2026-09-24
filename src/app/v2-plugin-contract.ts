@@ -43,8 +43,9 @@ export const V2_CAPABILITIES: readonly V2Capability[] = [
     name: 'Tool before policy',
     v1Hook: 'tool.execute.before',
     v2Mapping: "ctx.tool.hook('execute.before')",
-    status: 'out-of-scope',
-    reason: 'Runtime event adaptation is implemented in a later work unit.',
+    status: 'supported',
+    reason:
+      'The adapter preserves tool, session, call, input, agent, and message identity and propagates policy rejection.',
   },
   {
     name: 'Tool after lifecycle',
@@ -115,4 +116,27 @@ export function v2ProjectDirectory(context: Context): string {
 
 export function v2WorktreeDirectory(context: Context): string {
   return context.location.directory;
+}
+
+/**
+ * Maps exactly the identity required by V2's execute.before hook. The runtime
+ * does not currently consume agent or message identity, but retaining it here
+ * prevents the adapter boundary from silently losing host information.
+ */
+export function v2ToolBeforeEvent(event: {
+  readonly tool: string;
+  readonly sessionID: string;
+  readonly agent: string;
+  readonly messageID: string;
+  readonly id: string;
+  readonly input: unknown;
+}): V2ToolBeforeEvent {
+  return {
+    tool: event.tool,
+    sessionID: event.sessionID,
+    agent: event.agent,
+    messageID: event.messageID,
+    callID: event.id,
+    input: event.input,
+  };
 }
