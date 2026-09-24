@@ -560,6 +560,10 @@ class SessionGuardRuntime {
     void this.log('info', 'SessionGuardRuntime disposed');
   }
 
+  async logMessage(level: 'debug' | 'info' | 'warn' | 'error', message: string): Promise<void> {
+    await this.log(level, message);
+  }
+
   /**
    * Обработать config — зарегистрировать sm-* команды и session-guard agent.
    */
@@ -651,6 +655,10 @@ class SessionGuardRuntime {
       tools: this.workflowToolSurface.createTools(),
     });
   }
+
+  get workflowTools(): ReturnType<typeof createWorkflowToolSurface> {
+    return this.workflowToolSurface;
+  }
 }
 
 // ─── Factory ──────────────────────────────────────────────────────────────────
@@ -691,6 +699,8 @@ export interface RuntimeContext {
 
 export interface RuntimeHooks extends Hooks {
   handleToolFailure(input: { sessionID: string; callID: string }): Promise<void>;
+  logMessage(level: 'debug' | 'info' | 'warn' | 'error', message: string): Promise<void>;
+  workflowToolSurface: ReturnType<typeof createWorkflowToolSurface>;
 }
 
 export function createRuntime(
@@ -710,5 +720,7 @@ export function createRuntime(
   return {
     ...runtime.hooks,
     handleToolFailure: (input) => runtime.handleToolFailure(input),
+    logMessage: (level, message) => runtime.logMessage(level, message),
+    workflowToolSurface: runtime.workflowTools,
   };
 }

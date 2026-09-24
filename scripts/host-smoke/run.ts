@@ -29,7 +29,12 @@ import {
   api,
   buildPlugin,
   defaultModel,
+  hostVersionFromEnv,
+  isTraceEnabled,
+  log as harnessLog,
+  opencodeBinary,
   readWorkflowSession,
+  sanitizeTracePayload,
   startHost,
   stopAllHosts,
   type Host,
@@ -229,20 +234,22 @@ function modelResponseText(parts: Part[], error: string): string {
   return [error, response].filter(Boolean).join('\n') || '(empty response)';
 }
 
-/** Log the full `say` exchange: user instruction and model response. */
+/** Persist a bounded, sanitized `say` exchange only in explicit trace mode. */
 async function logExchange(
   instruction: string,
   agent: string | undefined,
   error: string,
   parts: Part[]
 ): Promise<void> {
+  if (!isTraceEnabled()) return;
+
   const response = modelResponseText(parts, error);
   const lines = [
     '',
     `─── ${new Date().toISOString()} ───`,
     `→ agent: ${agent ?? '(default)'}`,
-    `USER:\n${instruction}`,
-    `MODEL:\n${response}`,
+    `USER:\n${sanitizeTracePayload(instruction)}`,
+    `MODEL:\n${sanitizeTracePayload(response)}`,
   ];
   await appendFile(SESSION_LOG, lines.join('\n'), 'utf-8').catch(() => {});
 }
@@ -256,6 +263,16 @@ async function say(
   agent?: string
 ): Promise<Session> {
   const [providerID, ...rest] = model.split('/');
+  const startedAt = performance.now();
+
+  harnessLog(
+    'debug',
+    `say request: model=${model}${agent ? ` agent=${agent}` : ''} instruction.length=${text.length}`
+  );
+  if (isTraceEnabled()) {
+    harnessLog('trace', `say request payload: ${sanitizeTracePayload(text.slice(0, 2000))}`);
+  }
+
   const operator = answerQuestions(host, 'grant');
   let reply: Message;
   try {
@@ -268,8 +285,33 @@ async function say(
     operator.stop();
   }
 
+  const duration = performance.now() - startedAt;
   const parts = reply.parts ?? [];
   const error = reply.info?.error?.data?.message ?? '';
+
+  harnessLog(
+    'debug',
+    `say response: ${parts.length} parts${error ? ` error=${error.slice(0, 200)}` : ''} duration=${duration.toFixed(1)}ms`
+  );
+  if (isTraceEnabled()) {
+    const toolParts = parts.filter((p) => p.tool);
+    if (toolParts.length > 0) {
+      harnessLog(
+        'trace',
+        `say tools: [${toolParts.map((p) => `${p.tool}${p.state?.error ? ' ERROR' : p.state?.status ? ` status=${p.state.status}` : ''}`).join(', ')}]`
+      );
+    }
+    const responseText = parts.map((p) => p.text ?? '').join('\n');
+    if (responseText.length > 0) {
+      harnessLog(
+        'trace',
+        `say response text: ${sanitizeTracePayload(responseText.slice(0, 2000))}`
+      );
+    }
+    if (error) {
+      harnessLog('trace', `say response error: ${sanitizeTracePayload(error.slice(0, 1000))}`);
+    }
+  }
   // Вопрос, которого сценарий не задавал, — это модель, ушедшая в сторону.
   // Он попадает в транскрипт шага, чтобы падение следующего шага называло
   // причину, а не гадало про стадию.
@@ -362,6 +404,7 @@ interface ScenarioResult {
   evidence: string;
   attempts: number;
   durationMs: number;
+  status: 'pass' | 'fail' | 'blocked';
 }
 
 type Scenario = {
@@ -1139,12 +1182,17 @@ async function main(): Promise<void> {
     process.exit(2);
   }
 
-  const model = await defaultModel();
+  const hostVersion = hostVersionFromEnv();
+  const binary = opencodeBinary(hostVersion);
+  const model = await defaultModel(binary);
   const plugin = process.env.HOST_SMOKE_PLUGIN ?? buildPlugin();
   process.env.HOST_SMOKE_PLUGIN = plugin;
 
-  logEvent(`model:  ${model}`, 'gray', 'run.start', { model, plugin });
-  if (OUTPUT_FORMAT !== 'jsonl') logEvent(`plugin: ${plugin}`, 'gray');
+  logEvent(`model:  ${model}`, 'gray', 'run.start', { model, plugin, version: hostVersion });
+  if (OUTPUT_FORMAT !== 'jsonl') {
+    logEvent(`plugin: ${plugin}`, 'gray');
+    logEvent(`opencode: ${binary}`, 'gray');
+  }
 
   const results: ScenarioResult[] = [];
   for (const scenario of selected) {
@@ -1152,6 +1200,7 @@ async function main(): Promise<void> {
     logEvent(`▶ ${scenario.id} …`, 'cyan', 'scenario.start', { scenario: scenario.id });
     const host = await startHost({
       model,
+      version: hostVersion,
       profile: scenario.profile ?? 'smoke',
       env: scenario.env,
       files: {
@@ -1174,7 +1223,13 @@ async function main(): Promise<void> {
         );
       }
       const durationMs = Date.now() - startedAt;
-      results.push({ id: scenario.id, title: scenario.title, ...outcome, durationMs });
+      results.push({
+        id: scenario.id,
+        title: scenario.title,
+        ...outcome,
+        status: outcome.ok ? 'pass' : 'fail',
+        durationMs,
+      });
       logEvent(
         outcome.ok
           ? `PASS (${outcome.attempts} attempt(s), ${formatDuration(durationMs)})`
@@ -1196,6 +1251,7 @@ async function main(): Promise<void> {
         id: scenario.id,
         title: scenario.title,
         ok: false,
+        status: 'fail',
         attempts: 0,
         evidence: `harness error: ${message}\n${host.logs().slice(-1500)}`,
         durationMs: Date.now() - startedAt,
@@ -1222,6 +1278,7 @@ async function main(): Promise<void> {
     '',
     `| Model | \`${model}\` |`,
     '|---|---|',
+    `| Host version | ${hostVersion} (\`${binary}\`) |`,
     `| Plugin | \`${plugin.split('/').at(-1)}\` |`,
     `| Result | ${passed}/${results.length} scenarios passed |`,
     `| Average duration | ${formatDuration(averageDurationMs)} per scenario |`,
@@ -1230,7 +1287,7 @@ async function main(): Promise<void> {
     '|---|---|---|---|---|---|',
     ...results.map(
       (result, index) =>
-        `| ${index + 1} | ${result.title} | ${result.ok ? '**PASS**' : '**FAIL**'} | ${
+        `| ${index + 1} | ${result.title} | ${result.status === 'pass' ? '**PASS**' : result.status === 'blocked' ? '**BLOCKED**' : '**FAIL**'} | ${
           result.attempts
         } | ${formatDuration(result.durationMs)} | ${result.evidence.replace(/\n/g, ' ').slice(0, 300)} |`
     ),
@@ -1245,7 +1302,7 @@ async function main(): Promise<void> {
     'run.summary',
     { passed, total: results.length, averageDurationMs, reportPath }
   );
-  process.exit(passed === results.length ? 0 : 1);
+  process.exit(hostVersion === 'v2' ? 2 : passed === results.length ? 0 : 1);
 }
 
 await main();

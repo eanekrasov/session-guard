@@ -1,15 +1,19 @@
 import type { Context } from '@opencode/plugin/promise/plugin';
 import type { Registration } from '@opencode/plugin/promise/registration';
-import { Effect } from 'effect';
-import { Tool } from '@opencode/schema/tool';
 import { mkdirSync } from 'node:fs';
 import { opencodeStateDir, profilesDir, sessionsDir } from './paths.ts';
 import { createRuntime, type RuntimeContext } from './runtime.ts';
-import { formatWorkflowList } from './workflow-tool-surface.ts';
-import { listProfiles } from '../public-api.ts';
+import { registerV2Agent, registerV2Commands } from './v2-command-adapter.ts';
+import { registerV2ProfileAgents } from './v2-profile-agent-sync.ts';
+import { registerWorkflowTools } from './v2-tool-surface-adapter.ts';
 import {
-  v2ProjectDirectory,
   v2ParentResolver,
+  v2ContextEvent,
+  v2MessagesFromLegacy,
+  v2HostEvent,
+  type V2HostEvent,
+  v2PromptEvent,
+  v2ProjectDirectory,
   v2ToolAfterEvent,
   v2ToolBeforeEvent,
   v2WorktreeDirectory,
@@ -25,6 +29,34 @@ function ensureDirectory(directory: string): void {
     mkdirSync(directory, { recursive: true });
   } catch {
     // Runtime operations report actionable failures when a directory is unavailable.
+  }
+}
+
+async function registerV2Events(
+  context: Context,
+  handleEvent: (event: ReturnType<typeof v2HostEvent>) => Promise<void>
+): Promise<() => Promise<void>> {
+  const controller = new AbortController();
+  try {
+    const events = context.event.subscribe({ signal: controller.signal }) as AsyncIterable<{
+      readonly type: string;
+      readonly data: unknown;
+    }>;
+    void (async () => {
+      try {
+        for await (const event of events) {
+          if (event.type === 'message.removed' || event.type === 'message.part.updated') {
+            await handleEvent(v2HostEvent(event as V2HostEvent));
+          }
+        }
+      } catch {
+        if (!controller.signal.aborted) return;
+      }
+    })();
+    return async () => controller.abort();
+  } catch (error) {
+    controller.abort();
+    throw error;
   }
 }
 
@@ -64,72 +96,94 @@ export async function setupV2Runtime(context: Context): Promise<() => Promise<vo
     output: { title: string; output: string; metadata: unknown }
   ) => Promise<void>;
   const registrations: Registration[] = [];
+  let eventCleanup: (() => Promise<void>) | undefined;
   try {
-    const beforeRegistration = await context.tool.hook('execute.before', async (event) => {
-      const mapped = v2ToolBeforeEvent(event);
-      await before(
-        {
-          tool: mapped.tool,
-          sessionID: mapped.sessionID,
-          callID: mapped.callID,
-          agent: mapped.agent,
-          messageID: mapped.messageID,
-        },
-        { args: mapped.input }
-      );
-    });
-    registrations.push(beforeRegistration);
-    const afterRegistration = await context.tool.hook('execute.after', async (event) => {
-      const mapped = v2ToolAfterEvent(event);
-      if (mapped.status === 'error') {
-        await hooks.handleToolFailure({ sessionID: mapped.sessionID, callID: mapped.callID });
-        return;
-      }
-      await after(
-        {
-          tool: mapped.tool,
-          sessionID: mapped.sessionID,
-          callID: mapped.callID,
-          args: mapped.input,
-        },
-        {
-          title: mapped.tool,
-          output: typeof mapped.result.output === 'string' ? mapped.result.output : '',
-          metadata: mapped.result.metadata,
+    registrations.push(
+      await context.tool.hook('execute.before', async (event) => {
+        const mapped = v2ToolBeforeEvent(event);
+        await before(
+          {
+            tool: mapped.tool,
+            sessionID: mapped.sessionID,
+            callID: mapped.callID,
+            agent: mapped.agent,
+            messageID: mapped.messageID,
+          },
+          { args: mapped.input }
+        );
+      })
+    );
+    registrations.push(
+      await context.tool.hook('execute.after', async (event) => {
+        const mapped = v2ToolAfterEvent(event);
+        if (mapped.status === 'error') {
+          await hooks.handleToolFailure({ sessionID: mapped.sessionID, callID: mapped.callID });
+          return;
         }
+        await after(
+          {
+            tool: mapped.tool,
+            sessionID: mapped.sessionID,
+            callID: mapped.callID,
+            args: mapped.input,
+          },
+          {
+            title: mapped.tool,
+            output: typeof mapped.result.output === 'string' ? mapped.result.output : '',
+            metadata: mapped.result.metadata,
+          }
+        );
+      })
+    );
+    if (typeof context.session?.hook === 'function') {
+      registrations.push(
+        await context.session.hook('prompt', async (event) => {
+          const mapped = v2PromptEvent(event);
+          await hooks['chat.message']!(mapped.input, mapped.output as never);
+        })
       );
-    });
-    registrations.push(afterRegistration);
+      registrations.push(
+        await context.session.hook('context', async (event) => {
+          const mapped = v2ContextEvent(event);
+          const system = [...mapped.output.system];
+          const messages = [...mapped.output.messages];
+          await hooks['experimental.chat.system.transform']!(mapped.input as never, { system });
+          await hooks['experimental.chat.messages.transform']!(
+            { sessionID: event.sessionID },
+            { messages: messages as never }
+          );
+          event.system = system.map((text) => ({ type: 'text' as const, text }));
+          event.messages = v2MessagesFromLegacy(messages, event.sessionID);
+        })
+      );
+    }
+    if (typeof context.event?.subscribe === 'function') {
+      eventCleanup = await registerV2Events(context, (event) => hooks.event!(event as never));
+    }
     const transform = context.tool.transform;
     if (typeof transform === 'function') {
-      const workflowListRegistration = await transform((editor) => {
-        editor.add({
-          name: 'workflow-list',
-          description:
-            'List all available workflow profiles (schemas). Returns profilesDir and profile IDs with descriptions.',
-          input: { type: 'object', properties: {}, additionalProperties: false },
-          execute: () =>
-            Effect.runPromise(
-              Effect.tryPromise({
-                try: async () => ({
-                  output: formatWorkflowList(
-                    profileDirectory,
-                    await listProfiles(profileDirectory)
-                  ),
-                }),
-                catch: (error) =>
-                  new Tool.Error({
-                    message: `[ERROR] workflow-list failed for ${profileDirectory}: ${
-                      error instanceof Error ? error.message : String(error)
-                    }`,
-                  }),
-              })
-            ),
-        });
-      });
-      registrations.push(workflowListRegistration);
+      registrations.push(
+        await transform((editor) => {
+          registerWorkflowTools(editor, hooks.workflowToolSurface);
+        })
+      );
+    }
+    if (typeof context.command?.transform === 'function') {
+      registrations.push(await registerV2Commands(context));
+    }
+    if (typeof context.agent?.transform === 'function') {
+      registrations.push(await registerV2Agent(context));
+      registrations.push(
+        await registerV2ProfileAgents(
+          context,
+          projectDirectory,
+          profileDirectory,
+          (message) => void hooks.logMessage('info', message)
+        )
+      );
     }
   } catch (error) {
+    await eventCleanup?.();
     await Promise.allSettled(registrations.map((registration) => registration.dispose()));
     await hooks.dispose!().catch(() => {});
     throw error;
@@ -140,6 +194,7 @@ export async function setupV2Runtime(context: Context): Promise<() => Promise<vo
     if (disposed) return;
     disposed = true;
     let disposalError: unknown;
+    await eventCleanup?.();
     for (const registration of [...registrations].reverse()) {
       try {
         await registration.dispose();

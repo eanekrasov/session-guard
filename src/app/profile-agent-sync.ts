@@ -154,7 +154,8 @@ export async function listProfileAgents(
 export async function syncProfileAgents(
   profileId: string,
   projectDir: string,
-  log?: (msg: string) => void
+  log?: (msg: string) => void,
+  profilesDirectory?: string
 ): Promise<SyncOutcome> {
   const logMsg = log ?? (() => {});
   const outcome: SyncOutcome = {
@@ -166,7 +167,7 @@ export async function syncProfileAgents(
     errors: [],
   };
 
-  const pDir = profilesDir(projectDir);
+  const pDir = profilesDirectory ?? profilesDir(projectDir);
   const hDir = harnessDir(projectDir);
   const opencodeAgentsDir = path.join(hDir, 'agents');
 
@@ -332,12 +333,13 @@ export async function syncProfileAgents(
  */
 export async function syncAllProfileAgents(
   projectDir: string,
-  log?: (msg: string) => void
+  log?: (msg: string) => void,
+  profilesDirectory?: string
 ): Promise<SyncReport> {
   const logMsg = log ?? (() => {});
   const report: SyncReport = { profiles: [], errors: [] };
 
-  const pDir = profilesDir(projectDir);
+  const pDir = profilesDirectory ?? profilesDir(projectDir);
   if (!existsSync(pDir)) {
     logMsg(`[profile-agent-sync] No profiles directory at ${pDir}; nothing to sync`);
     return report;
@@ -359,7 +361,7 @@ export async function syncAllProfileAgents(
     // A directory without a profile.json is not a profile, and the sync would
     // only tell us it had nothing to do.
     if (!existsSync(path.join(pDir, profileId, 'profile.json'))) continue;
-    report.profiles.push(await syncProfileAgents(profileId, projectDir, logMsg));
+    report.profiles.push(await syncProfileAgents(profileId, projectDir, logMsg, pDir));
   }
 
   return report;

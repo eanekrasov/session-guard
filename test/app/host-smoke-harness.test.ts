@@ -1,8 +1,15 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { filterOperatorProviders, operatorProviders } from '../../scripts/host-smoke/harness.ts';
+import {
+  filterOperatorProviders,
+  hostVersionFromEnv,
+  opencodeBinary,
+  operatorProviders,
+  V1_BINARY,
+  V2_BINARY,
+} from '../../scripts/host-smoke/harness.ts';
 
 let configDirectory: string;
 let savedOperatorConfig: string | undefined;
@@ -75,5 +82,21 @@ describe('host smoke provider filtering', () => {
     );
 
     await expect(operatorProviders()).resolves.toEqual({});
+  });
+});
+
+describe('host version selection', () => {
+  test('defaults to V1 and selects canonical binaries', () => {
+    expect(hostVersionFromEnv(undefined)).toBe('v1');
+    expect(opencodeBinary('v1')).toBe(V1_BINARY);
+    expect(opencodeBinary('v2')).toBe(V2_BINARY);
+    expect(V1_BINARY).not.toBe('/opt/homebrew/bin/opencode');
+    expect(V2_BINARY).not.toBe('/opt/homebrew/bin/opencode');
+    expect(existsSync(V1_BINARY)).toBe(true);
+    expect(existsSync(V2_BINARY)).toBe(true);
+  });
+
+  test('rejects unknown versions', () => {
+    expect(() => hostVersionFromEnv('v3')).toThrow('expected "v1" or "v2"');
   });
 });
