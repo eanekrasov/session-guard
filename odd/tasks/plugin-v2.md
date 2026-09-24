@@ -49,11 +49,19 @@ especially for `execute.after`.
 - Current task: V2.3.
 - V2.1/V2.2 completed in `src/app/v2-plugin-contract.ts` and
   `test/app/plugin-v2-contract.test.ts`.
+- V2.3 partial: `SessionGuardPluginV2` is connected to
+  `src/app/v2-plugin-adapter.ts`; the adapter registers `execute.before`, resolves
+  per-instance paths, and performs idempotent registration/runtime cleanup.
 - Evidence: `bun test test/app/plugin-v2-contract.test.ts` (3 passed),
-  `mise run typecheck` (passed), `mise run check` (1803 tests passed),
+  `bun test test/app/v2-plugin-adapter.test.ts` (3 passed), `mise run typecheck`
+  (passed), `mise run lint` (passed), `mise run check` (1806 tests passed),
   `mise run build` (passed), and `git diff --check` (passed).
-- Runtime host behavior was intentionally not changed, so `mise run smoke` was not
-  applicable to this work unit.
+- Known limitation: the adapter currently bridges V2 `Context.session` to the
+  legacy runtime client contract. The V2 host policy path is therefore not yet
+  proven by real host behavior; completing the explicit V2 host port remains
+  required before claiming V2 policy parity.
+- `mise run smoke` is pending because the current environment has not run a real
+  OpenCode V2 loading scenario.
 
 ## Acceptance criteria
 

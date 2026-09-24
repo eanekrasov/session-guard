@@ -92,7 +92,7 @@ class SessionGuardRuntime {
   private readonly profilesDir: string;
   private readonly projectDir: string;
 
-  constructor(context: PluginInput, paths?: RuntimePaths) {
+  constructor(context: RuntimeContext, paths?: RuntimePaths) {
     this.log = createLogFn(context.client);
     this.report = createReporter(context.client, this.log);
     // Стор живёт вне проекта, под собственной стейт-директорией OpenCode.
@@ -650,7 +650,17 @@ export interface RuntimePaths {
   profilesDir?: string;
 }
 
-export function createRuntime(context: PluginInput, paths?: RuntimePaths): Hooks {
-  const runtime = new SessionGuardRuntime(context, paths);
+export interface RuntimeContext {
+  readonly client: PluginInput['client'];
+  readonly directory: string;
+  readonly project?: unknown;
+  readonly worktree?: string;
+}
+
+export function createRuntime(context: PluginInput | RuntimeContext, paths?: RuntimePaths): Hooks {
+  const runtime = new SessionGuardRuntime(
+    { client: context.client, directory: context.directory },
+    paths
+  );
   return runtime.hooks;
 }
