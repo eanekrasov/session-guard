@@ -30,8 +30,9 @@ import { createTaskAdmission, type TaskAdmission } from './task-admission.ts';
 import { createChangeEnforcement, type ChangeEnforcement } from './change-enforcement.ts';
 import { createToolExecutionPolicy, type ToolExecutionPolicy } from './tool-execution-policy.ts';
 import { createWorkflowLifecycle, type WorkflowLifecycle } from './workflow-lifecycle.ts';
-import type { SessionClient } from './runtime-types.ts';
 import { finishMutation as finishDomainMutation } from '../domain/operation-lifecycle.ts';
+import type { RuntimeHostAdapter } from './runtime-host-adapter.ts';
+import type { SessionClient } from './runtime-types.ts';
 
 export { schemaToEngineConfig };
 
@@ -95,8 +96,9 @@ class SessionGuardRuntime {
   private readonly projectDir: string;
 
   constructor(context: RuntimeContext, paths?: RuntimePaths) {
-    this.log = createLogFn(context.client);
-    this.report = createReporter(context.client, this.log);
+    const client = context.client ?? {};
+    this.log = context.host?.log ?? createLogFn(client);
+    this.report = context.host?.report ?? createReporter(client, this.log);
     // Стор живёт вне проекта, под собственной стейт-директорией OpenCode.
     // Раньше это говорили через process.env, который плагин выставлял от
     // первого проекта, с которым инициализировался — так что второй проект в
@@ -105,7 +107,7 @@ class SessionGuardRuntime {
     this.store = new WorkflowStore(storeDir, this.log);
     const resolveV1HostParent = async (sessionID: string): Promise<string | null> => {
       try {
-        const result = await context.client.session?.get({ path: { id: sessionID } });
+        const result = await client.session?.get({ path: { id: sessionID } });
         if (!result) return null;
         const session = result.data;
         const parent = session?.parentID;
@@ -118,7 +120,8 @@ class SessionGuardRuntime {
         return null;
       }
     };
-    const resolveHostParent = context.resolveParent ?? resolveV1HostParent;
+    const resolveHostParent =
+      context.host?.resolveParent ?? context.resolveParent ?? resolveV1HostParent;
     this.executor = new SessionExecutor(this.store, this.log, resolveHostParent);
     this.sessionContext = new RuntimeSessionContextImpl(
       this.store,
@@ -135,7 +138,7 @@ class SessionGuardRuntime {
       this.projectDir,
       this.profilesDir,
       this.log,
-      context.client.session
+      client.session
     );
     this.workflowLifecycle = createWorkflowLifecycle({
       store: this.store,
@@ -150,7 +153,7 @@ class SessionGuardRuntime {
       this.executor,
       this.projectDir,
       this.profilesDir,
-      context.client.session,
+      client.session,
       this.log
     );
     this.taskApi = new TaskApi(
@@ -210,7 +213,7 @@ class SessionGuardRuntime {
     // внутри OpenCodeRulesRuntime при первом использовании.
     const matchedRulesStateStore = new MatchedRulesStateStore();
     this.rulesRuntime = new OpenCodeRulesRuntime({
-      client: context.client,
+      client: context.host ?? client,
       directory: context.directory,
       projectDirectory: context.directory,
       matchedRulesStateStore,
@@ -681,7 +684,7 @@ export interface RuntimePaths {
 }
 
 export interface RuntimeContext {
-  readonly client: {
+  readonly client?: {
     readonly session?: Pick<SessionClient, 'get' | 'list' | 'messages' | 'prompt'>;
     readonly app?: Pick<PluginInput['client']['app'], 'log'>;
     readonly post?: (
@@ -691,6 +694,7 @@ export interface RuntimeContext {
     readonly tool?: PluginInput['client']['tool'];
     readonly mcp?: PluginInput['client']['mcp'];
   };
+  readonly host?: RuntimeHostAdapter;
   readonly directory: string;
   readonly project?: unknown;
   readonly worktree?: string;
@@ -708,10 +712,13 @@ export function createRuntime(
   paths?: RuntimePaths
 ): RuntimeHooks {
   const runtimeContext: RuntimeContext =
-    'resolveParent' in context ? context : { client: context.client, directory: context.directory };
+    'host' in context || 'resolveParent' in context
+      ? context
+      : { client: context.client, directory: context.directory };
   const runtime = new SessionGuardRuntime(
     {
       client: runtimeContext.client,
+      host: runtimeContext.host,
       directory: runtimeContext.directory,
       resolveParent: runtimeContext.resolveParent,
     },

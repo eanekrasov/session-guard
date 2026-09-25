@@ -6,8 +6,8 @@ import { createRuntime, type RuntimeContext } from './runtime.ts';
 import { registerV2Agent, registerV2Commands } from './v2-command-adapter.ts';
 import { registerV2ProfileAgents } from './v2-profile-agent-sync.ts';
 import { registerWorkflowTools } from './v2-tool-surface-adapter.ts';
+import { createV2RuntimeHostAdapter } from './runtime-host-adapter.ts';
 import {
-  v2ParentResolver,
   v2ContextEvent,
   v2MessagesFromLegacy,
   v2HostEvent,
@@ -73,9 +73,8 @@ export async function setupV2Runtime(context: Context): Promise<() => Promise<vo
   ensureDirectory(sessionStoreDirectory);
 
   const runtimeContext: RuntimeContext = {
-    client: {},
+    host: createV2RuntimeHostAdapter({ context, directory: worktreeDirectory }),
     directory: worktreeDirectory,
-    resolveParent: v2ParentResolver(context.session),
   };
   const hooks = createRuntime(runtimeContext, {
     profilesDir: profileDirectory,
