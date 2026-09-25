@@ -6,6 +6,7 @@ import * as runtimeContextModule from '../../src/rules/runtime-context.js';
 import * as runtimeChatModule from '../../src/rules/runtime-chat.js';
 import { hostPayload } from '../support/host-payload.ts';
 import { createV1RuntimeHostAdapter } from '../../src/app/runtime-host-adapter.ts';
+import { createV2RuntimeHostAdapter } from '../../src/app/runtime-host-adapter.ts';
 
 describe('runtime module runtime exports', () => {
   it('exports only OpenCodeRulesRuntime class at runtime', () => {
@@ -84,5 +85,35 @@ describe('OpenCodeRulesRuntime.queryAvailableToolIDs', () => {
     ).queryAvailableToolIDs();
     expect(ids).toContain('bash');
     // Should not throw, just not include mcp_ ids
+  });
+
+  it('uses V2 tool ids while treating absent history as empty history', async () => {
+    const runtime = new OpenCodeRulesRuntime(
+      hostPayload({
+        host: createV2RuntimeHostAdapter({
+          directory: '/tmp',
+          context: {
+            location: { project: { directory: '/tmp' } },
+            session: {},
+            tool: { list: async () => [{ id: 'bash' }, { id: 'workflow-create' }] },
+          } as never,
+        }),
+        directory: '/tmp',
+        projectDirectory: '/tmp',
+        ruleFiles: [],
+        sessionStore: new SessionStore({ max: 10 }),
+        debugLog: () => {},
+      })
+    );
+
+    const ids: string[] = await (
+      runtime as unknown as { queryAvailableToolIDs: () => Promise<string[]> }
+    ).queryAvailableToolIDs();
+    expect(ids).toEqual(['bash', 'workflow-create']);
+    await expect(
+      (
+        runtime as unknown as { readClientHistory: (sessionID: string) => Promise<unknown> }
+      ).readClientHistory('session-1')
+    ).resolves.toEqual({ ok: true, messages: [] });
   });
 });

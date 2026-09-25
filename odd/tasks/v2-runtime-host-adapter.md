@@ -34,7 +34,7 @@ host-session listing, tool/MCP discovery, logging, and reporting.
 - [x] V2-002 Implement V1 adapter and migrate shared runtime construction.
 - [x] V2-003 Implement confirmed V2 capabilities: parent lookup and tool discovery.
 - [x] V2-004 Migrate rules tool discovery and history consumers to neutral host operations.
-- [ ] V2-005 Add adapter and consumer tests, preserving V1 request-shape assertions at the adapter boundary.
+- [x] V2-005 Add adapter and consumer tests, preserving V1 request-shape assertions at the adapter boundary.
 - [ ] V2-006 Verify typecheck, tests, build, and V2 host smoke; record failures honestly.
 
 ## Acceptance criteria
@@ -73,11 +73,14 @@ Verification evidence:
 - `mise run typecheck`: passed.
 - `mise run lint`: passed with existing `no-explicit-any` warnings.
 - focused adapter and V2 adapter tests: 20 passed, 0 failed.
+- V2-005 focused adapter and rules-consumer tests: 11 passed, 0 failed.
 - `mise run build`: passed, including build verification.
 - `git diff --check`: passed.
 
 ## Next step
 
-Implement V2-004 in separate consumer slices. Start with rules discovery and
-history/delivery capabilities; do not change consent injection semantics until
-V2 synthetic delivery is confirmed.
+Run V2-006 verification (`mise run typecheck`, full tests, build, and host smoke)
+and record any environmental failures. V2 history, list, prompt/synthetic delivery,
+logging, reporting, mutation listing, and MCP status remain explicit blockers because
+their V2 semantics are not confirmed; do not add production capabilities or change
+consent semantics in V2-006.
