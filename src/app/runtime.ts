@@ -139,7 +139,7 @@ class SessionGuardRuntime {
       this.projectDir,
       this.profilesDir,
       this.log,
-      client.session
+      (context.host?.session ?? client.session) as Pick<SessionClient, 'list'> | undefined
     );
     this.workflowLifecycle = createWorkflowLifecycle({
       store: this.store,
@@ -154,7 +154,8 @@ class SessionGuardRuntime {
       this.executor,
       this.projectDir,
       this.profilesDir,
-      client.session,
+      (context.host?.session ?? client.session) as
+        Pick<SessionClient, 'messages' | 'prompt'> | undefined,
       this.log
     );
     this.taskApi = new TaskApi(

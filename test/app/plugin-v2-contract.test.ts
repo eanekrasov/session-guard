@@ -105,7 +105,7 @@ describe('V2 plugin contract', () => {
       expect.arrayContaining([
         expect.objectContaining({ name: 'Tool before policy', status: 'supported' }),
         expect.objectContaining({ name: 'Tool after lifecycle', status: 'supported' }),
-        expect.objectContaining({ name: 'Chat message processing', status: 'deferred' }),
+        expect.objectContaining({ name: 'Chat message processing', status: 'supported' }),
         expect.objectContaining({ name: 'Runtime disposal', status: 'supported' }),
       ])
     );

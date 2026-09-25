@@ -35,7 +35,7 @@ host-session listing, tool/MCP discovery, logging, and reporting.
 - [x] V2-003 Implement confirmed V2 capabilities: parent lookup and tool discovery.
 - [x] V2-004 Migrate rules tool discovery and history consumers to neutral host operations.
 - [x] V2-005 Add adapter and consumer tests, preserving V1 request-shape assertions at the adapter boundary.
-- [ ] V2-006 Verify typecheck, tests, build, and V2 host smoke; record failures honestly.
+- [x] V2-006 Verify typecheck, tests, build, and V2 host smoke; record failures honestly.
 
 ## Acceptance criteria
 
@@ -56,7 +56,7 @@ host-session listing, tool/MCP discovery, logging, and reporting.
 
 ## Progress
 
-Completed V2-001 through V2-004. The shared runtime now accepts a
+Completed V2-001 through V2-006. The shared runtime now accepts a
 `RuntimeHostAdapter`; V1 retains an SDK-shaped adapter, while V2 provides
 confirmed parent lookup and tool discovery. V2-004 migrated rules tool discovery
 and history reads to neutral host operations. V1 keeps directory-scoped `tool.ids`,
@@ -76,6 +76,20 @@ Verification evidence:
 - V2-005 focused adapter and rules-consumer tests: 11 passed, 0 failed.
 - `mise run build`: passed, including build verification.
 - `git diff --check`: passed.
+
+Compatibility follow-up classification:
+
+- Adapter boundary: V1 session methods are exposed through wrapper functions
+  preserving the SDK receiver, and the runtime passes the adapted session
+  capability to consent and mutation consumers. This restores consent refs,
+  legacy rule prompt/history delivery, and chat-message receiver binding.
+- Stale expectation: V2 chat-message processing is implemented and covered by
+  the prompt-hook adapter tests, so its contract assertion now says
+  `supported`; no new V2 capability was added.
+- Focused compatibility tests: passed (consent round trip, legacy runtime
+  match-context integration, V2 adapter and contract tests).
+- `mise run typecheck`: passed.
+- `bun test`: passed (1857 tests, 0 failures).
 
 ## Next step
 

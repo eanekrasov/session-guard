@@ -44,9 +44,16 @@ export function createV1RuntimeHostAdapter(
   options: V1RuntimeHostAdapterOptions
 ): RuntimeHostAdapter {
   const { client } = options;
+  const sdkSession = client.session;
+  const session: HostSessionCapabilities = {
+    get: sdkSession?.get ? (input) => sdkSession.get(input) : undefined,
+    list: sdkSession?.list ? (input) => sdkSession.list(input) : undefined,
+    messages: sdkSession?.messages ? (input) => sdkSession.messages(input) : undefined,
+    prompt: sdkSession?.prompt ? (input) => sdkSession.prompt(input) : undefined,
+  };
   return {
     directory: options.directory,
-    session: client.session,
+    session,
     tools: {
       list: async () => {
         const result = await client.tool.ids({ query: { directory: options.directory } });
