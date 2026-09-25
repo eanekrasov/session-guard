@@ -40,6 +40,7 @@ import {
 import { isRuleAdmissionPart, type DeliveryPart } from './rule-delivery-codec.js';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
+import type { RuntimeHostAdapter } from '../app/runtime-host-adapter.ts';
 
 const execAsync = promisify(exec);
 
@@ -47,40 +48,8 @@ export interface MessagesTransformOutput {
   messages: MessageWithInfo[];
 }
 
-interface OpenCodeClient {
-  tool?: {
-    ids?: (args: { query: { directory: string } }) => Promise<{ data: string[] }>;
-  };
-  mcp?: {
-    status?: (args: {
-      query: { directory: string };
-    }) => Promise<{ connected?: Array<{ id: string }> }>;
-  };
-  session?: {
-    messages?: (args: {
-      path: { id: string };
-      query?: { directory?: string };
-    }) => Promise<{ data?: Array<{ info?: unknown; parts?: unknown[] }> }>;
-    prompt?: (args: {
-      path: { id: string };
-      query?: { directory?: string };
-      body: {
-        messageID?: string;
-        noReply: boolean;
-        parts: Array<{
-          id?: string;
-          type: 'text';
-          text: string;
-          synthetic?: boolean;
-          metadata?: Record<string, unknown>;
-        }>;
-      };
-    }) => Promise<unknown>;
-  };
-}
-
 interface OpenCodeRulesRuntimeOptions {
-  client: unknown;
+  host: RuntimeHostAdapter;
   directory: string;
   projectDirectory: string;
   /** Опциональные заранее обнаруженные файлы правил. Когда опущены, рантайм
@@ -104,7 +73,7 @@ interface SessionRuleEvaluationInput {
 }
 
 export class OpenCodeRulesRuntime {
-  private client: OpenCodeClient;
+  private host: RuntimeHostAdapter;
   private directory: string;
   private projectDirectory: string;
   private ruleFilesPromise: Promise<DiscoveredRule[]>;
@@ -117,7 +86,7 @@ export class OpenCodeRulesRuntime {
   private snapshotPromises = new Map<string, Promise<RuleSnapshot[]>>();
 
   constructor(opts: OpenCodeRulesRuntimeOptions) {
-    this.client = opts.client as OpenCodeClient;
+    this.host = opts.host;
     this.directory = opts.directory;
     this.projectDirectory = opts.projectDirectory;
     this.ruleFilesPromise = opts.ruleFiles
@@ -143,7 +112,7 @@ export class OpenCodeRulesRuntime {
   }
 
   private async persistRuleAdmission(sessionID: string, part: DeliveryPart): Promise<void> {
-    const prompt = this.client.session?.prompt;
+    const prompt = this.host.session.prompt;
     if (!prompt || part.type !== 'text' || typeof part.text !== 'string') {
       throw new Error('OpenCode session.prompt is unavailable');
     }
@@ -167,10 +136,10 @@ export class OpenCodeRulesRuntime {
   }
 
   private async readClientHistory(sessionID: string): Promise<RawHistoryResult> {
-    const session = this.client.session;
-    if (!session?.messages) return { ok: true, messages: [] };
+    const messages = this.host.session.messages;
+    if (!messages) return { ok: true, messages: [] };
     try {
-      const result = await session.messages({
+      const result = await messages({
         path: { id: sessionID },
         query: { directory: this.directory },
       });
@@ -464,46 +433,19 @@ export class OpenCodeRulesRuntime {
   }
 
   private async queryAvailableToolIDs(): Promise<string[]> {
-    const ids = new Set<string>();
-    const query = { directory: this.directory };
-
-    const toolPromise = this.client.tool?.ids?.({ query });
-    const mcpPromise = this.client.mcp?.status?.({ query });
-
-    const [toolResult, mcpResult] = await Promise.allSettled([toolPromise, mcpPromise] as const);
-
-    const logSettledError = (label: string, result: PromiseRejectedResult): void => {
-      const message =
-        result.reason instanceof Error ? result.reason.message : String(result.reason);
-      logWarning(`Failed to query ${label}`, message);
-    };
-
-    if (toolResult.status === 'fulfilled' && Array.isArray(toolResult.value?.data)) {
-      for (const id of toolResult.value.data) {
-        ids.add(id);
-      }
+    const list = this.host.tools.list;
+    if (!list) return [];
+    try {
+      const tools = await list();
+      const ids = tools.map(({ id }) => id);
       this.debugLog(
-        `Built-in tools: ${toolResult.value.data.slice(0, 10).join(', ')}${toolResult.value.data.length > 10 ? '...' : ''} (${toolResult.value.data.length} total)`
+        `Available tools: ${ids.slice(0, 10).join(', ')}${ids.length > 10 ? '...' : ''} (${ids.length} total)`
       );
-    } else if (toolResult.status === 'rejected') {
-      logSettledError('tool IDs', toolResult);
+      return Array.from(new Set(ids));
+    } catch (error) {
+      logWarning('Failed to query available tools', error);
+      return [];
     }
-
-    if (mcpResult.status === 'fulfilled' && mcpResult.value && 'data' in mcpResult.value) {
-      const mcpIds = extractConnectedMcpCapabilityIDs(
-        mcpResult.value.data as Record<string, { status?: string }>
-      );
-      for (const id of mcpIds) {
-        ids.add(id);
-      }
-      if (mcpIds.length > 0) {
-        this.debugLog(`MCP capability IDs: ${mcpIds.join(', ')}`);
-      }
-    } else if (mcpResult.status === 'rejected') {
-      logSettledError('MCP status', mcpResult);
-    }
-
-    return Array.from(ids);
   }
 
   /** Called from SessionGuardRuntime on `experimental.session.compacting` hook. */

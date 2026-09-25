@@ -5,6 +5,7 @@ import * as runtimeModule from '../../src/rules/runtime.js';
 import * as runtimeContextModule from '../../src/rules/runtime-context.js';
 import * as runtimeChatModule from '../../src/rules/runtime-chat.js';
 import { hostPayload } from '../support/host-payload.ts';
+import { createV1RuntimeHostAdapter } from '../../src/app/runtime-host-adapter.ts';
 
 describe('runtime module runtime exports', () => {
   it('exports only OpenCodeRulesRuntime class at runtime', () => {
@@ -34,14 +35,17 @@ describe('OpenCodeRulesRuntime.queryAvailableToolIDs', () => {
   it('augments tool ids with connected mcp capability ids', async () => {
     const runtime = new OpenCodeRulesRuntime(
       hostPayload({
-        client: {
-          tool: { ids: async () => ({ data: ['bash'] }) },
-          mcp: {
-            status: async () => ({
-              data: { context7: { status: 'connected' } },
-            }),
-          },
-        } as unknown,
+        host: createV1RuntimeHostAdapter({
+          client: hostPayload({
+            tool: { ids: async () => ({ data: ['bash'] }) },
+            mcp: {
+              status: async () => ({
+                data: { context7: { status: 'connected' } },
+              }),
+            },
+          }),
+          directory: '/tmp',
+        }),
         directory: '/tmp',
         projectDirectory: '/tmp',
         ruleFiles: [],
@@ -60,10 +64,13 @@ describe('OpenCodeRulesRuntime.queryAvailableToolIDs', () => {
   it('handles missing mcp.status gracefully', async () => {
     const runtime = new OpenCodeRulesRuntime(
       hostPayload({
-        client: {
-          tool: { ids: async () => ({ data: ['bash'] }) },
-          // no mcp property
-        } as unknown,
+        host: createV1RuntimeHostAdapter({
+          client: hostPayload({
+            tool: { ids: async () => ({ data: ['bash'] }) },
+            // no mcp property
+          }),
+          directory: '/tmp',
+        }),
         directory: '/tmp',
         projectDirectory: '/tmp',
         ruleFiles: [],

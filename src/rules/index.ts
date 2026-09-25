@@ -9,6 +9,7 @@ import { SessionStore, type SessionState } from './session-store.js';
 import { MatchedRulesStateStore } from './matched-rules-state.js';
 import { OpenCodeRulesRuntime } from './runtime.js';
 import { discoverRuleFiles, clearRuleCache, type DiscoveredRule } from './rule-discovery.js';
+import { createV1RuntimeHostAdapter } from '../app/runtime-host-adapter.ts';
 
 const sessionStore = new SessionStore();
 const matchedRulesStateStore = new MatchedRulesStateStore();
@@ -48,7 +49,10 @@ const __testOnly = Object.freeze(
       clearRuleCache();
       const ruleFiles = await discoverRuleFiles();
       const runtime = new OpenCodeRulesRuntime({
-        client: (input?.client ?? {}) as Record<string, unknown>,
+        host: createV1RuntimeHostAdapter({
+          client: input?.client as never,
+          directory: input?.worktree ?? input?.directory ?? '',
+        }),
         directory: input?.worktree ?? input?.directory ?? '',
         projectDirectory: input?.directory ?? '',
         ruleFiles,
@@ -76,7 +80,10 @@ const server = async (pluginInput?: unknown): Promise<Record<string, unknown>> =
       }
     | undefined;
   const runtime = new OpenCodeRulesRuntime({
-    client: (input?.client ?? {}) as Record<string, unknown>,
+    host: createV1RuntimeHostAdapter({
+      client: input?.client as never,
+      directory: input?.worktree ?? input?.directory ?? '',
+    }),
     directory: input?.worktree ?? input?.directory ?? '',
     projectDirectory: input?.directory ?? '',
     ruleFiles,

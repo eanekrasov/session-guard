@@ -32,6 +32,7 @@ import { createToolExecutionPolicy, type ToolExecutionPolicy } from './tool-exec
 import { createWorkflowLifecycle, type WorkflowLifecycle } from './workflow-lifecycle.ts';
 import { finishMutation as finishDomainMutation } from '../domain/operation-lifecycle.ts';
 import type { RuntimeHostAdapter } from './runtime-host-adapter.ts';
+import { createV1RuntimeHostAdapter } from './runtime-host-adapter.ts';
 import type { SessionClient } from './runtime-types.ts';
 
 export { schemaToEngineConfig };
@@ -213,7 +214,12 @@ class SessionGuardRuntime {
     // внутри OpenCodeRulesRuntime при первом использовании.
     const matchedRulesStateStore = new MatchedRulesStateStore();
     this.rulesRuntime = new OpenCodeRulesRuntime({
-      client: context.host ?? client,
+      host:
+        context.host ??
+        createV1RuntimeHostAdapter({
+          client: client as PluginInput['client'],
+          directory: context.directory,
+        }),
       directory: context.directory,
       projectDirectory: context.directory,
       matchedRulesStateStore,
@@ -714,7 +720,13 @@ export function createRuntime(
   const runtimeContext: RuntimeContext =
     'host' in context || 'resolveParent' in context
       ? context
-      : { client: context.client, directory: context.directory };
+      : {
+          host: createV1RuntimeHostAdapter({
+            client: (context.client ?? {}) as PluginInput['client'],
+            directory: context.directory,
+          }),
+          directory: context.directory,
+        };
   const runtime = new SessionGuardRuntime(
     {
       client: runtimeContext.client,

@@ -50,7 +50,15 @@ export function createV1RuntimeHostAdapter(
     tools: {
       list: async () => {
         const result = await client.tool.ids({ query: { directory: options.directory } });
-        return (result.data ?? []).map((id) => ({ id }));
+        const ids = new Set(result.data ?? []);
+        const mcp = client.mcp?.status;
+        if (mcp) {
+          const mcpResult = await mcp({ query: { directory: options.directory } });
+          for (const [server, status] of Object.entries(mcpResult.data ?? {})) {
+            if (status.status === 'connected') ids.add(`mcp_${server}`);
+          }
+        }
+        return Array.from(ids).map((id) => ({ id }));
       },
     },
     log: createLogFn(client),

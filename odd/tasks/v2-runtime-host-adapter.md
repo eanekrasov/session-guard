@@ -33,7 +33,7 @@ host-session listing, tool/MCP discovery, logging, and reporting.
 - [x] V2-001 Define neutral host capability types and document missing-capability semantics.
 - [x] V2-002 Implement V1 adapter and migrate shared runtime construction.
 - [x] V2-003 Implement confirmed V2 capabilities: parent lookup and tool discovery.
-- [ ] V2-004 Migrate logging, reporting, mutation listing, consent, and rules consumers.
+- [x] V2-004 Migrate rules tool discovery and history consumers to neutral host operations.
 - [ ] V2-005 Add adapter and consumer tests, preserving V1 request-shape assertions at the adapter boundary.
 - [ ] V2-006 Verify typecheck, tests, build, and V2 host smoke; record failures honestly.
 
@@ -56,10 +56,16 @@ host-session listing, tool/MCP discovery, logging, and reporting.
 
 ## Progress
 
-Completed V2-001 through V2-003. The shared runtime now accepts a
+Completed V2-001 through V2-004. The shared runtime now accepts a
 `RuntimeHostAdapter`; V1 retains an SDK-shaped adapter, while V2 provides
-confirmed parent lookup and tool discovery. Optional consumer migration remains
-pending.
+confirmed parent lookup and tool discovery. V2-004 migrated rules tool discovery
+and history reads to neutral host operations. V1 keeps directory-scoped `tool.ids`,
+MCP connected-capability mapping, and `session.messages` response normalization
+inside the adapter boundary. V2 history remains unsupported because the checked-in
+V2 plugin contract exposes no message-list operation, so the runtime preserves its
+fail-open empty-history behavior. Synthetic/prompt delivery, consent, logging,
+reporting, mutation listing, and host-session listing remain intentionally
+unmigrated because their V2 semantics are not proven here.
 
 Verification evidence:
 
