@@ -112,7 +112,7 @@ describe('V2 plugin contract', () => {
     for (const capability of V2_CAPABILITIES) {
       expect(capability.reason.length).toBeGreaterThan(0);
 
-      if (capability.status === 'supported') {
+      if (capability.status === 'supported' || capability.testPath !== undefined) {
         expect(capability.testPath).toBeDefined();
         expect(existsSync(resolve(import.meta.dir, '../..', capability.testPath!))).toBe(true);
       } else {

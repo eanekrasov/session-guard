@@ -39,6 +39,7 @@ import {
   stopAllHosts,
   type Host,
 } from './harness.ts';
+import { createV2SmokeClient, runV2WorkflowCreate } from './v2-client.ts';
 
 const ATTEMPTS = Number(process.env.HOST_SMOKE_ATTEMPTS ?? 3);
 const OUTPUT_FORMAT = process.env.HOST_SMOKE_OUTPUT ?? 'human';
@@ -1173,6 +1174,10 @@ function formatDuration(durationMs: number): string {
 
 async function main(): Promise<void> {
   installSignalHandlers();
+  const hostVersion = hostVersionFromEnv();
+  if (hostVersion === 'v2') {
+    process.exit((await runV2Smoke()) ? 0 : 1);
+  }
   const wanted = process.argv.slice(2);
   const selected = wanted.length
     ? scenarios.filter((scenario) => wanted.includes(scenario.id))
@@ -1182,7 +1187,6 @@ async function main(): Promise<void> {
     process.exit(2);
   }
 
-  const hostVersion = hostVersionFromEnv();
   const binary = opencodeBinary(hostVersion);
   const model = await defaultModel(binary);
   const plugin = process.env.HOST_SMOKE_PLUGIN ?? buildPlugin();
@@ -1302,7 +1306,55 @@ async function main(): Promise<void> {
     'run.summary',
     { passed, total: results.length, averageDurationMs, reportPath }
   );
-  process.exit(hostVersion === 'v2' ? 2 : passed === results.length ? 0 : 1);
+  process.exit(passed === results.length ? 0 : 1);
+}
+
+async function runV2Smoke(): Promise<boolean> {
+  const binary = opencodeBinary('v2');
+  const model = await defaultModel(binary);
+  const plugin = process.env.HOST_SMOKE_PLUGIN ?? buildPlugin();
+  process.env.HOST_SMOKE_PLUGIN = plugin;
+  const requested = process.argv.slice(2);
+  if (requested.length > 0 && !requested.includes('v2-workflow-create')) {
+    logEvent('V2 supports only v2-workflow-create.', 'red', 'error');
+    return false;
+  }
+
+  logEvent(`model:  ${model}`, 'gray', 'run.start', { model, plugin, version: 'v2' });
+  const startedAt = Date.now();
+  let host: Host | undefined;
+  try {
+    host = await startHost({
+      model,
+      version: 'v2',
+      profile: 'smoke',
+      files: { 'plan.md': '# Smoke plan\n\nAdd one file under src/.\n' },
+    });
+    const outcome = await runV2WorkflowCreate(
+      createV2SmokeClient(host),
+      host,
+      'Call the tool `workflow-create` with schemaId "smoke". Do nothing else and add no commentary.'
+    );
+    const state = outcome.state as { currentStage?: unknown } | null;
+    const ok = state?.currentStage === 'planning';
+    const evidence = ok
+      ? 'V2 client created a session, the configured model called workflow-create, and session-guard persisted planning.'
+      : `workflow state was ${JSON.stringify(state)}`;
+    const durationMs = Date.now() - startedAt;
+    logEvent(ok ? 'PASS' : 'FAIL', ok ? 'green' : 'red', 'scenario.result', {
+      scenario: 'v2-workflow-create',
+      status: ok ? 'pass' : 'fail',
+      durationMs,
+    });
+    if (!ok) logEvent(`  ${evidence}`, 'red', 'scenario.evidence');
+    return ok;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logEvent(`V2 smoke failed: ${message}`, 'red', 'error');
+    return false;
+  } finally {
+    await host?.stop();
+  }
 }
 
 await main();

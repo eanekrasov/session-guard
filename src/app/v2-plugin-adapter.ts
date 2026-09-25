@@ -1,6 +1,7 @@
 import type { Context } from '@opencode/plugin/promise/plugin';
 import type { Registration } from '@opencode/plugin/promise/registration';
 import { mkdirSync } from 'node:fs';
+import { createConsoleLogFn } from './logger.ts';
 import { opencodeStateDir, profilesDir, sessionsDir } from './paths.ts';
 import { createRuntime, type RuntimeContext } from './runtime.ts';
 import { registerV2Agent, registerV2Commands } from './v2-command-adapter.ts';
@@ -185,7 +186,15 @@ export async function setupV2Runtime(context: Context): Promise<() => Promise<vo
     await eventCleanup?.();
     await Promise.allSettled(registrations.map((registration) => registration.dispose()));
     await hooks.dispose!().catch(() => {});
-    throw error;
+    const message = error instanceof Error ? error.message : String(error);
+    await createConsoleLogFn()(
+      'error',
+      '[ERROR] V2 runtime initialization failed; plugin degraded',
+      {
+        error: message,
+      }
+    );
+    return async () => {};
   }
 
   let disposed = false;

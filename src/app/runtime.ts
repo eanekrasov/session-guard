@@ -154,8 +154,28 @@ class SessionGuardRuntime {
       this.executor,
       this.projectDir,
       this.profilesDir,
-      (context.host?.session ?? client.session) as
-        Pick<SessionClient, 'messages' | 'prompt'> | undefined,
+      context.host?.session ??
+        (client.session
+          ? {
+              hasMessageContext: async (sessionID: string) => {
+                const messages = await client.session!.messages({
+                  path: { id: sessionID },
+                  query: { limit: 5 },
+                });
+                return (
+                  'data' in messages &&
+                  !!messages.data &&
+                  messages.data.some((message) =>
+                    message.parts.some(
+                      (part) =>
+                        part.type === 'text' && (!('status' in part) || part.status !== 'failed')
+                    )
+                  )
+                );
+              },
+              prompt: client.session.prompt,
+            }
+          : undefined),
       this.log
     );
     this.taskApi = new TaskApi(

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -9,6 +9,7 @@ import {
   operatorProviders,
   V1_BINARY,
   V2_BINARY,
+  writeSmokeConfigs,
 } from '../../scripts/host-smoke/harness.ts';
 
 let configDirectory: string;
@@ -98,5 +99,26 @@ describe('host version selection', () => {
 
   test('rejects unknown versions', () => {
     expect(() => hostVersionFromEnv('v3')).toThrow('expected "v1" or "v2"');
+  });
+});
+
+describe('host smoke configuration', () => {
+  test('uses the V2 local package configuration without changing V1 loading', async () => {
+    const v1 = mkdtempSync(join(tmpdir(), 'host-smoke-v1-config-'));
+    const v2 = mkdtempSync(join(tmpdir(), 'host-smoke-v2-config-'));
+    try {
+      await writeSmokeConfigs(v1, {}, 'acme/fast-model', '/plugin/dist');
+      await writeSmokeConfigs(v2, {}, 'acme/fast-model', '/plugin/dist', 'v2');
+
+      expect(JSON.parse(readFileSync(join(v1, 'opencode.json'), 'utf-8'))).toMatchObject({
+        plugin: ['file:///plugin/dist'],
+      });
+      expect(JSON.parse(readFileSync(join(v2, 'opencode.json'), 'utf-8'))).toMatchObject({
+        plugins: [{ package: '/plugin/dist' }],
+      });
+    } finally {
+      rmSync(v1, { recursive: true, force: true });
+      rmSync(v2, { recursive: true, force: true });
+    }
   });
 });

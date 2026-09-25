@@ -1,6 +1,6 @@
 import type { PluginInput } from '@opencode-ai/plugin';
 import type { Context } from '@opencode/plugin/promise/plugin';
-import { createLogFn, type LogFn } from './logger.ts';
+import { createConsoleLogFn, createLogFn, type LogFn } from './logger.ts';
 import { createReporter, type Reporter } from './report.ts';
 import type { ResolveParentFn } from './session-executor.ts';
 import type { SessionClient } from './runtime-types.ts';
@@ -9,6 +9,7 @@ export interface HostSessionCapabilities {
   readonly get?: SessionClient['get'];
   readonly list?: SessionClient['list'];
   readonly messages?: SessionClient['messages'];
+  readonly hasMessageContext?: (sessionID: string) => Promise<boolean>;
   readonly prompt?: SessionClient['prompt'];
 }
 
@@ -49,6 +50,23 @@ export function createV1RuntimeHostAdapter(
     get: sdkSession?.get ? (input) => sdkSession.get(input) : undefined,
     list: sdkSession?.list ? (input) => sdkSession.list(input) : undefined,
     messages: sdkSession?.messages ? (input) => sdkSession.messages(input) : undefined,
+    hasMessageContext: sdkSession?.messages
+      ? async (sessionID) => {
+          const messages = await sdkSession.messages({
+            path: { id: sessionID },
+            query: { limit: 5 },
+          });
+          return (
+            'data' in messages &&
+            !!messages.data &&
+            messages.data.some((message) =>
+              message.parts.some(
+                (part) => part.type === 'text' && (!('status' in part) || part.status !== 'failed')
+              )
+            )
+          );
+        }
+      : undefined,
     prompt: sdkSession?.prompt ? (input) => sdkSession.prompt(input) : undefined,
   };
   return {
@@ -82,24 +100,32 @@ type ReporterPost = (
 ) => Promise<unknown>;
 
 /**
- * Adapt only V2 capabilities whose semantics are confirmed by the V2 API:
- * parent lookup through session.get and registered tool discovery through
- * tool.list. V2 app has no log/post equivalent, so those capabilities are
- * deliberately absent and use local no-op behavior.
+ * Adapt only V2 capabilities whose semantics are confirmed by the V2 API.
+ * `session.context()` supplies the recent material required for consent
+ * context validation; V2 prompt injection has no no-reply equivalent, so it
+ * deliberately remains unavailable rather than changing consent semantics.
  */
 export function createV2RuntimeHostAdapter(
   options: V2RuntimeHostAdapterOptions
 ): RuntimeHostAdapter {
   const { context } = options;
+  const log = createConsoleLogFn();
   return {
     directory: options.directory,
     project: context.location.project,
-    session: {},
+    session: {
+      hasMessageContext: async (sessionID) =>
+        (await context.session.context({ sessionID })).some(
+          (message) =>
+            'content' in message &&
+            message.content.some((part) => part.type === 'text' && part.text.trim() !== '')
+        ),
+    },
     tools: {
       list: async () => (await context.tool.list()).map(({ id }) => ({ id })),
     },
-    log: async () => {},
-    report: () => {},
+    log,
+    report: createReporter({}, log),
     resolveParent: async (sessionID) => {
       const session = await context.session.get({ sessionID });
       return typeof session.parentID === 'string' && session.parentID !== ''

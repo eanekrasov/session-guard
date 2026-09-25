@@ -9,6 +9,8 @@ import { createSession, WorkflowStore } from '../../src/session/session-store.ts
 import { createTask } from '../support/task-factory.ts';
 import { Effect } from 'effect';
 import { v2ContextEvent, v2PromptEvent, v2HostEvent } from '../../src/app/v2-plugin-contract.ts';
+import { calculateDocumentSetEvidence, evidenceOf } from '../../src/app/consent.ts';
+import type { ConsentManifest } from '../../src/app/consent.ts';
 
 type BeforeEvent = {
   tool: string;
@@ -433,7 +435,7 @@ describe('V2 plugin setup adapter', () => {
     expect(disposed).toBe(2);
   });
 
-  test('disposes the runtime when registration fails during setup', async () => {
+  test('degrades safely when registration fails during setup', async () => {
     const context = {
       location: {
         directory: v2FixtureProject,
@@ -447,10 +449,10 @@ describe('V2 plugin setup adapter', () => {
       },
     } as unknown as Context;
 
-    await expect(SessionGuardPluginV2(context)).rejects.toThrow('registration failed');
+    await expect(SessionGuardPluginV2(context)).resolves.toBeFunction();
   });
 
-  test('disposes the before registration when after registration fails during setup', async () => {
+  test('disposes the before registration and degrades when after registration fails during setup', async () => {
     let beforeDisposals = 0;
     let registrations = 0;
     const context = {
@@ -472,8 +474,9 @@ describe('V2 plugin setup adapter', () => {
       },
     } as unknown as Context;
 
-    await expect(SessionGuardPluginV2(context)).rejects.toThrow('after registration failed');
+    const cleanup = await SessionGuardPluginV2(context);
     expect(beforeDisposals).toBe(1);
+    await cleanup();
   });
 
   test('still disposes the runtime when registration disposal fails', async () => {
@@ -823,6 +826,75 @@ describe('V2 plugin setup adapter', () => {
     } finally {
       if (previousStore === undefined) delete process.env.SESSION_GUARD_STORE_DIR;
       else process.env.SESSION_GUARD_STORE_DIR = previousStore;
+      await rm(storeDirectory, { recursive: true, force: true });
+    }
+  });
+
+  test('records and resolves V2 consent through the verified context capability', async () => {
+    const previousStore = process.env.SESSION_GUARD_STORE_DIR;
+    const storeDirectory = await mkdtemp(join(tmpdir(), 'v2-consent-store-'));
+    process.env.SESSION_GUARD_STORE_DIR = storeDirectory;
+    const manifest: ConsentManifest = {
+      schema: 'harness.consent.evidence/v1',
+      revision: 0,
+      summary: 'Approve the V2 plan',
+      files: ['plan.md'],
+    };
+    const evidence = evidenceOf(manifest);
+    const request = `<consent-request schema="harness.consent/v1" revision="0" evidence="${evidence}" grant="grant" decline="decline">${JSON.stringify(manifest)}</consent-request>`;
+
+    try {
+      await writeFile(join(v2FixtureProject, 'plan.md'), '# V2 plan\n');
+      const store = new WorkflowStore(storeDirectory);
+      const session = createSession('v2-consent', 'base', 'session-guard', 'planning');
+      await store.save(session);
+      let before: BeforeCallback | undefined;
+      let after: AfterCallback | undefined;
+      const context = v2Context((name, callback) => {
+        if (name === 'execute.before') before = callback as BeforeCallback;
+        else after = callback as AfterCallback;
+      }) as unknown as { session: { context: () => Promise<unknown[]> } };
+      context.session = {
+        context: async () => [{ type: 'user', content: [{ type: 'text', text: request }] }],
+      };
+      const cleanup = await SessionGuardPluginV2(context as unknown as Context);
+
+      await before!({
+        tool: 'question',
+        sessionID: 'v2-consent',
+        agent: 'orchestrator',
+        messageID: 'message-consent',
+        id: 'call-consent',
+        input: { questions: [{ question: request }] },
+      });
+      expect((await store.load('v2-consent'))?.approvals).toContainEqual(
+        expect.objectContaining({ type: 'plan', callId: 'call-consent', status: 'pending' })
+      );
+
+      await after!({
+        tool: 'question',
+        sessionID: 'v2-consent',
+        agent: 'orchestrator',
+        messageID: 'message-consent',
+        id: 'call-consent',
+        input: { questions: [{ question: request }] },
+        status: 'completed',
+        result: { output: request, metadata: { answers: ['grant'] } },
+      });
+      const resolved = await store.load('v2-consent');
+      expect(resolved?.approvals).toContainEqual(
+        expect.objectContaining({ type: 'plan', callId: 'call-consent', status: 'granted' })
+      );
+      expect(resolved?.currentStage).toBe('planning');
+      expect(resolved?.approvals.some((approval) => approval.status === 'pending')).toBe(false);
+      expect(resolved?.approvals[0]?.evidence).toBe(
+        calculateDocumentSetEvidence([['plan.md', '# V2 plan\n']])
+      );
+      await cleanup();
+    } finally {
+      if (previousStore === undefined) delete process.env.SESSION_GUARD_STORE_DIR;
+      else process.env.SESSION_GUARD_STORE_DIR = previousStore;
+      await rm(join(v2FixtureProject, 'plan.md'), { force: true });
       await rm(storeDirectory, { recursive: true, force: true });
     }
   });

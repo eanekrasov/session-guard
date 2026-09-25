@@ -33,7 +33,25 @@ async function makeOrchestrator(client?: SessionClient) {
   const { ConsentOrchestrator } = await import('../../src/app/consent-orchestrator.ts');
   const { SessionExecutor } = await import('../../src/app/session-executor.ts');
   const executor = new SessionExecutor(store);
-  return new ConsentOrchestrator(store, executor, directory, '', client ?? mockClient());
+  const v1Client = client ?? mockClient();
+  return new ConsentOrchestrator(store, executor, directory, '', {
+    hasMessageContext: async (sessionID: string) => {
+      const messages = await v1Client.messages({
+        path: { id: sessionID },
+        query: { limit: 5 },
+      });
+      return (
+        'data' in messages &&
+        !!messages.data &&
+        messages.data.some((message) =>
+          message.parts.some(
+            (part) => part.type === 'text' && (!('status' in part) || part.status !== 'failed')
+          )
+        )
+      );
+    },
+    prompt: v1Client.prompt,
+  });
 }
 
 function findOpenApproval(session: Awaited<ReturnType<WorkflowStore['load']>>) {

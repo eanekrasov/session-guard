@@ -101,7 +101,9 @@ export const V2_CAPABILITIES: readonly V2Capability[] = [
     v1Hook: 'experimental.session.compacting',
     v2Mapping: "ctx.session.hook('compaction')",
     status: 'deferred',
-    reason: 'V2 compaction exposes a result override, not the V1 mutable context/prompt output.',
+    reason:
+      'V2 exposes mutable request system/messages and an optional replacement summary, but V1 appends a separate compaction context/prompt output. No installed V2 field preserves that distinct insertion semantics.',
+    testPath: 'test/app/plugin-v2-contract.test.ts',
   },
   {
     name: 'Message transform',
@@ -110,6 +112,33 @@ export const V2_CAPABILITIES: readonly V2Capability[] = [
     status: 'supported',
     reason:
       'The adapter forwards V2 context messages through the existing V1 transform with explicit session identity and converts proven text/tool-call fields back to the V2 Message shape.',
+    testPath: 'test/app/v2-plugin-adapter.test.ts',
+  },
+  {
+    name: 'Consent context validation',
+    v1Hook: 'client.session.messages',
+    v2Mapping: 'ctx.session.context({ sessionID })',
+    status: 'supported',
+    reason:
+      'V2 context returns the session message material used only to verify a non-failed text context before pending consent is recorded; answer resolution remains evidence-verified and fail-closed.',
+    testPath: 'test/app/v2-plugin-adapter.test.ts',
+  },
+  {
+    name: 'Observability',
+    v1Hook: 'client.app.log and client.post',
+    v2Mapping: 'host-neutral local logger',
+    status: 'supported',
+    reason:
+      'The installed V2 Context has no logging or reporting capability. The adapter uses the project local logger and a reporter without a toast transport, so diagnostics are retained without inventing a host API.',
+    testPath: 'test/app/runtime-host-adapter.test.ts',
+  },
+  {
+    name: 'Degraded initialization',
+    v1Hook: 'V1 init catch fallback',
+    v2Mapping: 'setup cleanup after local diagnostic',
+    status: 'supported',
+    reason:
+      'A failed V2 registration disposes acquired resources, records a local diagnostic, and returns an idempotent no-op cleanup so plugin loading continues safely.',
     testPath: 'test/app/v2-plugin-adapter.test.ts',
   },
   {

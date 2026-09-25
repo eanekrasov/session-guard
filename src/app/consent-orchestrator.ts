@@ -16,6 +16,11 @@ import { type Approval } from '../session/session-schema.ts';
 import { readFile } from './sdd-artifacts.ts';
 import type { SessionClient } from './runtime-types.ts';
 
+export interface ConsentSessionCapabilities {
+  readonly hasMessageContext?: (sessionID: string) => Promise<boolean>;
+  readonly prompt?: SessionClient['prompt'];
+}
+
 // ─── ConsentOrchestrator ─────────────────────────────────────────────────────
 
 /**
@@ -31,7 +36,7 @@ export class ConsentOrchestrator {
     private readonly executor: SessionExecutor,
     private readonly projectDir: string,
     private readonly profilesDir: string,
-    private readonly client: Pick<SessionClient, 'messages' | 'prompt'> | undefined,
+    private readonly client: ConsentSessionCapabilities | undefined,
     log?: LogFn
   ) {
     this.log = log ?? (() => Promise.resolve());
@@ -56,17 +61,7 @@ export class ConsentOrchestrator {
     // SDK-004: Прочитать сообщения сессии чтобы проверить контекст вопроса
     // (например, подтвердить что вопрос действительно показывался пользователю).
     try {
-      if (!this.client?.messages) return;
-      const messages = await this.client.messages({ path: { id: sessionID }, query: { limit: 5 } });
-      // SDK возвращает discriminated union: { data: T; error: undefined } | { data: undefined; error: E }
-      // Проверяем, что data не undefined.
-      if (!('data' in messages) || !messages.data) return;
-      // TODO: SDK Part union не имеет поля `status` на text-варианте.
-      // Проверяем status только если он есть (другие Part могут его иметь).
-      const hasRelevantPart = messages.data.some((msg) =>
-        msg.parts.some((p) => p.type === 'text' && (!('status' in p) || p.status !== 'failed'))
-      );
-      if (!hasRelevantPart) return;
+      if (!(await this.client?.hasMessageContext?.(sessionID))) return;
     } catch (err) {
       void this.log('warn', 'consentBefore: client.messages unavailable, falling through', {
         sessionID,

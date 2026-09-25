@@ -77,12 +77,15 @@ describe('runtime host adapters', () => {
     expect(mcpQuery).toEqual({ query: { directory: '/project' } });
   });
 
-  test('V2 exposes confirmed parent and tool discovery only', async () => {
+  test('V2 exposes confirmed parent, tool discovery, and consent context validation', async () => {
     const adapter = createV2RuntimeHostAdapter({
       directory: '/project',
       context: {
         location: { project: { directory: '/project' } },
-        session: { get: async () => ({ parentID: 'parent-1' }) },
+        session: {
+          get: async () => ({ parentID: 'parent-1' }),
+          context: async () => [{ type: 'user', content: [{ type: 'text', text: 'consent' }] }],
+        },
         tool: { list: async () => [{ id: 'bash' }, { id: 'workflow-create' }] },
       } as never,
     });
@@ -92,7 +95,7 @@ describe('runtime host adapters', () => {
       { id: 'bash' },
       { id: 'workflow-create' },
     ]);
-    expect(adapter.session).toEqual({});
+    await expect(adapter.session.hasMessageContext?.('child-1')).resolves.toBe(true);
   });
 
   test('V2 makes unsupported optional capabilities explicit and harmless', async () => {
@@ -107,7 +110,7 @@ describe('runtime host adapters', () => {
 
     expect(adapter.session.get).toBeUndefined();
     expect(adapter.session.list).toBeUndefined();
-    expect(adapter.session.messages).toBeUndefined();
+    expect(adapter.session.hasMessageContext).toBeDefined();
     expect(adapter.session.prompt).toBeUndefined();
     await expect(adapter.tools.list?.()).resolves.toEqual([]);
     expect(() => adapter.report('unsupported')).not.toThrow();

@@ -3,6 +3,7 @@
 ```bash
 mise run smoke              # every scenario
 mise run smoke git-block    # one scenario by id
+HOST_SMOKE_OPENCODE_VERSION=v2 mise run smoke v2-workflow-create
 ```
 
 Nothing here calls into the plugin. Each scenario starts a real `opencode
@@ -12,6 +13,10 @@ plugin persisted, and the tool parts the host recorded. A scenario that passes
 here is evidence the mechanism works in production.
 
 ## What it isolates, and what it borrows
+
+V1 scenarios drive the host through its V1 HTTP API. The V2 scenario uses the
+installed `@opencode/client` API (`session.create`, `session.prompt`, and
+`session.wait`) and asserts the durable workflow state.
 
 `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME` and `XDG_CACHE_HOME` point
 at a temp tree, so your own agents, plugins, MCP servers and sessions take no
@@ -55,15 +60,16 @@ records fresh durations in `docs/plans/host-smoke.md` on every run.
 
 ## Environment
 
-| Variable              | Meaning                                                   |
-| --------------------- | --------------------------------------------------------- |
-| `HOST_SMOKE_MODEL`    | model id; defaults to the `model` in your opencode config |
-| `HOST_SMOKE_PLUGIN`   | skip the build and load this path instead of `dist`       |
-| `HOST_SMOKE_ATTEMPTS` | retries per step, default 3                               |
-| `HOST_SMOKE_DEBUG`    | print questions, USER/MODEL exchanges and failure details |
-| `HOST_SMOKE_OUTPUT`   | `human` (default) or `jsonl`                              |
-| `FORCE_COLOR=1`       | force colors when stderr is not attached to a TTY         |
-| `NO_COLOR=1`          | disable colors                                            |
+| Variable                      | Meaning                                                   |
+| ----------------------------- | --------------------------------------------------------- |
+| `HOST_SMOKE_MODEL`            | model id; defaults to the `model` in your opencode config |
+| `HOST_SMOKE_PLUGIN`           | skip the build and load this path instead of `dist`       |
+| `HOST_SMOKE_ATTEMPTS`         | retries per step, default 3                               |
+| `HOST_SMOKE_DEBUG`            | print questions, USER/MODEL exchanges and failure details |
+| `HOST_SMOKE_OPENCODE_VERSION` | `v1` (default) or `v2`                                    |
+| `HOST_SMOKE_OUTPUT`           | `human` (default) or `jsonl`                              |
+| `FORCE_COLOR=1`               | force colors when stderr is not attached to a TTY         |
+| `NO_COLOR=1`                  | disable colors                                            |
 
 For machine-readable output, use JSONL on stderr:
 

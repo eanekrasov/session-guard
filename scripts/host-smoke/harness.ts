@@ -381,7 +381,8 @@ export async function writeSmokeConfigs(
   opencodeDir: string,
   operator: Awaited<ReturnType<typeof operatorProviders>>,
   model: string,
-  pluginSpec: string
+  pluginSpec: string,
+  version: HostVersion = 'v1'
 ): Promise<void> {
   log('debug', `writing smoke config files to ${opencodeDir}`);
   await mkdir(opencodeDir, { recursive: true });
@@ -397,7 +398,9 @@ export async function writeSmokeConfigs(
         ...(operator.providers ? { providers: operator.providers } : {}),
         ...(operator.disabled_providers ? { disabled_providers: operator.disabled_providers } : {}),
         permission: { '*': 'allow', question: 'allow' },
-        plugin: [`file://${pluginSpec}`],
+        ...(version === 'v2'
+          ? { plugins: [{ package: pluginSpec }] }
+          : { plugin: [`file://${pluginSpec}`] }),
         autoupdate: false,
         share: 'disabled',
       },
@@ -441,7 +444,13 @@ export async function startHost(options: HostOptions): Promise<Host> {
     // Fetch the operator's full resolved config so the child host inherits its
     // provider definitions, model registry and all other required entries.
     const operator = await operatorProviders(options.model);
-    await writeSmokeConfigs(join(configDir, 'opencode'), operator, options.model, pluginSpec);
+    await writeSmokeConfigs(
+      join(configDir, 'opencode'),
+      operator,
+      options.model,
+      pluginSpec,
+      version
+    );
 
     // The profile the plugin governs this project with. `base` always comes
     // along: every shipped profile is a delta over it.
