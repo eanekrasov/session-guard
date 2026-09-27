@@ -31,5 +31,26 @@ export default [
       'no-console': 'off',
     },
   },
+  {
+    // The smoke suite is a black box around the built plugin: it drives `dist`
+    // through a real host and must not reach into the plugin's sources, or the
+    // suite starts passing because of internals instead of the artifact. Without
+    // this rule the boundary is only prose in `smoke/README.md`.
+    files: ['smoke/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['../src/*', '../../src/*', '@eanekrasov/session-guard'],
+              message:
+                'host smoke drives the built plugin (dist): import neither the plugin sources nor the package itself',
+            },
+          ],
+        },
+      ],
+    },
+  },
   prettierConfig,
 ];

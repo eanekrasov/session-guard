@@ -12,4 +12,6 @@
 
 Единственная связь с корнем — фикстуры: suite читает `profiles/base`
 (поставляемый набор) и `scripts/commit-task.ts` (копирует его в temp-проект).
-Обратной связи нет: `smoke/**` не импортирует `src/**`.
+Обратной связи нет: `smoke/**` не импортирует `src/**` и не импортирует сам
+пакет `@eanekrasov/session-guard` — это стережёт `no-restricted-imports` в
+`eslint.config.js`.
