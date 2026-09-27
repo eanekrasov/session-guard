@@ -208,28 +208,34 @@ V1 на V2 (или наоборот) нет. Поддерживаются ров
 
 ## Какие возможности нужны сценариям
 
-| Сценарий               | Что использует в общем фасаде                                              |
-| ---------------------- | -------------------------------------------------------------------------- |
-| `plugin-loads`         | создание сессии, `runPrompt`, нормализованные tool calls, plugin evidence  |
-| `create`               | создание сессии, `runPrompt`, `readWorkflowState` (durable `currentStage`) |
-| `no-session`           | следующий этап: создание сессии и отсутствие durable state                 |
-| consent-сценарии       | ответы оператора: `question` в V1, формы в V2                              |
-| task/mutation/pipeline | durable state, HEAD и квитанция, safe retry для мутаций                    |
+| Сценарий               | Что использует в общем фасаде                                                                                       |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `plugin-loads`         | создание сессии, `runPrompt`, нормализованные tool calls, plugin evidence                                           |
+| `create`               | создание сессии, `runPrompt`, `readWorkflowState` (durable `currentStage`)                                          |
+| `no-session`           | создание сессии, `runPrompt`, нормализованный shell-вызов, `readWorkflowState` (durable state должен отсутствовать) |
+| consent-сценарии       | ответы оператора: `question` в V1, формы в V2                                                                       |
+| task/mutation/pipeline | durable state, HEAD и квитанция, safe retry для мутаций                                                             |
+
+Хост называет shell-инструмент по-разному (V1 — `bash`, V2 — `shell`), поэтому общий
+контракт использует одно имя `SHELL_TOOL = 'shell'`: иначе утверждение «команда выполнена»
+пришлось бы ветвить по версии хоста внутри сценария.
 
 ## Стадийная миграция
 
 Новая реализация создана рядом со старой, миграция по этапам:
 
-1. **Сделано:** вертикальный срез — `SmokeHost`, две transport strategy, один runner,
-   canonical registry, `plugin-loads` и `create`, parity report и единый exit code.
-2. Дальше: `no-session` (stage-2-core), затем consent, task, negative, commit,
-   subagent и pipeline-сценарии.
-3. Baseline runner (`scenario-kit.ts`, `v2-scenario-kit.ts`, `v2-client.ts`) остаётся
+1. **Сделано (этап 1):** вертикальный срез — `SmokeHost`, две transport strategy, один
+   runner, canonical registry, `plugin-loads` и `create`, parity report и единый exit code.
+2. **Сделано (этап 2):** `no-session` (stage-2-core) — тот же registry, facade, runner и
+   parity pipeline; утверждение — «durable workflow state не появился **и** команда
+   действительно выполнилась».
+3. Дальше: consent, task, negative, commit, subagent и pipeline-сценарии.
+4. Baseline runner (`scenario-kit.ts`, `v2-scenario-kit.ts`, `v2-client.ts`) остаётся
    до миграции последнего сценария и **не** формирует parity report; он не получает
    новых сценариев и новых semantics.
 
-На первом этапе retry-семантика зафиксирована как baseline: `plugin-loads` —
-read-only шаг с повтором в той же сессии, `create` — mutating шаг с одной попыткой.
+Retry-семантика каждого мигрированного шага зафиксирована в registry: `plugin-loads` и
+`no-session` — read-only с повтором в той же сессии, `create` — mutating с одной попыткой.
 Полный контракт safe retry (`poll-state`, `new-session`, `indeterminate_mutation`)
 становится обязательным при миграции mutating-, consent-, task- и subagent-сценариев,
 и registry, объявивший ещё не реализованную strategy, отклоняется до старта хоста.
@@ -295,27 +301,75 @@ strategy, поэтому общий сценарий снова видит од�
 Всё, что нужно сценариям, объявлено локально в `smoke/src/host/types.ts`; внешний JSON
 сужается вручную. Отдельный публичный contract package не создавался.
 
-## Результаты первого этапа
+## Результаты этапа 1 (вертикальный срез)
 
 Живой прогон 2026-09-27, модель `crpt/deepseek-ai/DeepSeek-V4-Flash-small`, собранный
 `dist`:
 
-| Проверка                          | Команда                                                                            | Итог                                                                         |
-| --------------------------------- | ---------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| structural parity                 | `bun test smoke/`                                                                  | 125 pass: один registry, одинаковые metadata, одинаковые assertions          |
-| `plugin-loads` на V1              | `HOST_SMOKE_OPENCODE_VERSION=v1 mise run smoke plugin-loads`                       | **ПРОЙДЕНО**, 1 попытка, 38.2s, exit `0`                                     |
-| `plugin-loads` на V2              | `HOST_SMOKE_OPENCODE_VERSION=v2 mise run smoke plugin-loads`                       | **ПРОЙДЕНО**, 1 попытка, 3.8s, exit `0`                                      |
-| behavioral parity обоих сценариев | `mise run smoke plugin-loads create`                                               | 4/4 **ПРОЙДЕНО** (V1 33.7s и 30.9s, V2 4.3s и 2.5s), parity `pass`, exit `0` |
-| полный canonical registry         | `mise run smoke`                                                                   | 4/4 **ПРОЙДЕНО**, остальные 9 — `not-run`/`pending-migration`, exit `4`      |
-| недоступная среда                 | `HOST_SMOKE_V2_BINARY=/nonexistent/v2 mise run smoke create`                       | V1 **ПРОЙДЕНО**, V2 `not-run`/`live-environment-unavailable`, exit `5`       |
-| выбор только из pending           | `mise run smoke no-session`                                                        | `not-run`/`pending-migration`, exit `4`                                      |
-| baseline                          | `HOST_SMOKE_BASELINE=1 HOST_SMOKE_OPENCODE_VERSION=v1 mise run smoke plugin-loads` | **ПРОЙДЕНО**, exit `0`                                                       |
+| Проверка                          | Команда                                                                            | Итог                                                                                            |
+| --------------------------------- | ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| structural parity                 | `bun test smoke/`                                                                  | 125 pass: один registry, одинаковые metadata, одинаковые assertions                             |
+| `plugin-loads` на V1              | `HOST_SMOKE_OPENCODE_VERSION=v1 mise run smoke plugin-loads`                       | **ПРОЙДЕНО**, 1 попытка, 38.2s, exit `0`                                                        |
+| `plugin-loads` на V2              | `HOST_SMOKE_OPENCODE_VERSION=v2 mise run smoke plugin-loads`                       | **ПРОЙДЕНО**, 1 попытка, 3.8s, exit `0`                                                         |
+| behavioral parity обоих сценариев | `mise run smoke plugin-loads create`                                               | 4/4 **ПРОЙДЕНО** (V1 33.7s и 30.9s, V2 4.3s и 2.5s), parity `pass`, exit `0`                    |
+| полный canonical registry         | `mise run smoke`                                                                   | 4/4 **ПРОЙДЕНО**, остальные 9 — `not-run`/`pending-migration`, exit `4`                         |
+| недоступная среда                 | `HOST_SMOKE_V2_BINARY=/nonexistent/v2 mise run smoke create`                       | V1 **ПРОЙДЕНО**, V2 `not-run`/`live-environment-unavailable`, exit `5`                          |
+| выбор только из pending           | `mise run smoke no-session`                                                        | на этапе 1: `not-run`/`pending-migration`, exit `4` (после миграции — проверка самого сценария) |
+| baseline                          | `HOST_SMOKE_BASELINE=1 HOST_SMOKE_OPENCODE_VERSION=v1 mise run smoke plugin-loads` | **ПРОЙДЕНО**, exit `0`                                                                          |
 
 Baseline тех же сценариев до миграции: `plugin-loads` и `create` на V1 — 2/2
 **ПРОЙДЕНО** (exit `0`), `v2-workflow-create` на V2 — 1/1 **ПРОЙДЕНО** (exit `0`).
 
 Оговорка: полный прогон завершается `4`, пока не мигрированы остальные
 canonical id — это и есть честный признак незавершённого этапа, а не зелёный итог.
+
+## Результаты этапа 2 (`no-session`)
+
+| Проверка           | Команда                                                    | Итог                                                                                                                     |
+| ------------------ | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `no-session` на V1 | `HOST_SMOKE_OPENCODE_VERSION=v1 mise run smoke no-session` | **ПРОЙДЕНО**, 1 попытка, 1.4m, exit `0`                                                                                  |
+| `no-session` на V2 | `HOST_SMOKE_OPENCODE_VERSION=v2 mise run smoke no-session` | **ПРОЙДЕНО**, 1 попытка, 3.2s, exit `0`                                                                                  |
+| behavioral parity  | `mise run smoke no-session`                                | 2/2 **ПРОЙДЕНО** (V1 1.5m, V2 2.9s), parity `pass`, exit `0`                                                             |
+| полный registry    | `mise run smoke`                                           | 6/6 **ПРОЙДЕНО** (три сценария × два хоста), 8 сценариев `not-run`/`pending-migration`, `no-session` со `pass`, exit `4` |
+| structural parity  | `bun test smoke/`                                          | 149 pass, включая проверку одинаковых metadata, instruction, mutation, retry и assertion для обоих host kind             |
+
+Утверждение этого этапа — «ровно разрешённое действие», и оно проверяет:
+
+1. `workflowState === null` — durable workflow state не появился;
+2. **ровно один** tool call за попытку (лишние запрещены: инструкция требует
+   «Do nothing else», а дополнительный shell-вызов может изменить рабочее дерево или
+   окружение);
+3. нормализованное имя — `shell`;
+4. `command === 'git log --oneline -1'` (после нормализации пробелов);
+5. `status === 'completed'` и вывод содержит seed-коммит временного проекта.
+
+Считаются только tool calls: обычный текстовый ответ модели после вызова не нарушает
+контракт. Лишние действия в одной попытке делают её невыполненной, поэтому read-only шаг
+повторяется в той же сессии (до `HOST_SMOKE_ATTEMPTS`), и evidence сохраняет факт первой
+неудачной попытки («попытка 1: разрешено ровно одно действие…»). Если лишние действия
+есть во всех попытках — `fail` с `failureKind: 'model'`.
+
+Этот контракт **специфичен для `no-session`** и не распространяется на остальные сценарии
+автоматически: для каждого из них «ровно эти действия» должно быть отдельно объявлено
+частью acceptance.
+
+Без проверки «ровно одно действие» сценарий доказывал бы только, что `git log --oneline -1`
+когда-то выполнялась, а не что модель сделала ровно разрешённое. Без `command` подошла бы
+любая команда, печатающая `seed`, — например `echo seed`. Поэтому `NormalizedToolCall`
+несёт `command`, а не только `output`: оба хоста сообщают его в `state.input.command`
+(V1 `bash`, V2 `shell`), и сценарий сравнивает фактически выполненную команду с инструкцией,
+а не текст транскрипта.
+
+Что лишние действия — не гипотеза, показал живой прогон ещё до введения строгого контракта:
+в evidence V2-стороны отчёта было видно **две** команды за один ход —
+`shell:completed «git log --oneline -1»` и `shell:completed «echo "f360307 seed"»`. На
+прежнем утверждении это принималось как `pass`; по строгому контракту такая попытка
+невыполнена. После введения контракта тот же живой прогон V2 дал ровно один вызов и прошёл
+с первой попытки:
+
+```
+tools=[shell:completed «git log --oneline -1»]; stage=(none)
+```
 
 ### Ошибка модели против ошибки host/plugin
 

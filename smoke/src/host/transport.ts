@@ -29,6 +29,21 @@ export const PLUGIN_TOOL_PREFIX = 'workflow-';
 /** The tag the plugin puts on its own consent requests, whichever transport carries it. */
 export const CONSENT_TAG = '<consent-request';
 
+/**
+ * Shared name for the host's shell-command tool.
+ *
+ * V1 reports it as `bash`, V2 as `shell`, and both mean the same capability. The shared model
+ * uses one name so a scenario can assert "a shell command ran" without branching by host.
+ */
+export const SHELL_TOOL = 'shell';
+
+const TOOL_ALIASES: Record<string, string> = { bash: SHELL_TOOL, shell: SHELL_TOOL };
+
+/** The shared name of a host tool, for capabilities both hosts name differently. */
+export function sharedToolName(name: string): string {
+  return TOOL_ALIASES[name] ?? name;
+}
+
 export function hasConsentTag(text: string): boolean {
   return text.includes(CONSENT_TAG);
 }
@@ -71,6 +86,18 @@ function toolError(state: Record<string, unknown>): string | undefined {
   return typeof nested.message === 'string' && nested.message !== '' ? nested.message : undefined;
 }
 
+/**
+ * The command a shell call ran.
+ *
+ * Both hosts state it under `state.input.command` — V1 verbatim with its `workdir`, V2 with the
+ * command alone — so the shared model can carry the actual command without knowing which host
+ * reported it.
+ */
+function toolCommand(state: Record<string, unknown>): string | undefined {
+  const command = fields(state.input).command;
+  return typeof command === 'string' && command !== '' ? command : undefined;
+}
+
 export function normalizeToolStatus(status: unknown): NormalizedToolCall['status'] {
   switch (status) {
     case 'completed':
@@ -99,10 +126,12 @@ export function normalizeLegacyPart(value: unknown): NormalizedPart | undefined 
   if (part.type === 'tool' && typeof part.tool === 'string') {
     const output = toolOutput(state);
     const error = toolError(state);
+    const command = toolCommand(state);
     return {
       kind: 'tool',
-      tool: part.tool,
+      tool: sharedToolName(part.tool),
       status: normalizeToolStatus(state.status),
+      ...(command === undefined ? {} : { command }),
       ...(output === undefined ? {} : { output }),
       ...(error === undefined ? {} : { error }),
     };
@@ -131,11 +160,13 @@ export function normalizeSessionContent(value: unknown): NormalizedPart[] {
     const names =
       reported.length > 0
         ? reported
-        : [typeof content.name === 'string' ? content.name : 'unknown'];
+        : [sharedToolName(typeof content.name === 'string' ? content.name : 'unknown')];
+    const command = toolCommand(state);
     return names.map((name) => ({
       kind: 'tool',
       tool: name,
       status,
+      ...(command === undefined ? {} : { command }),
       ...(output === undefined ? {} : { output }),
       ...(error === undefined ? {} : { error }),
     }));
@@ -208,6 +239,7 @@ export function toolCallsFromParts(parts: NormalizedPart[]): NormalizedToolCall[
     .map((part) => ({
       name: part.tool,
       status: partStatus(part),
+      ...(part.command === undefined ? {} : { command: part.command }),
       ...(part.output === undefined ? {} : { output: part.output }),
       ...(part.error === undefined ? {} : { error: part.error }),
     }));

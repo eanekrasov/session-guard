@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 
 import type { SmokeHost } from '../src/host/facade.ts';
-import { pluginObservationFrom } from '../src/host/transport.ts';
+import { SHELL_TOOL, pluginObservationFrom } from '../src/host/transport.ts';
+import { canonicalScenarios } from '../src/registry.ts';
 import type {
   HostKind,
   MigratedScenarioDefinition,
@@ -460,5 +461,142 @@ describe('the common scenario runner', () => {
 
     expect(result.status).toBe('blocked');
     expect('failureKind' in result).toBe(false);
+  });
+});
+
+describe('the no-session canonical step', () => {
+  const step = canonicalScenarios.find((scenario) => scenario.id === 'no-session')!.steps![0]!;
+  const shellCall = {
+    name: SHELL_TOOL,
+    status: 'completed' as const,
+    command: 'git log --oneline -1',
+    output: 'd664784 seed\n',
+  };
+  const scenario = definition([step], { id: 'no-session', title: 'Без workflow-сессии' });
+
+  test('repeats in the same session, as the registry declares, until an attempt is clean', async () => {
+    // The first attempt adds a second shell call, which the boundary of an unmanaged session
+    // does not allow; the repeat is what the read-only retry policy is for.
+    const noisy = turn({
+      toolCalls: [
+        shellCall,
+        { name: SHELL_TOOL, status: 'completed', command: 'echo seed', output: 'seed\n' },
+      ],
+    });
+    const { host, calls } = makeHost([noisy, turn({ toolCalls: [shellCall] })]);
+
+    const result = await runScenario(host, scenario, { attempts: 3 });
+
+    expect(result.status).toBe('pass');
+    expect(result.attempts).toBe(2);
+    expect(calls.prompts).toHaveLength(2);
+    // The failed attempt is not erased from the evidence.
+    expect(result.evidence).toContain('попытка 1');
+    expect(result.evidence).toContain('разрешено ровно одно действие');
+  });
+
+  test('fails when every attempt performs more than the allowed action', async () => {
+    const noisy = turn({
+      toolCalls: [
+        shellCall,
+        { name: SHELL_TOOL, status: 'completed', command: 'echo seed', output: 'seed\n' },
+      ],
+    });
+    const { host } = makeHost([noisy]);
+
+    const result = await runScenario(host, scenario, { attempts: 3 });
+
+    expect(result.status).toBe('fail');
+    if (result.status !== 'fail') throw new Error('expected a failure');
+    expect(result.failureKind).toBe('model');
+    expect(result.evidence).toContain('разрешено ровно одно действие');
+    expect(result.evidence).toContain('«echo seed»');
+  });
+
+  test('fails when the command never ran, even though no workflow session exists', async () => {
+    // "Nothing happened" must not read as "the plugin stayed out of the way".
+    const { host } = makeHost([turn()]);
+
+    const result = await runScenario(host, scenario, { attempts: 1 });
+
+    expect(result.status).toBe('fail');
+    if (result.status !== 'fail') throw new Error('expected a failure');
+    expect(result.failureKind).toBe('model');
+    expect(result.evidence).toContain('ни одного вызова инструмента');
+  });
+
+  test('fails on a different command that happens to print seed', async () => {
+    // The proof is the command that ran, not text that looks like its output: `echo seed`
+    // must not satisfy a scenario that asked for `git log --oneline -1`.
+    const { host } = makeHost([
+      turn({
+        toolCalls: [
+          { name: SHELL_TOOL, status: 'completed', command: 'echo seed', output: 'seed\n' },
+        ],
+      }),
+    ]);
+
+    const result = await runScenario(host, scenario, { attempts: 1 });
+
+    expect(result.status).toBe('fail');
+    if (result.status !== 'fail') throw new Error('expected a failure');
+    expect(result.evidence).toContain('«echo seed»');
+    expect(result.evidence).toContain('ожидалась «git log --oneline -1»');
+  });
+
+  test('fails when the host reported no command at all, because nothing is proven', async () => {
+    const { host } = makeHost([
+      turn({ toolCalls: [{ name: SHELL_TOOL, status: 'completed', output: 'd664784 seed\n' }] }),
+    ]);
+
+    const result = await runScenario(host, scenario, { attempts: 1 });
+
+    expect(result.status).toBe('fail');
+    if (result.status !== 'fail') throw new Error('expected a failure');
+    expect(result.evidence).toContain('команда не сообщена');
+  });
+
+  test('fails when a non-shell tool was used', async () => {
+    const { host } = makeHost([
+      turn({
+        toolCalls: [
+          { name: 'read', status: 'completed', command: 'git log --oneline -1', output: 'seed\n' },
+        ],
+      }),
+    ]);
+
+    const result = await runScenario(host, scenario, { attempts: 1 });
+
+    expect(result.status).toBe('fail');
+    if (result.status !== 'fail') throw new Error('expected a failure');
+    expect(result.evidence).toContain('разрешён инструмент «shell»');
+  });
+
+  test('accepts the same command with incidental spacing', async () => {
+    const { host } = makeHost([
+      turn({
+        toolCalls: [
+          {
+            name: SHELL_TOOL,
+            status: 'completed',
+            command: '  git   log --oneline -1 ',
+            output: 'd664784 seed\n',
+          },
+        ],
+      }),
+    ]);
+
+    const result = await runScenario(host, scenario, { attempts: 1 });
+
+    expect(result.status).toBe('pass');
+  });
+
+  test('fails when the plugin wrote a workflow session for the unmanaged session', async () => {
+    const { host } = makeHost([turn({ toolCalls: [shellCall] }, planning)], { state: planning });
+
+    const result = await runScenario(host, scenario, { attempts: 1 });
+
+    expect(result.status).toBe('fail');
+    expect(result.evidence).toContain('плагин записал сессию workflow');
   });
 });

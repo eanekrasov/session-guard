@@ -21,6 +21,8 @@ import {
   normalizeSessionContent,
   normalizeWorkflowState,
   pluginObservationFrom,
+  sharedToolName,
+  SHELL_TOOL,
   toolCallsFromParts,
 } from '../src/host/transport.ts';
 import {
@@ -151,10 +153,53 @@ describe('normalizing a host payload into the shared smoke model', () => {
 
     const unrelated = normalizeSessionContent({
       type: 'tool',
-      name: 'bash',
-      state: { status: 'completed', input: { command: 'ls' } },
+      name: 'read',
+      state: { status: 'completed', input: { filePath: 'src/a.ts' } },
     });
-    expect(unrelated).toEqual([{ kind: 'tool', tool: 'bash', status: 'completed' }]);
+    expect(unrelated).toEqual([{ kind: 'tool', tool: 'read', status: 'completed' }]);
+  });
+
+  test('normalizes the host shell tool to one shared name, and keeps its command', () => {
+    // V1 reports the same capability as `bash`, V2 as `shell`; a shared scenario asserts one
+    // name, and both hosts state the command under `state.input.command`.
+    expect(
+      normalizeLegacyPart({
+        type: 'tool',
+        tool: 'bash',
+        state: { status: 'completed', input: { command: 'git log --oneline -1' } },
+      })
+    ).toEqual({
+      kind: 'tool',
+      tool: SHELL_TOOL,
+      status: 'completed',
+      command: 'git log --oneline -1',
+    });
+    expect(
+      normalizeSessionContent({
+        type: 'tool',
+        name: 'shell',
+        state: {
+          status: 'completed',
+          input: { command: 'git log --oneline -1' },
+          content: [{ type: 'text', text: 'ok' }],
+        },
+      })
+    ).toEqual([
+      {
+        kind: 'tool',
+        tool: SHELL_TOOL,
+        status: 'completed',
+        command: 'git log --oneline -1',
+        output: 'ok',
+      },
+    ]);
+    // A plugin tool is never aliased: its name is what proves the plugin ran.
+    expect(normalizeLegacyPart({ type: 'tool', tool: 'workflow-list', state: {} })).toEqual({
+      kind: 'tool',
+      tool: 'workflow-list',
+      status: 'unknown',
+    });
+    expect(sharedToolName('task')).toBe('task');
   });
 
   test('infers a call outcome when the host reported only its result', () => {

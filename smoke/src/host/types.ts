@@ -21,6 +21,12 @@ export type NormalizedPart =
        * when the host states it explicitly.
        */
       status?: NormalizedToolCall['status'];
+      /**
+       * The shell command the call ran, when the host reported one. Both hosts state it under
+       * `state.input.command`, so a scenario can prove that the command it asked for is the
+       * command that ran instead of matching the model's prose.
+       */
+      command?: string;
       output?: string;
       error?: string;
     }
@@ -30,6 +36,8 @@ export type NormalizedPart =
 export interface NormalizedToolCall {
   name: string;
   status: 'pending' | 'completed' | 'failed' | 'unknown';
+  /** The shell command this call ran, when the host reported one. */
+  command?: string;
   output?: string;
   error?: string;
 }

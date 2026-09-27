@@ -7,7 +7,13 @@
  * produces no scenario result at all.
  */
 
-import type { HostKind, ScenarioDefinition, ScenarioStep } from './host/types.ts';
+import { SHELL_TOOL } from './host/transport.ts';
+import type {
+  HostKind,
+  NormalizedToolCall,
+  ScenarioDefinition,
+  ScenarioStep,
+} from './host/types.ts';
 
 /** Which migration stage a scenario belongs to; the parity matrix is derived from it. */
 export type ScenarioStage =
@@ -68,6 +74,66 @@ const createStep: ScenarioStep = {
   },
 };
 
+/** The exact command the scenario asks for; the assertion proves this is what ran. */
+const NO_SESSION_COMMAND = 'git log --oneline -1';
+
+/** Spacing is not a finding: the command is compared after collapsing whitespace. */
+function normalizeCommand(command: string): string {
+  return command.trim().replace(/\s+/gu, ' ');
+}
+
+const noSessionStep: ScenarioStep = {
+  instruction: `Use the bash tool to run exactly this command: ${NO_SESSION_COMMAND}. Do nothing else.`,
+  // The command is read-only, so a repeat in the same session is allowed.
+  mutation: 'read-only',
+  retry: 'same-session',
+  expect: (result) => {
+    // The scenario owns the boundary of an unmanaged session, so its contract is "exactly the
+    // allowed action": an extra shell call could change the working tree or the environment even
+    // when it looks harmless. Only tool calls are counted — text after the call is not an action.
+    if (result.workflowState !== null) {
+      return `плагин записал сессию workflow для неуправляемой сессии: ${JSON.stringify(
+        result.workflowState
+      ).slice(0, 200)}`;
+    }
+    const calls = result.turn.toolCalls;
+    if (calls.length === 0)
+      return 'разрешённое действие не выполнено: ни одного вызова инструмента';
+    if (calls.length > 1) {
+      return (
+        `разрешено ровно одно действие, а выполнено ${calls.length}: ${describeCalls(calls)}; ` +
+        'инструкция требует «Do nothing else»'
+      );
+    }
+    const call = calls[0]!;
+    if (call.name !== SHELL_TOOL) {
+      return `разрешён инструмент «${SHELL_TOOL}», а вызван «${call.name}»`;
+    }
+    if (call.status !== 'completed') {
+      return `действие не завершилось: ${call.name}:${call.status}`;
+    }
+    if (normalizeCommand(call.command ?? '') !== NO_SESSION_COMMAND) {
+      return `выполнена не та команда: «${
+        call.command ?? '(команда не сообщена)'
+      }»; ожидалась «${NO_SESSION_COMMAND}»`;
+    }
+    if (!(call.output ?? '').includes('seed')) {
+      return `вывод не содержит seed-коммит: ${(call.output ?? '(пусто)').slice(0, 120)}`;
+    }
+    return true;
+  },
+};
+
+/** A compact, structured list of calls for a step's failure evidence. */
+function describeCalls(calls: NormalizedToolCall[]): string {
+  return calls
+    .map(
+      (call) =>
+        `${call.name}:${call.status}${call.command === undefined ? '' : ` «${call.command.slice(0, 60)}»`}`
+    )
+    .join(', ');
+}
+
 /**
  * The canonical scenarios, in the order the report numbers them. Ids and titles are the
  * ones the suite already published; a scenario is never dropped from one host kind only.
@@ -84,8 +150,10 @@ export const canonicalScenarios: CanonicalScenario[] = [
   {
     id: 'no-session',
     title: 'Без workflow-сессии плагин не вмешивается в работу',
-    migrationState: 'pending',
+    migrationState: 'migrated',
     stage: 'stage-2-core',
+    agent: ORCHESTRATOR,
+    steps: [noSessionStep],
   },
   {
     id: 'create',

@@ -140,6 +140,9 @@ async function runStep(
   let thrown: string | undefined;
   let last: PromptResult | undefined;
   const observed: NormalizedToolCall[] = [];
+  // A repeat that later succeeds must not erase what the earlier attempts did: the report has to
+  // say that the step needed them and why.
+  const unmet: string[] = [];
 
   for (let attempt = 1; attempt <= planned; attempt += 1) {
     if (process.env.HOST_SMOKE_DEBUG) {
@@ -165,8 +168,18 @@ async function runStep(
     if (last.turn.status === 'failed') failedTurn = true;
     observed.push(...last.turn.toolCalls);
     const verdict = step.expect(last);
-    if (verdict === true) return { ok: true, attempts: made, evidence: '', last, observed };
+    if (verdict === true) {
+      return {
+        ok: true,
+        attempts: made,
+        evidence: '',
+        last,
+        observed,
+        ...(unmet.length === 0 ? {} : { note: unmet.join('; ') }),
+      };
+    }
     detail = verdict;
+    if (attempt < planned) unmet.push(`попытка ${attempt}: ${detail}`.slice(0, 200));
     if (process.env.HOST_SMOKE_DEBUG) {
       logEvent(`  wait: ${detail.slice(0, 180)}`, 'yellow', 'step.state', { attempt });
     }
@@ -188,12 +201,14 @@ async function runStep(
         evidence: '',
         last: fromState,
         observed,
-        note:
+        note: [
+          ...unmet,
           thrown !== undefined
             ? 'промпт не вернулся, исход подтверждён сохранённым состоянием'
             : timedOut
               ? 'ход хоста не завершился за бюджет промпта, исход подтверждён сохранённым состоянием'
               : 'ход хоста вернулся с ошибкой, исход подтверждён сохранённым состоянием',
+        ].join('; '),
       };
     }
     freshRead = 'свежее чтение состояния ожидание не подтвердило';
@@ -242,7 +257,12 @@ function passEvidence(
 
 function describeToolCalls(toolCalls: NormalizedToolCall[]): string {
   if (toolCalls.length === 0) return 'tools=[]';
-  return `tools=[${toolCalls.map((call) => `${call.name}:${call.status}`).join(', ')}]`;
+  return `tools=[${toolCalls
+    .map((call) => {
+      const command = call.command === undefined ? '' : ` «${call.command.slice(0, 60)}»`;
+      return `${call.name}:${call.status}${command}`;
+    })
+    .join(', ')}]`;
 }
 
 /**
