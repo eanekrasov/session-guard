@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { runV2Scenario, type V2Scenario } from '../src/v2-scenarios.ts';
+import { runV2Scenario, type V2Scenario } from '../src/v2-scenario-kit.ts';
 import { PromptTimeoutError, type V2SmokeClient } from '../src/v2-client.ts';
 import type { Host } from '../src/harness.ts';
 

@@ -1,0 +1,22 @@
+/** Consent is asked as a host form, answered, and releases the transition */
+
+import { CONSENT_INSTRUCTION, ORCHESTRATOR, stage, type V2Scenario } from '../v2-scenario-kit.ts';
+
+export const v2WorkflowConsent: V2Scenario = {
+  id: 'v2-workflow-consent',
+  title: 'Consent is asked as a host form, answered, and releases the transition',
+  agent: ORCHESTRATOR,
+  steps: [
+    {
+      instruction:
+        'Call the tool `workflow-create` with schemaId "smoke". Do nothing else and add no commentary.',
+      expect: (state) => state.currentStage === 'planning' || `workflow state was ${stage(state)}`,
+    },
+    {
+      instruction: CONSENT_INSTRUCTION,
+      expect: (state) =>
+        state.currentStage === 'tasks_ready' ||
+        `stage is ${stage(state)}, expected tasks_ready after consent`,
+    },
+  ],
+};

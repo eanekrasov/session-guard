@@ -9,11 +9,18 @@ bun test smoke/             # this suite's own tests
 
 ## Layout
 
-`smoke/` is a small project of its own: `src/run.ts` drives the scenarios off
-`src/harness.ts`, `src/operator.ts` holds the answer policy both runs share,
-`src/report.ts` writes the report, `src/v2-client.ts` and `src/v2-scenarios.ts`
-are the V2 side, and `profile/` holds the fixture profiles the suite governs a
-throwaway project with. `test/` sits beside it — the plugin's `test/` tree holds
+`smoke/` is a small project of its own: `src/run.ts` drives the scenarios,
+`src/harness.ts` owns the host lifecycle, `src/operator.ts` holds the answer
+policy both runs share, `src/report.ts` writes the report, and `profile/` holds
+the fixture profiles the suite governs a throwaway project with.
+
+Each scenario is its own file under `src/scenarios/`, named after its id. V1's
+are imperatives and share `src/scenario-kit.ts` (`say`, `step`,
+`prepareCommittableSession`, the session shapes); V2's are declared as steps and
+share `src/v2-scenario-kit.ts` (`runV2Scenario`) plus `src/v2-client.ts` for the
+transport and the host's forms. `src/scenarios/index.ts` lists both, and a test
+pins the order — a scenario file that never reaches its registry stops running
+silently. `test/` sits beside it — the plugin's `test/` tree holds
 only the plugin's own tests. Only the root `src/` means "compiled into `dist/`";
 this one is run directly by bun.
 

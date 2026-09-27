@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { scenarios } from '../src/scenarios/index.ts';
+import { scenarios, v2Scenarios } from '../src/scenarios/index.ts';
 
 /**
  * The registry is what the runner iterates and what the report numbers. A scenario that exists as a
@@ -49,5 +49,26 @@ describe('the V1 scenario registry', () => {
       'cicd-full-cycle',
       'verify-loop',
     ]);
+  });
+});
+
+describe('the V2 scenario registry', () => {
+  test('lists every scenario once, in the order its run reports them', () => {
+    const ids = v2Scenarios.map((scenario) => scenario.id);
+
+    expect(ids).toEqual(['v2-workflow-create', 'v2-workflow-consent', 'v2-workflow-tasks']);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  test('drives every scenario as the orchestrator, with at least one step', () => {
+    for (const scenario of v2Scenarios) {
+      expect(scenario.title.length).toBeGreaterThan(10);
+      expect(scenario.agent).toBe('orchestrator');
+      expect(scenario.steps.length).toBeGreaterThan(0);
+      for (const step of scenario.steps) {
+        expect(step.instruction.length).toBeGreaterThan(10);
+        expect(typeof step.expect).toBe('function');
+      }
+    }
   });
 });

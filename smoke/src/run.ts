@@ -35,8 +35,8 @@ import {
 import { OUTPUT_FORMAT, logEvent } from './log.ts';
 import { writeSmokeReport } from './report.ts';
 import { ATTEMPTS, lastStepState, type ScenarioResult } from './scenario-kit.ts';
-import { scenarios } from './scenarios/index.ts';
-import { V2_SCENARIOS, runV2Scenario } from './v2-scenarios.ts';
+import { scenarios, v2Scenarios } from './scenarios/index.ts';
+import { runV2Scenario } from './v2-scenario-kit.ts';
 
 let shutdownPromise: Promise<void> | undefined;
 
@@ -208,11 +208,11 @@ async function runV2Smoke(): Promise<boolean> {
 
   const requested = process.argv.slice(2);
   const selected = requested.length
-    ? V2_SCENARIOS.filter((scenario) => requested.includes(scenario.id))
-    : V2_SCENARIOS;
+    ? v2Scenarios.filter((scenario) => requested.includes(scenario.id))
+    : v2Scenarios;
   if (selected.length === 0) {
     logEvent(
-      `No such V2 scenario. Known: ${V2_SCENARIOS.map((scenario) => scenario.id).join(', ')}`,
+      `No such V2 scenario. Known: ${v2Scenarios.map((scenario) => scenario.id).join(', ')}`,
       'red',
       'error'
     );
