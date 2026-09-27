@@ -3,38 +3,38 @@ import { OpenCode, type FormField, type FormInfo, type OpenCodeClient } from '@o
 import { type Host } from './harness.ts';
 import { chooseLabel, type OperatorDecision } from './operator.ts';
 
-/** The answer a form expects: one value per field key. */
+/** Ответ, который ожидает форма: по одному значению на ключ поля. */
 export type FormAnswer = Record<string, string | number | boolean | Array<string>>;
 
 export interface V2SmokeClient {
   createSession(title: string): Promise<string>;
   /**
-   * Send one instruction and play the operator until the session settles.
+   * Отправить одну инструкцию и выполнять оператора, пока сессия не завершится.
    *
-   * Throws `PromptTimeoutError` when the host outlives the prompt budget
-   * (`HOST_SMOKE_PROMPT_TIMEOUT_MS`, default 60s): a prompt that never settles
-   * is a finding about the host, so the scenario reports it rather than
-   * retrying or waiting forever.
+   * Выбрасывает `PromptTimeoutError`, когда хост превышает бюджет промпта
+   * (`HOST_SMOKE_PROMPT_TIMEOUT_MS`, по умолчанию 60 с): промпт, который никогда
+   * не завершается, — это находка о хосте, поэтому сценарий сообщает о нём, а не
+   * повторяет попытку или ждёт бесконечно.
    */
   prompt(sessionId: string, text: string, decision?: OperatorDecision): Promise<void>;
   removeSession(sessionId: string): Promise<void>;
-  /** Answers given to questions the scenario never asked, in order. */
+  /** Ответы на вопросы, которые сценарий не задавал, по порядку. */
   offScript(): string[];
 }
 
 export type V2SmokeTransport = typeof fetch;
 
 /**
- * How long one prompt may run before the client calls it a finding.
+ * Как долго может выполняться один промпт, прежде чем клиент сочтёт его находкой.
  *
- * A live model is slow, not wedged; measured on this host, a single
- * tool-calling instruction spent ~32s inside `session.wait` and settled. The
- * budget only has to be several times that, because its job is to turn an
- * unbounded wait into a reported failure, not to time the model.
+ * Живая модель медленная, не зависшая; на этом хосте одна инструкция с вызовом
+ * инструментов провела ~32 с внутри `session.wait` и завершилась. Бюджет должен
+ * быть всего в несколько раз больше, потому что его задача — превратить
+ * неограниченное ожидание в сообщаемую ошибку, а не засекать время модели.
  */
 const DEFAULT_PROMPT_TIMEOUT_MS = 60_000;
 
-/** Resolve the prompt budget; an unusable value falls back to the default. */
+/** Определить бюджет промпта; непригодное значение откатывается к умолчанию. */
 export function promptTimeoutMs(env: Record<string, string | undefined> = process.env): number {
   const raw = env.HOST_SMOKE_PROMPT_TIMEOUT_MS;
   if (raw === undefined || raw.trim() === '') return DEFAULT_PROMPT_TIMEOUT_MS;
@@ -43,12 +43,12 @@ export function promptTimeoutMs(env: Record<string, string | undefined> = proces
 }
 
 /**
- * A prompt that outlived its budget.
+ * Промпт, превысивший свой бюджет.
  *
- * The client cannot tell a slow model from a wedged host, so when the budget
- * runs out it stops waiting and hands the scenario a finding to report instead
- * of hanging. The message carries what the host was still waiting on, because
- * that is the only evidence left once the call is abandoned.
+ * Клиент не может отличить медленную модель от зависшего хоста, поэтому когда
+ * бюджет исчерпан, он прекращает ожидание и передаёт сценарию находку для
+ * сообщения, а не зависает. Сообщение содержит то, чего всё ещё ждал хост,
+ * потому что это единственное свидетельство, оставшееся после отказа от вызова.
  */
 export class PromptTimeoutError extends Error {
   constructor(operation: string, budgetMs: number, detail: string) {
@@ -58,11 +58,11 @@ export class PromptTimeoutError extends Error {
 }
 
 /**
- * The V2 host ignores an inherited `OPENCODE_SERVER_PASSWORD`: it generates its
- * own credential and requires it on every `/api` call. Without the header the
- * server answers 401 with an empty body, and the generated client reports that
- * as `UnsupportedContentType` — an authorization failure wearing a
- * content-type costume.
+ * Хост V2 игнорирует унаследованный `OPENCODE_SERVER_PASSWORD`: он генерирует
+ * собственные учётные данные и требует их при каждом вызове `/api`. Без этого
+ * заголовка сервер отвечает 401 с пустым телом, и сгенерированный клиент
+ * сообщает об этом как `UnsupportedContentType` — ошибка авторизации
+ * в костюме content-type.
  */
 export function createV2SmokeTransport(authHeader?: string): V2SmokeTransport {
   const transport = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -92,7 +92,7 @@ export function createV2SmokeTransport(authHeader?: string): V2SmokeTransport {
   return transport;
 }
 
-/** Everything a form says, so the consent tag can be found wherever it landed. */
+/** Всё, что содержит форма, чтобы тег consent можно было найти, где бы он ни оказался. */
 function formText(form: Pick<FormInfo, 'title' | 'fields'>): string {
   return [form.title, ...form.fields.flatMap((field) => [field.title, field.description])]
     .filter(Boolean)
@@ -101,16 +101,16 @@ function formText(form: Pick<FormInfo, 'title' | 'fields'>): string {
 
 export interface FormAnswerPlan {
   answer: FormAnswer;
-  /** Answers that were not what the instruction asked for, and why. */
+  /** Ответы, которые не соответствовали тому, что запрашивала инструкция, и почему. */
   offScript: string[];
 }
 
 /**
- * What the operator answers on one form.
+ * Что оператор отвечает на одну форму.
  *
- * The plugin's consent request reaches V2 as a form, and the tag that says so is
- * copied into the question text — so the tag, wherever it lands, is what makes
- * this the scenario's own subject rather than a question the model invented.
+ * Запрос согласия плагина приходит в V2 как форма, а тег, сообщающий об этом,
+ * копируется в текст вопроса — поэтому именно тег, где бы он ни оказался,
+ * делает это собственным предметом сценария, а не вопросом, придуманным моделью.
  */
 export function planFormAnswer(
   form: Pick<FormInfo, 'title' | 'fields'>,
@@ -142,8 +142,8 @@ export function planFormAnswer(
       continue;
     }
     if (field.type === 'string') {
-      // Free text. The operator has nothing of his own to add to the
-      // instruction, so the field's own default is the honest answer.
+      // Свободный текст. Оператору нечего добавить к инструкции от себя,
+      // поэтому собственное значение поля по умолчанию — это честный ответ.
       answer[field.key] = field.default ?? '';
       if (!consent) offScript.push(`answered the free-text question "${label}"`);
       continue;
@@ -161,21 +161,21 @@ function optionsOf(field: FormField): Array<{ label: string; value: string }> | 
 }
 
 export interface V2SmokeClientOptions {
-  /** How long one prompt may run; defaults to `HOST_SMOKE_PROMPT_TIMEOUT_MS`. */
+  /** Как долго может выполняться один промпт; по умолчанию `HOST_SMOKE_PROMPT_TIMEOUT_MS`. */
   promptTimeoutMs?: number;
   /**
-   * The agent the session runs as.
+   * Агент, под которым выполняется сессия.
    *
-   * V1 sends `agent` with every message, and the smoke profile's stages allow
-   * only `orchestrator`: a session left on the host default (`build`) is refused
-   * by its own workflow rules (`Refused workflow-tasks-set … allowed:
-   * ["orchestrator"]`), and its turn runs on instead of stopping at the
-   * instruction.
+   * V1 отправляет `agent` с каждым сообщением, а стадии smoke-профиля разрешают
+   * только `orchestrator`: сессия, оставленная на умолчании хоста (`build`),
+   * отклоняется собственными правилами workflow (`Refused workflow-tasks-set … allowed:
+   * ["orchestrator"]`), и её ход продолжается, вместо того чтобы
+   * остановиться на инструкции.
    */
   agent?: string;
 }
 
-/** What one sweep found: how many forms it answered. */
+/** Что показал один обход: сколько форм было отвечено. */
 interface SweepResult {
   answered: number;
 }
@@ -183,16 +183,16 @@ interface SweepResult {
 export function createV2SmokeClient(host: Host, options: V2SmokeClientOptions = {}): V2SmokeClient {
   const transport = createV2SmokeTransport(host.authHeader);
   const client = OpenCode.make({ baseUrl: host.url, fetch: transport });
-  // One client drives one scenario session, so the record of what was already
-  // answered outlives a single prompt: a form answered in an earlier prompt is
-  // never answered twice.
+  // Один клиент управляет одной сессией сценария, поэтому запись о том, что уже
+  // было отвечено, переживает один промпт: форма, отвеченная в раннем промпте,
+  // никогда не отвечается дважды.
   const seen = new Set<string>();
   const notes: string[] = [];
-  // What the host last told us it was waiting on. Recorded before the replies,
-  // so a reply the host never answers still shows up in a timeout message.
+  // Чего хост, по его последнему сообщению, ждал. Записывается до ответов,
+  // чтобы ответ, который хост так и не получил, всё равно появился в сообщении о тайм-ауте.
   let waitingForms = 0;
 
-  /** Answer everything the host is waiting on, and report what is left. */
+  /** Ответить на всё, чего ждёт хост, и сообщить, что осталось. */
   async function sweep(sessionId: string, decision: OperatorDecision): Promise<SweepResult> {
     const forms = await client.session.form.list({ sessionID: sessionId });
     const unanswered = (): number => forms.filter((form) => !seen.has(form.id)).length;
@@ -211,8 +211,8 @@ export function createV2SmokeClient(host: Host, options: V2SmokeClientOptions = 
         });
         answered += 1;
       } catch (error) {
-        // Leave it answerable: a form the host cancelled mid-reply must not
-        // hide one that still waits.
+        // Оставляем отвечаемой: форма, отменённая хостом во время ответа, не должна
+        // скрывать ту, которая всё ещё ждёт.
         seen.delete(form.id);
         notes.push(
           `reply to form ${form.id} failed: ${error instanceof Error ? error.message : String(error)}`
@@ -249,9 +249,9 @@ export function createV2SmokeClient(host: Host, options: V2SmokeClientOptions = 
           : 'the host had no form pending';
 
       /**
-       * Run one host call under the prompt's budget. A call that outlives it
-       * is the finding: the check itself cannot be waited out, but the
-       * abandoned call keeps whatever it already told us.
+       * Выполнить один вызов хоста в рамках бюджета промпта. Вызов, превышающий
+       * его, — это находка: саму проверку нельзя переждать, но
+       * прерванный вызов сохраняет всё, что уже сообщил нам.
        */
       const bound = async <T>(operation: string, work: Promise<T>): Promise<T> => {
         const left = deadline - Date.now();
@@ -274,12 +274,12 @@ export function createV2SmokeClient(host: Host, options: V2SmokeClientOptions = 
 
       let stopped = false;
       const sweeper = (async () => {
-        // Stop at the deadline: a sweep that outlived the budget would hide it.
+        // Остановиться на дедлайне: обход, превысивший бюджет, скрыл бы его.
         while (!stopped && Date.now() < deadline) {
           try {
             await bound('form sweep', sweep(sessionId, decision));
           } catch {
-            // The server is busy, or the budget is gone; the prompt reports it.
+            // Сервер занят или бюджет исчерпан; промпт сообщит об этом.
           }
           await new Promise((resolve) => setTimeout(resolve, 300));
         }
@@ -288,8 +288,8 @@ export function createV2SmokeClient(host: Host, options: V2SmokeClientOptions = 
       try {
         await bound('session.prompt', client.session.prompt({ sessionID: sessionId, text }));
         await bound('session.wait', client.session.wait({ sessionID: sessionId }));
-        // An answer changes what the rest of the prompt does, so whatever is
-        // still waiting is answered and waited for again.
+        // Ответ меняет то, что делает остальная часть промпта, поэтому всё, что
+        // всё ещё ждёт, отвечается и ожидается снова.
         for (let round = 0; round < 5; round += 1) {
           const swept = await bound('form sweep', sweep(sessionId, decision));
           if (swept.answered === 0) break;
@@ -297,9 +297,9 @@ export function createV2SmokeClient(host: Host, options: V2SmokeClientOptions = 
         }
       } finally {
         stopped = true;
-        // The sweeper has to stop, not finish: a sweep still in flight would
-        // otherwise hold a prompt that already settled for the rest of the
-        // budget. A late form is covered by the rounds above, not by this loop.
+        // Обходчик должен остановиться, а не завершиться: обход, всё ещё выполняющийся,
+        // иначе удерживал бы промпт, который уже завершился, на остаток
+        // бюджета. Запоздалая форма покрывается раундами выше, а не этим циклом.
         await Promise.race([sweeper, new Promise((resolve) => setTimeout(resolve, 1_000))]);
       }
     },

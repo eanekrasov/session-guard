@@ -1,9 +1,9 @@
 /**
- * What every host smoke scenario is built from: the session shapes an assertion reads, the
- * operator policy the runner plays, and the steps (`say`, `step`, `prepareCommittableSession`)
- * that drive a live host.
+ * Из чего строится каждый host smoke scenario: форма сессии, которую читает утверждение,
+ * политика оператора, которую применяет раннер, и шаги (`say`, `step`, `prepareCommittableSession`),
+ * управляющие живым хостом.
  *
- * A scenario owns what it proves; this owns how a scenario talks to the host.
+ * Сценарий отвечает за то, что он доказывает; этот модуль — за то, как сценарий общается с хостом.
  */
 
 import { spawnSync } from 'node:child_process';
@@ -37,14 +37,14 @@ export interface Message {
 export interface Session {
   id: string;
   state: Record<string, unknown> | null;
-  /** Everything the assistant produced for the last prompt. */
+  /** Всё, что ассистент выдал на последний промпт. */
   parts: Part[];
-  /** Tool output and errors, flattened for matching. */
+  /** Вывод и ошибки инструментов, уплощённые для сопоставления. */
   transcript: string;
 }
 
 /**
- * Questions the plugin raised carry its consent tag; anything else is the model's own.
+ * Вопросы, заданные плагином, содержат его consent-тег; всё остальное — вопросы самой модели.
  */
 export function isConsentQuestion(request: { questions?: Array<{ question?: string }> }): boolean {
   return (request.questions ?? []).some((entry) =>
@@ -53,28 +53,28 @@ export function isConsentQuestion(request: { questions?: Array<{ question?: stri
 }
 
 /**
- * Answer the host's questions while a prompt is running.
+ * Отвечать на вопросы хоста, пока выполняется промпт.
  *
- * The host's `question` tool blocks until an operator replies, so the run would
- * hang otherwise. The harness plays the operator, and an operator answers two
- * quite different things.
+ * Инструмент `question` хоста блокируется до ответа оператора, поэтому прогон
+ * иначе завис бы. Harness играет роль оператора, а оператор отвечает на два
+ * совершенно разных типа вопросов.
  *
- * A **consent request** is the scenario's own subject: it gets the decision the
- * instruction asked for (default: grant), which is exactly what the consent
- * mechanism exists to record.
+ * **Consent-запрос** — это тема самого сценария: он получает решение, которое
+ * запрашивала инструкция (по умолчанию: grant), — именно для этого и существует
+ * механизм consent.
  *
- * Anything else is a question the model invented — «How would you like to
- * proceed?» — and the harness used to answer it with the FIRST option, which is
- * almost always some flavour of «yes, go ahead». So an unscripted question
- * became permission to run past the scenario: `cicd-full-cycle` reached `test`
- * while the next step still expected `checkout`, and the failure blamed the
- * stage. The operator's honest answer to a question nobody asked for is «do
- * nothing beyond the instruction», so a declining option is preferred.
+ * Всё остальное — вопросы, выдуманные моделью: «How would you like to
+ * proceed?» — и harness раньше отвечал на них ПЕРВОЙ опцией, которая почти
+ * всегда была вариантом «да, продолжай». Так внесценарный вопрос превращался
+ * в разрешение выйти за рамки сценария: `cicd-full-cycle` доходил до `test`,
+ * а следующий шаг всё ещё ожидал `checkout`, и сбой списывали на стадию.
+ * Честный ответ оператора на вопрос, которого никто не задавал, — «не делай
+ * ничего сверх инструкции», поэтому предпочтительна опция отказа.
  *
- * When the model offers no way to decline, there is no safe answer — the first
- * option goes back, and that is precisely why every off-script answer is
- * recorded: a run steered by one has to say so rather than let the next step
- * guess.
+ * Когда модель не предлагает способа отказать, безопасного ответа нет —
+ * возвращается первая опция, и именно поэтому каждый ответ не по сценарию
+ * записывается: прогон, направленный таким ответом, должен явно указать это,
+ * а не заставлять следующий шаг гадать.
  */
 export function answerQuestions(
   host: Host,
@@ -114,7 +114,7 @@ export function answerQuestions(
           await api(host, 'POST', `/question/${request.id}/reply`, { answers });
         }
       } catch {
-        // The server is busy or gone; the prompt itself will report the failure.
+        // Сервер занят или недоступен; сам промпт сообщит об ошибке.
       }
       await new Promise((resolve) => setTimeout(resolve, 400));
     }
@@ -142,7 +142,7 @@ export function modelResponseText(parts: Part[], error: string): string {
   return [error, response].filter(Boolean).join('\n') || '(empty response)';
 }
 
-/** Persist a bounded, sanitized `say` exchange only in explicit trace mode. */
+/** Сохранять ограниченный санитизированный обмен `say` только в явном trace-режиме. */
 export async function logExchange(
   instruction: string,
   agent: string | undefined,
@@ -162,7 +162,7 @@ export async function logExchange(
   await appendFile(SESSION_LOG, lines.join('\n'), 'utf-8').catch(() => {});
 }
 
-/** Send one instruction and return what the host recorded for it. */
+/** Отправить одну инструкцию и вернуть то, что хост записал для неё. */
 export async function say(
   host: Host,
   sessionId: string,
@@ -255,8 +255,8 @@ export async function say(
   };
 }
 
-/** Repeat an instruction until its expectation holds, or attempts run out. */
-/** The last workflow session a step read, for diagnosing a failure. */
+/** Повторять инструкцию, пока не выполнится ожидание, либо пока не кончатся попытки. */
+/** Последняя workflow-сессия, прочитанная шагом, для диагностики ошибки. */
 let lastState: unknown = null;
 
 export async function step(
@@ -272,10 +272,11 @@ export async function step(
   let detail = '';
   let session!: Session;
   for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
-    // A prompt that outlives the client's timeout aborts the whole scenario,
-    // and the error it throws names no step — `cicd-full-cycle` reported only
-    // "The operation timed out" and nothing about where. Announcing the step
-    // before it runs is what makes the last line printed the answer.
+    // Промпт, превышающий таймаут клиента, обрывает весь сценарий,
+    // и ошибка не указывает, на каком шаге это произошло — `cicd-full-cycle`
+    // сообщал только «The operation timed out», без указания места.
+    // Объявление шага до его запуска — это то, что делает последнюю
+    // напечатанную строку ответом.
     if (process.env.HOST_SMOKE_DEBUG) {
       const started = new Date().toISOString().slice(11, 19);
       logEvent(
@@ -303,7 +304,7 @@ export async function step(
   return { ok: false, attempts: ATTEMPTS, detail, session };
 }
 
-// ─── Scenario definitions ─────────────────────────────────────────────────────
+// ─── Определения сценариев ───────────────────────────────────────────────────
 
 export interface ScenarioResult {
   id: string;
@@ -318,21 +319,21 @@ export interface ScenarioResult {
 export type Scenario = {
   id: string;
   title: string;
-  /** Profile id to use (defaults to 'smoke'). */
+  /** ID профиля для использования (по умолчанию 'smoke'). */
   profile?: string;
-  /** Extra environment for this scenario's host. */
+  /** Дополнительные переменные окружения для хоста этого сценария. */
   env?: Record<string, string>;
-  /** What the scenario proves, in the report. */
+  /** Что сценарий доказывает, в отчёте. */
   run: (host: Host, model: string) => Promise<{ ok: boolean; evidence: string; attempts: number }>;
 };
 
 export const ORCHESTRATOR = 'orchestrator';
 
 /**
- * The consent step: prepare the tag, then ask the operator with it verbatim.
+ * Шаг consent: подготовить тег, затем дословно задать его оператору.
  *
- * `type` names which consent this is — the same name the schema writes in
- * `consent:` on its transition. Omitted, it is `plan`.
+ * `type` указывает, какой это consent — то же имя, которое схема пишет
+ * в `consent:` в своём переходе. Если опущен — `plan`.
  */
 export function consentInstruction(type?: string): string {
   return (
@@ -353,7 +354,7 @@ export interface RunView {
   gates?: Record<string, string>;
 }
 
-/** The task run the loop is working, as the plugin persisted it. */
+/** Прогон задачи, с которым работает цикл, в том виде, как его сохранил плагин. */
 export function firstRun(session: Session): RunView | undefined {
   const runs = (session.state as { loopRuns?: Record<string, RunView> } | null)?.loopRuns;
   return runs ? Object.values(runs)[0] : undefined;
@@ -401,8 +402,8 @@ export async function newSession(host: Host, title: string): Promise<string> {
 }
 
 /**
- * Drive a session to the point where a commit is legitimate: plan approved,
- * tasks set and completed, invariants passed by a real mutation.
+ * Довести сессию до точки, в которой коммит легитимен: план одобрен,
+ * задачи назначены и выполнены, инварианты пройдены реальной мутацией.
  */
 export async function prepareCommittableSession(
   host: Host,
@@ -516,7 +517,7 @@ export async function prepareCommittableSession(
   return { ok: true, attempts, evidence: '' };
 }
 
-/** Current HEAD of the throwaway project. */
+/** Текущий HEAD временного проекта. */
 export function headOf(host: Host): string {
   const result = spawnSync('git', ['rev-parse', 'HEAD'], {
     cwd: host.workDir,
@@ -525,7 +526,7 @@ export function headOf(host: Host): string {
   return (result.stdout ?? '').trim();
 }
 
-/** The workflow session the last step read, for diagnosing a failure. */
+/** Workflow-сессия, прочитанная последним шагом, для диагностики ошибки. */
 export function lastStepState(): unknown {
   return lastState;
 }

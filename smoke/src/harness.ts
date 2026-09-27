@@ -1,15 +1,14 @@
 /**
- * Host harness — runs the real opencode against a throwaway project.
+ * Host harness — запускает реальный opencode во временном проекте.
  *
- * Everything the plugin governs is driven through the host: a real
- * `opencode serve`, a real session, a real model, the real tool pipeline.
- * Nothing here reaches into the plugin's internals; assertions read the
- * session state the plugin persisted, exactly as an operator would.
+ * Всё, чем управляет плагин, ведётся через хост: настоящие
+ * `opencode serve`, настоящая сессия, настоящая модель, настоящий конвейер инструментов.
+ * Никакой код здесь не проникает во внутренности плагина; проверки читают
+ * состояние сессии, сохранённое плагином, в точности как это делал бы оператор.
  *
- * Isolation: XDG config/data/state/cache point at a temp tree, so the
- * operator's own agents, plugins and sessions never take part. The provider
- * credentials in `auth.json` are copied in — they are what makes the model
- * live.
+ * Изоляция: XDG config/data/state/cache указывают на временное дерево, поэтому
+ * агенты, плагины и сессии оператора не участвуют. Учётные данные провайдера
+ * из `auth.json` копируются — именно они делают модель живой.
  */
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -21,40 +20,40 @@ import { jsmin } from 'jsmin';
 export const REPO_ROOT = resolve(import.meta.dir!, '../..');
 
 /**
- * Canonical opencode binary paths.  V1 is the default; V2 is available for
- * explicit selection.  Never fall back to /opt/homebrew/bin/opencode.
+ * Канонические пути к бинарникам opencode. V1 — по умолчанию; V2 доступен
+ * при явном выборе. Никогда не откатываться к /opt/homebrew/bin/opencode.
  *
- * These paths must be present at run time or the harness fails early.
+ * Эти пути должны существовать во время выполнения, иначе harness завершится ошибкой.
  */
 export const V1_BINARY = '/opt/homebrew/Cellar/opencode/1.18.32/bin/opencode';
 export const V2_BINARY = '/opt/homebrew/Cellar/opencode-v2/2.0.16/bin/opencode';
 
 export type HostVersion = 'v1' | 'v2';
 
-/** Parse the explicit host selection without silently changing host contracts. */
+/** Разобрать явный выбор хоста без скрытого изменения контрактов хоста. */
 export function hostVersionFromEnv(value = process.env.HOST_SMOKE_OPENCODE_VERSION): HostVersion {
   if (value === undefined || value === '') return 'v1';
   if (value === 'v1' || value === 'v2') return value;
   throw new Error(`Invalid HOST_SMOKE_OPENCODE_VERSION=${value}; expected "v1" or "v2".`);
 }
 
-/** Resolve the binary path for the requested version. */
+/** Определить путь к бинарнику для запрошенной версии. */
 export function opencodeBinary(version: HostVersion): string {
   if (version === 'v2') return V2_BINARY;
   return V1_BINARY;
 }
 
-/** The credential a V2 host generated for itself, as its own log announces it. */
+/** Учётные данные, которые хост V2 сгенерировал для себя, как объявлено в его логе. */
 export function serverPasswordFromLogs(logs: string): string | null {
   return /server password\s+(\S+)/.exec(logs)?.[1] ?? null;
 }
 
-/** The `Authorization` value the V2 host accepts that credential under. */
+/** Значение `Authorization`, которое хост V2 принимает для этих учётных данных. */
 export function basicAuthHeader(password: string, user = 'opencode'): string {
   return `Basic ${Buffer.from(`${user}:${password}`).toString('base64')}`;
 }
 
-/** Read the generated password out of the log once it appears, or give up. */
+/** Прочитать сгенерированный пароль из лога, как только он появится, или отказаться. */
 async function waitForServerPassword(
   read: () => string,
   timeoutMs: number
@@ -69,36 +68,36 @@ async function waitForServerPassword(
 }
 
 export interface Host {
-  /** Base URL of the running opencode server. */
+  /** Базовый URL запущенного сервера opencode. */
   url: string;
-  /** The throwaway project directory opencode was started in. */
+  /** Директория временного проекта, в которой был запущен opencode. */
   workDir: string;
-  /** Everything the host wrote — config, data, sessions. */
+  /** Всё, что записал хост — конфиг, данные, сессии. */
   homeDir: string;
   /**
-   * `Authorization` value this host's API accepts, when it needs one.
+   * Значение `Authorization`, которое API этого хоста принимает, когда оно нужно.
    *
-   * V1 needs none. V2 ignores `OPENCODE_SERVER_PASSWORD`, generates its own
-   * credential and requires it on every `/api` call.
+   * V1 не требует. V2 игнорирует `OPENCODE_SERVER_PASSWORD`, генерирует свои
+   * учётные данные и требует их при каждом вызове `/api`.
    */
   authHeader?: string;
   stop: () => Promise<void>;
-  /** Server stdout+stderr, for diagnosing a scenario that never ran. */
+  /** stdout+stderr сервера для диагностики сценария, который не выполнился. */
   logs: () => string;
 }
 
 export interface HostOptions {
-  /** Model id, e.g. `crpt/qwen-coder-x`. Defaults to $HOST_SMOKE_MODEL. */
+  /** Идентификатор модели, например `crpt/qwen-coder-x`. По умолчанию $HOST_SMOKE_MODEL. */
   model: string;
-  /** Profile directory (under `profiles/`) to ship into the project. */
+  /** Директория профиля (внутри `profiles/`), который нужно поместить в проект. */
   profile: string;
-  /** OpenCode host version to run. Defaults to 'v1'. */
+  /** Версия хоста OpenCode для запуска. По умолчанию 'v1'. */
   version?: HostVersion;
-  /** Extra files to write into the project, path → contents. */
+  /** Дополнительные файлы для записи в проект, путь → содержимое. */
   files?: Record<string, string>;
-  /** Whether to `git init` the project and make a seed commit. */
+  /** Нужно ли выполнить `git init` в проекте и сделать seed-коммит. */
   git?: boolean;
-  /** Extra environment for the host process. */
+  /** Дополнительное окружение для процесса хоста. */
   env?: Record<string, string>;
 }
 
@@ -130,9 +129,9 @@ export function configuredLogLevel(): LogLevel {
   ) {
     return configured;
   }
-  // HOST_SMOKE_DEBUG=1 remains a shorthand for debug when no explicit level is set.
+  // HOST_SMOKE_DEBUG=1 остаётся краткой формой debug, если не задан явный уровень.
   if (process.env.HOST_SMOKE_DEBUG === '1') return 'debug';
-  // Also treat '1' as a shorthand for debug.
+  // Значение '1' также считается краткой формой для debug.
   if (configured === '1') return 'debug';
   return 'info';
 }
@@ -146,13 +145,13 @@ export function log(level: LogLevel, message: string): void {
   process.stderr.write(colorEnabled ? `${LOG_COLORS[level]}${line}\u001b[0m\n` : `${line}\n`);
 }
 
-/** Max bytes for a single trace payload field before truncation. */
+/** Максимальное количество байт для одного поля trace payload до усечения. */
 const TRACE_PAYLOAD_MAX = 4096;
 
 /**
- * Redact common secret patterns (api keys, tokens, passwords) from a string.
- * Replaces the secret value with `<REDACTED>` while leaving the surrounding
- * structure intact so the shape is still readable.
+ * Замаскировать типовые шаблоны секретов (api keys, tokens, passwords) в строке.
+ * Заменяет значение секрета на `<REDACTED>`, оставляя окружающую структуру
+ * нетронутой, чтобы форма была по-прежнему читаема.
  */
 export function redactSecrets(text: string): string {
   return text.replace(
@@ -162,20 +161,20 @@ export function redactSecrets(text: string): string {
 }
 
 /**
- * Truncate a string to `max` bytes, appending a truncation marker when cut.
- * Prefers cutting at a word boundary when possible.
+ * Усечь строку до `max` байт, добавляя маркер усечения, если строка обрезана.
+ * Предпочтительно обрезать по границе слова, когда это возможно.
  */
 export function truncatePayload(text: string, max = TRACE_PAYLOAD_MAX): string {
   if (Buffer.byteLength(text, 'utf-8') <= max) return text;
   let truncated = text.slice(0, max);
-  // Try to cut at a word boundary
+  // Попробовать обрезать по границе слова
   const lastSpace = truncated.lastIndexOf(' ');
   if (lastSpace > max * 0.75) truncated = truncated.slice(0, lastSpace);
   return `${truncated} …[truncated ${Buffer.byteLength(text, 'utf-8') - Buffer.byteLength(truncated, 'utf-8')} bytes]`;
 }
 
 /**
- * Safely truncate and redact a trace payload field.
+ * Безопасно усечь и замаскировать поле trace payload.
  */
 export function sanitizeTracePayload(value: string): string {
   return truncatePayload(redactSecrets(value));
@@ -191,7 +190,7 @@ process.once('exit', () => {
   for (const directory of packDirectories) rmSync(directory, { recursive: true, force: true });
 });
 
-/** Stop hosts that are running or still waiting for their listen URL. */
+/** Остановить хосты, которые работают или всё ещё ждут свой listen URL. */
 export async function stopAllHosts(): Promise<void> {
   log('debug', `stopping ${activeHostStops.size} active host(s)`);
   await Promise.allSettled([...activeHostStops].map((stop) => stop()));
@@ -210,12 +209,12 @@ function run(cmd: string, args: string[], cwd: string): string {
 }
 
 /**
- * Build the plugin and hand the host the built entrypoint directory.
+ * Собрать плагин и передать хосту директорию собранной точки входа.
  *
- * This is the same spec form an operator puts in their own opencode config
- * (`file://<...>/dist`), so the run loads the plugin the way a real install
- * does. A packed `.tgz` is *not* used: the host does not load one from a
- * `file://` spec, which is itself worth knowing before anyone ships that way.
+ * Это та же форма spec, которую оператор указывает в своей конфигурации opencode
+ * (`file://<...>/dist`), поэтому прогон загружает плагин так же, как настоящая установка.
+ * Упакованный `.tgz` *не* используется: хост не загружает его из spec `file://`,
+ * что само по себе полезно знать, прежде чем кто-либо начнёт поставлять плагин таким образом.
  */
 export function buildPlugin(): string {
   log('info', 'building plugin for host smoke');
@@ -225,14 +224,14 @@ export function buildPlugin(): string {
   return pluginPath;
 }
 
-/** Build and pack the plugin into a tarball. Kept for packaging checks. */
+/** Собрать и упаковать плагин в tarball. Сохранён для проверок упаковки. */
 export function packPlugin(): string {
   run('mise', ['run', 'build'], REPO_ROOT);
   const destination = mkdtempSync(join(tmpdir(), 'host-smoke-pack-'));
   try {
     const out = run('bun', ['pm', 'pack', '--destination', destination], REPO_ROOT);
-    // `bun pm pack` prints a file list and a summary; the tarball path is the one
-    // line that ends in .tgz on its own.
+    // `bun pm pack` выводит список файлов и сводку; путь к tarball — это строка,
+    // которая заканчивается на .tgz и стоит отдельно.
     const line = out
       .split('\n')
       .map((entry) => entry.trim())
@@ -246,7 +245,7 @@ export function packPlugin(): string {
   }
 }
 
-/** Remove trailing commas after jsmin has removed JSONC comments. */
+/** Удалить завершающие запятые после того, как jsmin удалил комментарии JSONC. */
 function removeTrailingCommas(text: string): string {
   const out: string[] = [];
   let inString = false;
@@ -263,7 +262,7 @@ function removeTrailingCommas(text: string): string {
   return out.join('');
 }
 
-/** Parse JSONC using the same jsmin behavior as the V1 provider loader. */
+/** Разобрать JSONC, используя то же поведение jsmin, что и загрузчик провайдеров V1. */
 function parseJsonc<T = unknown>(text: string): T {
   return JSON.parse(removeTrailingCommas(jsmin(text))) as T;
 }
@@ -313,17 +312,17 @@ export function filterOperatorProviders(
 }
 
 /**
- * The provider key a V2 host can no longer import for itself.
+ * Ключ провайдера, который хост V2 больше не может импортировать самостоятельно.
  *
- * A fresh V2 data directory never runs the legacy credential import: the
- * database bootstrap creates the current schema and records **every** migration
- * as applied without executing any of them
- * (`packages/core/src/database/migration.ts`), so the `credential` table stays
- * empty and `20260805200742_import_legacy_credentials` imports nothing. With no
- * credential the model resolver forces `auth: none` and every prompt fails with
- * `provider.auth`, which is what the V2 smoke reported as a dead model.
+ * Свежая директория данных V2 никогда не выполняет импорт устаревших учётных данных:
+ * загрузчик базы данных создаёт текущую схему и помечает **каждую** миграцию
+ * как применённую, не выполняя ни одну из них
+ * (`packages/core/src/database/migration.ts`), поэтому таблица `credential`
+ * остаётся пустой, и `20260805200742_import_legacy_credentials` ничего не импортирует. Без
+ * учётных данных резолвер модели принудительно выставляет `auth: none`, и каждый промпт
+ * завершается ошибкой `provider.auth` — именно это V2 smoke сообщал как мёртвую модель.
  *
- * V1 reads `auth.json` directly, so only V2 needs this.
+ * V1 читает `auth.json` напрямую, поэтому это нужно только для V2.
  */
 export function legacyApiKeyFor(
   providerID: string,
@@ -342,8 +341,8 @@ export function legacyApiKeyFor(
 }
 
 /**
- * Put that key where the V2 provider entry carries configuration. An entry the
- * operator already gave a key is left exactly as it is.
+ * Поместить этот ключ туда, где запись провайдера V2 хранит конфигурацию. Запись,
+ * в которой оператор уже указал ключ, остаётся без изменений.
  */
 export function withProviderApiKey(providers: unknown, model: string, authFile?: string): unknown {
   if (typeof providers !== 'object' || providers === null || Array.isArray(providers)) {
@@ -404,7 +403,7 @@ export async function operatorProviders(requestedModel?: string): Promise<{
       if (parsed.disabled_providers) merged.disabled_providers = parsed.disabled_providers;
       if (typeof parsed.model === 'string') merged.model = parsed.model;
     } catch {
-      // Malformed or unreadable optional config is ignored, preserving V1 behavior.
+      // Некорректная или нечитаемая опциональная конфигурация игнорируется, сохраняя поведение V1.
     }
   }
   const model = requestedModel ?? merged.model;
@@ -412,7 +411,7 @@ export async function operatorProviders(requestedModel?: string): Promise<{
   return merged;
 }
 
-/** The model the operator runs by default, for use when none is given. */
+/** Модель, которую оператор использует по умолчанию, для случаев, когда модель не задана. */
 export async function defaultModel(_binary?: string): Promise<string> {
   const fromEnv = process.env.HOST_SMOKE_MODEL;
   if (fromEnv) {
@@ -432,7 +431,7 @@ export async function defaultModel(_binary?: string): Promise<string> {
 }
 
 /**
- * Kept for diagnostics only. V2 output is source documents, not a config object.
+ * Сохранён только для диагностики. Вывод V2 — это исходные документы, а не объект конфигурации.
  */
 export function captureResolvedConfig(binary?: string): string {
   const bin = binary ?? V1_BINARY;
@@ -449,7 +448,7 @@ export function captureResolvedConfig(binary?: string): string {
   try {
     closeSync(output);
   } catch {
-    // The descriptor is best-effort cleanup; the command result remains authoritative.
+    // Очистка дескриптора выполняется по возможности; результат команды остаётся основным.
   }
   const resolvedConfig = readFileSync(outputPath, 'utf-8');
   rmSync(captureDir, { recursive: true, force: true });
@@ -466,13 +465,13 @@ export function captureResolvedConfig(binary?: string): string {
 }
 
 /**
- * Write the smoke host config files into `opencodeDir`:
+ * Записать конфигурационные файлы smoke-host в `opencodeDir`:
  *
- * - `opencode.json` — the full resolved config from `captureResolvedConfig()`.
- * - `opencode.jsonc` — smoke-only overrides (model, permissions, plugin, etc.).
+ * - `opencode.json` — полная итоговая конфигурация из `captureResolvedConfig()`.
+ * - `opencode.jsonc` — переопределения только для smoke (model, permissions, plugin и т.д.).
  *
- * Separated from `startHost` so tests can verify the file layout without
- * running a real opencode process.
+ * Отделён от `startHost`, чтобы тесты могли проверить структуру файлов без
+ * запуска реального процесса opencode.
  */
 export async function writeSmokeConfigs(
   opencodeDir: string,
@@ -485,7 +484,7 @@ export async function writeSmokeConfigs(
   log('debug', `writing smoke config files to ${opencodeDir}`);
   await mkdir(opencodeDir, { recursive: true });
 
-  // The full resolved config becomes the base file.
+  // Полная итоговая конфигурация становится базовым файлом.
   await writeFile(
     join(opencodeDir, 'opencode.json'),
     JSON.stringify(
@@ -534,7 +533,7 @@ export async function startHost(options: HostOptions): Promise<Host> {
     }
     log('debug', `created isolated host directories under ${root}`);
 
-    // Credentials live in the data dir; copy them so the model is live.
+    // Учётные данные живут в data dir; скопируем их, чтобы модель была живой.
     const auth = join(homedir(), '.local/share/opencode/auth.json');
     if (existsSync(auth)) {
       await cp(auth, join(dataDir, 'opencode', 'auth.json'));
@@ -546,8 +545,8 @@ export async function startHost(options: HostOptions): Promise<Host> {
     const pluginSpec = process.env.HOST_SMOKE_PLUGIN ?? buildPlugin();
     log('debug', `using plugin specification: ${pluginSpec}`);
 
-    // Fetch the operator's full resolved config so the child host inherits its
-    // provider definitions, model registry and all other required entries.
+    // Получить полную итоговую конфигурацию оператора, чтобы дочерний хост унаследовал
+    // определения провайдеров, реестр моделей и все остальные необходимые записи.
     const operator = await operatorProviders(options.model);
     await writeSmokeConfigs(
       join(configDir, 'opencode'),
@@ -557,8 +556,8 @@ export async function startHost(options: HostOptions): Promise<Host> {
       version
     );
 
-    // The profile the plugin governs this project with. `base` always comes
-    // along: every shipped profile is a delta over it.
+    // Профиль, с которым плагин управляет этим проектом. `base` всегда идёт
+    // вместе: каждый поставляемый профиль — это дельта поверх него.
     const profileTarget = join(workDir, '.opencode', 'profiles');
     await mkdir(profileTarget, { recursive: true });
     const profileSource = existsSync(join(REPO_ROOT, 'profiles', options.profile))
@@ -567,10 +566,10 @@ export async function startHost(options: HostOptions): Promise<Host> {
     await cp(profileSource, join(profileTarget, options.profile), { recursive: true });
     await cp(join(REPO_ROOT, 'profiles', 'base'), join(profileTarget, 'base'), { recursive: true });
 
-    // The host reads its agent roster once, at startup, so the profile's agents
-    // are placed where opencode looks before the server comes up. They register
-    // under their bare names (`orchestrator`), which is one of the two forms the
-    // plugin accepts.
+    // Хост читает список агентов один раз, при запуске, поэтому агенты профиля
+    // помещаются туда, куда opencode смотрит до запуска сервера. Они регистрируются
+    // под своими именами без префикса (`orchestrator`), что является одной из двух форм,
+    // которые принимает плагин.
     const agentSource = join(profileSource, 'agents');
     if (existsSync(agentSource)) {
       await cp(agentSource, join(workDir, '.opencode', 'agent'), { recursive: true });
@@ -603,12 +602,12 @@ export async function startHost(options: HostOptions): Promise<Host> {
       XDG_STATE_HOME: join(homeDir, 'state'),
       XDG_CACHE_HOME: join(homeDir, 'cache'),
       OPENCODE_DISABLE_AUTOUPDATE: '1',
-      // The consent path runs through the host's `question` tool, which the
-      // server only registers for interactive clients unless this is set.
+      // Путь согласования проходит через tool `question` хоста, который
+      // сервер регистрирует только для интерактивных клиентов, если не установлена эта опция.
       OPENCODE_ENABLE_QUESTION_TOOL: '1',
     };
-    // The smoke client talks to this disposable server without an auth header.
-    // Do not inherit the operator's server password into the child host.
+    // Smoke-клиент общается с этим одноразовым сервером без заголовка auth.
+    // Не наследовать пароль сервера оператора в дочерний хост.
     // @typescript-eslint/no-dynamic-delete
     delete (env as Record<string, string | undefined>).OPENCODE_SERVER_PASSWORD;
     log('debug', 'removed inherited server password from child host environment');
@@ -685,12 +684,11 @@ export async function startHost(options: HostOptions): Promise<Host> {
       throw error;
     }
 
-    // V2 ignores an inherited OPENCODE_SERVER_PASSWORD and generates its own
-    // credential, announced in its log as `server password <value>`. Every
-    // `/api` call needs it: without the header the server answers 401 with an
-    // empty body, which the generated client reports as
-    // `UnsupportedContentType` — an authorization failure wearing a
-    // content-type costume.
+    // V2 игнорирует унаследованный OPENCODE_SERVER_PASSWORD и генерирует свои
+    // учётные данные, объявляемые в логе как `server password <value>`. Каждый
+    // вызов `/api` требует их: без заголовка сервер отвечает 401 с пустым телом,
+    // что сгенерированный клиент сообщает как
+    // `UnsupportedContentType` — ошибка авторизации в костюме content-type.
     let authHeader: string | undefined;
     if (version === 'v2') {
       const password = await waitForServerPassword(() => buffer, 5_000);
@@ -776,23 +774,23 @@ export async function api<T>(host: Host, method: string, path: string, body?: un
   return text ? (JSON.parse(text) as T) : (undefined as T);
 }
 
-/** Whether the current log level includes `trace` (i.e. is `trace`). */
+/** Включает ли текущий уровень логирования `trace` (т.е. равен `trace`). */
 export function isTraceEnabled(): boolean {
   return LOG_LEVELS[configuredLogLevel()] <= LOG_LEVELS['trace'];
 }
 
 /**
- * The workflow session the plugin persisted, or null when it wrote none.
+ * Сессия workflow, сохранённая плагином, или null, если плагин не записал ни одной.
  *
- * A finished workflow is moved out of `runtime/` into `runtime/archive/`: from
- * then on the plugin governs nothing, and "there is no session" is expressed
- * the one way this project expresses it — `load` finds no file. The record
- * itself survives, and a scenario asserting how a run ENDED has to read it
- * where it now lives.
+ * Завершённый workflow перемещается из `runtime/` в `runtime/archive/`: после
+ * этого плагин ничем не управляет, и «нет сессии» выражается
+ * единственным способом, принятым в этом проекте — `load` не находит файл. Сама запись
+ * сохраняется, и сценарий, проверяющий, КАК завершился прогон, должен читать её
+ * там, где она теперь находится.
  */
 export async function readWorkflowSession(host: Host, sessionId: string): Promise<unknown | null> {
-  // The plugin puts its runtime under the opencode data dir (see src/app/paths.ts),
-  // which the harness has pointed at the isolated home.
+  // Плагин размещает свой runtime в data dir opencode (см. src/app/paths.ts),
+  // который harness направил в изолированную домашнюю директорию.
   const runtime = join(host.homeDir, 'data', 'opencode', 'session-guard', 'runtime');
   for (const file of [
     join(runtime, `${sessionId}.json`),

@@ -16,7 +16,7 @@ import { v2WorkflowCreate } from './v2-workflow-create.ts';
 import { v2WorkflowTasks } from './v2-workflow-tasks.ts';
 import { verifyLoop } from './verify-loop.ts';
 
-/** The V1 scenarios, in the order the report numbers them. */
+/** V1-сценарии в том порядке, в котором их нумерует отчёт. */
 export const scenarios: Scenario[] = [
   pluginLoads,
   noSession,
@@ -27,16 +27,15 @@ export const scenarios: Scenario[] = [
   planConsent,
   commitCwd,
   commitMismatch,
-  // `comprehensive-full-cycle` was removed here on 2026-09-07: the profile it
-  // drives is still being written, so the scenario reported a timeout rather
-  // than anything about the plugin. Its profile stays under
-  // `profile/comprehensive/` for whoever finishes it.
+  // `comprehensive-full-cycle` удалён отсюда 2026-09-07: профиль, которым он управляет,
+  // ещё дописывается, поэтому сценарий сообщал о таймауте, а не о чём-то, связанном с
+  // плагином. Его профиль остаётся в `profile/comprehensive/` для того, кто его закончит.
   cicdFullCycle,
   verifyLoop,
 ];
 
 /**
- * The V2 scenarios, in the order their run reports them. They are declared as steps and driven by
- * `runV2Scenario`; V1's are imperatives, which is why the two are separate lists rather than one.
+ * V2-сценарии в порядке, в котором их выводит отчёт прогона. Объявлены как шаги и выполняются
+ * через `runV2Scenario`; V1-сценарии императивны, поэтому списки раздельные, а не один.
  */
 export const v2Scenarios: V2Scenario[] = [v2WorkflowCreate, v2WorkflowConsent, v2WorkflowTasks];

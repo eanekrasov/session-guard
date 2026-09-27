@@ -1,4 +1,4 @@
-/** Only the orchestrator may write workflow task state */
+/** Только orchestrator может записывать состояние workflow-задач */
 
 import { ORCHESTRATOR, newSession, step } from '../scenario-kit.ts';
 import type { Scenario } from '../scenario-kit.ts';
@@ -38,7 +38,7 @@ export const taskControl: Scenario = {
       instruction:
         'Call the tool `workflow-tasks-set-status` with taskId "task-1" and status "completed". ' +
         'Report the tool output verbatim.',
-      // The default agent is a worker, not the orchestrator.
+      // Агент по умолчанию — worker, а не orchestrator.
       expect: (s) => {
         const tasks = (s.state as { tasks?: Record<string, Array<{ status: string }>> } | null)
           ?.tasks;

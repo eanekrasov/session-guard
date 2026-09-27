@@ -1,4 +1,4 @@
-/** A live subagent closes a gate with its own workflow-result */
+/** Живой субагент закрывает гейт собственным workflow-result */
 
 import {
   CONSENT_INSTRUCTION,
@@ -35,7 +35,7 @@ export const verifyLoop: Scenario = {
         expect: (s: Session) => stage(s) === 'execution' || `stage is ${stage(s)}`,
       },
       {
-        // The code stage: a real edit, so the invariants gate is earned.
+        // Стадия code: настоящее редактирование, поэтому гейт инвариантов заработан.
         instruction:
           'Use the task tool with subagent_type "coder" and description ' +
           '"[workflow-task:task-0] write the file", telling it to create src/smoke-1.ts ' +
@@ -43,11 +43,11 @@ export const verifyLoop: Scenario = {
           '<workflow-result>{"gate":"code","status":"pass","summary":"wrote the file",' +
           '"evidence":["src/smoke-1.ts"]}</workflow-result>',
         expect: (s: Session) => {
-          // The stage moves on the coder's own <workflow-result>, so a model
-          // that reports a pass without writing anything would move the task
-          // just the same. `changedFiles` is the core's own record of what
-          // landed on disk inside the task's writeScope, and it is what makes
-          // this step about the work rather than about the report of it.
+          // Стадия переходит по собственному <workflow-result> кодера, поэтому
+          // модель, сообщившая об успехе без записи файлов, точно так же
+          // перевела бы задачу. `changedFiles` — это собственная запись ядра
+          // о том, что попало на диск в пределах writeScope задачи; именно
+          // она делает этот шаг проверкой работы, а не отчёта о ней.
           const changed = (s.state as { changedFiles?: string[] } | null)?.changedFiles ?? [];
           if (!changed.includes('src/smoke-1.ts')) {
             return `the coder reported a pass but nothing was written (changedFiles: ${JSON.stringify(changed)})`;
@@ -57,7 +57,7 @@ export const verifyLoop: Scenario = {
         },
       },
       {
-        // One of two verifiers reports. The stage must hold: it declared two.
+        // Один из двух верификаторов отчитывается. Стадия должна удерживаться: объявлено две.
         instruction:
           'Use the task tool with subagent_type "reviewer" and description ' +
           '"[workflow-task:task-0] review the file", telling it to review src/smoke-1.ts.',

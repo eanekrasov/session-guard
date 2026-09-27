@@ -1,4 +1,4 @@
-/** The host loads the packed plugin and registers its tools */
+/** Хост загружает упакованный плагин и регистрирует его инструменты */
 
 import { ORCHESTRATOR, newSession, step } from '../scenario-kit.ts';
 import type { Scenario } from '../scenario-kit.ts';
@@ -12,8 +12,8 @@ export const pluginLoads: Scenario = {
       instruction:
         'Call the tool `workflow-list` with no arguments, then reply with its output verbatim.',
       agent: ORCHESTRATOR,
-      // Evidence the tool really ran: the reply carries the resolved
-      // profilesDir, a temp path the model has no way to invent.
+      // Подтверждение, что инструмент действительно выполнился: ответ содержит
+      // profilesDir — временный путь, который модель не может сфабриковать.
       expect: (s) =>
         (s.transcript.includes('profilesDir') && s.transcript.includes('smoke')) ||
         `workflow-list did not report the smoke profile: ${s.transcript.slice(0, 300)}`,

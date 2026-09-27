@@ -1,4 +1,4 @@
-/** A commit that matches the permit is receipted */
+/** Коммит, совпадающий с разрешением, получает квитанцию */
 
 import {
   ORCHESTRATOR,

@@ -1,4 +1,4 @@
-/** Without a workflow session the plugin stays out of the way */
+/** Без workflow-сессии плагин не вмешивается */
 
 import { newSession, step } from '../scenario-kit.ts';
 import type { Scenario } from '../scenario-kit.ts';

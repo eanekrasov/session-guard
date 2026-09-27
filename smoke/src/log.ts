@@ -1,5 +1,5 @@
 /**
- * The suite's output layer: one colour per event kind, or JSONL when a machine reads it.
+ * Слой вывода suite: один цвет на вид события или JSONL, когда данные читает машина.
  */
 
 export const OUTPUT_FORMAT = process.env.HOST_SMOKE_OUTPUT ?? 'human';
@@ -23,7 +23,7 @@ export function colorize(text: string, color: LogColor): string {
   return enabled ? `${ANSI[color]}${text}${ANSI.reset}` : text;
 }
 
-/** Write one complete event so concurrent question polling cannot split it. */
+/** Записать одно цельное событие, чтобы параллельный опрос `question` не разбил его. */
 export function logEvent(
   text: string,
   color?: LogColor,

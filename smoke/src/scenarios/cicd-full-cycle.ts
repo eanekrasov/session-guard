@@ -1,4 +1,4 @@
-/** Full CI/CD pipeline: init → checkout → build → test(unit+integration) → deploy → smoke → done */
+/** Полный CI/CD-пайплайн: init → checkout → build → test(unit+integration) → deploy → smoke → done */
 
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -41,11 +41,11 @@ export const cicdFullCycle: Scenario = {
           'and then finish with exactly ' +
           '<workflow-result>{"gate":"checkout_done","status":"pass","summary":"created source file","evidence":["src/ci-demo.ts"]}</workflow-result>',
         expect: (s: Session) => {
-          // The file first, then the gate. A setup agent that closes
-          // `checkout_done` without writing anything used to be accepted
-          // here, and the failure surfaced two steps later as the build
-          // agent asking the operator to create the missing file — a loop
-          // that outlived the client's timeout and reported nothing at all.
+          // Сначала файл, затем гейт. Раньше setup-агент, закрывающий
+          // `checkout_done` без записи файла, проходил эту проверку,
+          // и ошибка всплывала двумя шагами позже, когда build-агент
+          // просил оператора создать недостающий файл — цикл,
+          // переживший тайм-аут клиента и не сообщивший ничего.
           if (!existsSync(join(host.workDir, 'src', 'ci-demo.ts'))) {
             return 'setup reported a pass but src/ci-demo.ts was never created';
           }
@@ -68,13 +68,15 @@ export const cicdFullCycle: Scenario = {
         expect: (s: Session) => stage(s) === 'test' || `stage is ${stage(s)}, expected test`,
       },
       {
-        // `test` is a loop over `test_suite`, and a loop with no tasks
-        // dispatches nothing: every `[workflow-task:...]` call was refused,
-        // the model kept trying, and one prompt outlived the client's
-        // timeout. That is what the scenario reported as an error.
+        // `test` — это цикл по `test_suite`, а цикл без задач не
+        // диспетчеризирует ничего: каждый вызов `[workflow-task:...]`
+        // был отклонён, модель продолжала попытки, и один промпт
+        // пережил тайм-аут клиента. Именно это сценарий и сообщил
+        // как ошибку.
         //
-        // No `writeScope`: a tester reports, it does not write, and an
-        // absent scope is exactly "read-only" (session-schema.ts).
+        // Без `writeScope`: тестировщик сообщает, а не записывает;
+        // отсутствие области видимости — это именно «только чтение»
+        // (session-schema.ts).
         instruction:
           'Call the tool `workflow-tasks-set` with listKey "test_suite" and tasks ' +
           '[{"status":"pending"}]. Do nothing else.',
@@ -87,21 +89,23 @@ export const cicdFullCycle: Scenario = {
         },
       },
       {
-        // One task walks both nested stages — unit, then integration. The
-        // loop has no transitions of its own, so declaration order moves it,
-        // and the last stage completes it. Two separate tasks cannot work:
-        // every task starts at the first nested stage, so a result naming
-        // `integration` would arrive at `unit`, which does not declare that
-        // gate, and be rejected.
+        // Одна задача проходит обе вложенные стадии — unit, затем integration.
+        // У цикла нет собственных переходов, поэтому порядок объявления
+        // двигает задачу, а последняя стадия завершает её. Две отдельные
+        // задачи работать не могут: каждая задача начинается с первой
+        // вложенной стадии, поэтому результат с именем `integration`
+        // пришёл бы на стадию `unit`, которая не объявляет такого гейта,
+        // и был бы отклонён.
         instruction:
           'Use the task tool with subagent_type "tester" and description ' +
           '"[workflow-task:task-0] unit test", telling it to run unit tests on ' +
           'src/ci-demo.ts and then finish with exactly ' +
           '<workflow-result>{"gate":"unit","status":"pass","summary":"unit tests passed","evidence":["src/ci-demo.ts"]}</workflow-result>',
         expect: (s: Session) => {
-          // The verdict moves the task, and a move clears the gates it was
-          // judged by — each stage judges its own work. So the evidence that
-          // `unit` passed is where the task now stands, not a gate value.
+          // Вердикт перемещает задачу, а перемещение очищает гейты,
+          // по которым выносилось суждение — каждая стадия судит свою
+          // работу. Поэтому доказательство того, что `unit` пройдена, —
+          // это текущее положение задачи, а не значение гейта.
           const run = firstRun(s);
           return run?.stage === 'integration' || `the task is at ${run?.stage ?? '(no run)'}`;
         },
@@ -134,9 +138,10 @@ export const cicdFullCycle: Scenario = {
         },
       },
       {
-        // Ребро `deploy → smoke` объявляет `consent: deploy`. Согласие с
-        // именем, отличным от `plan`, ядро выдавать не умело вовсе — переход
-        // был закрыт навсегда, и сценарий падал здесь с «stage is deploy».
+        // Ребро `deploy → smoke` объявляет `consent: deploy`. Раньше ядро
+        // вообще не умело выдавать согласие с именем, отличным от `plan` —
+        // переход был закрыт навсегда, и сценарий падал здесь с
+        // «stage is deploy».
         instruction: consentInstruction('deploy'),
         expect: (s: Session) => {
           const approvals =

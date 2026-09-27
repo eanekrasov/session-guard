@@ -1,25 +1,25 @@
 #!/usr/bin/env bun
 /**
- * host-smoke — drives the plugin through a real opencode.
+ * host-smoke — управляет плагином через реальный opencode.
  *
- * Every assertion here is made against what the host and the plugin actually
- * did: the session the plugin persisted, and the tool parts the host recorded.
- * Nothing calls into the plugin directly, so a scenario that passes here is
- * evidence the mechanism works in production, not that a unit test agrees with
- * itself.
+ * Каждое утверждение здесь проверяется на том, что хост и плагин фактически
+ * сделали: сессию, сохранённую плагином, и части инструментов, записанные хостом.
+ * Ничто не обращается к плагину напрямую, поэтому сценарий, проходящий здесь, —
+ * это доказательство, что механизм работает в продакшене, а не что модульный
+ * тест согласен сам с собой.
  *
- * A live model drives the tools, so a step can fail because the model ignored
- * the instruction rather than because the plugin misbehaved. Each step is
- * therefore retried, and the report records how many attempts it took: a step
- * that needed retries is a prompt problem, a step that never succeeded is a
- * finding.
+ * Инструментами управляет живая модель, поэтому шаг может упасть из-за того, что
+ * модель проигнорировала инструкцию, а не из-за некорректного поведения плагина.
+ * Каждый шаг поэтому повторяется, и отчёт записывает, сколько попыток потребовалось:
+ * шаг, потребовавший повторов, — проблема промпта; шаг, никогда не выполнившийся, —
+ * находка.
  *
- *   bun run smoke/src/run.ts              # every scenario
- *   bun run smoke/src/run.ts git-block    # one scenario by id
+ *   bun run smoke/src/run.ts              # все сценарии
+ *   bun run smoke/src/run.ts git-block    # один сценарий по id
  *
- * Env: HOST_SMOKE_MODEL (default: the model in your opencode config),
- *      HOST_SMOKE_PLUGIN (skip build+pack, use this tarball),
- *      HOST_SMOKE_ATTEMPTS (default 3).
+ * Окружение: HOST_SMOKE_MODEL (по умолчанию: модель из конфигурации opencode),
+ *      HOST_SMOKE_PLUGIN (пропустить сборку и упаковку, использовать этот tarball),
+ *      HOST_SMOKE_ATTEMPTS (по умолчанию 3).
  */
 import { join } from 'node:path';
 import {
@@ -54,7 +54,7 @@ function installSignalHandlers(): void {
     });
   }
 }
-// ─── Runner ───────────────────────────────────────────────────────────────────
+// ─── Раннер ───────────────────────────────────────────────────────────────────
 
 function formatDuration(durationMs: number): string {
   const seconds = durationMs / 1000;

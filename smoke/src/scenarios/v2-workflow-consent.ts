@@ -1,4 +1,4 @@
-/** Consent is asked as a host form, answered, and releases the transition */
+/** Consent запрашивается как форма хоста, получает ответ и открывает переход */
 
 import { CONSENT_INSTRUCTION, ORCHESTRATOR, stage, type V2Scenario } from '../v2-scenario-kit.ts';
 

@@ -2,12 +2,12 @@ import { readWorkflowSession, type Host } from './harness.ts';
 import { PromptTimeoutError, createV2SmokeClient, type V2SmokeClient } from './v2-client.ts';
 
 /**
- * What every V2 scenario is built from.
+ * Из чего состоит каждый V2-сценарий.
  *
- * V1 drives the host's HTTP API directly through `scenario-kit.ts`; V2 goes through the generated
- * client and the host's forms, so it has its own shapes and its own step driver — but a V2 scenario
- * asserts what a V1 one does: the durable workflow state the plugin persisted, not the model's
- * story about it.
+ * V1 управляет HTTP API хоста напрямую через `scenario-kit.ts`; V2 проходит через сгенерированный
+ * клиент и формы хоста, так что у V2 собственные типы и собственный движок шагов — но V2-сценарий
+ * проверяет то же, что и V1: устойчивое состояние workflow, сохранённое плагином, а не рассказ
+ * модели об этом состоянии.
  */
 
 export interface V2State {
@@ -24,7 +24,7 @@ export interface V2Step {
 export interface V2Scenario {
   id: string;
   title: string;
-  /** The profile agent this scenario drives, as V1 drives `orchestrator`. */
+  /** Агент профиля, которым управляет этот сценарий — как V1 управляет `orchestrator`. */
   agent: string;
   steps: V2Step[];
 }
@@ -32,9 +32,10 @@ export interface V2Scenario {
 const PLAN = 'plan.md';
 
 /**
- * The agent the V1 runner drives every instruction with (`scenario-kit.ts`, `ORCHESTRATOR`). V2's
- * session must be switched to it for the same scenarios to mean the same thing: the smoke profile's
- * stages allow only this agent, and any other one is refused by the workflow's own rules.
+ * Агент, которым V1-раннер отправляет каждую инструкцию (`scenario-kit.ts`, `ORCHESTRATOR`).
+ * V2-сессия должна быть переключена на него, чтобы те же сценарии означали то же самое:
+ * стадии smoke-профиля разрешают только этого агента, и любой другой отклоняется правилами
+ * workflow.
  */
 export const ORCHESTRATOR = 'orchestrator';
 
@@ -43,8 +44,8 @@ export function stage(state: V2State): string {
 }
 
 /**
- * The consent step: prepare the tag, then ask the operator with it verbatim. The host's `question`
- * tool reaches V2 as a form, which the client answers.
+ * Шаг согласия: подготовить тег, затем дословно спросить оператора этим тегом. Инструмент
+ * `question` хоста в V2 приходит как форма, на которую отвечает клиент.
  */
 export const CONSENT_INSTRUCTION =
   'Do this in two tool calls and nothing else. ' +
@@ -60,14 +61,15 @@ export interface V2ScenarioOutcome {
 }
 
 /**
- * Run one scenario in its own session, retrying a step whose expectation does not hold yet: a live
- * model may ignore an instruction, and a step that needed retries is a prompt problem rather than a
- * finding. The session is removed whether the scenario passed, failed, or threw.
+ * Запустить один сценарий в собственной сессии, повторяя шаг, чьё ожидание ещё не выполнено:
+ * живая модель может проигнорировать инструкцию, и шаг, потребовавший повторов, — это проблема
+ * промпта, а не находка. Сессия удаляется независимо от того, прошёл сценарий, упал или выбросил
+ * исключение.
  *
- * A step is judged by the state the plugin persisted, never by the model finishing its turn. V2's
- * agent keeps working after the tool call it was asked for — reading the plan, inspecting the
- * schema — so a turn can legitimately outlive the prompt budget. The budget bounds the wait; it is
- * not the verdict, and a run that hit it says so in its evidence.
+ * Шаг оценивается по состоянию, которое сохранил плагин, а не по завершению хода модели.
+ * V2-агент продолжает работу после вызванного инструмента — читает план, изучает схему, — так
+ * что ход может законно выйти за лимит промпта. Лимит ограничивает ожидание, но не является
+ * вердиктом; прогон, достигший лимита, сообщает об этом в своём доказательстве.
  */
 export async function runV2Scenario(
   host: Host,
@@ -126,7 +128,7 @@ export async function runV2Scenario(
         : 'every instruction produced the durable workflow state it claimed',
     };
   } finally {
-    // A session the host already dropped is not a reason to lose the result.
+    // Сессия, которую хост уже удалил, не повод терять результат.
     await client.removeSession(sessionId).catch(() => undefined);
   }
 }

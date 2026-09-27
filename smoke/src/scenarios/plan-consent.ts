@@ -1,4 +1,4 @@
-/** An approved plan moves the session out of planning */
+/** Утверждённый план выводит сессию из planning */
 
 import { CONSENT_INSTRUCTION, ORCHESTRATOR, newSession, stage, step } from '../scenario-kit.ts';
 import type { Scenario } from '../scenario-kit.ts';
@@ -6,9 +6,9 @@ import type { Scenario } from '../scenario-kit.ts';
 export const planConsent: Scenario = {
   id: 'plan-consent',
   title: 'An approved plan moves the session out of planning',
-  // The operator normally answers the consent question. `HARNESS_AUTO_APPROVE`
-  // is the shipped affordance for automation; the refusal side is covered by
-  // `commit-gate`, which runs without it.
+  // Обычно оператор отвечает на вопрос согласия. `HARNESS_AUTO_APPROVE`
+  // — поставляемая опция для автоматизации; сторона отказа покрыта
+  // сценарием `commit-gate`, который запускается без неё.
   env: { HARNESS_AUTO_APPROVE: 'true' },
   run: async (host, model) => {
     const sessionId = await newSession(host, 'plan-consent');

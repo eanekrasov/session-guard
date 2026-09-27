@@ -1,4 +1,4 @@
-/** commit-task is refused while the gates have not passed */
+/** commit-task отклоняется, пока гейты не пройдены */
 
 import { ORCHESTRATOR, newSession, step } from '../scenario-kit.ts';
 import type { Scenario } from '../scenario-kit.ts';

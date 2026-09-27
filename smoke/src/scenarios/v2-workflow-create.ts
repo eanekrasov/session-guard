@@ -1,4 +1,4 @@
-/** The configured model calls workflow-create through the V2 client */
+/** Настроенная модель вызывает workflow-create через клиент V2 */
 
 import { ORCHESTRATOR, stage, type V2Scenario } from '../v2-scenario-kit.ts';
 

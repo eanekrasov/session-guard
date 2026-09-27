@@ -1,4 +1,4 @@
-/** workflow-create puts the session under the state machine */
+/** workflow-create переводит сессию под управление машины состояний */
 
 import { ORCHESTRATOR, newSession, stage, step } from '../scenario-kit.ts';
 import type { Scenario } from '../scenario-kit.ts';

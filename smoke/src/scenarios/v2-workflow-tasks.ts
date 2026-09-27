@@ -1,4 +1,4 @@
-/** A task list set after consent moves the session into its loop */
+/** Список задач, заданный после consent, переводит сессию в свой цикл */
 
 import { CONSENT_INSTRUCTION, ORCHESTRATOR, stage, type V2Scenario } from '../v2-scenario-kit.ts';
 

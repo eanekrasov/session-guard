@@ -1,4 +1,4 @@
-/** A bare git commit is refused inside a governed session */
+/** Пустой git commit отклоняется внутри управляемой сессии */
 
 import { ORCHESTRATOR, newSession, step } from '../scenario-kit.ts';
 import type { Scenario } from '../scenario-kit.ts';
