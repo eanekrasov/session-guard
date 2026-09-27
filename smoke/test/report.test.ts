@@ -7,9 +7,9 @@ import { join } from 'node:path';
 import { writeSmokeReport } from '../src/report.ts';
 
 /**
- * `docs/plans` is gitignored and absent in a fresh checkout. Writing the run
- * report there used to throw `ENOENT` after every scenario, which lost the
- * report and turned a scenario that honestly passed into a failing task.
+ * `docs/plans` исключён из Git и отсутствует в свежей рабочей копии. Раньше запись отчёта
+ * о прогоне туда вызывала `ENOENT` после каждого сценария, из-за чего отчёт терялся,
+ * а успешно завершившийся сценарий превращался в неудачную задачу.
  */
 
 const cleanupDirs: string[] = [];

@@ -9,7 +9,7 @@ import {
 } from '../src/v2-client.ts';
 import type { Host } from '../src/harness.ts';
 
-/** Minimal form shapes: the answer plan only reads type, key, label and value. */
+/** Минимальные формы: план ответа читает только `type`, `key`, `label` и `value`. */
 const stringField = (key: string, options?: Array<{ label: string; value: string }>) =>
   ({ key, type: 'string', title: key, ...(options ? { options } : {}) }) as never;
 const multiselectField = (key: string, options: Array<{ label: string; value: string }>) =>
@@ -274,7 +274,7 @@ describe('the prompt budget', () => {
       await expect(failure).rejects.toThrow(PromptTimeoutError);
       await expect(failure).rejects.toThrow('session.wait did not settle within 50ms');
       await expect(failure).rejects.toThrow('the host had no form pending');
-      // The wait is what hung, not the enqueue.
+      // Завис именно wait, а не enqueue.
       expect(routes.some((route) => route.endsWith('/wait'))).toBe(true);
     } finally {
       globalThis.fetch = originalFetch;
@@ -306,7 +306,7 @@ describe('the prompt budget', () => {
   });
 });
 
-/** The generated client unwraps `data`, so a host reply is enveloped. */
+/** Сгенерированный клиент извлекает `data`, поэтому ответ хоста обёрнут. */
 function dataResponse(data: unknown): Response {
   return new Response(JSON.stringify({ data }), {
     status: 200,

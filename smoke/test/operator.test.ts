@@ -3,9 +3,9 @@ import { describe, expect, test } from 'bun:test';
 import { chooseLabel, DECLINING_WORDS } from '../src/operator.ts';
 
 /**
- * One operator policy for both runs. A consent request gets the decision the
- * instruction asked for; a question the model invented gets the honest answer,
- * which is a declining option when one is offered.
+ * Одна политика оператора для обоих прогонов. Запрос consent получает решение,
+ * указанное в инструкции; на вопрос, который агент придумал сам, возвращается честный ответ,
+ * то есть отклоняющая опция, если она предложена.
  */
 
 describe('the operator answer policy', () => {
@@ -25,8 +25,8 @@ describe('the operator answer policy', () => {
   });
 
   test('prefers the earliest declining word, not the earliest label', () => {
-    // `no,` is earlier in the word list than `stop`, so it wins even though
-    // "Stop everything" comes first among the labels.
+    // `no,` находится в списке слов раньше `stop`, поэтому побеждает, хотя
+    // "Stop everything" стоит среди меток первым.
     const choice = chooseLabel(['Stop everything', 'No, keep going', 'Proceed'], 'grant', false);
     expect(choice.label).toBe('No, keep going');
     expect(choice.refusal).toBe('No, keep going');

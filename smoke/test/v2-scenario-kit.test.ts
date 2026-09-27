@@ -8,8 +8,8 @@ import { PromptTimeoutError, type V2SmokeClient } from '../src/v2-client.ts';
 import type { Host } from '../src/harness.ts';
 
 /**
- * The V2 runner: one session per scenario, removal on every exit path, and a
- * step retried only while its expectation about the persisted state is unmet.
+ * Исполнитель V2: одна сессия на сценарий, удаление на каждом пути выхода и повтор шага
+ * только пока не выполнено его ожидание относительно сохранённого состояния.
  */
 
 const SCENARIO: V2Scenario = {
@@ -27,7 +27,7 @@ const SCENARIO: V2Scenario = {
 
 interface FakeHost {
   host: Host;
-  /** What the plugin would have persisted for the next read. */
+  /** Что плагин сохранил бы для следующего чтения. */
   setState: (state: unknown) => void;
   cleanup: () => void;
 }
@@ -97,7 +97,7 @@ describe('runV2Scenario', () => {
     const calls: string[] = [];
     let prompts = 0;
     try {
-      // The first read sees a state the step does not accept yet.
+      // При первом чтении шаг ещё не принимает это состояние.
       fake.setState({ currentStage: 'validation' });
       const outcome = await runV2Scenario(
         fake.host,
@@ -175,8 +175,8 @@ describe('runV2Scenario', () => {
         })
       );
 
-      // The turn kept working, but the state the step asked for is there: that
-      // is the assertion, and the run says the turn was still running.
+      // Обращение продолжало выполняться, но состояние, запрошенное шагом, присутствует:
+      // это и есть проверяемое утверждение, а прогон сообщает, что обращение ещё выполнялось.
       expect(outcome.ok).toBe(true);
       expect(outcome.attempts).toBe(1);
       expect(calls.filter((call) => call.startsWith('prompt:'))).toHaveLength(1);

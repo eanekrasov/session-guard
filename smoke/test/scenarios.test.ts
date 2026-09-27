@@ -3,9 +3,9 @@ import { describe, expect, test } from 'bun:test';
 import { scenarios, v2Scenarios } from '../src/scenarios/index.ts';
 
 /**
- * The registry is what the runner iterates and what the report numbers. A scenario that exists as a
- * file but is missing here would silently stop running — the one failure a file-per-scenario split
- * invites — so the list, its order and its shape are pinned.
+ * Исполнитель перебирает реестр и нумерует отчёт. Сценарий, существующий в виде файла,
+ * но отсутствующий здесь, перестал бы выполняться без предупреждения — это единственный сбой,
+ * к которому располагает разбиение по файлу на сценарий, — поэтому список, его порядок и форма закреплены.
  */
 describe('the V1 scenario registry', () => {
   test('lists every scenario once, in the order the report numbers them', () => {

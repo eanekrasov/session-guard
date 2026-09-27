@@ -60,7 +60,7 @@ describe('host smoke provider filtering', () => {
     writeFileSync(
       join(configDirectory, 'opencode.jsonc'),
       `{
-        // This comment must not become part of the JSON input.
+        // Этот комментарий не должен стать частью входных данных JSON.
         "model": "acme/fast-model",
         "provider": {
           "acme": {
@@ -170,7 +170,7 @@ describe('host smoke configuration', () => {
       await writeSmokeConfigs(v1, { providers }, 'acme/fast-model', '/plugin/dist', 'v1', auth);
       await writeSmokeConfigs(v2, { providers }, 'acme/fast-model', '/plugin/dist', 'v2', auth);
 
-      // V1 reads auth.json itself; only V2 needs the key in its provider entry.
+      // V1 самостоятельно читает auth.json; только V2 нужен ключ в записи провайдера.
       expect(read(v1).providers).toMatchObject({
         acme: { settings: { baseURL: 'https://example.test/v1' } },
       });
