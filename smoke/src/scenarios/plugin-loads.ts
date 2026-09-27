@@ -5,7 +5,7 @@ import type { Scenario } from '../scenario-kit.ts';
 
 export const pluginLoads: Scenario = {
   id: 'plugin-loads',
-  title: 'The host loads the packed plugin and registers its tools',
+  title: 'Хост загружает упакованный плагин и регистрирует его инструменты',
   run: async (host, model) => {
     const sessionId = await newSession(host, 'plugin-loads');
     const result = await step(host, sessionId, model, {
@@ -22,7 +22,7 @@ export const pluginLoads: Scenario = {
       ok: result.ok,
       attempts: result.attempts,
       evidence: result.ok
-        ? 'workflow-list ran through the host and listed the project profiles'
+        ? 'workflow-list выполнен через хост и вывел профили проекта'
         : `${result.detail}\n${result.session.transcript.slice(0, 600)}`,
     };
   },

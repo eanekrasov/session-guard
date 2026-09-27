@@ -5,7 +5,7 @@ import type { Scenario } from '../scenario-kit.ts';
 
 export const planConsent: Scenario = {
   id: 'plan-consent',
-  title: 'An approved plan moves the session out of planning',
+  title: 'Одобренный план переводит сессию из стадии planning',
   // Обычно оператор отвечает на вопрос согласия. `HARNESS_AUTO_APPROVE`
   // — поставляемая опция для автоматизации; сторона отказа покрыта
   // сценарием `commit-gate`, который запускается без неё.
@@ -31,7 +31,7 @@ export const planConsent: Scenario = {
       ok: result.ok,
       attempts: result.attempts,
       evidence: result.ok
-        ? 'consent recorded the plan reference and the guard released planning → tasks_ready'
+        ? 'согласие сохранило ссылку на план, и гейт открыл переход planning → tasks_ready'
         : `${result.detail}\n${result.session.transcript.slice(0, 700)}`,
     };
   },

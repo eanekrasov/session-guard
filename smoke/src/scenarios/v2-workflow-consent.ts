@@ -4,7 +4,7 @@ import { CONSENT_INSTRUCTION, ORCHESTRATOR, stage, type V2Scenario } from '../v2
 
 export const v2WorkflowConsent: V2Scenario = {
   id: 'v2-workflow-consent',
-  title: 'Consent is asked as a host form, answered, and releases the transition',
+  title: 'Согласие запрашивается как форма хоста, получает ответ и открывает переход',
   agent: ORCHESTRATOR,
   steps: [
     {

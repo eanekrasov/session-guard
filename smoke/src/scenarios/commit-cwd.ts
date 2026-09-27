@@ -11,7 +11,7 @@ import type { Scenario } from '../scenario-kit.ts';
 
 export const commitCwd: Scenario = {
   id: 'commit-cwd',
-  title: 'A commit that matches the permit is receipted',
+  title: 'Коммит, соответствующий разрешению, получает квитанцию',
   env: { HARNESS_AUTO_APPROVE: 'true' },
   run: async (host, model) => {
     const sessionId = await newSession(host, 'commit-cwd');
@@ -34,7 +34,7 @@ export const commitCwd: Scenario = {
       ok: result.ok,
       attempts: result.attempts,
       evidence: result.ok
-        ? 'the permit was issued, the commit moved HEAD, and the receipt records that commit'
+        ? 'разрешение выдано, коммит переместил HEAD, и квитанция фиксирует этот коммит'
         : `${result.detail}\n${result.session.transcript.slice(0, 700)}`,
     };
   },

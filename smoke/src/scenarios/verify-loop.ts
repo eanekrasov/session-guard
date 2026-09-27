@@ -12,7 +12,7 @@ import type { Scenario, Session } from '../scenario-kit.ts';
 
 export const verifyLoop: Scenario = {
   id: 'verify-loop',
-  title: 'A live subagent closes a gate with its own workflow-result',
+  title: 'Живой субагент закрывает гейт собственным workflow-result',
   env: { HARNESS_AUTO_APPROVE: 'true' },
   run: async (host, model) => {
     const sessionId = await newSession(host, 'verify-loop');
@@ -98,8 +98,8 @@ export const verifyLoop: Scenario = {
       ok: true,
       attempts,
       evidence:
-        'two live subagents each closed their own gate with a workflow-result; ' +
-        'the stage held for the first and completed the task on the second',
+        'два живых субагента закрыли каждый свой гейт с помощью workflow-result; ' +
+        'после первого вердикта стадия не сдвинулась, после второго задача завершилась',
     };
   },
 };

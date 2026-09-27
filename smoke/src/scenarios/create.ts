@@ -5,7 +5,7 @@ import type { Scenario } from '../scenario-kit.ts';
 
 export const create: Scenario = {
   id: 'create',
-  title: 'workflow-create puts the session under the state machine',
+  title: 'workflow-create передаёт сессию под управление конечного автомата',
   run: async (host, model) => {
     const sessionId = await newSession(host, 'create');
     const result = await step(host, sessionId, model, {
@@ -22,7 +22,7 @@ export const create: Scenario = {
       ok: result.ok,
       attempts: result.attempts,
       evidence: result.ok
-        ? `session persisted in stage ${stage(result.session)}`
+        ? `сессия сохранена на стадии ${stage(result.session)}`
         : `${result.detail}\n${result.session.transcript.slice(0, 600)}`,
     };
   },

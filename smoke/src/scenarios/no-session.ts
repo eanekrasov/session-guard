@@ -5,7 +5,7 @@ import type { Scenario } from '../scenario-kit.ts';
 
 export const noSession: Scenario = {
   id: 'no-session',
-  title: 'Without a workflow session the plugin stays out of the way',
+  title: 'Без workflow-сессии плагин не вмешивается в работу',
   run: async (host, model) => {
     const sessionId = await newSession(host, 'no-session');
     const result = await step(host, sessionId, model, {
@@ -17,7 +17,7 @@ export const noSession: Scenario = {
       ok: result.ok,
       attempts: result.attempts,
       evidence: result.ok
-        ? 'bash ran with no workflow session and the plugin persisted nothing'
+        ? 'bash выполнен без workflow-сессии, и плагин ничего не сохранил'
         : result.detail,
     };
   },

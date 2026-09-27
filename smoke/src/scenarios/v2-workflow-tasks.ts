@@ -4,7 +4,7 @@ import { CONSENT_INSTRUCTION, ORCHESTRATOR, stage, type V2Scenario } from '../v2
 
 export const v2WorkflowTasks: V2Scenario = {
   id: 'v2-workflow-tasks',
-  title: 'A task list set after consent moves the session into its loop',
+  title: 'Список задач после согласия переводит сессию в свой цикл',
   agent: ORCHESTRATOR,
   steps: [
     {

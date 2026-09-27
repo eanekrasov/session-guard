@@ -5,7 +5,7 @@ import type { Scenario } from '../scenario-kit.ts';
 
 export const commitGate: Scenario = {
   id: 'commit-gate',
-  title: 'commit-task is refused while the gates have not passed',
+  title: 'commit-task отклоняется, пока гейты не пройдены',
   run: async (host, model) => {
     const sessionId = await newSession(host, 'commit-gate');
     await step(host, sessionId, model, {
@@ -28,7 +28,7 @@ export const commitGate: Scenario = {
       ok: result.ok,
       attempts: result.attempts,
       evidence: result.ok
-        ? 'the delivery guard refused the call and no receipt was written'
+        ? 'гейт поставки отклонил вызов, и квитанция не была записана'
         : `${result.detail}\n${result.session.transcript.slice(0, 800)}`,
     };
   },

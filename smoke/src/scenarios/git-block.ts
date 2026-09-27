@@ -5,7 +5,7 @@ import type { Scenario } from '../scenario-kit.ts';
 
 export const gitBlock: Scenario = {
   id: 'git-block',
-  title: 'A bare git commit is refused inside a governed session',
+  title: 'Прямой git commit отклоняется внутри управляемой сессии',
   run: async (host, model) => {
     const sessionId = await newSession(host, 'git-block');
     await step(host, sessionId, model, {
@@ -27,7 +27,7 @@ export const gitBlock: Scenario = {
       ok: result.ok,
       attempts: result.attempts,
       evidence: result.ok
-        ? 'the host cancelled the tool call and surfaced the workflow reason'
+        ? 'хост отменил вызов инструмента и сообщил причину, связанную с workflow'
         : `${result.detail}\n${result.session.transcript.slice(0, 800)}`,
     };
   },

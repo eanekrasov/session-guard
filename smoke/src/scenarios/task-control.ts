@@ -5,7 +5,7 @@ import type { Scenario } from '../scenario-kit.ts';
 
 export const taskControl: Scenario = {
   id: 'task-control',
-  title: 'Only the orchestrator may write workflow task state',
+  title: 'Только orchestrator может изменять состояние задач workflow',
   run: async (host, model) => {
     const sessionId = await newSession(host, 'task-control');
     await step(host, sessionId, model, {
@@ -51,7 +51,7 @@ export const taskControl: Scenario = {
       ok: refused.ok,
       attempts: set.attempts + refused.attempts,
       evidence: refused.ok
-        ? 'the orchestrator set the list; the worker agent was refused and the status stayed pending'
+        ? 'orchestrator задал список; worker-агент получил отказ, а статус остался pending'
         : `${refused.detail}\n${refused.session.transcript.slice(0, 800)}`,
     };
   },

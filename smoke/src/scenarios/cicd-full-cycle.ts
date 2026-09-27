@@ -16,7 +16,7 @@ import type { Scenario, Session } from '../scenario-kit.ts';
 export const cicdFullCycle: Scenario = {
   id: 'cicd-full-cycle',
   title:
-    'Full CI/CD pipeline: init → checkout → build → test(unit+integration) → deploy → smoke → done',
+    'Полный CI/CD-пайплайн: init → checkout → build → test(unit+integration) → deploy → smoke → done',
   profile: 'cicd',
   env: { HARNESS_AUTO_APPROVE: 'true' },
   run: async (host, model) => {
@@ -183,7 +183,7 @@ export const cicdFullCycle: Scenario = {
       ok: true,
       attempts,
       evidence:
-        'full CI/CD pipeline passed: init → consent → setup → build → unit → integration → deploy (consent) → smoke → done',
+        'полный CI/CD-пайплайн пройден: init → consent → setup → build → unit → integration → deploy (consent) → smoke → done',
     };
   },
 };

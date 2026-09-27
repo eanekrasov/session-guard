@@ -13,7 +13,7 @@ import type { Scenario } from '../scenario-kit.ts';
 
 export const commitMismatch: Scenario = {
   id: 'commit-mismatch',
-  title: 'A commit that sweeps in an unrelated file is not receipted',
+  title: 'Коммит с посторонним файлом не получает квитанцию',
   env: { HARNESS_AUTO_APPROVE: 'true' },
   run: async (host, model) => {
     const sessionId = await newSession(host, 'commit-mismatch');
@@ -49,7 +49,7 @@ export const commitMismatch: Scenario = {
       ok: result.ok,
       attempts: prepared.attempts + result.attempts,
       evidence: result.ok
-        ? 'HEAD moved but the commit carried unrelated.txt: no receipt, permit dropped, refusal surfaced'
+        ? 'HEAD переместился, но коммит содержал unrelated.txt: квитанции нет, разрешение отозвано, отказ сообщён'
         : `${result.detail}\n${result.session.transcript.slice(0, 700)}`,
     };
   },
