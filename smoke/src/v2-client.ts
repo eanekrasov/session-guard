@@ -18,6 +18,11 @@ export interface V2SmokeClient {
    */
   prompt(sessionId: string, text: string, decision?: OperatorDecision): Promise<void>;
   removeSession(sessionId: string): Promise<void>;
+  /**
+   * Raw messages of the session, as the generated client reports them. The transport
+   * narrows them into the shared turn parts; this client never interprets them.
+   */
+  listMessages(sessionId: string): Promise<unknown[]>;
   /** Ответы на вопросы, которые сценарий не задавал, по порядку. */
   offScript(): string[];
 }
@@ -51,9 +56,13 @@ export function promptTimeoutMs(env: Record<string, string | undefined> = proces
  * потому что это единственное свидетельство, оставшееся после отказа от вызова.
  */
 export class PromptTimeoutError extends Error {
-  constructor(operation: string, budgetMs: number, detail: string) {
+  /** Forms the host was still waiting on when the budget ran out; 0 when it awaited none. */
+  readonly pendingForms: number;
+
+  constructor(operation: string, budgetMs: number, detail: string, pendingForms = 0) {
     super(`[ERROR] ${operation} не завершился за ${budgetMs} мс: ${detail}`);
     this.name = 'PromptTimeoutError';
+    this.pendingForms = pendingForms;
   }
 }
 
@@ -255,14 +264,16 @@ export function createV2SmokeClient(host: Host, options: V2SmokeClientOptions = 
        */
       const bound = async <T>(operation: string, work: Promise<T>): Promise<T> => {
         const left = deadline - Date.now();
-        if (left <= 0) throw new PromptTimeoutError(operation, budgetMs, pendingNote());
+        if (left <= 0)
+          throw new PromptTimeoutError(operation, budgetMs, pendingNote(), waitingForms);
         let timer: ReturnType<typeof setTimeout> | undefined;
         try {
           return await Promise.race([
             work,
             new Promise<never>((_, reject) => {
               timer = setTimeout(
-                () => reject(new PromptTimeoutError(operation, budgetMs, pendingNote())),
+                () =>
+                  reject(new PromptTimeoutError(operation, budgetMs, pendingNote(), waitingForms)),
                 left
               );
             }),
@@ -306,6 +317,11 @@ export function createV2SmokeClient(host: Host, options: V2SmokeClientOptions = 
 
     async removeSession(sessionId: string): Promise<void> {
       await client.session.remove({ sessionID: sessionId });
+    },
+
+    async listMessages(sessionId: string): Promise<unknown[]> {
+      const response = await client.message.list({ sessionID: sessionId });
+      return response?.data ?? [];
     },
 
     offScript: () => [...notes],

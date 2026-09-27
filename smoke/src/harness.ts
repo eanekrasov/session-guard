@@ -58,12 +58,28 @@ export function attemptsFromEnv(env: Record<string, string | undefined> = proces
   return DEFAULT_ATTEMPTS;
 }
 
+/**
+ * Живая среда не может предоставить хост: нет бинарника, не разрешается модель, процесс
+ * сервера не поднялся. Caller сообщает это как `not-run` с `live-environment-unavailable`
+ * и не считает такой запуск находкой о сценарии.
+ *
+ * Любая другая ошибка bootstrap (запись конфигурации, фикстура профиля, сборка плагина)
+ * остаётся обычной ошибкой и завершает прогон фатально: значит, сломан harness или
+ * плагин, а не отсутствует среда.
+ */
+export class EnvironmentUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'EnvironmentUnavailableError';
+  }
+}
+
 /** Проверить бинарник непосредственно перед запуском дочернего хоста. */
 export function ensureOpencodeBinary(version: HostVersion, env = process.env): string {
   const variable = version === 'v2' ? 'HOST_SMOKE_V2_BINARY' : 'HOST_SMOKE_V1_BINARY';
   const binary = opencodeBinary(version, env);
   if (!existsSync(binary)) {
-    throw new Error(
+    throw new EnvironmentUnavailableError(
       `[ERROR] бинарник opencode ${version} не найден по пути ${binary}; задайте ${variable}, чтобы переопределить путь.`
     );
   }
@@ -451,7 +467,7 @@ export async function defaultModel(_binary?: string): Promise<string> {
   const model = operator.model;
   if (!model) {
     log('error', 'разрешённая конфигурация opencode не содержит модель');
-    throw new Error(
+    throw new EnvironmentUnavailableError(
       '[ERROR] Нет модели для запуска: задайте HOST_SMOKE_MODEL или объявите `model` в конфигурации opencode.'
     );
   }
@@ -672,6 +688,12 @@ export async function startHost(options: HostOptions): Promise<Host> {
     });
     child.stdout?.on('data', (chunk) => (buffer += chunk));
     child.stderr?.on('data', (chunk) => (buffer += chunk));
+    // A process that cannot even be spawned emits `error` and never exits; without this the
+    // run would wait for the listen timeout and blame the wrong thing.
+    let spawnError: Error | undefined;
+    child.once('error', (error) => {
+      spawnError = error instanceof Error ? error : new Error(String(error));
+    });
     log('info', 'процесс opencode serve запущен; ожидание URL прослушивания');
 
     let stopPromise: Promise<void> | undefined;
@@ -698,16 +720,29 @@ export async function startHost(options: HostOptions): Promise<Host> {
       url = await new Promise<string>((resolveUrl, rejectUrl) => {
         const deadline = setTimeout(() => {
           log('error', 'opencode serve не сообщил URL за 60 секунд');
-          rejectUrl(new Error(`opencode serve не сообщил URL:\n${buffer}`));
+          rejectUrl(new EnvironmentUnavailableError(`opencode serve не сообщил URL:\n${buffer}`));
         }, 60_000);
         const poll = setInterval(() => {
+          if (spawnError !== undefined) {
+            clearInterval(poll);
+            clearTimeout(deadline);
+            log('error', `opencode serve не запустился: ${spawnError.message}`);
+            rejectUrl(
+              new EnvironmentUnavailableError(`opencode serve не запустился: ${spawnError.message}`)
+            );
+            return;
+          }
           const match = /(http:\/\/127\.0\.0\.1:\d+)/.exec(buffer);
           if (!match) {
             if (child.exitCode !== null) {
               clearInterval(poll);
               clearTimeout(deadline);
               log('error', `opencode serve завершился до сообщения URL (${child.exitCode})`);
-              rejectUrl(new Error(`opencode serve завершился (${child.exitCode}):\n${buffer}`));
+              rejectUrl(
+                new EnvironmentUnavailableError(
+                  `opencode serve завершился (${child.exitCode}):\n${buffer}`
+                )
+              );
             }
             return;
           }

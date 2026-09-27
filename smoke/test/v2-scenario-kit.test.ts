@@ -70,6 +70,9 @@ function fakeClient(
     async removeSession(id) {
       calls.push(`remove:${id}`);
     },
+    async listMessages() {
+      return [];
+    },
     offScript: () => [],
   });
 }

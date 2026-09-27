@@ -1,0 +1,136 @@
+import { describe, expect, test } from 'bun:test';
+
+import {
+  canonicalScenarios,
+  findScenario,
+  parityMatrix,
+  validateScenarioDefinitions,
+  type CanonicalScenario,
+} from '../src/registry.ts';
+import { scenarios as legacyScenarios } from '../src/scenarios/index.ts';
+
+const LEGACY_IDS = [
+  'plugin-loads',
+  'no-session',
+  'create',
+  'git-block',
+  'task-control',
+  'commit-gate',
+  'plan-consent',
+  'commit-cwd',
+  'commit-mismatch',
+  'cicd-full-cycle',
+  'verify-loop',
+];
+
+describe('the canonical scenario registry', () => {
+  test('is the one list both host kinds run, in the order the report numbers them', () => {
+    const ids = canonicalScenarios.map((scenario) => scenario.id);
+
+    expect(ids).toEqual(LEGACY_IDS);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  test('keeps the published id, title, profile and env of every current scenario', () => {
+    for (const scenario of canonicalScenarios) {
+      const legacy = legacyScenarios.find((candidate) => candidate.id === scenario.id);
+      if (legacy === undefined) throw new Error(`сценарий «${scenario.id}» отсутствует в baseline`);
+      expect(scenario.title).toBe(legacy.title);
+      expect(scenario.profile).toBe(legacy.profile);
+      expect(scenario.env).toEqual(legacy.env);
+    }
+  });
+
+  test('holds no V2-only scenario id and no second registry', () => {
+    for (const scenario of canonicalScenarios) {
+      expect(scenario.id.startsWith('v2-')).toBe(false);
+    }
+    expect(findScenario('v2-workflow-create')).toBeUndefined();
+    expect(findScenario('create')?.migrationState).toBe('migrated');
+  });
+
+  test('marks only the stage-1 core scenarios as migrated, and gives them runnable steps', () => {
+    const migrated = canonicalScenarios
+      .filter((scenario) => scenario.migrationState === 'migrated')
+      .map((scenario) => scenario.id);
+
+    expect(migrated).toEqual(['plugin-loads', 'create']);
+    for (const scenario of canonicalScenarios) {
+      if (scenario.migrationState !== 'migrated') {
+        expect(scenario.steps).toBeUndefined();
+        continue;
+      }
+      expect(scenario.steps?.length ?? 0).toBeGreaterThan(0);
+      for (const step of scenario.steps ?? []) {
+        expect(step.instruction.length).toBeGreaterThan(10);
+        expect(['read-only', 'mutating']).toContain(step.mutation);
+        expect(['same-session', 'new-session', 'poll-state', 'none']).toContain(step.retry);
+        expect(typeof step.expect).toBe('function');
+      }
+    }
+  });
+
+  test('passes its own validation, and rejects a registry the runner cannot honour', () => {
+    expect(validateScenarioDefinitions(canonicalScenarios)).toEqual([]);
+
+    const step = canonicalScenarios.find((scenario) => scenario.id === 'create')!.steps![0]!;
+    const bad: CanonicalScenario[] = [
+      { id: 'x', title: 'X', migrationState: 'migrated', stage: 'stage-1-core', steps: [step] },
+      { id: 'x', title: 'X again', migrationState: 'pending', stage: 'stage-1-core' },
+      { id: 'v2-something', title: 'V2 only', migrationState: 'pending', stage: 'stage-1-core' },
+      {
+        id: 'no-steps',
+        title: 'Nothing to run',
+        migrationState: 'migrated',
+        stage: 'stage-1-core',
+        steps: [],
+      },
+      {
+        id: 'unsafe-mutation',
+        title: 'Repeats a mutation',
+        migrationState: 'migrated',
+        stage: 'mutation',
+        steps: [{ ...step, mutation: 'mutating', retry: 'same-session' }],
+      },
+      {
+        id: 'unimplemented-retry',
+        title: 'Asks for a later stage',
+        migrationState: 'migrated',
+        stage: 'consent',
+        steps: [{ ...step, retry: 'poll-state' }],
+      },
+    ];
+
+    const problems = validateScenarioDefinitions(bad);
+    expect(problems.map((problem) => problem.scenarioId)).toEqual([
+      'x',
+      'v2-something',
+      'no-steps',
+      'unsafe-mutation',
+      'unimplemented-retry',
+    ]);
+    expect(problems.map((problem) => problem.problem).join('\n')).toContain(
+      'duplicate scenario id'
+    );
+    expect(problems.map((problem) => problem.problem).join('\n')).toContain(
+      'may not retry in the same session'
+    );
+    expect(problems.map((problem) => problem.problem).join('\n')).toContain(
+      'retry strategy poll-state is not implemented'
+    );
+  });
+
+  test('derives the parity matrix from the registry, requiring every scenario on both hosts', () => {
+    const matrix = parityMatrix();
+
+    expect(matrix.map((row) => row.scenarioId)).toEqual(LEGACY_IDS);
+    for (const row of matrix) {
+      expect(row.requiredOn).toEqual({ v1: true, v2: true });
+      expect(row.reason.length).toBeGreaterThan(10);
+    }
+    const migratedRow = matrix.find((row) => row.scenarioId === 'create');
+    expect(migratedRow?.reason).toContain('migrated');
+    const pendingRow = matrix.find((row) => row.scenarioId === 'commit-gate');
+    expect(pendingRow?.reason).toContain('pending migration');
+  });
+});

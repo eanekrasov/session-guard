@@ -32,11 +32,26 @@ export function logEvent(
 ): void {
   if (OUTPUT_FORMAT === 'jsonl') {
     process.stderr.write(
-      `${JSON.stringify({ timestamp: new Date().toISOString(), type, message: text, ...fields })}\n`
+      formatJsonlEvent({ ...fields, timestamp: new Date().toISOString(), type, message: text })
     );
     return;
   }
   process.stderr.write(`${color ? colorize(text, color) : text}\n`);
+}
+
+export interface SmokeEvent {
+  timestamp: string;
+  type: string;
+  message: string;
+  [field: string]: unknown;
+}
+
+/**
+ * Одна машинно-читаемая строка. Многострочные сообщения пользователя, модели и
+ * доказательства остаются корректными JSON-строками, поэтому поток JSONL не рвётся.
+ */
+export function formatJsonlEvent(event: SmokeEvent): string {
+  return `${JSON.stringify(event)}\n`;
 }
 
 export function logBlock(label: string, text: string, color: LogColor, type: string): void {
