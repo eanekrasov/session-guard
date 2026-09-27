@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from 'vitest';
-import { Effect } from 'effect';
 
 import { registerWorkflowTools } from '../../src/app/v2-tool-surface-adapter.ts';
 import type { WorkflowToolSurfacePorts } from '../../src/app/workflow-tool-surface.ts';
@@ -19,10 +18,11 @@ interface CapturedTool {
   readonly name: string;
   readonly description: string;
   readonly input: unknown;
+  readonly output: unknown;
   readonly execute: (
     input: unknown,
     context: { sessionID: string; agent: string }
-  ) => Effect.Effect<{ output?: string; metadata?: unknown }, { message: string }>;
+  ) => Promise<{ output?: string; metadata?: unknown }>;
 }
 
 function createMockPorts(): WorkflowToolSurfacePorts {
@@ -71,13 +71,13 @@ function fakeEditor(): {
   };
 }
 
-/** Run a V2 Effect tool.execute and return its resolved output */
+/** Run a V2 tool.execute and return its resolved output */
 async function runTool(
   tool: CapturedTool,
   input: Record<string, unknown> = {},
   context: { sessionID: string; agent: string } = { sessionID: 'ses-test', agent: '' }
 ): Promise<{ output?: string; metadata?: unknown }> {
-  return Effect.runPromise(tool.execute(input, context));
+  return tool.execute(input, context);
 }
 
 // ── Suite ─────────────────────────────────────────────────────────────────
@@ -99,6 +99,22 @@ describe('V2ToolSurfaceAdapter', () => {
         'workflow-tasks-set-status',
         'workflow-tasks-resolve-decision',
       ]);
+    });
+
+    // The promise ToolEditor hands `execute`'s return value to `Effect.promise`,
+    // which calls `.then` on it; an Effect there is not a thenable and every
+    // tool call dies with `… .then is not a function` before the tool runs.
+    it('returns a Promise from execute, as the promise ToolEditor requires', async () => {
+      const { editor, tools } = fakeEditor();
+      registerWorkflowTools(editor as any, createMockPorts());
+
+      const wl = tools.find((t) => t.name === 'workflow-list')!;
+      const returned = wl.execute({}, { sessionID: 'ses-test', agent: '' });
+
+      expect(returned).toBeInstanceOf(Promise);
+      await expect(returned).resolves.toMatchObject({
+        output: expect.stringContaining('profilesDir'),
+      });
     });
   });
 
@@ -142,6 +158,18 @@ describe('V2ToolSurfaceAdapter', () => {
 
       for (const tool of tools) {
         expect(tool.description.length).toBeGreaterThan(5);
+      }
+    });
+
+    // A result carrying `output` with no declared output schema is a runtime
+    // error in V2 (`Tool result declared output without an output schema`), and
+    // the model answers it by calling the tool again, forever.
+    it('declares a string output schema for every tool', () => {
+      const { editor, tools } = fakeEditor();
+      registerWorkflowTools(editor as any, createMockPorts());
+
+      for (const tool of tools) {
+        expect(tool.output).toEqual({ type: 'string' });
       }
     });
   });

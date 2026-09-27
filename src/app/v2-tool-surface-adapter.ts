@@ -1,6 +1,4 @@
-import { Effect } from 'effect';
-import { Tool } from '@opencode/schema/tool';
-import type { ToolEditor } from '@opencode/plugin/promise/tool';
+import type { Result, ToolEditor } from '@opencode/plugin/promise/tool';
 import type { ToolDefinition } from '@opencode-ai/plugin';
 import { errorMessage } from './report.ts';
 import {
@@ -86,14 +84,37 @@ const toolOrder = [
   'workflow-tasks-resolve-decision',
 ] as const;
 
+/**
+ * Every workflow tool answers with one line of text.
+ *
+ * The schema is not decoration: the V2 runtime rejects a result that carries
+ * `output` while the tool declared no output schema — `packages/core/src/tool/runtime.ts`
+ * dies with `Tool result declared output without an output schema` — and the
+ * model sees that as a failed call, which it then repeats. Declaring the string
+ * is what makes the shared surface's `{ output }` result legal here. (The
+ * surface itself is V1-facing and unchanged.)
+ */
+const outputSchema = { type: 'string' } as const;
+
+/**
+ * One tool call, in the shape the promise `ToolEditor` requires.
+ *
+ * The editor is the promise flavour (`@opencode/plugin/promise/tool`), whose
+ * `execute` returns `Promise<Result>` — not the effect flavour, whose `execute`
+ * returns `Effect`. The host bridges the two with `Effect.promise`
+ * (`packages/plugin/src/promise/adapter.ts`, `executePromiseTool`), which calls
+ * `.then` on what `execute` returned; an `Effect` there is not a thenable and
+ * the call dies with `… .then is not a function`. Handing the promise straight
+ * back is the whole contract.
+ */
 function runTool(
   surface: WorkflowToolSurface,
   name: string,
   input: unknown,
   context: unknown
-): Promise<{ output?: string; metadata?: unknown }> {
+): Promise<Result> {
   const definition = surface.createTools()[name] as ToolDefinition & {
-    execute: (args: unknown, ctx: unknown) => Promise<{ output?: string; metadata?: unknown }>;
+    execute: (args: unknown, ctx: unknown) => Promise<Result>;
   };
   const ctx = context as { sessionID: string; agent?: string };
   return definition.execute(input, ctx);
@@ -118,11 +139,15 @@ export function registerWorkflowTools(
               additionalProperties: false,
             }
           : inputs[name],
-      execute: (input: unknown, context: unknown) =>
-        Effect.tryPromise({
-          try: () => runTool(surface, name, input, context),
-          catch: (error) => new Tool.Error({ message: `[ERROR] ${errorMessage(error)}` }),
-        }),
-    } as never);
+      output: outputSchema,
+      execute: async (input: unknown, context: unknown): Promise<Result> => {
+        try {
+          return await runTool(surface, name, input, context);
+        } catch (error) {
+          // The promise contract has no error channel: the rejection carries it.
+          throw new Error(`[ERROR] ${errorMessage(error)}`);
+        }
+      },
+    });
   }
 }
