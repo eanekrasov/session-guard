@@ -107,6 +107,17 @@ export interface SmokeWorkflowState {
    * instead, so absence is never inferred from a payload nobody could check.
    */
   durableMutation?: 'none' | 'applied' | 'unknown';
+  /**
+   * Разрешение на поставку, как его хранит плагин. Его наличие — durable право коммитить,
+   * поэтому сценарий, доказывающий отказ, обязан показать, что права нет: отказ, после
+   * которого разрешение всё-таки выдано, отказом не является.
+   */
+  deliveryPermit?: boolean;
+  /**
+   * Квитанция о поставке, как её хранит плагин: непустая строка — доказательство того, что
+   * поставка состоялась. Отсутствие поля означает, что её не было.
+   */
+  deliveryReceipt?: string;
 }
 
 /**

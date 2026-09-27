@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import type { SmokeHost } from '../src/host/facade.ts';
 import { SHELL_TOOL, pluginObservationFrom } from '../src/host/transport.ts';
-import { canonicalScenarios } from '../src/registry.ts';
+import { canonicalScenarios, findScenario } from '../src/registry.ts';
 import type {
   HostKind,
   MigratedScenarioDefinition,
@@ -799,6 +799,141 @@ describe('the task-control canonical scenario', () => {
     if (result.status !== 'blocked') throw new Error('expected a blocked result');
     expect(result.blockedReason).toBe('indeterminate_mutation');
     // create + the one task-list mutation: the mutation is never sent twice.
+    expect(calls.prompts).toHaveLength(2);
+  });
+});
+
+describe('the git-block canonical scenario', () => {
+  const candidate = findScenario('git-block');
+  if (candidate?.migrationState !== 'migrated') {
+    throw new Error('registry не объявляет git-block мигрированным: сценарий нечего запускать');
+  }
+  const gitBlock = candidate;
+  const commitCommand = 'git commit --allow-empty -m "smoke"';
+
+  test('passes when the host refuses the direct commit and no delivery is recorded', async () => {
+    const { host, calls } = makeHost([
+      turn({ toolCalls: [] }, planning),
+      turn(
+        {
+          toolCalls: [
+            {
+              name: SHELL_TOOL,
+              status: 'completed',
+              command: commitCommand,
+              refused: true,
+            },
+          ],
+        },
+        planning
+      ),
+    ]);
+
+    const result = await runScenario(host, gitBlock, { attempts: 1 });
+
+    // An expected refusal is the scenario's pass: the guard did what it is asked to do.
+    expect(result.status).toBe('pass');
+    expect(result.blockedReason).toBeUndefined();
+    // workflow-create runs before the guard check, and the commit is never sent twice.
+    expect(calls.prompts).toHaveLength(2);
+    expect(calls.prompts[0]?.text).toContain('workflow-create');
+    expect(result.evidence).toContain('delivery=none');
+  });
+
+  test('passes on the refusal the host reports when the structured marker is dropped', async () => {
+    const { host } = makeHost([
+      turn({ toolCalls: [] }, planning),
+      turn(
+        {
+          toolCalls: [
+            {
+              name: SHELL_TOOL,
+              status: 'failed',
+              command: commitCommand,
+              error: '[ERROR] Refused: this stage does not declare the action git delivery',
+            },
+          ],
+        },
+        planning
+      ),
+    ]);
+
+    const result = await runScenario(host, gitBlock, { attempts: 1 });
+
+    expect(result.status).toBe('pass');
+  });
+
+  test('fails when the guarded commit ran instead of being refused', async () => {
+    const { host, calls } = makeHost([
+      turn({ toolCalls: [] }, planning),
+      turn(
+        { toolCalls: [{ name: SHELL_TOOL, status: 'completed', command: commitCommand }] },
+        planning
+      ),
+    ]);
+
+    const result = await runScenario(host, gitBlock, { attempts: 1 });
+
+    expect(result.status).toBe('fail');
+    expect(result.evidence).toContain('commit выполнился, хотя должен был быть отклонён');
+    expect(calls.prompts).toHaveLength(2);
+  });
+
+  test('fails when a delivery receipt was recorded despite the refusal', async () => {
+    const { host } = makeHost([
+      turn({ toolCalls: [] }, planning),
+      turn(
+        {
+          toolCalls: [
+            { name: SHELL_TOOL, status: 'completed', command: commitCommand, refused: true },
+          ],
+        },
+        { ...planning, deliveryReceipt: 'receipt-1' }
+      ),
+    ]);
+
+    const result = await runScenario(host, gitBlock, { attempts: 1 });
+
+    expect(result.status).toBe('fail');
+    expect(result.evidence).toContain('квитанция о поставке');
+  });
+
+  test('fails when the workflow granted a delivery permit despite the refusal', async () => {
+    const { host } = makeHost([
+      turn({ toolCalls: [] }, planning),
+      turn(
+        {
+          toolCalls: [
+            { name: SHELL_TOOL, status: 'completed', command: commitCommand, refused: true },
+          ],
+        },
+        { ...planning, deliveryPermit: true }
+      ),
+    ]);
+
+    const result = await runScenario(host, gitBlock, { attempts: 1 });
+
+    expect(result.status).toBe('fail');
+    expect(result.evidence).toContain('разрешение на поставку');
+  });
+
+  test('blocks an unprovable commit without repeating it', async () => {
+    const { host, calls } = makeHost([
+      turn({ toolCalls: [] }, planning),
+      turn(
+        {
+          status: 'timed-out',
+          toolCalls: [{ name: SHELL_TOOL, status: 'pending', command: commitCommand }],
+        },
+        planning
+      ),
+    ]);
+
+    const result = await runScenario(host, gitBlock, { attempts: 1 });
+
+    expect(result.status).toBe('blocked');
+    expect(result.blockedReason).toBe('indeterminate_mutation');
+    // The mutation is sent once: a repeat after a timeout could commit for real.
     expect(calls.prompts).toHaveLength(2);
   });
 });

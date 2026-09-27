@@ -452,7 +452,21 @@ function passEvidence(
     describeToolCalls(last?.turn.toolCalls ?? []),
     describeInteractions(last?.interactions),
     `stage=${last?.workflowState?.currentStage ?? '(none)'}`,
+    `delivery=${deliveryEvidence(last?.workflowState)}`,
   ].join('; ');
+}
+
+/**
+ * The durable delivery facts a pass is read back with.
+ *
+ * A scenario that proves a refusal has to say that no permission to deliver and no receipt were
+ * recorded, not merely that the model said so: the store is the only proof that survives the
+ * model's own account.
+ */
+function deliveryEvidence(state: SmokeWorkflowState | null | undefined): string {
+  const receipt = state?.deliveryReceipt;
+  if (receipt !== undefined) return `receipt:${receipt.slice(0, 40)}`;
+  return state?.deliveryPermit === true ? 'permit-granted' : 'none';
 }
 
 /** The operator interactions a turn answered, which is what proves consent went through. */

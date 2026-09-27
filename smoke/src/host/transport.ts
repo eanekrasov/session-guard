@@ -470,6 +470,10 @@ export function normalizeWorkflowState(sessionId: string, raw: unknown): SmokeWo
   const refs = normalizeRefs(session.refs);
   const changedFiles = normalizeChangedFiles(session.changedFiles);
   const runs = normalizeRuns(session.loopRuns);
+  // Разрешение и квитанция — это ответ на вопрос «состоялась ли поставка», а не деталь
+  // конкретного хоста: плагин хранит их в самой сессии, и сценарий обязан их видеть.
+  const permit = session.deliveryPermit;
+  const receipt = session.deliveryReceipt;
   return {
     sessionId,
     status:
@@ -479,6 +483,8 @@ export function normalizeWorkflowState(sessionId: string, raw: unknown): SmokeWo
     ...(refs === undefined ? {} : { refs }),
     ...(changedFiles === undefined ? {} : { changedFiles }),
     ...(runs === undefined ? {} : { runs }),
+    ...(permit === null || permit === undefined ? {} : { deliveryPermit: true }),
+    ...(typeof receipt === 'string' && receipt.length > 0 ? { deliveryReceipt: receipt } : {}),
     durableMutation: 'applied',
   };
 }

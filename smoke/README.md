@@ -457,6 +457,100 @@ session и только по явно разрешённой политике (�
 `poll-state`, `indeterminate_mutation` и `new-session` становятся обязательными при миграции
 mutation/consent/task/subagent-сценариев.
 
+## Результаты этапа 4 (`task-control`, `verify-loop`)
+
+Этап вводит в общий runner всё, что нужно петле задач: шаг может работать другим агентом
+(`ScenarioStep.agent`), ждать дольше бюджета промпта (`stateBudgetMs`) и читать из состояния
+не только стадию, но и то, как хост видит работу.
+
+Новое в нормализованном контракте:
+
+- `NormalizedToolCall.refused` — структурированный маркер отказа плагина (`metadata.refused`):
+  отказ — это **успешный** результат вызова, поэтому маркер читается раньше статуса;
+- `SmokeWorkflowState.changedFiles` — файлы, которые ядро записало как изменённые; вердикт
+  шага строится по ним, а не по отчёту модели;
+- `SmokeWorkflowState.runs` — прогоны задач: какая задача, на какой подстадии, какие гейты
+  закрыты. Цикл проверки доказывается ими;
+- `subagentStep()` — общий конструктор шага, который диспатчит субагента и ждёт durable-исход,
+  а не ответ модели; V2 для этого переключает агента сессии (`switchAgent`), V1 называет агента
+  в сообщении.
+
+Порядок доказательства отказа (`task-control`, шаг worker): сначала состояние задачи обязано
+остаться `pending`, затем ищется сам вызов `workflow-tasks-set-status`, и только потом читается
+маркер отказа. Если durable-статус сдвинулся — это `fail` независимо от того, что сказала модель.
+
+| Проверка             | Команда                                                      | Итог                                                                                              |
+| -------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------- |
+| `task-control` на V1 | `HOST_SMOKE_OPENCODE_VERSION=v1 mise run smoke task-control` | **ПРОЙДЕНО**, 3 шага, 10.1s, exit `0`                                                             |
+| `task-control` на V2 | `HOST_SMOKE_OPENCODE_VERSION=v2 mise run smoke task-control` | **ПРОЙДЕНО**, 3 шага, 1.1m, exit `0`                                                              |
+| `verify-loop` на V1  | `HOST_SMOKE_OPENCODE_VERSION=v1 mise run smoke verify-loop`  | **ПРОЙДЕНО**, 6 шагов, 1.5m, exit `0`                                                             |
+| `verify-loop` на V2  | `HOST_SMOKE_OPENCODE_VERSION=v2 mise run smoke verify-loop`  | **ПРОЙДЕНО**, 6 шагов, 1.6m, exit `0` (ход превысил бюджет промпта, исход подтверждён состоянием) |
+| behavioral parity    | `mise run smoke`                                             | семь сценариев × два хоста = 14/14 **ПРОЙДЕНО**, parity `pass` у всех, exit `4` (четыре pending)  |
+| structural parity    | `bun test smoke/`                                            | 185 pass                                                                                          |
+
+### Найденный дефект: имя инструмента диспатча
+
+Хост сообщает субагентский диспатч как `task` на V1 и как `subagent` на V2. Гарды, инварианты
+и разбор `<workflow-result>` написаны против одной возможности, поэтому на V2 субагент выполнял
+работу и сообщал вердикт, а плагин не записывал ни файлов, ни гейтов, ни завершения задачи:
+цикл проверки «проходил» без единого записанного результата. Дефект закрыт картой алиасов в
+`normalizeTool` (`subagent → task`, `shell → bash`, позднее `patch → apply_patch`) — это
+`plugin-contract-mismatch`, доказанный живыми прогонами, а не догадка.
+
+## Результаты этапа 5 (`git-block`)
+
+Сценарий доказывает, что прямой `git commit --allow-empty -m "smoke"` внутри управляемой
+сессии отклоняется, и что отказ не оставил разрешения на поставку.
+
+Порядок доказательства (всё, что можно, — из durable-состояния, а не из слов модели):
+
+1. `workflow-create` выполняется до попытки коммита: сначала durable-сессия на стадии `planning`,
+   и только потом guarded-команда;
+2. `workflowState.deliveryReceipt` отсутствует — квитанция о поставке не записана;
+3. `workflowState.deliveryPermit` отсутствует — разрешение коммитить не выдано;
+4. вызов `shell` относится именно к этой команде (нормализованное поле `command`);
+5. структурированный маркер отказа (`refused`), затем статус вызова: `completed` без отказа —
+   это `fail` («commit выполнился, хотя должен был быть отклонён»);
+6. текст отказа — только документированный fallback, когда хост не сообщил ни маркера, ни
+   ошибки. На V2 маркер не доезжает (обёртка снимает `metadata`), поэтому отказ приходит как
+   ошибка вызова `shell:failed`, и это видно в evidence.
+
+Retry-политика шага — `none`: команда меняет состояние git, повтор после таймаута мог бы
+закоммитить по-настоящему, а ожидаемый отказ повтора не требует. Если ход превысил бюджет
+промпта и состояние не доказывает, что команда не выполнялась, шаг получает
+`blocked/indeterminate_mutation`, а не `pass`.
+
+Evidence пары прогонов совпадает по нормализованным фактам:
+
+```text
+tools=[shell:failed «git commit --allow-empty -m "smoke"»]; stage=planning; delivery=none
+```
+
+| Проверка                  | Команда                                                                                                                        | Итог                                                                        |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------- |
+| `git-block` на V1         | `HOST_SMOKE_OPENCODE_VERSION=v1 mise run smoke git-block`                                                                      | **ПРОЙДЕНО**, 2 шага, 8.5s, exit `0`                                        |
+| `git-block` на V2         | `HOST_SMOKE_OPENCODE_VERSION=v2 mise run smoke git-block`                                                                      | **ПРОЙДЕНО**, 2 шага, 5.6s, exit `0`                                        |
+| behavioral parity         | `mise run smoke git-block`                                                                                                     | 2/2 **ПРОЙДЕНО** (V1 10.6s, V2 5.2s), parity `pass`, exit `0`               |
+| накопленный subset на V1  | `HOST_SMOKE_OPENCODE_VERSION=v1 mise run smoke plugin-loads create no-session plan-consent task-control verify-loop git-block` | 7/7 **ПРОЙДЕНО**, exit `0`                                                  |
+| накопленный subset на V2  | `HOST_SMOKE_OPENCODE_VERSION=v2 mise run smoke plugin-loads create no-session plan-consent task-control verify-loop git-block` | 7/7 **ПРОЙДЕНО**, exit `0`                                                  |
+| полный canonical registry | `mise run smoke`                                                                                                               | 14/14 **ПРОЙДЕНО**, четыре сценария `not-run`/`pending-migration`, exit `4` |
+| structural parity         | `bun test smoke/`                                                                                                              | 185 pass                                                                    |
+
+### Найденный дефект: имена инструментов и аргументов на V2
+
+V2 называет патч `patch` (V1 — `apply_patch`), а аргумент пути передаёт как `path`
+(V1 — `filePath`). Гарды стадии построены на именах V1, поэтому на V2 извлечение путей
+возвращало пустой список, и допуск отказывал в правке, которая на самом деле в объявленном
+скоупе. Субагент-кодер получал отказ на каждую запись и повторял её — прогон выглядел как
+многоминутный простой, а `changedFiles` оставался пустым.
+
+Исправлено в плагине, без обхода публичного контракта:
+
+- `src/rules/message-paths.ts` — путь читается и из `filePath`, и из `path`; добавлен `patch`;
+- `src/app/runtime-session-context.ts` — алиас `patch → apply_patch` рядом с существующими;
+- `src/app/change-enforcement.ts` — путь приводится к project-relative перед сверкой со
+  скоупом (V2 присылает абсолютный путь, V1 — относительный).
+
 ## Что изолируется, а что заимствуется
 
 `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME` и `XDG_CACHE_HOME` указывают на

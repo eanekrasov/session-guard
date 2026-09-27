@@ -72,6 +72,7 @@ describe('the canonical scenario registry', () => {
       'plugin-loads',
       'no-session',
       'create',
+      'git-block',
       'task-control',
       'plan-consent',
       'verify-loop',
@@ -110,6 +111,12 @@ describe('the canonical scenario registry', () => {
       'plugin-loads': [{ mutation: 'read-only', retry: 'same-session' }],
       'no-session': [{ mutation: 'read-only', retry: 'same-session' }],
       create: [{ mutation: 'mutating', retry: 'poll-state' }],
+      // The guarded commit is a mutation that must not be repeated: the expected refusal is an
+      // outcome, not something to retry, and a repeat after a timeout could commit for real.
+      'git-block': [
+        { mutation: 'mutating', retry: 'poll-state' },
+        { mutation: 'mutating', retry: 'none' },
+      ],
       'task-control': [
         { mutation: 'mutating', retry: 'poll-state' },
         { mutation: 'mutating', retry: 'poll-state' },
@@ -128,6 +135,26 @@ describe('the canonical scenario registry', () => {
         { mutation: 'mutating', retry: 'poll-state' },
       ],
     });
+  });
+
+  test('leaves exactly the commit and pipeline scenarios pending, with no steps to run', () => {
+    const pending = canonicalScenarios
+      .filter((scenario) => scenario.migrationState === 'pending')
+      .map((scenario) => scenario.id);
+
+    expect(pending).toEqual(['commit-gate', 'commit-cwd', 'commit-mismatch', 'cicd-full-cycle']);
+    for (const scenario of canonicalScenarios) {
+      if (scenario.migrationState !== 'pending') continue;
+      expect(scenario.steps).toBeUndefined();
+    }
+  });
+
+  test('requires the guarded commit on both host kinds and expects the same semantics', () => {
+    const row = parityMatrix().find((entry) => entry.scenarioId === 'git-block');
+
+    expect(row).toBeDefined();
+    expect(row?.requiredOn).toEqual({ v1: true, v2: true });
+    expect(row?.expectedStatus).toBe('pass');
   });
 
   test('passes its own validation, and rejects a registry the runner cannot honour', () => {

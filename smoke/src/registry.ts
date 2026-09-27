@@ -84,6 +84,60 @@ export const DEFAULT_STEP_STATE_BUDGET_MS = 5_000;
 const TASK_REFUSAL_SENTENCE = /is refused/i;
 
 /**
+ * The refusal sentence a blocked direct commit is reported with. Only a fallback: the proof is
+ * the structured signal — the plugin's `metadata.refused`, or the host's error for the refused
+ * call — and the durable state. The wording is read when a host reports neither, which V2's tool
+ * wrapper can do because it drops the metadata; the durable state stays the primary proof.
+ */
+const COMMIT_REFUSAL_SENTENCE = /refus|not allowed|no entry covers|not permitted|blocked/i;
+
+/**
+ * The guarded attempt: a direct `git commit` inside a managed session is refused by the plugin's
+ * stage action table, and the durable state is left without any permission to deliver.
+ *
+ * The instruction is sent once (`retry: none`). The command changes git state, so a repeat after
+ * a timeout could produce a different outcome, and an expected refusal never needs one: there is
+ * no mutation to re-send. When a turn times out and the store cannot prove the command did not
+ * run, the runner reports `blocked/indeterminate_mutation` instead of guessing.
+ */
+const directCommitStep: ScenarioStep = {
+  instruction:
+    'Use the bash tool to run exactly this command: git commit --allow-empty -m "smoke". ' +
+    'Report what happened, verbatim.',
+  mutation: 'mutating',
+  retry: 'none',
+  expect: (result) => {
+    const state = result.workflowState;
+    const call = result.turn.toolCalls.find((candidate) => candidate.name === SHELL_TOOL);
+    if (call === undefined) {
+      return `коммит не вызывался: в ходе нет вызова «${SHELL_TOOL}»`;
+    }
+    // A refusal that still moved the workflow on is not a refusal: the durable record is read
+    // before the call is judged, and it is the only proof that survives the model's own account.
+    if (state?.deliveryReceipt !== undefined) {
+      return `отказ не подтверждён: записана квитанция о поставке (${state.deliveryReceipt.slice(0, 60)})`;
+    }
+    if (state?.deliveryPermit === true) {
+      return 'отказ не подтверждён: плагин выдал разрешение на поставку';
+    }
+    // The command is part of the proof: refusing some other command says nothing about this one.
+    const command = (call.command ?? '').trim();
+    if (command !== '' && !/^git\s+commit\b/u.test(command)) {
+      return `вызвана другая команда: ${command.slice(0, 120)}`;
+    }
+    // A refusal is a *successful* tool result carrying the plugin's marker, so the marker is
+    // read before the status: a refused call still reports `completed` on both hosts.
+    if (call.refused === true) return true;
+    if (call.status === 'completed') {
+      return 'commit выполнился, хотя должен был быть отклонён';
+    }
+    const reported = `${call.output ?? ''}\n${call.error ?? ''}`;
+    if (COMMIT_REFUSAL_SENTENCE.test(reported)) return true;
+    return `отказ не подтверждён: ${call.name}:${call.status} «${(call.output ?? call.error ?? '').slice(0, 120)}»`;
+  },
+};
+
+/**
  * The verdict a subagent is told to report for its stage, and the durable effect the scenario
  * waits for.
  *
@@ -356,11 +410,13 @@ export const canonicalScenarios: CanonicalScenario[] = [
   {
     id: 'git-block',
     title: 'Прямой git commit отклоняется внутри управляемой сессии',
-    migrationState: 'pending',
+    migrationState: 'migrated',
     // `git-block` is the one current scenario the stage classes do not name. It drives a git
     // mutation and expects the workflow guard to refuse it, which is what the `mutation`
     // class covers, so it migrates with that class rather than in a class of its own.
     stage: 'mutation',
+    agent: ORCHESTRATOR,
+    steps: [workflowCreateStep, directCommitStep],
   },
   {
     id: 'task-control',
