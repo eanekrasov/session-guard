@@ -243,6 +243,13 @@ export function v2ContextEvent(event: V2ContextEvent): {
   };
 }
 
+/**
+ * Project legacy messages into the V2 request shape — text parts only.
+ *
+ * Lossy on purpose, and only for messages the legacy layer added: it is not a
+ * round trip. Rebuilding the whole request with it drops the tool history; use
+ * `v2MessagesWithInjected` for that.
+ */
 export function v2MessagesFromLegacy(
   messages: import('../rules/message-context.js').MessageWithInfo[],
   sessionID: string
@@ -264,6 +271,27 @@ export function v2MessagesFromLegacy(
       }));
     return content.length > 0 ? [{ id: message.info?.id, role, content } as Message] : [];
   });
+}
+
+/**
+ * The host's own messages, followed by only what the legacy transform injected.
+ *
+ * The legacy layer delivers by pushing a synthetic message (`rules/rule-delivery.ts`,
+ * `deliverTransientDispatch`) and never rewrites the messages it was handed. The
+ * projection back to V2 carries text only, so writing it over `event.messages`
+ * deleted every `tool-call`, `tool-result` and `reasoning` part: the model could
+ * not see that it had already called a tool, and repeated the call for as long as
+ * the turn lasted. The host's messages stay the source of truth; only the
+ * additions cross back.
+ */
+export function v2MessagesWithInjected(
+  hostMessages: Message[],
+  legacyMessages: import('../rules/message-context.js').MessageWithInfo[],
+  sessionID: string
+): Message[] {
+  const known = new Set(hostMessages.map((message) => message.id));
+  const injected = legacyMessages.filter((message) => !known.has(message.info?.id));
+  return [...hostMessages, ...v2MessagesFromLegacy(injected, sessionID)];
 }
 
 interface V2SessionLookup {

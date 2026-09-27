@@ -7,8 +7,12 @@ import { join, resolve } from 'node:path';
 import { SessionGuardPluginV2 } from '../../src/index.ts';
 import { createSession, WorkflowStore } from '../../src/session/session-store.ts';
 import { createTask } from '../support/task-factory.ts';
-import { Effect } from 'effect';
-import { v2ContextEvent, v2PromptEvent, v2HostEvent } from '../../src/app/v2-plugin-contract.ts';
+import {
+  v2ContextEvent,
+  v2MessagesWithInjected,
+  v2PromptEvent,
+  v2HostEvent,
+} from '../../src/app/v2-plugin-contract.ts';
 import { calculateDocumentSetEvidence, evidenceOf } from '../../src/app/consent.ts';
 import type { ConsentManifest } from '../../src/app/consent.ts';
 
@@ -226,20 +230,110 @@ describe('V2 plugin setup adapter', () => {
           role: 'user' as const,
           content: [{ type: 'text' as const, text: 'inspect src/app/runtime.ts' }],
         },
+        {
+          id: 'message-2',
+          role: 'assistant' as const,
+          content: [
+            {
+              type: 'tool-call' as const,
+              id: 'call-1',
+              name: 'workflow-create',
+              input: { schemaId: 'smoke' },
+            },
+          ],
+        },
+        {
+          id: 'message-3',
+          role: 'tool' as const,
+          content: [
+            {
+              type: 'tool-result' as const,
+              id: 'call-1',
+              name: 'workflow-create',
+              output: 'Created session',
+            },
+          ],
+        },
       ],
       system: [{ type: 'text' as const, text: 'base instructions' }],
     };
-    await contextCallback!(event);
+    await contextCallback!(event as never);
     expect(event.system).toEqual([{ type: 'text', text: 'base instructions' }]);
+    // The tool call and its result must survive the bridge: without them the
+    // model cannot see that it already ran the tool, and repeats the call.
     expect(event.messages).toEqual([
       {
         id: 'message-1',
         role: 'user',
         content: [{ type: 'text', text: 'inspect src/app/runtime.ts' }],
       },
+      {
+        id: 'message-2',
+        role: 'assistant',
+        content: [
+          {
+            type: 'tool-call',
+            id: 'call-1',
+            name: 'workflow-create',
+            input: { schemaId: 'smoke' },
+          },
+        ],
+      },
+      {
+        id: 'message-3',
+        role: 'tool',
+        content: [
+          {
+            type: 'tool-result',
+            id: 'call-1',
+            name: 'workflow-create',
+            output: 'Created session',
+          },
+        ],
+      },
     ]);
     await cleanup();
     expect(disposed).toContain('context');
+  });
+
+  test('appends only the message the legacy layer injected', () => {
+    const hostMessages = [
+      { id: 'message-1', role: 'user', content: [{ type: 'text', text: 'go' }] },
+      {
+        id: 'message-2',
+        role: 'assistant',
+        content: [{ type: 'tool-call', id: 'call-1', name: 'workflow-create', input: {} }],
+      },
+    ];
+    // The legacy view always carries every message; only the id the host does
+    // not know is an injection.
+    const legacyMessages = [
+      { info: { id: 'message-1', role: 'user' }, parts: [{ type: 'text', text: 'go' }] },
+      {
+        info: { id: 'injected-1', role: 'user' },
+        parts: [{ type: 'text', text: 'a rule arrived', synthetic: true }],
+      },
+    ];
+
+    const result = v2MessagesWithInjected(
+      hostMessages as never,
+      legacyMessages as never,
+      'session-1'
+    );
+
+    expect(result.slice(0, 2)).toEqual(hostMessages as never);
+    expect(result).toHaveLength(3);
+    expect(result[2]).toEqual({
+      id: 'injected-1',
+      role: 'user',
+      content: [
+        {
+          type: 'text',
+          text: 'a rule arrived',
+          metadata: { synthetic: true, sessionID: 'session-1' },
+        },
+      ],
+    });
   });
 
   test('maps a prompt event to the shared chat message contract', () => {
@@ -344,7 +438,7 @@ describe('V2 plugin setup adapter', () => {
       properties: {},
       additionalProperties: false,
     });
-    const result = await Effect.runPromise(workflowList.execute({}, {}) as never);
+    const result = await workflowList.execute({}, {});
     expect(result).toEqual({
       output:
         `profilesDir: ${join(projectA, '.opencode', 'profiles')}\n` +
@@ -381,18 +475,16 @@ describe('V2 plugin setup adapter', () => {
     try {
       const cleanup = await SessionGuardPluginV2(context);
       const tool = tools.find((value) => value.name === 'workflow-list')!;
-      await expect(
-        Effect.runPromise(tool.execute({}, { sessionID: 'list-session', agent: '' }) as never)
-      ).resolves.toEqual({
+      await expect(tool.execute({}, { sessionID: 'list-session', agent: '' })).resolves.toEqual({
         output: `profilesDir: ${profileDirectory}\n  (no profiles found)`,
       });
       await cleanup();
       await mkdir(join(profileDirectory, 'broken'), { recursive: true });
       await writeFile(join(profileDirectory, 'broken', 'profile.json'), '{');
       const second = await SessionGuardPluginV2(context);
-      await expect(
-        Effect.runPromise(tool.execute({}, { sessionID: 'list-session', agent: '' }) as never)
-      ).rejects.toThrow('[ERROR] JSON Parse error');
+      await expect(tool.execute({}, { sessionID: 'list-session', agent: '' })).rejects.toThrow(
+        '[ERROR] JSON Parse error'
+      );
       await second();
     } finally {
       await rm(root, { recursive: true, force: true });

@@ -10,7 +10,7 @@ import { registerWorkflowTools } from './v2-tool-surface-adapter.ts';
 import { createV2RuntimeHostAdapter } from './runtime-host-adapter.ts';
 import {
   v2ContextEvent,
-  v2MessagesFromLegacy,
+  v2MessagesWithInjected,
   v2HostEvent,
   type V2HostEvent,
   v2PromptEvent,
@@ -153,7 +153,9 @@ export async function setupV2Runtime(context: Context): Promise<() => Promise<vo
             { messages: messages as never }
           );
           event.system = system.map((text) => ({ type: 'text' as const, text }));
-          event.messages = v2MessagesFromLegacy(messages, event.sessionID);
+          // The legacy layer only pushes synthetic messages; the host's own
+          // messages — tool calls and their results included — must survive.
+          event.messages = v2MessagesWithInjected(event.messages, messages, event.sessionID);
         })
       );
     }
