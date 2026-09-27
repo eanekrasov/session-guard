@@ -28,6 +28,8 @@ export const REPO_ROOT = resolve(import.meta.dir!, '../..');
 export const V1_BINARY = '/opt/homebrew/Cellar/opencode/1.18.32/bin/opencode';
 export const V2_BINARY = '/opt/homebrew/Cellar/opencode-v2/2.0.16/bin/opencode';
 
+const DEFAULT_ATTEMPTS = 3;
+
 export type HostVersion = 'v1' | 'v2';
 
 /** Разобрать явный выбор хоста без скрытого изменения контрактов хоста. */
@@ -38,9 +40,34 @@ export function hostVersionFromEnv(value = process.env.HOST_SMOKE_OPENCODE_VERSI
 }
 
 /** Определить путь к бинарнику для запрошенной версии. */
-export function opencodeBinary(version: HostVersion): string {
-  if (version === 'v2') return V2_BINARY;
-  return V1_BINARY;
+export function opencodeBinary(
+  version: HostVersion,
+  env: Record<string, string | undefined> = process.env
+): string {
+  const variable = version === 'v2' ? 'HOST_SMOKE_V2_BINARY' : 'HOST_SMOKE_V1_BINARY';
+  return env[variable] || (version === 'v2' ? V2_BINARY : V1_BINARY);
+}
+
+/** Разрешить число повторов шага, сообщая о непригодном значении окружения. */
+export function attemptsFromEnv(env: Record<string, string | undefined> = process.env): number {
+  const raw = env.HOST_SMOKE_ATTEMPTS;
+  if (raw === undefined) return DEFAULT_ATTEMPTS;
+  const value = Number(raw);
+  if (Number.isInteger(value) && value > 0) return value;
+  log('warn', `Invalid HOST_SMOKE_ATTEMPTS=${raw}; using ${DEFAULT_ATTEMPTS}.`);
+  return DEFAULT_ATTEMPTS;
+}
+
+/** Проверить бинарник непосредственно перед запуском дочернего хоста. */
+export function ensureOpencodeBinary(version: HostVersion, env = process.env): string {
+  const variable = version === 'v2' ? 'HOST_SMOKE_V2_BINARY' : 'HOST_SMOKE_V1_BINARY';
+  const binary = opencodeBinary(version, env);
+  if (!existsSync(binary)) {
+    throw new Error(
+      `[ERROR] opencode ${version} binary was not found at ${binary}; set ${variable} to override the path.`
+    );
+  }
+  return binary;
 }
 
 /** Учётные данные, которые хост V2 сгенерировал для себя, как объявлено в его логе. */
@@ -519,7 +546,7 @@ export async function writeSmokeConfigs(
 
 export async function startHost(options: HostOptions): Promise<Host> {
   const version = options.version ?? 'v1';
-  const binary = opencodeBinary(version);
+  const binary = ensureOpencodeBinary(version);
   log('info', `starting isolated host (${version}) for profile ${options.profile}`);
   const root = await mkdtemp(join(tmpdir(), 'host-smoke-'));
   const homeDir = join(root, 'home');
@@ -798,7 +825,12 @@ export async function readWorkflowSession(host: Host, sessionId: string): Promis
   ]) {
     if (existsSync(file)) {
       log('debug', `reading workflow session from ${file}`);
-      return JSON.parse(await readFile(file, 'utf-8'));
+      try {
+        return JSON.parse(await readFile(file, 'utf-8'));
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        throw new Error(`[ERROR] failed to read workflow session file ${file}: ${reason}`);
+      }
     }
   }
   log('debug', `workflow session not found: ${sessionId}`);

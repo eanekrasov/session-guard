@@ -12,6 +12,7 @@ import { join, resolve } from 'node:path';
 import {
   REPO_ROOT,
   api,
+  attemptsFromEnv,
   isTraceEnabled,
   readWorkflowSession,
   sanitizeTracePayload,
@@ -21,7 +22,7 @@ import type { Host } from './harness.ts';
 import { logBlock, logEvent } from './log.ts';
 import { chooseLabel } from './operator.ts';
 
-export const ATTEMPTS = Number(process.env.HOST_SMOKE_ATTEMPTS ?? 3);
+export const ATTEMPTS = attemptsFromEnv();
 
 export interface Part {
   type: string;

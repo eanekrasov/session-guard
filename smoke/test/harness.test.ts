@@ -1,14 +1,17 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   basicAuthHeader,
+  attemptsFromEnv,
+  ensureOpencodeBinary,
   filterOperatorProviders,
   hostVersionFromEnv,
   legacyApiKeyFor,
   opencodeBinary,
   operatorProviders,
+  readWorkflowSession,
   serverPasswordFromLogs,
   V1_BINARY,
   V2_BINARY,
@@ -93,16 +96,53 @@ describe('host smoke provider filtering', () => {
 describe('host version selection', () => {
   test('defaults to V1 and selects canonical binaries', () => {
     expect(hostVersionFromEnv(undefined)).toBe('v1');
-    expect(opencodeBinary('v1')).toBe(V1_BINARY);
-    expect(opencodeBinary('v2')).toBe(V2_BINARY);
+    expect(opencodeBinary('v1', {})).toBe(V1_BINARY);
+    expect(opencodeBinary('v2', {})).toBe(V2_BINARY);
     expect(V1_BINARY).not.toBe('/opt/homebrew/bin/opencode');
     expect(V2_BINARY).not.toBe('/opt/homebrew/bin/opencode');
-    expect(existsSync(V1_BINARY)).toBe(true);
-    expect(existsSync(V2_BINARY)).toBe(true);
+  });
+
+  test('prefers explicit binary overrides', () => {
+    expect(opencodeBinary('v1', { HOST_SMOKE_V1_BINARY: '/tmp/v1' })).toBe('/tmp/v1');
+    expect(opencodeBinary('v2', { HOST_SMOKE_V2_BINARY: '/tmp/v2' })).toBe('/tmp/v2');
+  });
+
+  test('reports a missing binary path and its override variable', () => {
+    expect(() => ensureOpencodeBinary('v1', { HOST_SMOKE_V1_BINARY: '/missing/v1' })).toThrow(
+      '/missing/v1'
+    );
+    expect(() => ensureOpencodeBinary('v1', { HOST_SMOKE_V1_BINARY: '/missing/v1' })).toThrow(
+      'HOST_SMOKE_V1_BINARY'
+    );
   });
 
   test('rejects unknown versions', () => {
     expect(() => hostVersionFromEnv('v3')).toThrow('expected "v1" or "v2"');
+  });
+});
+
+describe('smoke environment and persisted state diagnostics', () => {
+  test('accepts only positive integer attempt counts', () => {
+    expect(attemptsFromEnv({ HOST_SMOKE_ATTEMPTS: '1' })).toBe(1);
+    expect(attemptsFromEnv({ HOST_SMOKE_ATTEMPTS: '12' })).toBe(12);
+    expect(attemptsFromEnv({ HOST_SMOKE_ATTEMPTS: '0' })).toBe(3);
+    expect(attemptsFromEnv({ HOST_SMOKE_ATTEMPTS: '-1' })).toBe(3);
+    expect(attemptsFromEnv({ HOST_SMOKE_ATTEMPTS: '1.5' })).toBe(3);
+    expect(attemptsFromEnv({ HOST_SMOKE_ATTEMPTS: 'nope' })).toBe(3);
+  });
+
+  test('explains which state file is damaged', async () => {
+    const homeDir = mkdtempSync(join(tmpdir(), 'host-smoke-state-'));
+    const file = join(homeDir, 'data/opencode/session-guard/runtime/broken.json');
+    mkdirSync(join(file, '..'), { recursive: true });
+    writeFileSync(file, '{broken');
+    try {
+      await expect(readWorkflowSession({ homeDir } as never, 'broken')).rejects.toThrow(
+        `[ERROR] failed to read workflow session file ${file}`
+      );
+    } finally {
+      rmSync(homeDir, { recursive: true, force: true });
+    }
   });
 });
 
