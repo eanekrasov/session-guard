@@ -73,6 +73,7 @@ function fakeClient(
     async listMessages() {
       return [];
     },
+    answeredForms: () => [],
     offScript: () => [],
   });
 }

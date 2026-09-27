@@ -60,7 +60,7 @@ import {
   type ReportMode,
 } from './report.ts';
 import { ATTEMPTS, lastStepState } from './scenario-kit.ts';
-import { runScenario } from './runner.ts';
+import { runScenario, statePollBudgetMs, DEFAULT_POLL_INTERVAL_MS } from './runner.ts';
 import { scenarios, v2Scenarios } from './scenarios/index.ts';
 import { runV2Scenario } from './v2-scenario-kit.ts';
 
@@ -165,6 +165,10 @@ async function runCanonical(
   ledger: RunLedger
 ): Promise<void> {
   const attempts = attemptsFromEnv();
+  const polls = {
+    pollBudgetMs: statePollBudgetMs(),
+    pollIntervalMs: DEFAULT_POLL_INTERVAL_MS,
+  };
   for (const kind of kinds) {
     const model = models.get(kind);
     if (model === undefined) continue;
@@ -177,7 +181,7 @@ async function runCanonical(
       let host: RunningSmokeHost | undefined;
       try {
         host = await startSmokeHost(scenarioHostOptions(scenario, kind, model, commonFiles));
-        const result = await runScenario(host, scenario, { attempts });
+        const result = await runScenario(host, scenario, { attempts, ...polls });
         ledger.results.push(result);
         recordResult(ledger.byScenario, scenario.id, result);
         logEvent(

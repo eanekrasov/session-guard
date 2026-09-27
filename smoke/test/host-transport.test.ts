@@ -307,49 +307,43 @@ describe('the V1 transport strategy', () => {
       'utf-8'
     );
 
+    // The session is empty before the prompt; the turn adds its own messages, and the answer to
+    // a question lands in the middle of them as a user message of its own.
+    let turnComplete = false;
+    const listing = [
+      {
+        info: { role: 'assistant', time: { created: 4 } },
+        parts: [
+          { type: 'step-start' },
+          {
+            type: 'tool',
+            tool: 'workflow-list',
+            state: {
+              status: 'completed',
+              input: {},
+              output: '{"profilesDir":"/tmp","profiles":["smoke"]}',
+            },
+          },
+          { type: 'step-finish' },
+        ],
+      },
+      { info: { role: 'user', time: { created: 5 } }, parts: [{ type: 'text', text: 'grant' }] },
+      {
+        info: { role: 'assistant', time: { created: 6 } },
+        parts: [{ type: 'text', text: 'here is the output' }],
+      },
+    ];
     const stub = stubFetch((url, init) => {
       const method = init?.method ?? 'GET';
       if (url.endsWith('/session') && method === 'POST') return json({ id: 'ses-1' });
       if (url.endsWith('/session/ses-1/message') && method === 'POST') {
         // The legacy endpoint answers with the last message of the turn only, and the tool
         // call of the same turn lives in an earlier assistant message.
+        turnComplete = true;
         return json({ parts: [{ type: 'text', text: 'here is the output' }] });
       }
       if (url.endsWith('/session/ses-1/message') && method === 'GET') {
-        return json([
-          {
-            info: { role: 'user', time: { created: 1 } },
-            parts: [{ type: 'text', text: 'old instruction' }],
-          },
-          {
-            info: { role: 'assistant', time: { created: 2 } },
-            parts: [{ type: 'text', text: 'old reply' }],
-          },
-          {
-            info: { role: 'user', time: { created: 3 } },
-            parts: [{ type: 'text', text: 'Call the tool `workflow-list`.' }],
-          },
-          {
-            info: { role: 'assistant', time: { created: 4 } },
-            parts: [
-              { type: 'step-start' },
-              {
-                type: 'tool',
-                tool: 'workflow-list',
-                state: {
-                  status: 'completed',
-                  input: {},
-                  output: '{"profilesDir":"/tmp","profiles":["smoke"]}',
-                },
-              },
-              { type: 'step-finish' },
-            ],
-          },
-          {
-            info: { role: 'assistant', time: { created: 5 } },
-            parts: [{ type: 'text', text: 'here is the output' }],
-          },
-        ]);
+        return json(turnComplete ? listing : []);
       }
       if (url.endsWith('/session/ses-1') && method === 'DELETE') {
         return new Response('', { status: 204 });
@@ -382,10 +376,9 @@ describe('the V1 transport strategy', () => {
           output: '{"profilesDir":"/tmp","profiles":["smoke"]}',
         },
       ]);
+      // The final text of the same turn is kept even though an answer added a user message.
       expect(result.turn.transcript).toContain('here is the output');
       expect(result.turn.transcript).toContain('profilesDir');
-      // Nothing from the previous turn leaks into this turn's evidence.
-      expect(result.turn.transcript).not.toContain('old reply');
       expect(result.workflowState).toEqual({
         sessionId: 'ses-1',
         status: 'running',
@@ -408,6 +401,61 @@ describe('the V1 transport strategy', () => {
     } finally {
       stub.restore();
       await rm(stateDir, { recursive: true, force: true });
+    }
+  });
+
+  test('keeps the tool calls of a turn whose question was answered mid-turn', async () => {
+    // The answer is stored as a user message (#1), so a role-based boundary would cut away the
+    // very tool calls this turn produced. The measured boundary keeps them.
+    let turnComplete = false;
+    const listing = [
+      {
+        info: { role: 'assistant', time: { created: 4 } },
+        parts: [
+          { type: 'tool', tool: 'workflow-consent', state: { status: 'completed', input: {} } },
+        ],
+      },
+      {
+        info: { role: 'assistant', time: { created: 5 } },
+        parts: [{ type: 'tool', tool: 'question', state: { status: 'completed', input: {} } }],
+      },
+      { info: { role: 'user', time: { created: 6 } }, parts: [{ type: 'text', text: 'grant' }] },
+      {
+        info: { role: 'assistant', time: { created: 7 } },
+        parts: [{ type: 'text', text: 'consent recorded' }],
+      },
+    ];
+    const stub = stubFetch((url, init) => {
+      const method = init?.method ?? 'GET';
+      if (url.endsWith('/session') && method === 'POST') return json({ id: 'ses-1' });
+      if (url.endsWith('/session/ses-1/message') && method === 'POST') {
+        turnComplete = true;
+        return json({ parts: [{ type: 'text', text: 'consent recorded' }] });
+      }
+      if (url.endsWith('/session/ses-1/message') && method === 'GET') {
+        return json(turnComplete ? listing : []);
+      }
+      if (url.includes('/question')) return json([]);
+      return json([]);
+    });
+
+    try {
+      const transport = createTransport(fakeHost(), {
+        kind: 'v1',
+        model: 'crpt/model',
+        profile: 'smoke',
+      });
+      const session = await transport.createSession('plan-consent');
+
+      const result = await transport.prompt(session, { text: 'ask for consent' });
+
+      expect(result.turn.toolCalls.map((call) => call.name)).toEqual([
+        'workflow-consent',
+        'question',
+      ]);
+      expect(result.turn.transcript).toContain('consent recorded');
+    } finally {
+      stub.restore();
     }
   });
 
@@ -506,6 +554,7 @@ describe('the V2 transport strategy', () => {
       prompt: async () => {},
       removeSession: async () => {},
       listMessages: async () => [],
+      answeredForms: () => [],
       offScript: () => [],
       ...overrides,
     };
@@ -689,6 +738,127 @@ describe('the host operation marker', () => {
         pluginEvidence: { ...evidence, hostOperation: 'unknown' },
       })
     ).toContain('не от живого хоста');
+  });
+});
+
+describe('the interaction the facade answered', () => {
+  test('reports a V1 question and sends the decision the step asked for', async () => {
+    const stub = stubFetch(async (url, init) => {
+      const method = init?.method ?? 'GET';
+      if (url.endsWith('/session') && method === 'POST') return json({ id: 'ses-1' });
+      if (url.endsWith('/question') && method === 'GET') {
+        return json([
+          {
+            id: 'q-1',
+            questions: [
+              {
+                question: '<consent-request type="plan">approve?</consent-request>',
+                options: [{ label: 'grant' }, { label: 'decline' }],
+              },
+            ],
+          },
+        ]);
+      }
+      if (url.includes('/question/q-1/reply') && method === 'POST') return json({});
+      if (url.endsWith('/session/ses-1/message') && method === 'POST') {
+        // Give the operator loop time to answer while the turn is still running.
+        await new Promise((resolve) => setTimeout(resolve, 60));
+        return json({ parts: [] });
+      }
+      return json([]);
+    });
+
+    try {
+      const transport = createTransport(fakeHost(), {
+        kind: 'v1',
+        model: 'crpt/model',
+        profile: 'smoke',
+        agent: 'orchestrator',
+      });
+      const session = await transport.createSession('plan-consent');
+
+      const result = await transport.prompt(session, {
+        text: 'ask for consent',
+        decision: 'decline',
+      });
+
+      expect(result.interactions).toEqual([
+        {
+          kind: 'question',
+          id: 'q-1',
+          isConsent: true,
+          decision: 'decline',
+          label: 'decline',
+          offered: ['grant', 'decline'],
+        },
+      ]);
+      const reply = stub.requests.find((request) => request.path.includes('/question/q-1/reply'));
+      expect(reply?.body).toContain('decline');
+    } finally {
+      stub.restore();
+    }
+  });
+
+  test('reports a V2 form and passes the decision to the client', async () => {
+    const prompts: Array<{ text: string; decision?: string }> = [];
+    const client = {
+      createSession: async () => 'ses-2',
+      prompt: async (_id: string, text: string, decision?: string) => {
+        prompts.push({ text, decision });
+      },
+      removeSession: async () => {},
+      listMessages: async () => [],
+      answeredForms: () => [
+        {
+          id: 'form-1',
+          consent: true,
+          decision: 'grant' as const,
+          label: 'grant',
+          offered: ['grant', 'decline'],
+        },
+      ],
+      offScript: () => [],
+    };
+    const transport = createSessionClientTransport(fakeHost(), {}, () => client);
+    const session = await transport.createSession('plan-consent');
+
+    const result = await transport.prompt(session, { text: 'ask for consent', decision: 'grant' });
+
+    expect(prompts).toEqual([{ text: 'ask for consent', decision: 'grant' }]);
+    expect(result.interactions).toEqual([
+      {
+        kind: 'form',
+        id: 'form-1',
+        isConsent: true,
+        decision: 'grant',
+        label: 'grant',
+        offered: ['grant', 'decline'],
+      },
+    ]);
+  });
+
+  test('reports no interaction when the host raised none', async () => {
+    const stub = stubFetch((url, init) => {
+      const method = init?.method ?? 'GET';
+      if (url.endsWith('/session') && method === 'POST') return json({ id: 'ses-1' });
+      if (url.endsWith('/session/ses-1/message') && method === 'POST') return json({ parts: [] });
+      return json([]);
+    });
+
+    try {
+      const transport = createTransport(fakeHost(), {
+        kind: 'v1',
+        model: 'crpt/model',
+        profile: 'smoke',
+      });
+      const session = await transport.createSession('create');
+
+      const result = await transport.prompt(session, { text: 'no question here' });
+
+      expect(result.interactions).toEqual([]);
+    } finally {
+      stub.restore();
+    }
   });
 });
 

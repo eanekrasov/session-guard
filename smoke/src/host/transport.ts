@@ -9,6 +9,7 @@
 
 import { readWorkflowSession, type Host } from '../harness.ts';
 import type {
+  NormalizedInteraction,
   NormalizedPart,
   NormalizedToolCall,
   NormalizedTurn,
@@ -303,6 +304,8 @@ export interface TurnEvidence {
   error?: string;
   /** The host is still waiting for an operator decision this turn produced. */
   pendingInteraction?: boolean;
+  /** Interactions this turn answered through the facade. */
+  interactions?: NormalizedInteraction[];
   /** Operator answers and timeouts worth carrying into the step's evidence. */
   notes?: string[];
 }
@@ -338,6 +341,7 @@ export function buildPromptResult(
     },
     workflowState,
     pluginEvidence: pluginObservationFrom(toolCalls, evidence.status, hostOperation),
+    ...(evidence.interactions === undefined ? {} : { interactions: evidence.interactions }),
   };
 }
 
@@ -368,6 +372,19 @@ function normalizeTasks(value: unknown): Record<string, Array<{ status?: string 
   return seen ? tasks : undefined;
 }
 
+/** Document references the plugin recorded, with non-string values dropped. */
+function normalizeRefs(value: unknown): Record<string, string> | undefined {
+  const refs = fields(value);
+  const normalized: Record<string, string> = {};
+  let seen = false;
+  for (const [key, entry] of Object.entries(refs)) {
+    if (typeof entry !== 'string') continue;
+    seen = true;
+    normalized[key] = entry;
+  }
+  return seen ? normalized : undefined;
+}
+
 /**
  * Narrow the plugin's persisted session into the shared workflow state.
  *
@@ -392,12 +409,14 @@ export function normalizeWorkflowState(sessionId: string, raw: unknown): SmokeWo
   }
   const stage = typeof session.currentStage === 'string' ? session.currentStage : undefined;
   const tasks = normalizeTasks(session.tasks);
+  const refs = normalizeRefs(session.refs);
   return {
     sessionId,
     status:
       normalizeWorkflowStatus(session.status) ?? (stage === undefined ? 'unknown' : 'running'),
     ...(stage === undefined ? {} : { currentStage: stage }),
     ...(tasks === undefined ? {} : { tasks }),
+    ...(refs === undefined ? {} : { refs }),
     durableMutation: 'applied',
   };
 }

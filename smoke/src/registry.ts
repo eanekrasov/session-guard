@@ -10,6 +10,7 @@
 import { SHELL_TOOL } from './host/transport.ts';
 import type {
   HostKind,
+  NormalizedInteraction,
   NormalizedToolCall,
   ScenarioDefinition,
   ScenarioStep,
@@ -58,11 +59,12 @@ const pluginLoadsStep: ScenarioStep = {
   },
 };
 
-const createStep: ScenarioStep = {
+/** Creating the workflow session; `create` and every later stage start with it. */
+const workflowCreateStep: ScenarioStep = {
   instruction:
     'Call the tool `workflow-create` with schemaId "smoke". Do nothing else and add no commentary.',
   // Creating the session changes durable state, so it is never repeated in the same
-  // session: stage 1 keeps a single attempt and the runner reports an unprovable outcome
+  // session: the runner keeps a single attempt and reports an unprovable outcome
   // instead of a second mutation.
   mutation: 'mutating',
   retry: 'none',
@@ -71,6 +73,47 @@ const createStep: ScenarioStep = {
     if (state === null) return 'сессия workflow не сохранена';
     const stage = state.currentStage ?? '(не задана)';
     return stage === 'planning' || `стадия — ${stage}, ожидалась planning`;
+  },
+};
+
+/** Prepare the consent tag, then ask the operator with it, exactly as the plugin expects. */
+const CONSENT_INSTRUCTION =
+  'Do this in two tool calls and nothing else. ' +
+  'First call `workflow-consent` with files ["plan.md"] and summary "smoke plan". ' +
+  'Then call the `question` tool once, passing as the question text the ENTIRE ' +
+  '<consent-request ...>...</consent-request> tag that the first tool printed, copied ' +
+  'character for character, with options labelled "grant" and "decline".';
+
+/**
+ * Consent is a mutation of the workflow's own state, so its outcome is read from that state
+ * rather than from the answer: the plan reference must be recorded and the machine must have
+ * left `planning`. `poll-state` is what makes that safe — the instruction is sent once, and
+ * only the durable store is read afterwards.
+ */
+const consentStep: ScenarioStep = {
+  instruction: CONSENT_INSTRUCTION,
+  mutation: 'mutating',
+  retry: 'poll-state',
+  expect: (result) => {
+    const state = result.workflowState;
+    if (state === null) return 'сессия workflow отсутствует после согласия';
+    // The consent path itself is what must be proven: a grant for some other question the model
+    // invented would otherwise satisfy this assertion while proving nothing.
+    const consent = (result.interactions ?? []).find(
+      (entry) => entry.isConsent && entry.decision === 'grant'
+    );
+    if (consent === undefined) {
+      return `согласие не было задано и отвечено через общий фасад: interactions=${JSON.stringify(
+        (result.interactions ?? []).map(
+          (entry) => `${entry.kind}:${entry.decision}:consent=${entry.isConsent}`
+        )
+      ).slice(0, 200)}`;
+    }
+    if (state.refs?.plan === undefined) {
+      return `ссылка на план не записана: refs=${JSON.stringify(state.refs ?? {}).slice(0, 200)}`;
+    }
+    const stage = state.currentStage ?? '(не задана)';
+    return stage === 'tasks_ready' || `стадия — ${stage}, ожидалась tasks_ready`;
   },
 };
 
@@ -161,7 +204,7 @@ export const canonicalScenarios: CanonicalScenario[] = [
     migrationState: 'migrated',
     stage: 'stage-1-core',
     agent: ORCHESTRATOR,
-    steps: [createStep],
+    steps: [workflowCreateStep],
   },
   {
     id: 'git-block',
@@ -187,9 +230,13 @@ export const canonicalScenarios: CanonicalScenario[] = [
   {
     id: 'plan-consent',
     title: 'Одобренный план переводит сессию из стадии planning',
-    migrationState: 'pending',
+    migrationState: 'migrated',
     stage: 'consent',
-    env: { HARNESS_AUTO_APPROVE: 'true' },
+    agent: ORCHESTRATOR,
+    // The legacy baseline set HARNESS_AUTO_APPROVE here, which made the plugin grant the
+    // consent by itself; the canonical scenario deliberately runs without it, so the only way
+    // to reach `tasks_ready` is the operator's answer travelling through the facade.
+    steps: [workflowCreateStep, consentStep],
   },
   {
     id: 'commit-cwd',
@@ -294,10 +341,10 @@ export function validateScenarioDefinitions(
           problem: `${where}: a mutating step may not retry in the same session`,
         });
       }
-      if (step.retry === 'poll-state' || step.retry === 'new-session') {
+      if (step.retry === 'new-session') {
         problems.push({
           scenarioId: scenario.id,
-          problem: `${where}: retry strategy ${step.retry} is not implemented in this stage`,
+          problem: `${where}: retry strategy new-session is not implemented in this stage`,
         });
       }
     });

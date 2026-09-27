@@ -8,6 +8,12 @@ export interface SmokeSession {
 export interface PromptInput {
   text: string;
   agent?: string;
+  /**
+   * The answer the operator gives to any interaction this prompt raises, in the scenario's own
+   * vocabulary. V1 and V2 word those answers differently; the facade maps this into whichever
+   * one the host offers. Defaults to `grant`.
+   */
+  decision?: 'grant' | 'decline';
 }
 
 export type NormalizedPart =
@@ -60,6 +66,12 @@ export interface SmokeWorkflowState {
   currentStage?: string;
   /** Persisted task lists by list key (`implementation`, `test_suite`, ...). */
   tasks?: Record<string, Array<{ status?: string }>>;
+  /**
+   * Document references the plugin recorded, keyed by consent name (`plan`, `deploy`, ...).
+   * This is what proves a consent was applied: the answer itself is a host interaction, while
+   * `refs.plan` is the workflow's own durable record of it.
+   */
+  refs?: Record<string, string>;
   operationId?: string;
   operationStatus?: 'pending' | 'completed' | 'failed' | 'unknown';
   /**
@@ -90,10 +102,38 @@ export interface PluginObservation {
   result: 'success' | 'error' | 'unknown';
 }
 
+/**
+ * One operator interaction a prompt raised, normalized across both host surfaces.
+ *
+ * V1 asks through its `question` tool and V2 through forms; a scenario sees only this record.
+ * `id` and `kind` are for evidence — they are the host's own bookkeeping and never a way to
+ * reach the host, so a scenario cannot depend on a transport-specific interaction shape.
+ */
+export interface NormalizedInteraction {
+  kind: 'question' | 'form';
+  id: string;
+  /**
+   * Whether this interaction carried the plugin's own consent tag (`<consent-request …>`).
+   *
+   * `kind` says which host surface asked; this says what was asked. Both hosts mark a consent
+   * request the same way, so a scenario can require the consent path itself instead of accepting
+   * any operator grant that happens to arrive.
+   */
+  isConsent: boolean;
+  /** The decision the operator gave, in the scenario's vocabulary. */
+  decision: 'grant' | 'decline';
+  /** The label the operator answered with, chosen from the labels the host offered. */
+  label: string;
+  /** Labels the host offered, kept for evidence. */
+  offered: string[];
+}
+
 export interface PromptResult {
   turn: NormalizedTurn;
   workflowState: SmokeWorkflowState | null;
   pluginEvidence: PluginObservation;
+  /** Interactions this prompt answered, in the order the host raised them. */
+  interactions?: NormalizedInteraction[];
 }
 
 export type MigrationState = 'migrated' | 'pending';

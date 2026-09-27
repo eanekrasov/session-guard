@@ -48,27 +48,53 @@ interface LegacyMessageEntry {
  * The parts the host stored for this turn.
  *
  * `POST /session/:id/message` answers with the turn's *last* message, so a tool call from an
- * earlier step of the same turn is invisible there; the whole session is listed instead.
- * Reading it back can fail on its own, and the turn has already happened by then, so the
- * answer is reported as missing rather than replacing the scenario's finding.
+ * earlier step of the same turn is invisible there; the whole session is listed instead. The
+ * boundary is the session length measured *before* the prompt: an answered question is stored
+ * as a user message of its own, so "after the last user message" would cut away the very tool
+ * calls a consent turn needs to show. Reading it back can fail on its own, and the turn has
+ * already happened by then, so the answer is reported as missing rather than replacing the
+ * scenario's finding.
  */
-async function listedTurnParts(host: Host, sessionId: string): Promise<Part[] | undefined> {
+async function listedTurnParts(
+  host: Host,
+  sessionId: string,
+  from: number | undefined
+): Promise<Part[] | undefined> {
   try {
     const listed = (await api(host, 'GET', `/session/${sessionId}/message`)) as
       LegacyMessageEntry[] | undefined;
-    const items = itemsAfterLastUser(
-      (Array.isArray(listed) ? listed : []).map((message) => ({
-        role: message.info?.role,
-        createdAt: message.info?.time?.created ?? 0,
-        items: message.parts ?? [],
-      }))
-    );
+    const messages = Array.isArray(listed) ? listed : [];
+    const items =
+      from === undefined
+        ? // No boundary was measured; fall back to the last instruction the session holds.
+          itemsAfterLastUser(
+            messages.map((message) => ({
+              role: message.info?.role,
+              createdAt: message.info?.time?.created ?? 0,
+              items: message.parts ?? [],
+            }))
+          )
+        : messages
+            .slice(from)
+            .filter((message) => message.info?.role === 'assistant')
+            .flatMap((message) => message.parts ?? []);
     return items as Part[];
   } catch (error) {
     harnessLog(
       'warn',
       `не удалось прочитать сообщения сессии: ${error instanceof Error ? error.message : String(error)}`
     );
+    return undefined;
+  }
+}
+
+/** How many messages the session already holds, measured before the prompt is sent. */
+async function listedCount(host: Host, sessionId: string): Promise<number | undefined> {
+  try {
+    const listed = (await api(host, 'GET', `/session/${sessionId}/message`)) as
+      unknown[] | undefined;
+    return Array.isArray(listed) ? listed.length : undefined;
+  } catch {
     return undefined;
   }
 }
@@ -102,8 +128,13 @@ export function createLegacyHttpTransport(
       }
 
       // The host's `question` tool blocks until an operator answers, so the scenario would
-      // hang without this loop. The operator policy itself is shared with V2.
-      const operator = answerQuestions(host, 'grant');
+      // hang without this loop. The operator policy itself is shared with V2, and the decision
+      // comes from the step so a scenario can ask for a decline as well as a grant.
+      const requested = input.decision ?? 'grant';
+      // Measure the turn's lower boundary before the prompt: an answered question lands in the
+      // session as a user message of its own, which a role-based boundary would misread.
+      const boundary = await listedCount(host, session.id);
+      const operator = answerQuestions(host, requested);
       let reply: LegacyMessage;
       try {
         reply = (await api(host, 'POST', `/session/${session.id}/message`, {
@@ -115,7 +146,7 @@ export function createLegacyHttpTransport(
         operator.stop();
       }
 
-      const rawParts = (await listedTurnParts(host, session.id)) ?? reply.parts ?? [];
+      const rawParts = (await listedTurnParts(host, session.id, boundary)) ?? reply.parts ?? [];
       const error = reply.info?.error?.data?.message ?? '';
       harnessLog(
         'debug',
@@ -136,6 +167,16 @@ export function createLegacyHttpTransport(
           // A question the scenario never asked is the model going off script; it belongs
           // in the transcript so the next unmet expectation names its cause.
           notes: operator.offScript().map((entry) => `[вопрос вне сценария] ${entry}`),
+          // Every interaction the operator answered is reported in the shared vocabulary, so a
+          // scenario can prove that a consent answer really reached the host.
+          interactions: operator.answered().map((entry) => ({
+            kind: 'question' as const,
+            id: entry.id,
+            isConsent: entry.consent,
+            decision: entry.decision,
+            label: entry.label,
+            offered: entry.offered,
+          })),
         },
         await readNormalizedWorkflowState(host, session.id),
         // This strategy holds a live `Host`, so the evidence really comes from one.

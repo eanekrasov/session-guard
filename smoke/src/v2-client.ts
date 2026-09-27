@@ -7,8 +7,7 @@ import { chooseLabel, type OperatorDecision } from './operator.ts';
 export type FormAnswer = Record<string, string | number | boolean | Array<string>>;
 
 export interface V2SmokeClient {
-  createSession(title: string): Promise<string>;
-  /**
+  createSession(title: string): Promise<string>; /**
    * Отправить одну инструкцию и выполнять оператора, пока сессия не завершится.
    *
    * Выбрасывает `PromptTimeoutError`, когда хост превышает бюджет промпта
@@ -23,6 +22,8 @@ export interface V2SmokeClient {
    * narrows them into the shared turn parts; this client never interprets them.
    */
   listMessages(sessionId: string): Promise<unknown[]>;
+  /** Forms this client answered, in the order it answered them. */
+  answeredForms(): AnsweredForm[];
   /** Ответы на вопросы, которые сценарий не задавал, по порядку. */
   offScript(): string[];
 }
@@ -112,6 +113,13 @@ export interface FormAnswerPlan {
   answer: FormAnswer;
   /** Ответы, которые не соответствовали тому, что запрашивала инструкция, и почему. */
   offScript: string[];
+  /** Несёт ли форма собственный тег согласия плагина (`<consent-request …>`). */
+  consent: boolean;
+  /**
+   * Какие варианты выбраны по каждому полю: метки, предложенные хостом, и решение оператора.
+   * Нужны, чтобы caller мог отчитаться, какой именно ответ ушёл хосту, не разбирая payload.
+   */
+  choices: Array<{ key: string; decision: OperatorDecision; label: string; offered: string[] }>;
 }
 
 /**
@@ -128,21 +136,20 @@ export function planFormAnswer(
   const consent = formText(form).includes('<consent-request');
   const answer: FormAnswer = {};
   const offScript: string[] = [];
+  const choices: FormAnswerPlan['choices'] = [];
 
   for (const field of form.fields) {
     const label = field.title ?? field.key;
     const options = optionsOf(field);
     if (options) {
-      const choice = chooseLabel(
-        options.map((option) => option.label),
-        decision,
-        consent
-      );
+      const offered = options.map((option) => option.label);
+      const choice = chooseLabel(offered, decision, consent);
       const option = options.find((candidate) => candidate.label === choice.label);
       if (!option) {
         offScript.push(`no option matched for "${label}"`);
         continue;
       }
+      choices.push({ key: field.key, decision, label: choice.label, offered });
       answer[field.key] = field.type === 'multiselect' ? [option.value] : option.value;
       continue;
     }
@@ -160,7 +167,7 @@ export function planFormAnswer(
     offScript.push(`field "${label}" has type ${field.type}, which the operator cannot answer`);
   }
 
-  return { answer, offScript };
+  return { answer, offScript, consent, choices };
 }
 
 function optionsOf(field: FormField): Array<{ label: string; value: string }> | undefined {
@@ -189,6 +196,17 @@ interface SweepResult {
   answered: number;
 }
 
+/** Одна форма, на которую оператор ответил: что ушло хосту. */
+export interface AnsweredForm {
+  id: string;
+  /** Несёт ли форма тег согласия плагина. */
+  consent: boolean;
+  decision: OperatorDecision;
+  /** Метка, выбранная из предложенных хостом. */
+  label: string;
+  offered: string[];
+}
+
 export function createV2SmokeClient(host: Host, options: V2SmokeClientOptions = {}): V2SmokeClient {
   const transport = createV2SmokeTransport(host.authHeader);
   const client = OpenCode.make({ baseUrl: host.url, fetch: transport });
@@ -200,6 +218,8 @@ export function createV2SmokeClient(host: Host, options: V2SmokeClientOptions = 
   // Чего хост, по его последнему сообщению, ждал. Записывается до ответов,
   // чтобы ответ, который хост так и не получил, всё равно появился в сообщении о тайм-ауте.
   let waitingForms = 0;
+  // Что именно оператор ответил: форма, решение и выбранная метка.
+  const answeredForms: AnsweredForm[] = [];
 
   /** Ответить на всё, чего ждёт хост, и сообщить, что осталось. */
   async function sweep(sessionId: string, decision: OperatorDecision): Promise<SweepResult> {
@@ -219,6 +239,17 @@ export function createV2SmokeClient(host: Host, options: V2SmokeClientOptions = 
           answer: plan.answer,
         });
         answered += 1;
+        // Report the form and the choice behind each field, so the caller can say what was sent
+        // without knowing anything about the form's own shape.
+        for (const choice of plan.choices) {
+          answeredForms.push({
+            id: form.id,
+            consent: plan.consent,
+            decision: choice.decision,
+            label: choice.label,
+            offered: choice.offered,
+          });
+        }
       } catch (error) {
         // Оставляем отвечаемой: форма, отменённая хостом во время ответа, не должна
         // скрывать ту, которая всё ещё ждёт.
@@ -323,6 +354,8 @@ export function createV2SmokeClient(host: Host, options: V2SmokeClientOptions = 
       const response = await client.message.list({ sessionID: sessionId });
       return response?.data ?? [];
     },
+
+    answeredForms: () => [...answeredForms],
 
     offScript: () => [...notes],
   };

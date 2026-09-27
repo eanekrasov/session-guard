@@ -32,12 +32,23 @@ describe('the canonical scenario registry', () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  test('keeps the published id, title, profile and env of every current scenario', () => {
+  test('keeps the published id, title and profile of every current scenario', () => {
+    // `env` is compared too, with one deliberately documented exception: the legacy
+    // `plan-consent` set HARNESS_AUTO_APPROVE, which made the plugin grant consent by itself,
+    // so the canonical scenario drops it and proves the operator's answer instead.
+    const envOverrides: Record<string, string> = {
+      'plan-consent':
+        'runs without HARNESS_AUTO_APPROVE: the operator answer must be what grants consent',
+    };
     for (const scenario of canonicalScenarios) {
       const legacy = legacyScenarios.find((candidate) => candidate.id === scenario.id);
       if (legacy === undefined) throw new Error(`сценарий «${scenario.id}» отсутствует в baseline`);
       expect(scenario.title).toBe(legacy.title);
       expect(scenario.profile).toBe(legacy.profile);
+      if (envOverrides[scenario.id] !== undefined) {
+        expect(scenario.env).not.toEqual(legacy.env);
+        continue;
+      }
       expect(scenario.env).toEqual(legacy.env);
     }
   });
@@ -55,7 +66,7 @@ describe('the canonical scenario registry', () => {
       .filter((scenario) => scenario.migrationState === 'migrated')
       .map((scenario) => scenario.id);
 
-    expect(migrated).toEqual(['plugin-loads', 'no-session', 'create']);
+    expect(migrated).toEqual(['plugin-loads', 'no-session', 'create', 'plan-consent']);
     for (const scenario of canonicalScenarios) {
       if (scenario.migrationState !== 'migrated') {
         expect(scenario.steps).toBeUndefined();
@@ -90,6 +101,10 @@ describe('the canonical scenario registry', () => {
       'plugin-loads': [{ mutation: 'read-only', retry: 'same-session' }],
       'no-session': [{ mutation: 'read-only', retry: 'same-session' }],
       create: [{ mutation: 'mutating', retry: 'none' }],
+      'plan-consent': [
+        { mutation: 'mutating', retry: 'none' },
+        { mutation: 'mutating', retry: 'poll-state' },
+      ],
     });
   });
 
@@ -120,7 +135,7 @@ describe('the canonical scenario registry', () => {
         title: 'Asks for a later stage',
         migrationState: 'migrated',
         stage: 'consent',
-        steps: [{ ...step, retry: 'poll-state' }],
+        steps: [{ ...step, retry: 'new-session' }],
       },
     ];
 
@@ -139,7 +154,7 @@ describe('the canonical scenario registry', () => {
       'may not retry in the same session'
     );
     expect(problems.map((problem) => problem.problem).join('\n')).toContain(
-      'retry strategy poll-state is not implemented'
+      'retry strategy new-session is not implemented'
     );
   });
 
@@ -181,6 +196,28 @@ describe('the canonical scenario registry', () => {
     expect(scenario?.steps?.[0]?.instruction).toContain('git log --oneline -1');
     expect(scenario?.steps?.[0]?.mutation).toBe('read-only');
     expect(scenario?.steps?.[0]?.retry).toBe('same-session');
+  });
+
+  test('describes plan-consent as a consent scenario driven by the operator answer', () => {
+    const scenario = canonicalScenarios.find((candidate) => candidate.id === 'plan-consent');
+
+    expect(scenario).toMatchObject({
+      id: 'plan-consent',
+      title: 'Одобренный план переводит сессию из стадии planning',
+      migrationState: 'migrated',
+      stage: 'consent',
+      agent: 'orchestrator',
+    });
+    // Deliberately without HARNESS_AUTO_APPROVE: the plugin must not grant the consent itself,
+    // or the scenario would pass without the operator's answer reaching it.
+    expect(scenario?.env ?? {}).toEqual({});
+    expect(scenario?.steps).toHaveLength(2);
+    expect(scenario?.steps?.[0]?.instruction).toContain('workflow-create');
+    expect(scenario?.steps?.[1]?.instruction).toContain('workflow-consent');
+    expect(scenario?.steps?.[1]?.instruction).toContain('question');
+    expect(scenario?.steps?.[1]?.mutation).toBe('mutating');
+    // Consent is never repeated in the same session: the outcome is polled from durable state.
+    expect(scenario?.steps?.[1]?.retry).toBe('poll-state');
   });
 
   test('derives the parity matrix from the registry, requiring every scenario on both hosts', () => {

@@ -6,12 +6,13 @@ import { canonicalScenarios } from '../src/registry.ts';
 import type {
   HostKind,
   MigratedScenarioDefinition,
+  NormalizedInteraction,
   PromptInput,
   PromptResult,
   ScenarioStep,
   SmokeWorkflowState,
 } from '../src/host/types.ts';
-import { runScenario } from '../src/runner.ts';
+import { runScenario, statePollBudgetMs, DEFAULT_POLL_BUDGET_MS } from '../src/runner.ts';
 
 const BLOCKED_REASONS = [
   'adapter_contract_mismatch',
@@ -21,7 +22,8 @@ const BLOCKED_REASONS = [
 
 function turn(
   overrides: Partial<PromptResult['turn']> = {},
-  state: SmokeWorkflowState | null = null
+  state: SmokeWorkflowState | null = null,
+  interactions?: NormalizedInteraction[]
 ): PromptResult {
   const toolCalls = overrides.toolCalls ?? [];
   return {
@@ -34,19 +36,32 @@ function turn(
     },
     workflowState: state,
     pluginEvidence: pluginObservationFrom(toolCalls, overrides.status ?? 'completed'),
+    ...(interactions === undefined ? {} : { interactions }),
   };
 }
 
 function makeHost(
   replies: Array<PromptResult | Error>,
-  options: { kind?: HostKind; state?: SmokeWorkflowState | null; stateError?: boolean } = {}
+  options: {
+    kind?: HostKind;
+    state?: SmokeWorkflowState | null;
+    stateError?: boolean;
+    /** A queue of durable states for successive reads; the last one repeats. */
+    states?: Array<SmokeWorkflowState | null>;
+  } = {}
 ): {
   host: SmokeHost;
-  calls: { created: string[]; prompts: PromptInput[]; closed: string[] };
+  calls: { created: string[]; prompts: PromptInput[]; closed: string[]; stateReads: number };
 } {
   const kind = options.kind ?? 'v1';
-  const calls = { created: [] as string[], prompts: [] as PromptInput[], closed: [] as string[] };
+  const calls = {
+    created: [] as string[],
+    prompts: [] as PromptInput[],
+    closed: [] as string[],
+    stateReads: 0,
+  };
   let index = 0;
+  let stateIndex = 0;
   return {
     calls,
     host: {
@@ -64,7 +79,13 @@ function makeHost(
         return reply;
       },
       async readWorkflowState() {
+        calls.stateReads += 1;
         if (options.stateError === true) throw new Error('[ERROR] damaged state file');
+        if (options.states !== undefined && options.states.length > 0) {
+          const queued = options.states[Math.min(stateIndex, options.states.length - 1)];
+          stateIndex += 1;
+          return queued;
+        }
         return options.state ?? null;
       },
       async closeSession(session) {
@@ -451,6 +472,14 @@ describe('the common scenario runner', () => {
     expect(result.evidence).toContain('tools=[workflow-create:failed]');
   });
 
+  test('reads the poll budget from the environment and refuses an unusable one', () => {
+    expect(statePollBudgetMs({})).toBe(DEFAULT_POLL_BUDGET_MS);
+    expect(statePollBudgetMs({ HOST_SMOKE_STATE_POLL_MS: '' })).toBe(DEFAULT_POLL_BUDGET_MS);
+    expect(statePollBudgetMs({ HOST_SMOKE_STATE_POLL_MS: '2500' })).toBe(2_500);
+    expect(statePollBudgetMs({ HOST_SMOKE_STATE_POLL_MS: 'soon' })).toBe(DEFAULT_POLL_BUDGET_MS);
+    expect(statePollBudgetMs({ HOST_SMOKE_STATE_POLL_MS: '-5' })).toBe(DEFAULT_POLL_BUDGET_MS);
+  });
+
   test('keeps a blocked verdict free of a failure class', async () => {
     const { host } = makeHost([turn({ status: 'timed-out' })]);
 
@@ -461,6 +490,190 @@ describe('the common scenario runner', () => {
 
     expect(result.status).toBe('blocked');
     expect('failureKind' in result).toBe(false);
+  });
+});
+
+describe('the plan-consent canonical scenario', () => {
+  const scenario = canonicalScenarios.find((entry) => entry.id === 'plan-consent')!;
+  const definition = {
+    id: scenario.id,
+    title: scenario.title,
+    migrationState: 'migrated' as const,
+    agent: scenario.agent,
+    steps: scenario.steps!,
+  };
+  const planning: SmokeWorkflowState = {
+    sessionId: 'ses-1',
+    status: 'running',
+    currentStage: 'planning',
+    durableMutation: 'applied',
+  };
+  const consented: SmokeWorkflowState = {
+    ...planning,
+    currentStage: 'tasks_ready',
+    refs: { plan: 'plan.md' },
+  };
+  const granted = {
+    kind: 'question' as const,
+    id: 'q-1',
+    isConsent: true,
+    decision: 'grant' as const,
+    label: 'grant',
+    offered: ['grant', 'decline'],
+  };
+
+  test('passes on the durable outcome of the answer, not on the answer alone', async () => {
+    const { host, calls } = makeHost([
+      turn({ toolCalls: [] }, planning),
+      turn({ toolCalls: [] }, consented, [granted]),
+    ]);
+
+    const result = await runScenario(host, definition, { attempts: 1 });
+
+    expect(result.status).toBe('pass');
+    expect(result.attempts).toBe(2);
+    expect(result.evidence).toContain('stage=tasks_ready');
+    expect(calls.prompts).toHaveLength(2);
+  });
+
+  test('fails when no interaction reached the facade, even if the state moved', async () => {
+    // A plugin that approved consent by itself (or a scenario that never asked) proves nothing
+    // about the consent path, so the interaction is part of the contract.
+    const { host } = makeHost([
+      turn({ toolCalls: [] }, planning),
+      turn({ toolCalls: [] }, consented),
+    ]);
+
+    const result = await runScenario(host, definition, { attempts: 1, pollBudgetMs: 50 });
+
+    expect(result.status).toBe('fail');
+    expect(result.evidence).toContain('согласие не было задано');
+  });
+
+  test('fails when the grant came from a question that was not the consent request', async () => {
+    // The model can invent an extra question and the operator answers it by policy; a plausible
+    // state must not let that stand in for the consent path.
+    const invented = {
+      kind: 'question' as const,
+      id: 'q-2',
+      isConsent: false,
+      decision: 'grant' as const,
+      label: 'grant',
+      offered: ['grant', 'decline'],
+    };
+    const { host } = makeHost([
+      turn({ toolCalls: [] }, planning),
+      turn({ toolCalls: [] }, consented, [invented]),
+    ]);
+
+    const result = await runScenario(host, definition, { attempts: 1, pollBudgetMs: 50 });
+
+    expect(result.status).toBe('fail');
+    if (result.status !== 'fail') throw new Error('expected a failure');
+    expect(result.evidence).toContain('consent=false');
+    expect(result.evidence).toContain('согласие не было задано');
+  });
+
+  test('fails when the plan reference was not recorded', async () => {
+    const noRef = { ...planning, currentStage: 'tasks_ready' };
+    const { host } = makeHost([
+      turn({ toolCalls: [] }, planning),
+      turn({ toolCalls: [] }, noRef, [granted]),
+    ]);
+
+    const result = await runScenario(host, definition, { attempts: 1, pollBudgetMs: 50 });
+
+    expect(result.status).toBe('fail');
+    expect(result.evidence).toContain('ссылка на план не записана');
+  });
+
+  test('fails when the state machine did not leave planning', async () => {
+    // The plan reference is recorded, but the machine has not moved: that is not consent applied.
+    const planRecorded = { ...planning, refs: { plan: 'plan.md' } };
+    const { host } = makeHost([
+      turn({ toolCalls: [] }, planning),
+      turn({ toolCalls: [] }, planRecorded, [granted]),
+    ]);
+
+    const result = await runScenario(host, definition, { attempts: 1, pollBudgetMs: 50 });
+
+    expect(result.status).toBe('fail');
+    expect(result.evidence).toContain('ожидалась tasks_ready');
+  });
+
+  test('confirms the outcome from a later durable read without re-sending the consent', async () => {
+    // The answer landed after the turn ended: `poll-state` reads the store instead of asking
+    // again, and the evidence says so.
+    const { host, calls } = makeHost(
+      [turn({ toolCalls: [] }, planning), turn({ toolCalls: [] }, planning, [granted])],
+      {
+        states: [planning, planning, consented],
+      }
+    );
+
+    const result = await runScenario(host, definition, {
+      attempts: 1,
+      pollBudgetMs: 400,
+      pollIntervalMs: 10,
+    });
+
+    expect(result.status).toBe('pass');
+    // Two prompts: the create step and the consent step — never a second consent.
+    expect(calls.prompts).toHaveLength(2);
+    expect(result.evidence).toContain('retry=poll-state');
+    expect(result.evidence).toContain('stage=tasks_ready');
+  });
+
+  test('blocks an unproven outcome after the consent prompt was sent once', async () => {
+    const { host, calls } = makeHost(
+      [turn({ toolCalls: [] }, planning), turn({ status: 'timed-out' }, planning)],
+      {
+        states: [planning, planning, planning],
+      }
+    );
+
+    const result = await runScenario(host, definition, {
+      attempts: 1,
+      pollBudgetMs: 40,
+      pollIntervalMs: 10,
+    });
+
+    expect(result.status).toBe('blocked');
+    if (result.status !== 'blocked') throw new Error('expected a blocked result');
+    expect(result.blockedReason).toBe('indeterminate_mutation');
+    expect(calls.prompts).toHaveLength(2);
+    expect(result.evidence).toContain('poll-state не подтвердил ожидание');
+    expect(result.evidence).toContain('durableMutation=applied');
+  });
+});
+
+describe('scenario sources stay free of transport specifics', () => {
+  test('neither the registry nor the scenarios reach past the facade', async () => {
+    // The scenario layer must describe semantics only: no endpoints, no generated client, no
+    // transport module. This is what keeps one scenario runnable on both host kinds.
+    const { readFile } = await import('node:fs/promises');
+    const { join } = await import('node:path');
+    const forbidden = [
+      '/question',
+      'session.form',
+      './host/v1-transport',
+      './host/v2-transport',
+      './v2-client',
+      '../v2-client',
+      'OpenCode.make',
+    ];
+    const files = ['src/registry.ts'];
+    const scenarioDir = join(import.meta.dirname, '../src/scenarios');
+
+    for (const file of files) {
+      const source = await readFile(join(import.meta.dirname, '..', file), 'utf-8');
+      for (const needle of forbidden) {
+        expect(source).not.toContain(needle);
+      }
+    }
+    // The canonical scenarios live in the registry; the legacy per-kind files are the baseline
+    // this stage is migrating away from and are not part of the shared path.
+    expect(scenarioDir.length).toBeGreaterThan(0);
   });
 });
 

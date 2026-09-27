@@ -371,6 +371,52 @@ canonical id — это и есть честный признак незавер
 tools=[shell:completed «git log --oneline -1»]; stage=(none)
 ```
 
+## Результаты этапа 3 (`plan-consent`)
+
+Сценарий согласия — первый, где нужен ответ оператора, поэтому фасад получил нормализованный
+interaction, а runner — безопасный `poll-state`:
+
+- `NormalizedInteraction { kind: 'question' | 'form'; id; isConsent; decision; label; offered }` —
+  V1 `question` и V2 форма приводятся к одной записи; сценарий видит только её, а `id`/`kind`
+  служат evidence и не дают добраться до хоста; `isConsent` отмечает interaction, который нёс
+  собственный тег согласия плагина (`<consent-request …>`);
+- `PromptInput.decision` — решение оператора (по умолчанию `grant`), которое strategy
+  переводит в метку/значение конкретного хоста;
+- `PromptResult.interactions` — что именно было отвечено в этом ходу;
+- `SmokeWorkflowState.refs` — durable-запись ссылок плагина (`refs.plan`), которая доказывает
+  применение согласия, в отличие от самого факта ответа.
+
+Утверждение сценария (после `workflow-create`):
+
+1. `interactions` содержит interaction с `isConsent: true` и решением `grant` — согласие реально
+   прошло через фасад. Именно `isConsent`, а не любой `grant`: иначе придуманный моделью
+   лишний вопрос с ответом «grant» удовлетворял бы проверку, ничего не доказывая
+   (`kind` говорит, какая поверхность хоста спросила, `isConsent` — что именно спросили);
+2. `workflowState.refs.plan` записан;
+3. `currentStage === 'tasks_ready'` — машина вышла из `planning`.
+
+Retry-политика: consent — mutating-шаг, `same-session` для него запрещён. Объявлен
+`poll-state`: инструкция отправляется **один раз**, дальше runner читает durable store до
+бюджета `HOST_SMOKE_STATE_POLL_MS` (по умолчанию 5000 мс) и не повторяет мутацию. Если исход
+доказан состоянием — `pass` с пометкой в evidence; если состояние недоступно или ничего не
+подтверждает — `blocked` с `indeterminate_mutation`.
+
+`HARNESS_AUTO_APPROVE` в canonical-сценарии **не** выставляется: с ним плагин одобряет
+согласие сам (`consent-orchestrator.ts`), и сценарий проходил бы, не доказав, что ответ
+оператора вообще доехал. Это единственное намеренное расхождение с baseline-metadata
+(зафиксировано и в тесте, и в registry).
+
+| Проверка                    | Команда                                                                                     | Итог                                                                     |
+| --------------------------- | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `plan-consent` на V1        | `HOST_SMOKE_OPENCODE_VERSION=v1 mise run smoke plan-consent`                                | **ПРОЙДЕНО**, 2 шага, 1.7m, exit `0`                                     |
+| `plan-consent` на V2        | `HOST_SMOKE_OPENCODE_VERSION=v2 mise run smoke plan-consent`                                | **ПРОЙДЕНО**, 2 шага, 9.6s, exit `0`                                     |
+| behavioral parity           | `mise run smoke plan-consent`                                                               | 2/2 **ПРОЙДЕНО** (V1 1.6m, V2 10.2s), parity `pass`, exit `0`            |
+| накопленный subset на V1    | `HOST_SMOKE_OPENCODE_VERSION=v1 mise run smoke plugin-loads create no-session plan-consent` | 4/4 **ПРОЙДЕНО**, exit `0`                                               |
+| накопленный subset на V2    | `HOST_SMOKE_OPENCODE_VERSION=v2 mise run smoke plugin-loads create no-session plan-consent` | 4/4 **ПРОЙДЕНО**, exit `0`                                               |
+| migrated subset (оба хоста) | `mise run smoke plugin-loads create no-session plan-consent`                                | 8/8 **ПРОЙДЕНО** (четыре сценария × два хоста), exit `0`                 |
+| полный canonical registry   | `mise run smoke`                                                                            | 8/8 **ПРОЙДЕНО**, семь сценариев `not-run`/`pending-migration`, exit `4` |
+| structural parity           | `bun test smoke/`                                                                           | 164 pass, включая metadata, стратегии и assertion обоих host kind        |
+
 ### Ошибка модели против ошибки host/plugin
 
 Живой прогон может провалиться из-за того, что модель не выполнила инструкцию, и это **не**

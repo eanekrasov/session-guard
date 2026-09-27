@@ -13,6 +13,7 @@ import type {
   BlockedReason,
   FailureKind,
   MigratedScenarioDefinition,
+  NormalizedInteraction,
   NormalizedToolCall,
   PromptResult,
   ScenarioResult,
@@ -25,6 +26,24 @@ import { logEvent } from './log.ts';
 export interface RunnerOptions {
   /** Attempts a step that declared `read-only` + `same-session` may take. Defaults to one. */
   attempts?: number;
+  /** How long `poll-state` may keep reading the durable store before giving up. */
+  pollBudgetMs?: number;
+  /** How often `poll-state` reads it. */
+  pollIntervalMs?: number;
+}
+
+export const DEFAULT_POLL_BUDGET_MS = 5_000;
+export const DEFAULT_POLL_INTERVAL_MS = 500;
+
+/**
+ * How long a `poll-state` step may wait for the durable outcome, from the environment. An
+ * unusable value falls back to the default rather than waiting forever on a typo.
+ */
+export function statePollBudgetMs(env: Record<string, string | undefined> = process.env): number {
+  const raw = env.HOST_SMOKE_STATE_POLL_MS;
+  if (raw === undefined || raw.trim() === '') return DEFAULT_POLL_BUDGET_MS;
+  const value = Number(raw);
+  return Number.isFinite(value) && value > 0 ? value : DEFAULT_POLL_BUDGET_MS;
 }
 
 interface StepOutcome {
@@ -70,13 +89,40 @@ function messageOf(error: unknown): string {
  * How many times one step may be prompted.
  *
  * Only a read-only step that declared `same-session` may repeat: a mutating instruction is
- * never sent twice into the same stateful session, whatever the step declared. The remaining
- * strategies (`poll-state`, `new-session`) are not implemented in this stage, and a registry
- * that declares one is rejected before any host starts.
+ * never sent twice into the same stateful session, whatever the step declared. `poll-state`
+ * never re-prompts at all — it reads the durable outcome instead (see `pollOutcome`) — and a
+ * registry that declares `new-session` is rejected before any host starts.
  */
 function plannedAttempts(step: ScenarioStep, options: RunnerOptions): number {
   if (step.retry !== 'same-session' || step.mutation !== 'read-only') return 1;
   return Math.max(1, options.attempts ?? 1);
+}
+
+/**
+ * Wait for a mutating step's durable outcome without ever repeating its instruction.
+ *
+ * `poll-state` is the recovery the contract prescribes when the operation may already have
+ * happened: the prompt is sent once, and only the plugin's own store is read until its deadline.
+ * Returns the observation that satisfied the expectation, or nothing if it never did.
+ */
+async function pollOutcome(
+  host: SmokeHost,
+  session: SmokeSession,
+  step: ScenarioStep,
+  last: PromptResult | undefined,
+  options: RunnerOptions
+): Promise<PromptResult | undefined> {
+  const deadline = Date.now() + Math.max(0, options.pollBudgetMs ?? DEFAULT_POLL_BUDGET_MS);
+  const interval = Math.max(1, options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS);
+  for (;;) {
+    const reading = await readDurable(host, session);
+    if (reading.outcome === 'present') {
+      const observation = observationFromState(last, '', reading.state);
+      if (step.expect(observation) === true) return observation;
+    }
+    if (Date.now() >= deadline) return undefined;
+    await new Promise((resolve) => setTimeout(resolve, interval));
+  }
 }
 
 function durableLabel(reading: DurableReading): string {
@@ -185,33 +231,59 @@ async function runStep(
     }
   }
 
-  // None of these attempts says what the instruction did, so the durable state is observed
-  // first: an expectation the persisted state already satisfies is the outcome, and nothing
-  // about it is guessed.
+  // Neither a timed-out turn nor a thrown prompt says what the instruction did, so the
+  // durable state is observed first: an expectation the persisted state already satisfies is
+  // the outcome, and nothing about it is guessed.
   const running = timedOut || thrown !== undefined;
   const unprovable = running || failedTurn;
-  const reading = await readDurable(host, session);
+  let reading = await readDurable(host, session);
   let freshRead = '';
+  const satisfied =
+    step.mutation === 'mutating' && unprovable && reading.outcome === 'present'
+      ? observationFromState(last, thrown ?? '', reading.state)
+      : undefined;
+  if (satisfied !== undefined && step.expect(satisfied) === true) {
+    return {
+      ok: true,
+      attempts: made,
+      evidence: '',
+      last: satisfied,
+      observed,
+      note: [
+        ...unmet,
+        thrown !== undefined
+          ? 'промпт не вернулся, исход подтверждён сохранённым состоянием'
+          : timedOut
+            ? 'ход хоста не завершился за бюджет промпта, исход подтверждён сохранённым состоянием'
+            : 'ход хоста вернулся с ошибкой, исход подтверждён сохранённым состоянием',
+      ].join('; '),
+    };
+  }
   if (step.mutation === 'mutating' && unprovable && reading.outcome === 'present') {
-    const fromState = observationFromState(last, thrown ?? '', reading.state);
-    if (step.expect(fromState) === true) {
+    freshRead = 'свежее чтение состояния ожидание не подтвердило';
+  }
+
+  // `poll-state` is the last chance for a mutating step: the instruction stays sent once, and
+  // only the durable store is read until its deadline.
+  if (step.retry === 'poll-state') {
+    const polled = await pollOutcome(host, session, step, last, options);
+    if (polled !== undefined) {
       return {
         ok: true,
         attempts: made,
         evidence: '',
-        last: fromState,
+        last: polled,
         observed,
         note: [
           ...unmet,
-          thrown !== undefined
-            ? 'промпт не вернулся, исход подтверждён сохранённым состоянием'
-            : timedOut
-              ? 'ход хоста не завершился за бюджет промпта, исход подтверждён сохранённым состоянием'
-              : 'ход хоста вернулся с ошибкой, исход подтверждён сохранённым состоянием',
+          `исход подтверждён состоянием после ожидания (retry=poll-state, повтор промпта не отправлялся)`,
         ].join('; '),
       };
     }
-    freshRead = 'свежее чтение состояния ожидание не подтвердило';
+    freshRead = `${freshRead === '' ? '' : `${freshRead}; `}poll-state не подтвердил ожидание за ${
+      options.pollBudgetMs ?? DEFAULT_POLL_BUDGET_MS
+    } мс`;
+    reading = await readDurable(host, session);
   }
 
   const blockedReason = unprovenMutation(step, reading, { running, failedTurn });
@@ -223,6 +295,7 @@ async function runStep(
     // Which side failed is part of the evidence: a model that never completed a plugin call
     // is not a host defect, and the transcript alone would leave that to guesswork.
     ...(blockedReason === undefined ? [failureClassLine(failureKindOf(observed), observed)] : []),
+    describeInteractions(last?.interactions),
     `hostKind=${host.kind} mutation=${step.mutation} retry=${step.retry}`,
     `durableMutation=${durableLabel(reading)}`,
     timedOut ? 'ход хоста не завершился за бюджет промпта' : '',
@@ -251,8 +324,20 @@ function passEvidence(
     `шагов: ${definition.steps.length}, попыток: ${attempts}`,
     `turn=${last?.turn.status ?? 'unknown'}`,
     describeToolCalls(last?.turn.toolCalls ?? []),
+    describeInteractions(last?.interactions),
     `stage=${last?.workflowState?.currentStage ?? '(none)'}`,
   ].join('; ');
+}
+
+/** The operator interactions a turn answered, which is what proves consent went through. */
+function describeInteractions(interactions: NormalizedInteraction[] | undefined): string {
+  if (interactions === undefined || interactions.length === 0) return 'interactions=[]';
+  return `interactions=[${interactions
+    .map(
+      (entry) =>
+        `${entry.kind}:${entry.isConsent ? 'consent:' : ''}${entry.decision} «${entry.label}»`
+    )
+    .join(', ')}]`;
 }
 
 function describeToolCalls(toolCalls: NormalizedToolCall[]): string {

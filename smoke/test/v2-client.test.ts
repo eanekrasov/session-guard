@@ -170,6 +170,27 @@ describe('the operator answer for one form', () => {
     expect(plan.answer).toEqual({ decision: ['provider-granted'] });
   });
 
+  test('records which label carried the decision, so the caller can report what was sent', () => {
+    const plan = planFormAnswer(
+      {
+        title: '<consent-request type="plan">approve?</consent-request>',
+        fields: [stringField('decision', GRANT_DECLINE)],
+      },
+      'grant'
+    );
+
+    expect(plan.choices).toEqual([
+      {
+        key: 'decision',
+        decision: 'grant',
+        label: 'grant',
+        offered: ['grant', 'decline'],
+      },
+    ]);
+    // The value sent to the host is the one behind the chosen label, not the label itself.
+    expect(plan.answer).toEqual({ decision: 'provider-granted' });
+  });
+
   test('answers a boolean field with its default, and records a free-text answer', () => {
     const plan = planFormAnswer(
       {

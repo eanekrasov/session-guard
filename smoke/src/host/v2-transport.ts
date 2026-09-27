@@ -102,7 +102,7 @@ export function createSessionClientTransport(
         `say request: session=${session.id} instruction.length=${input.text.length}`
       );
       try {
-        await client.prompt(session.id, input.text);
+        await client.prompt(session.id, input.text, input.decision ?? 'grant');
       } catch (caught) {
         if (!(caught instanceof PromptTimeoutError)) throw caught;
         timedOut = true;
@@ -128,6 +128,14 @@ export function createSessionClientTransport(
           error,
           ...(pendingInteraction ? { pendingInteraction: true } : {}),
           notes: [...notes, ...client.offScript()],
+          interactions: client.answeredForms().map((form) => ({
+            kind: 'form' as const,
+            id: form.id,
+            isConsent: form.consent,
+            decision: form.decision,
+            label: form.label,
+            offered: form.offered,
+          })),
         },
         await readNormalizedWorkflowState(host, session.id),
         // This strategy holds a live `Host`, so the evidence really comes from one.

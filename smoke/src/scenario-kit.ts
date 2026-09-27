@@ -80,10 +80,15 @@ export function isConsentQuestion(request: { questions?: Array<{ question?: stri
 export function answerQuestions(
   host: Host,
   choose: 'grant' | 'decline'
-): { stop: () => void; offScript: () => string[] } {
+): {
+  stop: () => void;
+  offScript: () => string[];
+  answered: () => AnsweredQuestion[];
+} {
   let stopped = false;
   const seen = new Set<string>();
   const offScript: string[] = [];
+  const answered: AnsweredQuestion[] = [];
 
   const loop = async (): Promise<void> => {
     while (!stopped) {
@@ -99,17 +104,28 @@ export function answerQuestions(
             logEvent(`  question: ${JSON.stringify(request).slice(0, 400)}`, 'yellow', 'question');
           }
           const consent = isConsentQuestion(request);
+          const labels: string[] = [];
           const answers = (request.questions ?? [{}]).map((question) => {
-            const labels = (question.options ?? []).map((option) =>
+            const options = (question.options ?? []).map((option) =>
               typeof option === 'string' ? option : (option.label ?? '')
             );
-            const choice = chooseLabel(labels, choose, consent);
+            labels.push(...options);
+            const choice = chooseLabel(options, choose, consent);
             if (!consent) {
               const text = (question.question ?? '').replace(/\s+/gu, ' ').slice(0, 160);
               offScript.push(
                 `${choice.refusal ? 'отказано' : 'дан ответ единственным предложенным вариантом'}: "${text}"`
               );
             }
+            // The answer the host will actually receive, so a caller can report what was sent.
+            answered.push({
+              id: request.id,
+              kind: 'question',
+              decision: choose,
+              label: choice.label,
+              offered: options,
+              consent,
+            });
             return [choice.label];
           });
           await api(host, 'POST', `/question/${request.id}/reply`, { answers });
@@ -121,7 +137,24 @@ export function answerQuestions(
     }
   };
   void loop();
-  return { stop: () => (stopped = true), offScript: () => [...offScript] };
+  return {
+    stop: () => (stopped = true),
+    offScript: () => [...offScript],
+    answered: () => [...answered],
+  };
+}
+
+/** One question the operator answered, in the host's own terms. */
+export interface AnsweredQuestion {
+  id: string;
+  kind: 'question';
+  decision: 'grant' | 'decline';
+  /** The label that was sent back. */
+  label: string;
+  /** Labels the host offered. */
+  offered: string[];
+  /** Whether the question carried the plugin's consent tag. */
+  consent: boolean;
 }
 
 export const SESSION_LOG = join(REPO_ROOT, '.memory/session.log');
