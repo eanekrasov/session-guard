@@ -4,8 +4,8 @@
 
 Stop the host smoke suite from living half in `scripts/` and half in the plugin's
 `test/` tree. `smoke/` becomes a small project with its own runner, fixtures,
-README/AGENTS and tests next to the code, so `scripts/` is build tooling again and
-`test/` holds only the plugin's tests.
+README/AGENTS, sources (`smoke/src/`) and tests (`smoke/test/`), so `scripts/` is build
+tooling again and `test/` holds only the plugin's tests.
 
 ## Problem
 
@@ -22,8 +22,9 @@ README/AGENTS and tests next to the code, so `scripts/` is build tooling again a
 
 ## Scope
 
-- `git mv scripts/host-smoke/ smoke/` — runner, harness, operator, report, V2
-  client/scenarios, `jsmin.d.ts`, fixture profiles, README, AGENTS.
+- `git mv scripts/host-smoke/ smoke/`, then the sources into `smoke/src/` — runner, harness,
+  operator, report, V2 client/scenarios, `jsmin.d.ts` — with fixture profiles, README and
+  AGENTS at the suite root.
 - `git mv test/app/host-smoke-<name>.test.ts smoke/test/<name>.test.ts` — the
   `host-smoke-` prefix is dropped; the root carries the context now.
 - Path fixes: `REPO_ROOT`, `SESSION_LOG`, the `commit-task.ts` fixture copy, the
@@ -65,12 +66,13 @@ README/AGENTS and tests next to the code, so `scripts/` is build tooling again a
 - `SR-004`: Update the docs that name the old location.
 - `SR-005`: Freeze the boundary with an eslint rule against importing `src/**`.
 - `SR-006`: Prove the move: type coverage, tests, lint, one live scenario.
+- `SR-007`: Put the suite's sources in `smoke/src/` once the root `src` invariant is stated.
 
 ## Acceptance Criteria
 
 1. `scripts/` contains only build tooling and `commit-task.ts`.
 2. `test/` contains no suite tests; `smoke/test/` contains the five.
-3. `bunx tsc --noEmit --listFiles` lists every file under `smoke/`.
+3. `bunx tsc --noEmit --listFiles` lists every file under `smoke/src/` and `smoke/test/`.
 4. `bun test smoke/` runs the suite's tests alone.
 5. `mise run smoke <id>` still drives a live host, including the `commit-task.ts`
    fixture copy and the report write.
@@ -95,9 +97,11 @@ README/AGENTS and tests next to the code, so `scripts/` is build tooling again a
       `no-console` override.
 - [x] `SR-004` root `AGENTS.md` context map, `smoke/README.md` layout and the two
       root fixtures, `smoke/AGENTS.md`.
-- [x] `SR-005` `no-restricted-imports` over `smoke/**/*.ts` rejects `../src/*`,
-      `../../src/*` and `@eanekrasov/session-guard`; proven both ways (probe fails,
-      `eslint smoke/` clean).
+- [x] `SR-005` `no-restricted-imports` forbids leaving the suite — any import that
+      climbs above `smoke/`, and the package by name — with one block per depth
+      (`smoke/src/**`, `smoke/test/**`); proven both ways with a probe in each.
+- [x] `SR-007` sources moved to `smoke/src/`; `import.meta.dir` depths fixed in
+      `harness.ts` (`REPO_ROOT`, profile fallback) and test imports read `../src/`.
 - [x] `SR-006` type coverage verified with `--listFiles` (12 files), `bun test smoke/`
       (44 pass), `mise run check` (1902 tests, 0 fail).
 
@@ -110,9 +114,16 @@ scripts/host-smoke/*.ts` returned nothing, so the refactor declares a boundary
   `test/schema/guard-facts-exist.test.ts` validates the fixture profiles of
   `smoke/profile` (they are real schemas with guards). It keeps reaching in, with
   the path updated and the reason written where the path is.
-- `src/` inside the suite was rejected: in this repo `src` means "compiled into
-  `dist/`" (build globs, published declarations, the `paths` mapping). A second
-  `src` that is never built would give the word two meanings.
+- `src/` inside the suite: first rejected, then accepted once the invariant was
+  stated properly — only the **root** `src/` means "compiled into `dist/`", and that
+  meaning is anchored at the root (build globs `src/**/*`, `tsconfig.paths` ->
+  `./src/index.ts`, published declarations). A nested `smoke/src/` cannot collide with
+  those, so it costs nothing and reads as a normal project. Verified before moving:
+  no glob outside `smoke/**` matches a nested `src/`.
+- The boundary rule was rewritten after it caught itself: a literal `../src/*` bans
+  the suite's *own* sources from its tests once they live in `smoke/src/`. It now bans
+  leaving `smoke/` (one block per depth) plus the package name, which is what the
+  boundary actually means.
 - Commit split: the move is one atomic commit (code alone would leave the tests
   importing a directory that no longer exists); the eslint boundary rule is a
   second, so it can be dropped independently; this record is the third.
