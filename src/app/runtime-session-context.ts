@@ -45,7 +45,27 @@ export class RuntimeSessionContextImpl implements RuntimeSessionContext {
     }
   }
 
+  /**
+   * Привести имя инструмента к тому, под которым его знает workflow.
+   *
+   * Хосты называют одну и ту же возможность по-разному: V1 присылает субагентский диспатч
+   * как `task`, а V2 — как `subagent`; V1 присылает команду оболочки как `bash`, а V2 — как
+   * `shell`; патч V1 называет `apply_patch`, а V2 — `patch`. Гарды, инварианты (в том числе
+   * `changedFiles`) и разбор `<workflow-result>` написаны против одной возможности, поэтому оба
+   * имени нормализуются в одно: иначе на V2 субагент выполняет работу и сообщает вердикт, а
+   * плагин не записывает ни его файлов, ни гейтов, ни завершения задачи, команда оболочки
+   * проходит мимо правил, привязанных к `bash`, а патч — мимо правил и инвариантов,
+   * привязанных к `apply_patch`.
+   */
   normalizeTool(tool: string): string {
-    return tool.toLowerCase();
+    const normalized = tool.toLowerCase();
+    return TOOL_ALIASES[normalized] ?? normalized;
   }
 }
+
+/** Имена одной и той же возможности у разных версий хоста. */
+const TOOL_ALIASES: Record<string, string> = {
+  subagent: 'task',
+  shell: 'bash',
+  patch: 'apply_patch',
+};

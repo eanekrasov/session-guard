@@ -202,6 +202,74 @@ describe('normalizing a host payload into the shared smoke model', () => {
     expect(sharedToolName('task')).toBe('task');
   });
 
+  test('reads the plugin refusal marker the host reported for a tool call', () => {
+    // A refused task mutation is a successful result carrying the plugin's own marker; the
+    // sentence is what a host that drops that metadata leaves behind.
+    expect(
+      normalizeLegacyPart({
+        type: 'tool',
+        tool: 'workflow-tasks-set-status',
+        state: {
+          status: 'completed',
+          output:
+            'workflow-tasks-set-status is refused: workflow task state is controlled by [orchestrator]',
+          metadata: { refused: true, tool: 'workflow-tasks-set-status', agent: 'coder' },
+        },
+      })
+    ).toEqual({
+      kind: 'tool',
+      tool: 'workflow-tasks-set-status',
+      status: 'completed',
+      refused: true,
+      output:
+        'workflow-tasks-set-status is refused: workflow task state is controlled by [orchestrator]',
+    });
+    // A refusal without the marker stays unflagged: the scenario may match the sentence itself.
+    expect(
+      normalizeLegacyPart({
+        type: 'tool',
+        tool: 'workflow-tasks-set-status',
+        state: { status: 'completed', output: 'workflow-tasks-set-status is refused: …' },
+      })
+    ).toEqual({
+      kind: 'tool',
+      tool: 'workflow-tasks-set-status',
+      status: 'completed',
+      output: 'workflow-tasks-set-status is refused: …',
+    });
+  });
+
+  test('narrows changed files and loop runs from the durable payload', () => {
+    expect(
+      normalizeWorkflowState('ses-1', {
+        currentStage: 'execution',
+        changedFiles: ['src/smoke-1.ts', 42],
+        loopRuns: {
+          'run-1': {
+            taskId: 'task-0',
+            stage: 'verify',
+            status: 'running',
+            gates: { code: 'passed', review: 'pending', noisy: 7 },
+          },
+        },
+      })
+    ).toEqual({
+      sessionId: 'ses-1',
+      status: 'running',
+      currentStage: 'execution',
+      changedFiles: ['src/smoke-1.ts'],
+      runs: [
+        {
+          taskId: 'task-0',
+          stage: 'verify',
+          status: 'running',
+          gates: { code: 'passed', review: 'pending' },
+        },
+      ],
+      durableMutation: 'applied',
+    });
+  });
+
   test('infers a call outcome when the host reported only its result', () => {
     expect(toolCallsFromParts([{ kind: 'tool', tool: 'bash', output: 'ok' }])).toEqual([
       { name: 'bash', status: 'completed', output: 'ok' },
@@ -554,6 +622,7 @@ describe('the V2 transport strategy', () => {
       prompt: async () => {},
       removeSession: async () => {},
       listMessages: async () => [],
+      switchAgent: async () => {},
       answeredForms: () => [],
       offScript: () => [],
       ...overrides,
@@ -624,8 +693,14 @@ describe('the V2 transport strategy', () => {
     expect(result.turn.transcript).toContain('хост всё ещё ожидает 1 форм');
   });
 
-  test('carries off-script operator answers and a per-session-only agent into evidence', async () => {
-    const client = fakeClient({ offScript: () => ['answered the free-text question "note"'] });
+  test('switches the session agent for a step that names another one', async () => {
+    const switched: string[] = [];
+    const client: V2SmokeClient = {
+      ...fakeClient({ offScript: () => ['answered the free-text question "note"'] }),
+      switchAgent: async (_id: string, agent: string) => {
+        switched.push(agent);
+      },
+    };
     const transport = createSessionClientTransport(
       fakeHost(),
       { agent: 'orchestrator' },
@@ -638,7 +713,9 @@ describe('the V2 transport strategy', () => {
     );
 
     expect(result.turn.transcript).toContain('answered the free-text question "note"');
-    expect(result.turn.transcript).toContain('V2 переключает агента один раз');
+    // V2 keeps the agent on the session, so a worker step is switched to before its prompt.
+    expect(switched).toEqual(['reviewer']);
+    expect(result.turn.transcript).toContain('агент сессии переключён на «reviewer»');
   });
 
   test('orders messages by host timestamps when picking the last turn', () => {
@@ -808,6 +885,7 @@ describe('the interaction the facade answered', () => {
       },
       removeSession: async () => {},
       listMessages: async () => [],
+      switchAgent: async () => {},
       answeredForms: () => [
         {
           id: 'form-1',

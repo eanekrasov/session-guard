@@ -33,6 +33,8 @@ export type NormalizedPart =
        * command that ran instead of matching the model's prose.
        */
       command?: string;
+      /** The plugin's structured refusal marker, when the host reported one. */
+      refused?: boolean;
       output?: string;
       error?: string;
     }
@@ -44,6 +46,12 @@ export interface NormalizedToolCall {
   status: 'pending' | 'completed' | 'failed' | 'unknown';
   /** The shell command this call ran, when the host reported one. */
   command?: string;
+  /**
+   * The plugin's own structured refusal marker for this call (`metadata.refused`), when the
+   * host reported one. A refusal is a *successful* tool result carrying this marker, so a
+   * scenario can prove a guard rejected an action instead of matching the refusal prose.
+   */
+  refused?: boolean;
   output?: string;
   error?: string;
 }
@@ -64,14 +72,31 @@ export interface SmokeWorkflowState {
    * progress with this instead of matching prose the model produced.
    */
   currentStage?: string;
-  /** Persisted task lists by list key (`implementation`, `test_suite`, ...). */
-  tasks?: Record<string, Array<{ status?: string }>>;
+  /**
+   * Persisted task lists by list key (`implementation`, `test_suite`, ...). The id is kept
+   * because a dispatch names its task (`[workflow-task:task-0]`), so evidence and assertions
+   * are about a named task rather than about whichever entry happens to be first.
+   */
+  tasks?: Record<string, Array<{ id?: string; status?: string }>>;
   /**
    * Document references the plugin recorded, keyed by consent name (`plan`, `deploy`, ...).
    * This is what proves a consent was applied: the answer itself is a host interaction, while
    * `refs.plan` is the workflow's own durable record of it.
    */
   refs?: Record<string, string>;
+  /** Files the core recorded as changed inside a task's write scope. */
+  changedFiles?: string[];
+  /**
+   * Task runs, as the plugin's loop engine tracks them: which task, which sub-stage it is on,
+   * and the gates settled for it. A verification loop is proven by these, not by the model's
+   * account of it.
+   */
+  runs?: Array<{
+    taskId?: string;
+    stage?: string;
+    status?: string;
+    gates?: Record<string, string>;
+  }>;
   operationId?: string;
   operationStatus?: 'pending' | 'completed' | 'failed' | 'unknown';
   /**
@@ -143,6 +168,18 @@ export interface ScenarioStep {
   instruction: string;
   mutation: 'read-only' | 'mutating';
   retry: RetryStrategy;
+  /**
+   * The agent this step runs as, when it differs from the scenario's own. V1 carries the agent
+   * on the message; V2 switches the session to it, so both hosts can run, say, a worker attempt
+   * that the task guard must refuse.
+   */
+  agent?: string;
+  /**
+   * How long this step's durable outcome may take to appear, for `poll-state`. A step whose
+   * instruction dispatches a subagent is minutes of work behind the prompt, so the run's default
+   * budget is not enough for it; the step says what it needs instead of the whole run waiting.
+   */
+  stateBudgetMs?: number;
   expect: (result: PromptResult) => true | string;
 }
 

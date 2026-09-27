@@ -22,6 +22,11 @@ export interface V2SmokeClient {
    * narrows them into the shared turn parts; this client never interprets them.
    */
   listMessages(sessionId: string): Promise<unknown[]>;
+  /**
+   * Switch the agent this session runs as. V2 carries the agent on the session, so a step that
+   * must run as another agent — a worker the task guard refuses — needs this between prompts.
+   */
+  switchAgent(sessionId: string, agent: string): Promise<void>;
   /** Forms this client answered, in the order it answered them. */
   answeredForms(): AnsweredForm[];
   /** Ответы на вопросы, которые сценарий не задавал, по порядку. */
@@ -353,6 +358,10 @@ export function createV2SmokeClient(host: Host, options: V2SmokeClientOptions = 
     async listMessages(sessionId: string): Promise<unknown[]> {
       const response = await client.message.list({ sessionID: sessionId });
       return response?.data ?? [];
+    },
+
+    async switchAgent(sessionId: string, agent: string): Promise<void> {
+      await client.session.switchAgent({ sessionID: sessionId, agent });
     },
 
     answeredForms: () => [...answeredForms],

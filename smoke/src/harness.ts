@@ -11,6 +11,8 @@
  * из `auth.json` копируются — именно они делают модель живой.
  */
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { createServer } from 'node:net';
+import type { AddressInfo } from 'node:net';
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { closeSync, existsSync, mkdtempSync, openSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
@@ -112,8 +114,7 @@ async function waitForServerPassword(
 
 export interface Host {
   /** Базовый URL запущенного сервера opencode. */
-  url: string;
-  /** Директория временного проекта, в которой был запущен opencode. */
+  url: string; /** Директория временного проекта, в которой был запущен opencode. */
   workDir: string;
   /** Всё, что записал хост — конфиг, данные, сессии. */
   homeDir: string;
@@ -127,6 +128,56 @@ export interface Host {
   stop: () => Promise<void>;
   /** stdout+stderr сервера для диагностики сценария, который не выполнился. */
   logs: () => string;
+}
+
+/**
+ * Кеш изолированного хоста.
+ *
+ * Хост на старте добирает в кеш свои зависимости и без прогретого кеша делает это в сеть при
+ * каждом запуске, задерживая первую сессию. Кеш не содержит состояния прогона и не является
+ * секретом, поэтому он живёт в `.memory/` (каталог исключён из Git) и переиспользуется между
+ * прогонами: первый старт его наполняет, последующие читают. Каталоги данных и состояния при
+ * этом остаются одноразовыми — сессии, плагинные артефакты и база не протекают между прогонами.
+ */
+/**
+ * Свободный локальный порт для хоста.
+ *
+ * `--port 0` в этом билде opencode означает не «любой свободный», а порт по умолчанию (4096):
+ * два прогона подряд или осиротевший после убийства хоста процесс начинают отвечать чужой
+ * сессией, и smoke-клиент ждёт хост, который занят другим прогоном. Поэтому порт выбираем сами.
+ */
+export async function freePort(): Promise<number> {
+  const probe = createServer();
+  await new Promise<void>((resolve) => probe.listen(0, '127.0.0.1', resolve));
+  const address = probe.address() as AddressInfo;
+  await new Promise<void>((resolve) => probe.close(() => resolve()));
+  return address.port;
+}
+
+/**
+ * Кеш npm для установки зависимостей плагина в изолированном хосте.
+ *
+ * Живёт рядом с кешем хоста, вне одноразового дерева прогона: первый старт наполняет его,
+ * последующие читают, и установка перестаёт ходить в сеть на каждом запуске.
+ */
+/**
+ * Каталог конфигурации изолированного хоста.
+ *
+ * Рядом с конфигом хост ставит зависимости, нужные для загрузки плагинов
+ * (`<config>/opencode/node_modules`, около 60 МБ). Каталог конфигурации одноразовым не делаем:
+ * иначе эти зависимости скачиваются заново на каждом старте и задерживают первую сессию.
+ * Сами конфигурационные файлы прогон перезаписывает, поэтому чужого состояния здесь нет.
+ */
+export function smokeConfigDir(): string {
+  return join(REPO_ROOT, '.memory', 'opencode-config');
+}
+
+export function smokeNpmCacheDir(): string {
+  return join(REPO_ROOT, '.memory', 'opencode-npm-cache');
+}
+
+export function smokeCacheDir(): string {
+  return join(REPO_ROOT, '.memory', 'opencode-cache');
 }
 
 export interface HostOptions {
@@ -144,8 +195,29 @@ export interface HostOptions {
   env?: Record<string, string>;
 }
 
-export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error';
+/**
+ * Окружение, которое наследует изолированный хост.
+ *
+ * Операторская конфигурация и её переключатели приезжают в прогон вместе с окружением: хост
+ * умеет читать конфиг по явному пути (`OPENCODE_CONFIG`, `OPENCODE_CONFIG_DIR`), а его bootstrap
+ * ставит из npm плагины, объявленные в чужом конфиге, и загружает их в прогон — изоляция
+ * заканчивается, и старт каждой сессии уходит в сеть на минуты. Поэтому всё, что относится к
+ * OpenCode и OpenChamber, из наследства вырезается целиком, а нужные прогону значения harness
+ * выставляет сам. Остальное окружение сохраняется: PATH, сертификаты, прокси модели и ключи
+ * провайдера, на которые ссылается конфиг, — без них не будет живой модели.
+ */
+export function isolatedEnvironment(
+  base: Record<string, string | undefined>
+): Record<string, string | undefined> {
+  const inherited: Record<string, string | undefined> = {};
+  for (const [name, value] of Object.entries(base)) {
+    if (name.startsWith('OPENCODE_') || name.startsWith('OPENCHAMBER_')) continue;
+    inherited[name] = value;
+  }
+  return inherited;
+}
 
+export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error';
 const LOG_LEVELS: Record<LogLevel, number> = {
   trace: -1,
   debug: 0,
@@ -260,10 +332,15 @@ function run(cmd: string, args: string[], cwd: string): string {
  * (`file://<...>/dist`), поэтому прогон загружает плагин так же, как настоящая установка.
  * Упакованный `.tgz` *не* используется: хост не загружает его из spec `file://`,
  * что само по себе полезно знать, прежде чем кто-либо начнёт поставлять плагин таким образом.
+ *
+ * Сборка идёт **без** зависимостей задачи (`--skip-deps`): сама `build` ничего не ставит, а её
+ * зависимость `setup` выполняет `hk install` и `bun install` — то есть каждый прогон заново
+ * ходил бы в реестр за пакетами, которые уже лежат в `node_modules`. На чистом checkout-е
+ * сборка тогда падает заметно (нет зависимостей), а не подтягивает их молча.
  */
 export function buildPlugin(): string {
   log('info', 'сборка плагина для host smoke');
-  run('mise', ['run', 'build'], REPO_ROOT);
+  run('mise', ['run', '--skip-deps', 'build'], REPO_ROOT);
   const pluginPath = join(REPO_ROOT, 'dist');
   log('info', `собранный плагин готов: ${pluginPath}`);
   return pluginPath;
@@ -271,7 +348,9 @@ export function buildPlugin(): string {
 
 /** Собрать и упаковать плагин в tarball. Сохранён для проверок упаковки. */
 export function packPlugin(): string {
-  run('mise', ['run', 'build'], REPO_ROOT);
+  // Тот же запрет на установку зависимостей, что и у `buildPlugin`: пакеты уже на месте,
+  // а `setup` в реестр ходить не должен.
+  run('mise', ['run', '--skip-deps', 'build'], REPO_ROOT);
   const destination = mkdtempSync(join(tmpdir(), 'host-smoke-pack-'));
   try {
     const out = run('bun', ['pm', 'pack', '--destination', destination], REPO_ROOT);
@@ -575,7 +654,10 @@ export async function startHost(options: HostOptions): Promise<Host> {
   const root = await mkdtemp(join(tmpdir(), 'host-smoke-'));
   const homeDir = join(root, 'home');
   const workDir = join(root, 'work');
-  const configDir = join(homeDir, 'config');
+  // Каталог конфигурации постоянный: рядом с конфигом хост ставит зависимости для загрузки
+  // плагинов, и при одноразовом каталоге они скачивались заново на каждом старте. Сам файл
+  // конфига прогон перезаписывает, поэтому чужого состояния здесь не остаётся.
+  const configDir = smokeConfigDir();
   const dataDir = join(homeDir, 'data');
   let stop: (() => Promise<void>) | undefined;
   try {
@@ -647,38 +729,62 @@ export async function startHost(options: HostOptions): Promise<Host> {
       run('git', ['commit', '-q', '-m', 'seed'], workDir);
     }
 
+    await mkdir(smokeCacheDir(), { recursive: true });
+    await mkdir(smokeNpmCacheDir(), { recursive: true });
+    await mkdir(smokeConfigDir(), { recursive: true });
+
     const env = {
-      ...process.env,
+      ...isolatedEnvironment(process.env),
       ...(options.env ?? {}),
       HOME: homeDir,
-      XDG_CONFIG_HOME: configDir,
+      XDG_CONFIG_HOME: smokeConfigDir(),
       XDG_DATA_HOME: dataDir,
       XDG_STATE_HOME: join(homeDir, 'state'),
-      XDG_CACHE_HOME: join(homeDir, 'cache'),
+      XDG_CACHE_HOME: smokeCacheDir(),
       OPENCODE_DISABLE_AUTOUPDATE: '1',
+      // Хост ставит зависимости плагина своим npm-инсталлятором. Кеш npm по умолчанию лежит в
+      // $HOME, а дом у прогона одноразовый, поэтому установка повторялась каждый старт и уходила
+      // в сеть перед первой сессией. Кеш пакетов — это кеш: держим его вне временного дерева.
+      npm_config_cache: smokeNpmCacheDir(),
+      NPM_CONFIG_CACHE: smokeNpmCacheDir(),
+      // The host resolves its own dependencies from the checkout it already has instead of
+      // asking the registry on startup: an isolated host that blocks on registry.npmjs.org
+      // delays the first session by a minute or more, and the resolution result is the same.
+      NODE_PATH: join(REPO_ROOT, 'node_modules'),
+      // The model comes from the config this run writes, so the catalog fetch is not needed;
+      // without this the host blocks on models.opencode.ai before serving the first session.
+      OPENCODE_DISABLE_MODELS_FETCH: '1',
       // Путь согласования проходит через tool `question` хоста, который
       // сервер регистрирует только для интерактивных клиентов, если не установлена эта опция.
       OPENCODE_ENABLE_QUESTION_TOOL: '1',
     };
-    // Smoke-клиент общается с этим одноразовым сервером без заголовка auth.
-    // Не наследовать пароль сервера оператора в дочерний хост.
-    // @typescript-eslint/no-dynamic-delete
-    delete (env as Record<string, string | undefined>).OPENCODE_SERVER_PASSWORD;
-    log('debug', 'унаследованный пароль сервера удалён из окружения дочернего хоста');
 
     let buffer = '';
+    // Уровень лога хоста поднимается явно (HOST_SMOKE_HOST_LOG_LEVEL) для диагностики:
+    // на info причина ожидания на старте не видна.
+    const hostLogLevel = (process.env.HOST_SMOKE_HOST_LOG_LEVEL ?? 'info').toLowerCase();
+    const port = await freePort();
     const serveArgs =
       version === 'v2'
-        ? ['serve', '--hostname', '127.0.0.1', '--port', '0', '--print-logs', '--log-level', 'info']
+        ? [
+            'serve',
+            '--hostname',
+            '127.0.0.1',
+            '--port',
+            String(port),
+            '--print-logs',
+            '--log-level',
+            hostLogLevel,
+          ]
         : [
             'serve',
             '--hostname',
             '127.0.0.1',
             '--port',
-            '0',
+            String(port),
             '--print-logs',
             '--log-level',
-            'INFO',
+            hostLogLevel.toUpperCase(),
           ];
     log('debug', `запуск процесса ${binary} ${serveArgs.join(' ')}`);
     const child: ChildProcess = spawn(binary, serveArgs, {
@@ -686,8 +792,17 @@ export async function startHost(options: HostOptions): Promise<Host> {
       env,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
-    child.stdout?.on('data', (chunk) => (buffer += chunk));
-    child.stderr?.on('data', (chunk) => (buffer += chunk));
+    // Лог хоста собирается в buffer и при debug дублируется наружу: без этого причина
+    // ожидания на старте (что именно хост делает вместо ответа) не видна в отчёте.
+    const collect = (chunk: Buffer): void => {
+      buffer += chunk;
+      for (const line of chunk.toString('utf8').split('\n')) {
+        const text = line.trim();
+        if (text.length > 0) log('debug', `[host ${version}] ${text}`);
+      }
+    };
+    child.stdout?.on('data', collect);
+    child.stderr?.on('data', collect);
     // A process that cannot even be spawned emits `error` and never exits; without this the
     // run would wait for the listen timeout and blame the wrong thing.
     let spawnError: Error | undefined;
@@ -782,7 +897,9 @@ export async function startHost(options: HostOptions): Promise<Host> {
     };
   } catch (error) {
     if (stop) await stop();
-    else await rm(root, { recursive: true, force: true });
+    else {
+      await rm(root, { recursive: true, force: true });
+    }
     throw error;
   }
 }

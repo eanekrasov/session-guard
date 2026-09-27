@@ -86,21 +86,27 @@ export function extractFilePathsFromMessages(messages: Message[]): string[] {
  * и history extraction чтобы идентичные вызовы вносили идентичные пути обоими
  * способами:
  *
- * - read / edit / write -> filePath
+ * - read / edit / write -> filePath, затем path
  * - grep -> path only (pattern/include — search terms, не пути)
  * - glob -> directory из pattern, плюс явный path
  * - bash -> workdir
- * - apply_patch -> patchText (распарсенный для путей)
+ * - apply_patch / patch -> patchText (распарсенный для путей)
  * - неизвестные инструменты -> ничего
+ *
+ * Имена аргументов различаются у хостов так же, как имена инструментов: V1 присылает
+ * `filePath`, V2 — `path`. Читаются оба, иначе на V2 путь не извлекается, `paths`
+ * остаётся пустым, и допуск стадии отказывает в правке, которая на самом деле в
+ * объявленном скоупе: отказ приходит в форме «no entry covers this call».
  */
 const PATH_ARG_TOOLS: ReadonlyMap<string, readonly string[]> = new Map([
-  ['read', ['filePath']],
-  ['edit', ['filePath']],
-  ['write', ['filePath']],
+  ['read', ['filePath', 'path']],
+  ['edit', ['filePath', 'path']],
+  ['write', ['filePath', 'path']],
   ['glob', ['pattern', 'path']],
   ['grep', ['path']],
   ['bash', ['workdir']],
   ['apply_patch', ['patchText']],
+  ['patch', ['patchText']],
 ]);
 
 /**

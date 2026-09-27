@@ -14,8 +14,8 @@ import type {
   NormalizedToolCall,
   ScenarioDefinition,
   ScenarioStep,
+  SmokeWorkflowState,
 } from './host/types.ts';
-
 /** Which migration stage a scenario belongs to; the parity matrix is derived from it. */
 export type ScenarioStage =
   'stage-1-core' | 'stage-2-core' | 'consent' | 'task' | 'mutation' | 'pipeline';
@@ -63,11 +63,11 @@ const pluginLoadsStep: ScenarioStep = {
 const workflowCreateStep: ScenarioStep = {
   instruction:
     'Call the tool `workflow-create` with schemaId "smoke". Do nothing else and add no commentary.',
-  // Creating the session changes durable state, so it is never repeated in the same
-  // session: the runner keeps a single attempt and reports an unprovable outcome
-  // instead of a second mutation.
+  // Creating the session changes durable state, so its instruction is never repeated. The
+  // outcome is a session at `planning`, which the store shows, so `poll-state` waits for it
+  // instead of blocking on a turn that outlived the prompt budget.
   mutation: 'mutating',
-  retry: 'none',
+  retry: 'poll-state',
   expect: (result) => {
     const state = result.workflowState;
     if (state === null) return 'сессия workflow не сохранена';
@@ -75,6 +75,153 @@ const workflowCreateStep: ScenarioStep = {
     return stage === 'planning' || `стадия — ${stage}, ожидалась planning`;
   },
 };
+
+/** The one task list the smoke profile declares, with a single task the orchestrator owns. */
+/** How long one step may take to appear in the store, when the step does not say. */
+export const DEFAULT_STEP_STATE_BUDGET_MS = 5_000;
+
+/** The refusal sentence the plugin's task guard answers with, used only as a fallback. */
+const TASK_REFUSAL_SENTENCE = /is refused/i;
+
+/**
+ * The verdict a subagent is told to report for its stage, and the durable effect the scenario
+ * waits for.
+ *
+ * A step whose state does not move inside this budget is reported, not waited out: a durable
+ * store that stays `running` while the loop is not being driven says exactly that, and a longer
+ * budget only postpones the finding. The wait is short on purpose — what it must catch is the
+ * absence of progress, not the duration of a subagent's own turn.
+ */
+const SUBAGENT_STATE_BUDGET_MS = 20_000;
+
+/**
+ * Replacing the task list is a mutation of the workflow's own state; `poll-state` reads its
+ * outcome from that state instead of sending the instruction again. The write scope is the
+ * file the scenario's later steps work on, so each scenario declares its own.
+ */
+function taskSetStepFor(writeScope: string): ScenarioStep {
+  return {
+    instruction:
+      `Call the tool \`workflow-tasks-set\` with tasks [{"writeScope":["${writeScope}"],"status":"pending"}]. ` +
+      'Do nothing else.',
+    mutation: 'mutating',
+    retry: 'poll-state',
+    expect: (result) => {
+      const tasks = result.workflowState?.tasks?.implementation ?? [];
+      if (tasks.length !== 1) {
+        return `ожидался ровно один task в списке implementation, получено ${tasks.length}`;
+      }
+      const status = tasks[0]?.status;
+      return status === 'pending' || `статус task-0 — ${status ?? '(не задан)'}, ожидался pending`;
+    },
+  };
+}
+
+const taskSetStep = taskSetStepFor('src/a.ts');
+
+/**
+ * The worker attempt: it asks to change a task status while running as an agent the workflow
+ * does not let control tasks, so the guard must refuse it and the durable status must not move.
+ *
+ * The attempt is declared read-only on purpose: the guard makes it non-mutating by construction,
+ * and the step's verdict is the unchanged state, so a repeat after a model hiccup cannot change
+ * anything. The refusal itself is proven structurally when the host reports the plugin's
+ * `metadata.refused`; V2's tool wrapper drops that metadata, so its own refusal sentence is the
+ * documented fallback — the durable status is the primary proof on both hosts.
+ */
+const taskWorkerStep: ScenarioStep = {
+  instruction:
+    'Call the tool `workflow-tasks-set-status` with taskId "task-0" and status "completed". ' +
+    'Report the tool output verbatim.',
+  mutation: 'read-only',
+  retry: 'same-session',
+  agent: 'coder',
+  expect: (result) => {
+    const status = result.workflowState?.tasks?.implementation?.[0]?.status;
+    if (status !== 'pending') {
+      return `worker изменил статус задачи: task-0 = ${status ?? '(нет задачи)'}`;
+    }
+    const attempt = result.turn.toolCalls.find((call) => call.name === 'workflow-tasks-set-status');
+    if (attempt === undefined) {
+      return 'worker не вызывал `workflow-tasks-set-status`, поэтому отказ не наблюдался';
+    }
+    if (attempt.refused === true) return true;
+    if (TASK_REFUSAL_SENTENCE.test(attempt.output ?? '')) return true;
+    return `отказ не подтверждён: ${attempt.name}:${attempt.status} «${(attempt.output ?? '').slice(0, 120)}»`;
+  },
+};
+
+/**
+ * A subagent step: the orchestrator dispatches it with the task tool, the subagent does the
+ * work, and the verdict it reports is what moves the loop. Its outcome is durable state, so
+ * `poll-state` waits for it — a subagent's turn easily outlives the prompt budget, and the
+ * instruction is never repeated because the work it starts is a mutation.
+ */
+function subagentStep(options: {
+  type: string;
+  description: string;
+  task: string;
+  verdict?: string;
+  expect: (state: SmokeWorkflowState | null) => true | string;
+}): ScenarioStep {
+  const verdict =
+    options.verdict === undefined ? '' : ` and then finish with exactly ${options.verdict}`;
+  return {
+    instruction:
+      `Use the task tool with subagent_type "${options.type}" and description ` +
+      `"${options.description}", ${options.task}${verdict}`,
+    mutation: 'mutating',
+    retry: 'poll-state',
+    stateBudgetMs: SUBAGENT_STATE_BUDGET_MS,
+    expect: (result) => options.expect(result.workflowState),
+  };
+}
+
+const VERIFY_FILE = 'src/smoke-1.ts';
+
+const coderStep = subagentStep({
+  type: 'coder',
+  description: '[workflow-task:task-0] write the file',
+  task: `telling it to create ${VERIFY_FILE} containing \`export const smoke = 1;\``,
+  verdict: `<workflow-result>{"gate":"code","status":"pass","summary":"wrote the file","evidence":["${VERIFY_FILE}"]}</workflow-result>`,
+  expect: (state) => {
+    // The core's own record of what landed on disk, not the subagent's report about it.
+    const changed = state?.changedFiles ?? [];
+    if (!changed.includes(VERIFY_FILE)) {
+      return `файла ${VERIFY_FILE} нет среди изменённых ядром: ${JSON.stringify(changed)}`;
+    }
+    const stage = state?.runs?.[0]?.stage ?? '(нет прогона)';
+    return stage === 'verify' || `задача на стадии ${stage}, ожидалась verify`;
+  },
+});
+
+const reviewerStep = subagentStep({
+  type: 'reviewer',
+  description: '[workflow-task:task-0] review the file',
+  task: `telling it to review ${VERIFY_FILE}`,
+  // The verdict is named, as it is for the coder: the loop is driven by the `<workflow-result>`
+  // a subagent reports, and leaving it to the agent's own profile made the step depend on how
+  // that profile happens to end its turn.
+  verdict: `<workflow-result>{"gate":"review","status":"pass","summary":"reviewed","evidence":["${VERIFY_FILE}"]}</workflow-result>`,
+  expect: (state) => {
+    const run = state?.runs?.[0];
+    const review = run?.gates?.review;
+    if (review !== 'passed') return `гейт review имеет статус ${review ?? '(не задан)'}`;
+    // One verdict of two must not move the task on.
+    return run?.stage === 'verify' || 'стадия перешла дальше по одному вердикту';
+  },
+});
+
+const testerStep = subagentStep({
+  type: 'tester',
+  description: '[workflow-task:task-0] verify the file',
+  task: `telling it to verify ${VERIFY_FILE}`,
+  verdict: `<workflow-result>{"gate":"qa","status":"pass","summary":"verified","evidence":["${VERIFY_FILE}"]}</workflow-result>`,
+  expect: (state) => {
+    const status = state?.tasks?.implementation?.[0]?.status;
+    return status === 'completed' || `статус задачи — ${status ?? '(отсутствует)'}`;
+  },
+});
 
 /** Prepare the consent tag, then ask the operator with it, exactly as the plugin expects. */
 const CONSENT_INSTRUCTION =
@@ -218,8 +365,10 @@ export const canonicalScenarios: CanonicalScenario[] = [
   {
     id: 'task-control',
     title: 'Только orchestrator может изменять состояние задач workflow',
-    migrationState: 'pending',
+    migrationState: 'migrated',
     stage: 'task',
+    agent: ORCHESTRATOR,
+    steps: [workflowCreateStep, taskSetStep, taskWorkerStep],
   },
   {
     id: 'commit-gate',
@@ -264,9 +413,19 @@ export const canonicalScenarios: CanonicalScenario[] = [
   {
     id: 'verify-loop',
     title: 'Живой субагент закрывает гейт собственным workflow-result',
-    migrationState: 'pending',
+    migrationState: 'migrated',
     stage: 'task',
-    env: { HARNESS_AUTO_APPROVE: 'true' },
+    agent: ORCHESTRATOR,
+    // The legacy baseline set HARNESS_AUTO_APPROVE, which let the plugin grant consent itself;
+    // the canonical scenario drops it so the operator answer must be what opens the tasks stage.
+    steps: [
+      workflowCreateStep,
+      consentStep,
+      taskSetStepFor(VERIFY_FILE),
+      coderStep,
+      reviewerStep,
+      testerStep,
+    ],
   },
 ];
 

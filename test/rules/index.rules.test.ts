@@ -639,6 +639,26 @@ describe('extractToolCallPaths', () => {
     }
   });
 
+  it('maps read/edit/write to path when the host names the argument that way', () => {
+    // V2 присылает `path`, V1 — `filePath`; оба обязаны давать путь, иначе допуск
+    // стадии отказывает в правке, которая в объявленном скоупе.
+    for (const tool of ['read', 'edit', 'write']) {
+      expect(extractToolCallPaths(tool, { path: 'src/a.ts' })).toEqual(['src/a.ts']);
+    }
+  });
+
+  it('maps the V2 patch tool to the paths of its patch text', () => {
+    const patchText = [
+      '*** Begin Patch',
+      '*** Update File: src/a.ts',
+      '@@',
+      '-old',
+      '+new',
+      '*** End Patch',
+    ].join('\n');
+    expect(extractToolCallPaths('patch', { patchText })).toEqual(['src/a.ts']);
+  });
+
   it('maps grep to path only, ignoring pattern and include', () => {
     expect(
       extractToolCallPaths('grep', {

@@ -77,6 +77,8 @@ export function createSessionClientTransport(
     })
 ): HostTransport {
   const client = makeClient(host);
+  /** The agent the session currently runs as; V2 keeps it on the session, not on the message. */
+  let currentAgent = options.agent;
 
   return {
     async createSession(title: string): Promise<SmokeSession> {
@@ -89,12 +91,20 @@ export function createSessionClientTransport(
       let error = '';
       let pendingInteraction = false;
 
-      // V2 carries the agent on the session, not on the message, so a step naming another
-      // agent is reported rather than silently run as the session's own agent.
-      if (input.agent !== undefined && input.agent !== options.agent) {
-        notes.push(
-          `агент шага «${input.agent}» не применён: V2 переключает агента один раз, при создании сессии`
-        );
+      // V2 carries the agent on the session, so a step that must run as another agent — the
+      // worker the task guard refuses — is switched to before its prompt.
+      if (input.agent !== undefined && input.agent !== currentAgent) {
+        try {
+          await client.switchAgent(session.id, input.agent);
+          currentAgent = input.agent;
+          notes.push(`агент сессии переключён на «${input.agent}»`);
+        } catch (caught) {
+          notes.push(
+            `не удалось переключить агента сессии на «${input.agent}»: ${
+              caught instanceof Error ? caught.message : String(caught)
+            }`
+          );
+        }
       }
 
       harnessLog(

@@ -80,6 +80,18 @@ function toolOutput(state: Record<string, unknown>): string | undefined {
   return text === '' ? undefined : text;
 }
 
+/**
+ * The plugin's own structured refusal marker for one tool call.
+ *
+ * A refused task mutation is a *successful* tool result carrying `metadata.refused: true`, so a
+ * scenario can prove the guard rejected the action instead of matching its prose. A host that
+ * runs plugin tools through a wrapper of its own reports the same metadata one level in.
+ */
+function isRefused(state: Record<string, unknown>): boolean {
+  if (fields(state.metadata).refused === true) return true;
+  return fields(fields(state.input).metadata).refused === true;
+}
+
 /** Error text a tool result carried, under either name the two hosts use for it. */
 function toolError(state: Record<string, unknown>): string | undefined {
   if (typeof state.error === 'string' && state.error !== '') return state.error;
@@ -133,6 +145,7 @@ export function normalizeLegacyPart(value: unknown): NormalizedPart | undefined 
       tool: sharedToolName(part.tool),
       status: normalizeToolStatus(state.status),
       ...(command === undefined ? {} : { command }),
+      ...(isRefused(state) ? { refused: true } : {}),
       ...(output === undefined ? {} : { output }),
       ...(error === undefined ? {} : { error }),
     };
@@ -163,11 +176,13 @@ export function normalizeSessionContent(value: unknown): NormalizedPart[] {
         ? reported
         : [sharedToolName(typeof content.name === 'string' ? content.name : 'unknown')];
     const command = toolCommand(state);
+    const refused = isRefused(state);
     return names.map((name) => ({
       kind: 'tool',
       tool: name,
       status,
       ...(command === undefined ? {} : { command }),
+      ...(refused ? { refused: true } : {}),
       ...(output === undefined ? {} : { output }),
       ...(error === undefined ? {} : { error }),
     }));
@@ -241,6 +256,7 @@ export function toolCallsFromParts(parts: NormalizedPart[]): NormalizedToolCall[
       name: part.tool,
       status: partStatus(part),
       ...(part.command === undefined ? {} : { command: part.command }),
+      ...(part.refused === true ? { refused: true } : {}),
       ...(part.output === undefined ? {} : { output: part.output }),
       ...(part.error === undefined ? {} : { error: part.error }),
     }));
@@ -357,16 +373,22 @@ function normalizeWorkflowStatus(value: unknown): SmokeWorkflowState['status'] |
   }
 }
 
-function normalizeTasks(value: unknown): Record<string, Array<{ status?: string }>> | undefined {
+function normalizeTasks(
+  value: unknown
+): Record<string, Array<{ id?: string; status?: string }>> | undefined {
   const lists = fields(value);
-  const tasks: Record<string, Array<{ status?: string }>> = {};
+  const tasks: Record<string, Array<{ id?: string; status?: string }>> = {};
   let seen = false;
   for (const [key, list] of Object.entries(lists)) {
     if (!Array.isArray(list)) continue;
     seen = true;
     tasks[key] = list.map((task) => {
-      const status = fields(task).status;
-      return typeof status === 'string' ? { status } : {};
+      const entry = fields(task);
+      const status = entry.status;
+      return {
+        ...(typeof entry.id === 'string' ? { id: entry.id } : {}),
+        ...(typeof status === 'string' ? { status } : {}),
+      };
     });
   }
   return seen ? tasks : undefined;
@@ -383,6 +405,42 @@ function normalizeRefs(value: unknown): Record<string, string> | undefined {
     normalized[key] = entry;
   }
   return seen ? normalized : undefined;
+}
+
+/** Files the core recorded as changed, with non-string entries dropped. */
+function normalizeChangedFiles(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const files = value.filter((entry): entry is string => typeof entry === 'string');
+  return files.length === 0 ? undefined : files;
+}
+
+/** Task runs as the loop engine tracks them, narrowed without inventing fields. */
+function normalizeRuns(
+  value: unknown
+):
+  | Array<{ taskId?: string; stage?: string; status?: string; gates?: Record<string, string> }>
+  | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const runs: Array<{
+    taskId?: string;
+    stage?: string;
+    status?: string;
+    gates?: Record<string, string>;
+  }> = [];
+  for (const entry of Object.values(value)) {
+    const run = fields(entry);
+    const gates: Record<string, string> = {};
+    for (const [gate, status] of Object.entries(fields(run.gates))) {
+      if (typeof status === 'string') gates[gate] = status;
+    }
+    runs.push({
+      ...(typeof run.taskId === 'string' ? { taskId: run.taskId } : {}),
+      ...(typeof run.stage === 'string' ? { stage: run.stage } : {}),
+      ...(typeof run.status === 'string' ? { status: run.status } : {}),
+      ...(Object.keys(gates).length === 0 ? {} : { gates }),
+    });
+  }
+  return runs.length === 0 ? undefined : runs;
 }
 
 /**
@@ -410,6 +468,8 @@ export function normalizeWorkflowState(sessionId: string, raw: unknown): SmokeWo
   const stage = typeof session.currentStage === 'string' ? session.currentStage : undefined;
   const tasks = normalizeTasks(session.tasks);
   const refs = normalizeRefs(session.refs);
+  const changedFiles = normalizeChangedFiles(session.changedFiles);
+  const runs = normalizeRuns(session.loopRuns);
   return {
     sessionId,
     status:
@@ -417,6 +477,8 @@ export function normalizeWorkflowState(sessionId: string, raw: unknown): SmokeWo
     ...(stage === undefined ? {} : { currentStage: stage }),
     ...(tasks === undefined ? {} : { tasks }),
     ...(refs === undefined ? {} : { refs }),
+    ...(changedFiles === undefined ? {} : { changedFiles }),
+    ...(runs === undefined ? {} : { runs }),
     durableMutation: 'applied',
   };
 }

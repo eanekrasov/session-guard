@@ -245,7 +245,13 @@ export function createChangeEnforcement(ports: ChangeEnforcementPorts): ChangeEn
     if (tool === 'bash') {
       request = { action: 'bash', command: extractBashCommand(args) };
     } else if (fileTools.has(tool)) {
-      request = { action: 'edit', paths: scopeTargetPaths(tool, args) };
+      // Путь приводится к project-relative перед сверкой со скоупом: V2 присылает абсолютный
+      // путь, V1 — относительный, а `matchesScope` сравнивает строки с объявленными масками.
+      // Путь вне проекта остаётся как есть — совпасть он не может, и отказ называет его.
+      request = {
+        action: 'edit',
+        paths: scopeTargetPaths(tool, args).map((path) => toProjectRelativePath(path) ?? path),
+      };
     }
     if (!request) return;
 

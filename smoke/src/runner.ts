@@ -26,8 +26,14 @@ import { logEvent } from './log.ts';
 export interface RunnerOptions {
   /** Attempts a step that declared `read-only` + `same-session` may take. Defaults to one. */
   attempts?: number;
-  /** How long `poll-state` may keep reading the durable store before giving up. */
+  /** How long `poll-state` may keep reading the durable store for a step that declares none. */
   pollBudgetMs?: number;
+  /**
+   * An upper bound applied to every step's wait, including one that declared its own budget.
+   * A subagent step asks for minutes; an operator who wants a hard ceiling on a run, or a test
+   * that must finish quickly, sets this instead of lowering the step's own declaration.
+   */
+  maxPollBudgetMs?: number;
   /** How often `poll-state` reads it. */
   pollIntervalMs?: number;
 }
@@ -105,24 +111,96 @@ function plannedAttempts(step: ScenarioStep, options: RunnerOptions): number {
  * happened: the prompt is sent once, and only the plugin's own store is read until its deadline.
  * Returns the observation that satisfied the expectation, or nothing if it never did.
  */
+/** The effective wait for one step: its own declaration, the run's default, and the run's cap. */
+function stateBudgetFor(step: ScenarioStep, options: RunnerOptions): number {
+  const declared = step.stateBudgetMs ?? options.pollBudgetMs ?? DEFAULT_POLL_BUDGET_MS;
+  return Math.min(declared, options.maxPollBudgetMs ?? declared);
+}
+
+interface PollOutcome {
+  /** The observation that satisfied the step, when one did. */
+  observation?: PromptResult;
+  /** One line per read: what the store said while the step waited, and what was still missing. */
+  rounds: string[];
+}
+
+/** A one-line picture of the durable state a step was waiting on. */
+function summarizeState(state: SmokeWorkflowState | null): string {
+  if (state === null) return '(нет состояния)';
+  const tasks = (state.tasks?.implementation ?? [])
+    .map((task) => `${task.id}=${task.status}`)
+    .join(',');
+  const runs = (state.runs ?? [])
+    .map((run) => `${run.taskId}/${run.stage}:${run.status}`)
+    .join(',');
+  return `stage=${state.currentStage ?? '(нет)'} tasks=[${tasks}] runs=[${runs}]`;
+}
+
 async function pollOutcome(
   host: SmokeHost,
   session: SmokeSession,
   step: ScenarioStep,
   last: PromptResult | undefined,
   options: RunnerOptions
-): Promise<PromptResult | undefined> {
-  const deadline = Date.now() + Math.max(0, options.pollBudgetMs ?? DEFAULT_POLL_BUDGET_MS);
+): Promise<PollOutcome> {
+  // A step whose instruction dispatches a subagent declares its own budget, the run's applies
+  // only when it does not, and the run may cap both. Every read is recorded: a step that fails
+  // has to say what the store looked like while it waited, otherwise a stall and a slow turn
+  // read the same from the outside.
+  const budget = stateBudgetFor(step, options);
+  const startedAt = Date.now();
+  const deadline = startedAt + Math.max(0, budget);
   const interval = Math.max(1, options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS);
+  const rounds: string[] = [];
   for (;;) {
+    const elapsed = `+${Math.round((Date.now() - startedAt) / 1000)}s`;
     const reading = await readDurable(host, session);
     if (reading.outcome === 'present') {
       const observation = observationFromState(last, '', reading.state);
-      if (step.expect(observation) === true) return observation;
+      const verdict = step.expect(observation);
+      if (verdict === true) return { observation, rounds };
+      rounds.push(`${elapsed} ${summarizeState(reading.state)} → ${verdict}`);
+    } else {
+      rounds.push(`${elapsed} состояние ${reading.outcome}`);
     }
-    if (Date.now() >= deadline) return undefined;
+    if (Date.now() >= deadline) return { rounds };
     await new Promise((resolve) => setTimeout(resolve, interval));
   }
+}
+
+/**
+ * Ask the host once more when a dispatched subagent left no trace.
+ *
+ * A step that dispatches a subagent sends its instruction once and then reads the durable store.
+ * If the store never moves, nothing else in the run asks the host anything: the turn that
+ * dispatched the subagent is over, and whether the subagent ran at all is only visible by asking.
+ * This is a read-only follow-up — it repeats no mutation — and it is sent only when the step's own
+ * turn actually dispatched a subagent, so a step that simply failed is not asked twice.
+ */
+async function resumeAfterDispatch(
+  host: SmokeHost,
+  session: SmokeSession,
+  observed: NormalizedToolCall[],
+  agent: string | undefined
+): Promise<PromptResult | undefined> {
+  const dispatched = observed.some((call) => call.name === 'task' || call.name === 'subagent');
+  if (!dispatched) return undefined;
+  logEvent(
+    '  ↻ субагент вызван, но состояние не сдвинулось: спрашиваю хост о его результате',
+    'yellow',
+    'step.resume'
+  );
+  return host.runPrompt(session, {
+    text:
+      'Do not dispatch anything again and do not change any status. Report the result of the ' +
+      'subagent you already dispatched, and the current workflow state, then finish the turn.',
+    ...(agent === undefined ? {} : { agent }),
+  });
+}
+
+/** How long a step has been running, in seconds with one decimal. */
+function secondsSince(startedAt: number): string {
+  return ((Date.now() - startedAt) / 1000).toFixed(1);
 }
 
 function durableLabel(reading: DurableReading): string {
@@ -178,6 +256,7 @@ async function runStep(
   step: ScenarioStep,
   options: RunnerOptions
 ): Promise<StepOutcome> {
+  const stepStartedAt = Date.now();
   const planned = plannedAttempts(step, options);
   let made = 0;
   let detail = '';
@@ -199,10 +278,11 @@ async function runStep(
       });
     }
     made = attempt;
+    const agent = step.agent ?? definition.agent;
     try {
       last = await host.runPrompt(session, {
         text: step.instruction,
-        ...(definition.agent === undefined ? {} : { agent: definition.agent }),
+        ...(agent === undefined ? {} : { agent }),
       });
     } catch (error) {
       // The prompt died before it answered. Whether it mutated anything is read back below
@@ -265,24 +345,68 @@ async function runStep(
 
   // `poll-state` is the last chance for a mutating step: the instruction stays sent once, and
   // only the durable store is read until its deadline.
+  let pollRounds: string[] = [];
   if (step.retry === 'poll-state') {
     const polled = await pollOutcome(host, session, step, last, options);
-    if (polled !== undefined) {
+    pollRounds = polled.rounds;
+    if (polled.observation !== undefined) {
+      logEvent(
+        `  ✔ шаг закрыт состоянием за ${secondsSince(stepStartedAt)} s`,
+        'green',
+        'step.state',
+        {
+          attempts: made,
+          polls: polled.rounds.length,
+        }
+      );
       return {
         ok: true,
         attempts: made,
         evidence: '',
-        last: polled,
+        last: polled.observation,
         observed,
         note: [
           ...unmet,
           `исход подтверждён состоянием после ожидания (retry=poll-state, повтор промпта не отправлялся)`,
+          `опросов: ${polled.rounds.length}`,
         ].join('; '),
       };
     }
-    freshRead = `${freshRead === '' ? '' : `${freshRead}; `}poll-state не подтвердил ожидание за ${
-      options.pollBudgetMs ?? DEFAULT_POLL_BUDGET_MS
-    } мс`;
+    freshRead = `${freshRead === '' ? '' : `${freshRead}; `}poll-state не подтвердил ожидание за ${stateBudgetFor(
+      step,
+      options
+    )} мс`;
+    // Ничего больше не спрашивает хост о субагенте, поэтому спрашиваем сами — один раз и без
+    // повтора мутации. Ответ либо закрывает шаг, либо показывает, что субагент не вернул ничего.
+    const resumed = await resumeAfterDispatch(
+      host,
+      session,
+      observed,
+      step.agent ?? definition.agent
+    );
+    if (resumed !== undefined) {
+      last = resumed;
+      if (resumed.turn.status === 'timed-out') timedOut = true;
+      if (resumed.turn.status === 'failed') failedTurn = true;
+      observed.push(...resumed.turn.toolCalls);
+      const rePolled = await pollOutcome(host, session, step, resumed, options);
+      if (rePolled.observation !== undefined) {
+        return {
+          ok: true,
+          attempts: made,
+          evidence: '',
+          last: rePolled.observation,
+          observed,
+          note: [
+            ...unmet,
+            'исход подтверждён состоянием после повторного обращения к хосту (мутация не повторялась)',
+            `опросов после обращения: ${rePolled.rounds.length}`,
+          ].join('; '),
+        };
+      }
+      pollRounds = [...pollRounds, ...rePolled.rounds];
+      freshRead = `${freshRead}; после повторного обращения состояние тоже не подтвердило ожидание`;
+    }
     reading = await readDurable(host, session);
   }
 
@@ -295,6 +419,8 @@ async function runStep(
     // Which side failed is part of the evidence: a model that never completed a plugin call
     // is not a host defect, and the transcript alone would leave that to guesswork.
     ...(blockedReason === undefined ? [failureClassLine(failureKindOf(observed), observed)] : []),
+    `шаг занял: ${secondsSince(stepStartedAt)} s`,
+    ...(pollRounds.length === 0 ? [] : [`ожидание шага: ${pollRounds.slice(-4).join('; ')}`]),
     describeInteractions(last?.interactions),
     `hostKind=${host.kind} mutation=${step.mutation} retry=${step.retry}`,
     `durableMutation=${durableLabel(reading)}`,
@@ -345,7 +471,8 @@ function describeToolCalls(toolCalls: NormalizedToolCall[]): string {
   return `tools=[${toolCalls
     .map((call) => {
       const command = call.command === undefined ? '' : ` «${call.command.slice(0, 60)}»`;
-      return `${call.name}:${call.status}${command}`;
+      const refused = call.refused === true ? ':refused' : '';
+      return `${call.name}:${call.status}${refused}${command}`;
     })
     .join(', ')}]`;
 }

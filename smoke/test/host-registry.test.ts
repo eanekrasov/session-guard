@@ -39,6 +39,8 @@ describe('the canonical scenario registry', () => {
     const envOverrides: Record<string, string> = {
       'plan-consent':
         'runs without HARNESS_AUTO_APPROVE: the operator answer must be what grants consent',
+      'verify-loop':
+        'runs without HARNESS_AUTO_APPROVE: the operator answer must be what opens the tasks stage',
     };
     for (const scenario of canonicalScenarios) {
       const legacy = legacyScenarios.find((candidate) => candidate.id === scenario.id);
@@ -66,7 +68,14 @@ describe('the canonical scenario registry', () => {
       .filter((scenario) => scenario.migrationState === 'migrated')
       .map((scenario) => scenario.id);
 
-    expect(migrated).toEqual(['plugin-loads', 'no-session', 'create', 'plan-consent']);
+    expect(migrated).toEqual([
+      'plugin-loads',
+      'no-session',
+      'create',
+      'task-control',
+      'plan-consent',
+      'verify-loop',
+    ]);
     for (const scenario of canonicalScenarios) {
       if (scenario.migrationState !== 'migrated') {
         expect(scenario.steps).toBeUndefined();
@@ -100,9 +109,22 @@ describe('the canonical scenario registry', () => {
     expect(strategies).toEqual({
       'plugin-loads': [{ mutation: 'read-only', retry: 'same-session' }],
       'no-session': [{ mutation: 'read-only', retry: 'same-session' }],
-      create: [{ mutation: 'mutating', retry: 'none' }],
+      create: [{ mutation: 'mutating', retry: 'poll-state' }],
+      'task-control': [
+        { mutation: 'mutating', retry: 'poll-state' },
+        { mutation: 'mutating', retry: 'poll-state' },
+        { mutation: 'read-only', retry: 'same-session' },
+      ],
       'plan-consent': [
-        { mutation: 'mutating', retry: 'none' },
+        { mutation: 'mutating', retry: 'poll-state' },
+        { mutation: 'mutating', retry: 'poll-state' },
+      ],
+      'verify-loop': [
+        { mutation: 'mutating', retry: 'poll-state' },
+        { mutation: 'mutating', retry: 'poll-state' },
+        { mutation: 'mutating', retry: 'poll-state' },
+        { mutation: 'mutating', retry: 'poll-state' },
+        { mutation: 'mutating', retry: 'poll-state' },
         { mutation: 'mutating', retry: 'poll-state' },
       ],
     });

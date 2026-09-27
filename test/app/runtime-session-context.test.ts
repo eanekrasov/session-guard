@@ -85,4 +85,24 @@ describe('RuntimeSessionContext', () => {
     expect(context.normalizeTool('BASH')).toBe('bash');
     expect(context.normalizeTool('Apply_Patch')).toBe('apply_patch');
   });
+
+  /**
+   * Хосты называют одну и ту же возможность по-разному: V2 присылает субагентский диспатч как
+   * `subagent`, а команду оболочки как `shell`. Workflow узнаёт эти возможности под именами V1,
+   * поэтому без нормализации на V2 не работают ни инварианты субагента (`changedFiles`), ни
+   * разбор `<workflow-result>`, ни правила для команды оболочки.
+   */
+  it('maps the host-specific capability names onto the ones the workflow knows', () => {
+    const context = new RuntimeSessionContextImpl(store, new SessionExecutor(store));
+
+    expect(context.normalizeTool('subagent')).toBe('task');
+    expect(context.normalizeTool('SUBAGENT')).toBe('task');
+    expect(context.normalizeTool('shell')).toBe('bash');
+    expect(context.normalizeTool('task')).toBe('task');
+    expect(context.normalizeTool('bash')).toBe('bash');
+    expect(context.normalizeTool('write')).toBe('write');
+    // V2 называет патч `patch`, V1 — `apply_patch`.
+    expect(context.normalizeTool('patch')).toBe('apply_patch');
+    expect(context.normalizeTool('PATCH')).toBe('apply_patch');
+  });
 });

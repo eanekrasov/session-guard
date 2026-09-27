@@ -7,6 +7,7 @@ import type {
   HostKind,
   MigratedScenarioDefinition,
   NormalizedInteraction,
+  NormalizedToolCall,
   PromptInput,
   PromptResult,
   ScenarioStep,
@@ -674,6 +675,293 @@ describe('scenario sources stay free of transport specifics', () => {
     // The canonical scenarios live in the registry; the legacy per-kind files are the baseline
     // this stage is migrating away from and are not part of the shared path.
     expect(scenarioDir.length).toBeGreaterThan(0);
+  });
+});
+
+describe('the task-control canonical scenario', () => {
+  const scenario = canonicalScenarios.find((entry) => entry.id === 'task-control')!;
+  const definition = {
+    id: scenario.id,
+    title: scenario.title,
+    migrationState: 'migrated' as const,
+    agent: scenario.agent,
+    steps: scenario.steps!,
+  };
+  const withTasks = (status: string): SmokeWorkflowState => ({
+    sessionId: 'ses-1',
+    status: 'running',
+    currentStage: 'planning',
+    tasks: { implementation: [{ status }] },
+    durableMutation: 'applied',
+  });
+  const tasksSet = turn({ toolCalls: [] }, withTasks('pending'));
+  const workerAttempt = (overrides: Partial<NormalizedToolCall> = {}) =>
+    turn(
+      {
+        toolCalls: [
+          {
+            name: 'workflow-tasks-set-status',
+            status: 'completed',
+            output:
+              'workflow-tasks-set-status is refused: workflow task state is controlled by [orchestrator]',
+            ...overrides,
+          },
+        ],
+      },
+      withTasks('pending')
+    );
+
+  test('runs the orchestrator mutation and the worker attempt as different agents', async () => {
+    // The worker step names its agent per step: V1 carries it on the message, V2 switches the
+    // session, and the guard is what makes the refusal meaningful.
+    const { host, calls } = makeHost([
+      turn({ toolCalls: [] }, withTasks('pending')),
+      tasksSet,
+      workerAttempt(),
+    ]);
+
+    const result = await runScenario(host, definition, { attempts: 1 });
+
+    expect(result.status).toBe('pass');
+    expect(result.attempts).toBe(3);
+    expect(calls.prompts.map((input) => input.agent)).toEqual([
+      'orchestrator',
+      'orchestrator',
+      'coder',
+    ]);
+  });
+
+  test('accepts a structured refusal marker, and the plugin sentence as the documented fallback', async () => {
+    for (const attempt of [workerAttempt({ refused: true, output: undefined }), workerAttempt()]) {
+      const { host } = makeHost([turn({ toolCalls: [] }, withTasks('pending')), tasksSet, attempt]);
+      const result = await runScenario(host, definition, { attempts: 1 });
+      expect(result.status).toBe('pass');
+    }
+  });
+
+  test('fails when the worker actually moved the task status', async () => {
+    const { host } = makeHost([
+      turn({ toolCalls: [] }, withTasks('pending')),
+      tasksSet,
+      turn({ toolCalls: [] }, withTasks('completed')),
+    ]);
+
+    const result = await runScenario(host, definition, { attempts: 1 });
+
+    expect(result.status).toBe('fail');
+    if (result.status !== 'fail') throw new Error('expected a failure');
+    expect(result.evidence).toContain('worker изменил статус задачи');
+  });
+
+  test('fails when the worker never called the tool, so no refusal was observed', async () => {
+    const { host } = makeHost([
+      turn({ toolCalls: [] }, withTasks('pending')),
+      tasksSet,
+      turn({ toolCalls: [{ name: 'read', status: 'completed' }] }, withTasks('pending')),
+    ]);
+
+    const result = await runScenario(host, definition, { attempts: 1 });
+
+    expect(result.status).toBe('fail');
+    if (result.status !== 'fail') throw new Error('expected a failure');
+    expect(result.evidence).toContain('worker не вызывал');
+  });
+
+  test('fails when the tool ran without any refusal, because the guard did not answer', async () => {
+    const { host } = makeHost([
+      turn({ toolCalls: [] }, withTasks('pending')),
+      tasksSet,
+      workerAttempt({ output: 'Updated task-0 to completed' }),
+    ]);
+
+    const result = await runScenario(host, definition, { attempts: 1 });
+
+    expect(result.status).toBe('fail');
+    if (result.status !== 'fail') throw new Error('expected a failure');
+    expect(result.evidence).toContain('отказ не подтверждён');
+  });
+
+  test('blocks an unprovable orchestrator mutation and never repeats it', async () => {
+    // The mutation's outcome never lands in the store, so it cannot be proven either way.
+    const noTasks: SmokeWorkflowState = { ...withTasks('pending'), tasks: {} };
+    const { host, calls } = makeHost(
+      [turn({ toolCalls: [] }, withTasks('pending')), turn({ status: 'timed-out' }, noTasks)],
+      { states: [noTasks, noTasks] }
+    );
+
+    const result = await runScenario(host, definition, {
+      attempts: 1,
+      pollBudgetMs: 40,
+      pollIntervalMs: 10,
+    });
+
+    expect(result.status).toBe('blocked');
+    if (result.status !== 'blocked') throw new Error('expected a blocked result');
+    expect(result.blockedReason).toBe('indeterminate_mutation');
+    // create + the one task-list mutation: the mutation is never sent twice.
+    expect(calls.prompts).toHaveLength(2);
+  });
+});
+
+describe('the verify-loop canonical scenario', () => {
+  const scenario = canonicalScenarios.find((entry) => entry.id === 'verify-loop')!;
+  const definition = {
+    id: scenario.id,
+    title: scenario.title,
+    migrationState: 'migrated' as const,
+    agent: scenario.agent,
+    steps: scenario.steps!,
+  };
+  // From the consent step on, the plugin holds the plan reference; the loop's later steps are
+  // only reached once consent opened the tasks stage.
+  const base = (extra: Partial<SmokeWorkflowState> = {}): SmokeWorkflowState => ({
+    sessionId: 'ses-1',
+    status: 'running',
+    currentStage: 'execution',
+    tasks: { implementation: [{ status: 'pending' }] },
+    refs: { plan: 'plan.md' },
+    durableMutation: 'applied',
+    ...extra,
+  });
+  const planningState = base({ currentStage: 'planning', tasks: {} });
+  const consentedState = base({ currentStage: 'tasks_ready', tasks: {} });
+  const coderState = base({ changedFiles: ['src/smoke-1.ts'], runs: [{ stage: 'verify' }] });
+  const reviewedState = base({
+    changedFiles: ['src/smoke-1.ts'],
+    runs: [{ stage: 'verify', gates: { review: 'passed' } }],
+  });
+  const completedState = base({
+    changedFiles: ['src/smoke-1.ts'],
+    runs: [{ stage: 'verify', gates: { review: 'passed', qa: 'passed' } }],
+    tasks: { implementation: [{ status: 'completed' }] },
+  });
+  const granted = {
+    kind: 'question' as const,
+    id: 'q-1',
+    isConsent: true,
+    decision: 'grant' as const,
+    label: 'grant',
+    offered: ['grant', 'decline'],
+  };
+
+  test('runs the whole loop and proves each stage from durable state', async () => {
+    const { host, calls } = makeHost([
+      turn({ toolCalls: [] }, planningState),
+      turn({ toolCalls: [] }, consentedState, [granted]),
+      turn({ toolCalls: [] }, base()),
+      turn({ toolCalls: [] }, coderState),
+      turn({ toolCalls: [] }, reviewedState),
+      turn({ toolCalls: [] }, completedState),
+    ]);
+
+    const result = await runScenario(host, definition, { attempts: 1 });
+
+    expect(result.status).toBe('pass');
+    expect(result.attempts).toBe(6);
+    expect(calls.prompts).toHaveLength(6);
+    expect(result.evidence).toContain('stage=execution');
+  });
+
+  test('fails when the core never recorded the file the coder was asked to write', async () => {
+    const { host } = makeHost([
+      turn({ toolCalls: [] }, planningState),
+      turn({ toolCalls: [] }, consentedState, [granted]),
+      turn({ toolCalls: [] }, base()),
+      turn({ toolCalls: [] }, base({ runs: [{ stage: 'verify' }] })),
+    ]);
+
+    const result = await runScenario(host, definition, { attempts: 1, maxPollBudgetMs: 30 });
+
+    expect(result.status).toBe('fail');
+    expect(result.evidence).toContain('файла src/smoke-1.ts нет среди изменённых ядром');
+    // The wait is reported with what the store looked like, not just its duration.
+    expect(result.evidence).toContain('ожидание шага:');
+    expect(result.evidence).toContain('шаг занял:');
+  });
+
+  test('asks the host once more when a dispatched subagent left the state unmoved', async () => {
+    const unmoved = base({ runs: [{ stage: 'code', status: 'running' }] });
+    const { host, calls } = makeHost(
+      [
+        turn({ toolCalls: [] }, planningState),
+        turn({ toolCalls: [] }, consentedState, [granted]),
+        turn({ toolCalls: [] }, base()),
+        // The coder's turn dispatched a subagent and ended; the store never moved.
+        turn({ toolCalls: [{ name: 'subagent', status: 'completed' }] }, unmoved),
+        // The read-only follow-up answers, and the store still does not move.
+        turn({ toolCalls: [] }, unmoved),
+      ],
+      { states: [unmoved] }
+    );
+
+    const result = await runScenario(host, definition, { attempts: 1, maxPollBudgetMs: 30 });
+
+    expect(result.status).toBe('fail');
+    // Four scenario turns, then exactly one follow-up: the mutation is never repeated.
+    expect(calls.prompts).toHaveLength(5);
+    expect(calls.prompts[4]?.text).toContain('Do not dispatch anything again');
+    expect(result.evidence).toContain('повторного обращения');
+  });
+
+  test('fails when one verdict of two moves the task on', async () => {
+    const { host } = makeHost([
+      turn({ toolCalls: [] }, planningState),
+      turn({ toolCalls: [] }, consentedState, [granted]),
+      turn({ toolCalls: [] }, base()),
+      turn({ toolCalls: [] }, coderState),
+      turn({ toolCalls: [] }, base({ runs: [{ stage: 'qa', gates: { review: 'passed' } }] })),
+    ]);
+
+    const result = await runScenario(host, definition, { attempts: 1, maxPollBudgetMs: 30 });
+
+    expect(result.status).toBe('fail');
+    expect(result.evidence).toContain('стадия перешла дальше по одному вердикту');
+  });
+
+  test('fails when the task never completed after both verdicts', async () => {
+    const { host } = makeHost([
+      turn({ toolCalls: [] }, planningState),
+      turn({ toolCalls: [] }, consentedState, [granted]),
+      turn({ toolCalls: [] }, base()),
+      turn({ toolCalls: [] }, coderState),
+      turn({ toolCalls: [] }, reviewedState),
+      turn({ toolCalls: [] }, base({ runs: [{ stage: 'verify' }] })),
+    ]);
+
+    const result = await runScenario(host, definition, { attempts: 1, maxPollBudgetMs: 30 });
+
+    expect(result.status).toBe('fail');
+    expect(result.evidence).toContain('статус задачи');
+  });
+
+  test('waits for a subagent outcome with the step budget, and never repeats the dispatch', async () => {
+    // The turn may time out long before a subagent finishes; the step declares how long its
+    // durable outcome may take, and the instruction is never sent again.
+    const { host, calls } = makeHost(
+      [
+        turn({ toolCalls: [] }, planningState),
+        turn({ toolCalls: [] }, consentedState, [granted]),
+        turn({ toolCalls: [] }, base()),
+        turn({ status: 'timed-out' }, base()),
+      ],
+      // Only the third read shows the coder's work: the step budget has to be what waits.
+      { states: [base(), base(), coderState, coderState] }
+    );
+
+    const result = await runScenario(host, definition, {
+      attempts: 1,
+      pollBudgetMs: 10,
+      maxPollBudgetMs: 100,
+      pollIntervalMs: 5,
+    });
+
+    // The coder step waited out its own declared budget and passed; the reviewer step that
+    // followed had no outcome to prove, so it blocked instead of asking again.
+    expect(result.status).toBe('blocked');
+    if (result.status !== 'blocked') throw new Error('expected a blocked result');
+    expect(result.blockedReason).toBe('indeterminate_mutation');
+    expect(calls.prompts).toHaveLength(5);
+    expect(result.evidence).toContain('review');
   });
 });
 
