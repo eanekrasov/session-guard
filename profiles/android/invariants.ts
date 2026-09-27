@@ -7,7 +7,7 @@
  * - Все проверки и функции идентичны оригиналу
  */
 
-import type { InvariantCheck } from '../../src/types/index.ts';
+import type { InvariantCheck } from '@eanekrasov/session-guard';
 
 const isKotlin = (filePath: string) => filePath.endsWith('.kt');
 const isKotlinUi = (filePath: string) => filePath.endsWith('.kt') && isUiFile(filePath);

@@ -5,6 +5,13 @@ import { opencodeStateDir, profilesDir, sessionsDir } from './app/paths.ts';
 import type { Cleanup, Context } from '@opencode/plugin/promise/plugin';
 import { setupV2Runtime } from './app/v2-plugin-adapter.ts';
 
+// Contract for profile authors: the shape of an entry in a profile's
+// `INVARIANTS` array. It is re-exported here because the package publishes
+// only this entrypoint - `src/types/index.ts` is not an exported subpath, so a
+// profile outside this repository had no public path to the type and had to
+// name a non-existent one.
+export type { InvariantCheck } from './types/index.ts';
+
 export const SessionGuardPluginV1: PluginV1 = async (ctx: PluginInput): Promise<Hooks> => {
   console.error('[session-guard] plugin v1');
 
