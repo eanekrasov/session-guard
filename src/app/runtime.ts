@@ -225,6 +225,17 @@ class SessionGuardRuntime {
         output: input.output ?? { args: input.args },
         session: input.session!,
       }),
+      // Без этого порта `toolExecutionPolicy.after` не могла дойти до
+      // `changeEnforcement.after`, и финализация мутации не вызывалась ниоткуда:
+      // вердикт хода не писался, а активная операция оставалась запертой до TTL.
+      changeAfterInput: (input, output) => ({
+        tool: input.tool,
+        sessionID: input.sessionID,
+        callID: input.callID,
+        args: input.args,
+        output,
+        session: input.session!,
+      }),
       scope: async () => undefined,
       actions: async () => undefined,
       delivery: async () => undefined,
@@ -399,10 +410,24 @@ class SessionGuardRuntime {
         await this.consentAfter(tool, input.sessionID, input.callID, input.args, output);
       }
 
-      // 5. Finish mutation (Bash/Write tool) — единственный путь финализации.
+      // 5. Finish mutation (Bash/Write/Edit) — единственный путь финализации.
       //    MutationOrchestrator.finishMutation вычисляет scope, валидацию
-      //    инвариантов и устанавливает gate через один вызов domain finishMutation.
-      //    Теперь обрабатывается changeEnforcement в toolExecutionPolicy.
+      //    инвариантов, снимает активную операцию и выносит вердикт через один
+      //    вызов domain finishMutation.
+      //
+      //    Этот вызов был потерян: `before` подключали, `after` — нет, и
+      //    успешный write не получал вердикта, а его лок жил до TTL. Порядок
+      //    восстановлен по версии до регрессии: сразу перед переходами.
+      await this.toolExecutionPolicy.after(
+        {
+          tool,
+          sessionID: input.sessionID,
+          callID: input.callID,
+          args: input.args,
+          session: tx.session,
+        },
+        output
+      );
 
       // 6. Try transitions — после любого инструмента проверяем, можно ли перейти
       await this.workflowLifecycle.afterTool(tx.session, tx);

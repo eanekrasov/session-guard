@@ -40,6 +40,7 @@ import {
   type Host,
 } from './harness.ts';
 import { createV2SmokeClient, runV2WorkflowCreate } from './v2-client.ts';
+import { writeSmokeReport } from './report.ts';
 
 const ATTEMPTS = Number(process.env.HOST_SMOKE_ATTEMPTS ?? 3);
 const OUTPUT_FORMAT = process.env.HOST_SMOKE_OUTPUT ?? 'human';
@@ -1299,7 +1300,7 @@ async function main(): Promise<void> {
   ].join('\n');
 
   const reportPath = join(import.meta.dir!, '../../docs/plans/host-smoke.md');
-  await writeFile(reportPath, report, 'utf-8');
+  await writeSmokeReport(reportPath, report);
   logEvent(
     `\n${passed}/${results.length} passed — report written to ${reportPath}`,
     passed === results.length ? 'green' : 'red',
