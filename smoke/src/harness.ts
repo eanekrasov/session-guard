@@ -36,7 +36,7 @@ export type HostVersion = 'v1' | 'v2';
 export function hostVersionFromEnv(value = process.env.HOST_SMOKE_OPENCODE_VERSION): HostVersion {
   if (value === undefined || value === '') return 'v1';
   if (value === 'v1' || value === 'v2') return value;
-  throw new Error(`Invalid HOST_SMOKE_OPENCODE_VERSION=${value}; expected "v1" or "v2".`);
+  throw new Error(`Недопустимое HOST_SMOKE_OPENCODE_VERSION=${value}; ожидается «v1» или «v2».`);
 }
 
 /** Определить путь к бинарнику для запрошенной версии. */
@@ -54,7 +54,7 @@ export function attemptsFromEnv(env: Record<string, string | undefined> = proces
   if (raw === undefined) return DEFAULT_ATTEMPTS;
   const value = Number(raw);
   if (Number.isInteger(value) && value > 0) return value;
-  log('warn', `Invalid HOST_SMOKE_ATTEMPTS=${raw}; using ${DEFAULT_ATTEMPTS}.`);
+  log('warn', `Недопустимое HOST_SMOKE_ATTEMPTS=${raw}; используется ${DEFAULT_ATTEMPTS}.`);
   return DEFAULT_ATTEMPTS;
 }
 
@@ -64,7 +64,7 @@ export function ensureOpencodeBinary(version: HostVersion, env = process.env): s
   const binary = opencodeBinary(version, env);
   if (!existsSync(binary)) {
     throw new Error(
-      `[ERROR] opencode ${version} binary was not found at ${binary}; set ${variable} to override the path.`
+      `[ERROR] бинарник opencode ${version} не найден по пути ${binary}; задайте ${variable}, чтобы переопределить путь.`
     );
   }
   return binary;
@@ -219,19 +219,21 @@ process.once('exit', () => {
 
 /** Остановить хосты, которые работают или всё ещё ждут свой listen URL. */
 export async function stopAllHosts(): Promise<void> {
-  log('debug', `stopping ${activeHostStops.size} active host(s)`);
+  log('debug', `останавливаются активные хосты: ${activeHostStops.size}`);
   await Promise.allSettled([...activeHostStops].map((stop) => stop()));
-  log('debug', 'all active hosts stopped');
+  log('debug', 'все активные хосты остановлены');
 }
 
 function run(cmd: string, args: string[], cwd: string): string {
-  log('debug', `running ${cmd} ${args.join(' ')} (cwd=${cwd})`);
+  log('debug', `запуск ${cmd} ${args.join(' ')} (cwd=${cwd})`);
   const result = spawnSync(cmd, args, { cwd, encoding: 'utf-8' });
   if (result.status !== 0) {
-    log('error', `${cmd} exited with status ${result.status ?? 'signal'}`);
-    throw new Error(`${cmd} ${args.join(' ')} failed: ${result.stderr || result.stdout}`);
+    log('error', `${cmd} завершился со статусом ${result.status ?? 'signal'}`);
+    throw new Error(
+      `${cmd} ${args.join(' ')} завершился с ошибкой: ${result.stderr || result.stdout}`
+    );
   }
-  log('debug', `${cmd} completed successfully`);
+  log('debug', `${cmd} успешно завершён`);
   return (result.stdout ?? '').trim();
 }
 
@@ -244,10 +246,10 @@ function run(cmd: string, args: string[], cwd: string): string {
  * что само по себе полезно знать, прежде чем кто-либо начнёт поставлять плагин таким образом.
  */
 export function buildPlugin(): string {
-  log('info', 'building plugin for host smoke');
+  log('info', 'сборка плагина для host smoke');
   run('mise', ['run', 'build'], REPO_ROOT);
   const pluginPath = join(REPO_ROOT, 'dist');
-  log('info', `plugin build ready: ${pluginPath}`);
+  log('info', `собранный плагин готов: ${pluginPath}`);
   return pluginPath;
 }
 
@@ -263,7 +265,7 @@ export function packPlugin(): string {
       .split('\n')
       .map((entry) => entry.trim())
       .findLast((entry) => entry.endsWith('.tgz') && !entry.startsWith('packed'));
-    if (!line) throw new Error(`could not read the packed tarball from:\n${out}`);
+    if (!line) throw new Error(`не удалось прочитать упакованный tarball из:\n${out}`);
     packDirectories.add(destination);
     return line.startsWith('/') ? line : join(destination, line);
   } catch (error) {
@@ -391,7 +393,7 @@ export function withProviderApiKey(providers: unknown, model: string, authFile?:
       : undefined;
   if (typeof existing === 'string' && existing !== '') return providers;
 
-  log('debug', `configured the provider key for ${providerID} from the operator auth database`);
+  log('debug', `ключ провайдера ${providerID} настроен из базы учётных данных оператора`);
   return {
     ...map,
     [providerID]: {
@@ -442,18 +444,18 @@ export async function operatorProviders(requestedModel?: string): Promise<{
 export async function defaultModel(_binary?: string): Promise<string> {
   const fromEnv = process.env.HOST_SMOKE_MODEL;
   if (fromEnv) {
-    log('debug', `using model from HOST_SMOKE_MODEL: ${fromEnv}`);
+    log('debug', `модель из HOST_SMOKE_MODEL: ${fromEnv}`);
     return fromEnv;
   }
   const operator = await operatorProviders();
   const model = operator.model;
   if (!model) {
-    log('error', 'resolved opencode config does not declare a model');
+    log('error', 'разрешённая конфигурация opencode не содержит модель');
     throw new Error(
-      'No model to run against: set HOST_SMOKE_MODEL, or declare `model` in your opencode config.'
+      '[ERROR] Нет модели для запуска: задайте HOST_SMOKE_MODEL или объявите `model` в конфигурации opencode.'
     );
   }
-  log('info', `using model from resolved opencode config: ${model}`);
+  log('info', `модель из разрешённой конфигурации opencode: ${model}`);
   return model;
 }
 
@@ -463,7 +465,10 @@ export async function defaultModel(_binary?: string): Promise<string> {
 export function captureResolvedConfig(binary?: string): string {
   const bin = binary ?? V1_BINARY;
   const isV2 = bin === V2_BINARY;
-  log('debug', `capturing resolved config with ${bin} debug config${isV2 ? '' : ' --pure'}`);
+  log(
+    'debug',
+    `получение разрешённой конфигурации через ${bin} debug config${isV2 ? '' : ' --pure'}`
+  );
   const captureDir = mkdtempSync(join(tmpdir(), 'host-smoke-resolved-config-'));
   const outputPath = join(captureDir, 'opencode.json');
   const output = openSync(outputPath, 'w');
@@ -480,14 +485,17 @@ export function captureResolvedConfig(binary?: string): string {
   const resolvedConfig = readFileSync(outputPath, 'utf-8');
   rmSync(captureDir, { recursive: true, force: true });
   if (result.status !== 0 || !resolvedConfig) {
-    log('error', `resolved config capture failed with status ${result.status ?? 'signal'}`);
+    log(
+      'error',
+      `не удалось получить разрешённую конфигурацию; статус ${result.status ?? 'signal'}`
+    );
     throw new Error(
-      `${bin} debug config failed (exit ${result.status ?? 'signal'}): ` +
-        (result.stderr || '(no stderr)')
+      `${bin} debug config завершился с ошибкой (код ${result.status ?? 'signal'}): ` +
+        (result.stderr || '(нет stderr)')
     );
   }
   JSON.parse(resolvedConfig);
-  log('debug', `resolved config captured (${resolvedConfig.length} bytes)`);
+  log('debug', `разрешённая конфигурация получена (${resolvedConfig.length} байт)`);
   return resolvedConfig;
 }
 
@@ -508,7 +516,7 @@ export async function writeSmokeConfigs(
   version: HostVersion = 'v1',
   operatorAuthFile?: string
 ): Promise<void> {
-  log('debug', `writing smoke config files to ${opencodeDir}`);
+  log('debug', `запись конфигурационных файлов smoke в ${opencodeDir}`);
   await mkdir(opencodeDir, { recursive: true });
 
   // Полная итоговая конфигурация становится базовым файлом.
@@ -541,13 +549,13 @@ export async function writeSmokeConfigs(
     'utf-8'
   );
 
-  log('debug', 'smoke config file written');
+  log('debug', 'конфигурационный файл smoke записан');
 }
 
 export async function startHost(options: HostOptions): Promise<Host> {
   const version = options.version ?? 'v1';
   const binary = ensureOpencodeBinary(version);
-  log('info', `starting isolated host (${version}) for profile ${options.profile}`);
+  log('info', `запуск изолированного хоста (${version}) для профиля ${options.profile}`);
   const root = await mkdtemp(join(tmpdir(), 'host-smoke-'));
   const homeDir = join(root, 'home');
   const workDir = join(root, 'work');
@@ -558,19 +566,22 @@ export async function startHost(options: HostOptions): Promise<Host> {
     for (const dir of [workDir, join(configDir, 'opencode'), join(dataDir, 'opencode')]) {
       await mkdir(dir, { recursive: true });
     }
-    log('debug', `created isolated host directories under ${root}`);
+    log('debug', `созданы каталоги изолированного хоста в ${root}`);
 
     // Учётные данные живут в data dir; скопируем их, чтобы модель была живой.
     const auth = join(homedir(), '.local/share/opencode/auth.json');
     if (existsSync(auth)) {
       await cp(auth, join(dataDir, 'opencode', 'auth.json'));
-      log('debug', 'copied operator auth database into isolated data directory');
+      log('debug', 'база учётных данных оператора скопирована в изолированный каталог данных');
     } else {
-      log('warn', 'operator auth database not found; model calls may fail');
+      log(
+        'warn',
+        'база учётных данных оператора не найдена; вызовы модели могут завершиться ошибкой'
+      );
     }
 
     const pluginSpec = process.env.HOST_SMOKE_PLUGIN ?? buildPlugin();
-    log('debug', `using plugin specification: ${pluginSpec}`);
+    log('debug', `используется спецификация плагина: ${pluginSpec}`);
 
     // Получить полную итоговую конфигурацию оператора, чтобы дочерний хост унаследовал
     // определения провайдеров, реестр моделей и все остальные необходимые записи.
@@ -600,18 +611,18 @@ export async function startHost(options: HostOptions): Promise<Host> {
     const agentSource = join(profileSource, 'agents');
     if (existsSync(agentSource)) {
       await cp(agentSource, join(workDir, '.opencode', 'agent'), { recursive: true });
-      log('debug', `copied profile agents from ${agentSource}`);
+      log('debug', `агенты профиля скопированы из ${agentSource}`);
     }
 
     for (const [path, contents] of Object.entries(options.files ?? {})) {
       const target = join(workDir, path);
       await mkdir(join(target, '..'), { recursive: true });
       await writeFile(target, contents, 'utf-8');
-      log('debug', `wrote smoke project file ${path}`);
+      log('debug', `записан файл проекта smoke ${path}`);
     }
 
     if (options.git !== false) {
-      log('debug', 'initializing smoke project git repository');
+      log('debug', 'инициализация репозитория git проекта smoke');
       run('git', ['init', '-q'], workDir);
       run('git', ['config', 'user.email', 'smoke@example.com'], workDir);
       run('git', ['config', 'user.name', 'host smoke'], workDir);
@@ -637,7 +648,7 @@ export async function startHost(options: HostOptions): Promise<Host> {
     // Не наследовать пароль сервера оператора в дочерний хост.
     // @typescript-eslint/no-dynamic-delete
     delete (env as Record<string, string | undefined>).OPENCODE_SERVER_PASSWORD;
-    log('debug', 'removed inherited server password from child host environment');
+    log('debug', 'унаследованный пароль сервера удалён из окружения дочернего хоста');
 
     let buffer = '';
     const serveArgs =
@@ -653,7 +664,7 @@ export async function startHost(options: HostOptions): Promise<Host> {
             '--log-level',
             'INFO',
           ];
-    log('debug', `spawning ${binary} ${serveArgs.join(' ')}`);
+    log('debug', `запуск процесса ${binary} ${serveArgs.join(' ')}`);
     const child: ChildProcess = spawn(binary, serveArgs, {
       cwd: workDir,
       env,
@@ -661,13 +672,13 @@ export async function startHost(options: HostOptions): Promise<Host> {
     });
     child.stdout?.on('data', (chunk) => (buffer += chunk));
     child.stderr?.on('data', (chunk) => (buffer += chunk));
-    log('info', 'opencode serve process started; waiting for listen URL');
+    log('info', 'процесс opencode serve запущен; ожидание URL прослушивания');
 
     let stopPromise: Promise<void> | undefined;
     const hostStop = async (): Promise<void> => {
       if (stopPromise) return stopPromise;
       stopPromise = (async () => {
-        log('debug', 'stopping isolated opencode host');
+        log('debug', 'остановка изолированного хоста opencode');
         if (child.exitCode === null) {
           child.kill('SIGTERM');
           await new Promise((resolve) => setTimeout(resolve, 300));
@@ -675,7 +686,7 @@ export async function startHost(options: HostOptions): Promise<Host> {
         }
         await rm(root, { recursive: true, force: true });
         activeHostStops.delete(hostStop);
-        log('debug', 'isolated host stopped and temporary directory removed');
+        log('debug', 'изолированный хост остановлен, временный каталог удалён');
       })();
       return stopPromise;
     };
@@ -686,8 +697,8 @@ export async function startHost(options: HostOptions): Promise<Host> {
     try {
       url = await new Promise<string>((resolveUrl, rejectUrl) => {
         const deadline = setTimeout(() => {
-          log('error', 'opencode serve did not report a URL within 60 seconds');
-          rejectUrl(new Error(`opencode serve did not report a URL:\n${buffer}`));
+          log('error', 'opencode serve не сообщил URL за 60 секунд');
+          rejectUrl(new Error(`opencode serve не сообщил URL:\n${buffer}`));
         }, 60_000);
         const poll = setInterval(() => {
           const match = /(http:\/\/127\.0\.0\.1:\d+)/.exec(buffer);
@@ -695,15 +706,15 @@ export async function startHost(options: HostOptions): Promise<Host> {
             if (child.exitCode !== null) {
               clearInterval(poll);
               clearTimeout(deadline);
-              log('error', `opencode serve exited before reporting a URL (${child.exitCode})`);
-              rejectUrl(new Error(`opencode serve exited (${child.exitCode}):\n${buffer}`));
+              log('error', `opencode serve завершился до сообщения URL (${child.exitCode})`);
+              rejectUrl(new Error(`opencode serve завершился (${child.exitCode}):\n${buffer}`));
             }
             return;
           }
           clearInterval(poll);
           clearTimeout(deadline);
           resolveUrl(match[1]!);
-          log('info', `opencode serve is listening at ${match[1]}`);
+          log('info', `opencode serve прослушивает адрес ${match[1]}`);
         }, 100);
       });
     } catch (error) {
@@ -722,7 +733,7 @@ export async function startHost(options: HostOptions): Promise<Host> {
       if (password) {
         authHeader = basicAuthHeader(password);
       } else {
-        log('warn', 'v2 host announced no server password; its /api calls will be unauthenticated');
+        log('warn', 'хост v2 не сообщил пароль сервера; вызовы /api будут без аутентификации');
       }
     }
 
@@ -829,10 +840,10 @@ export async function readWorkflowSession(host: Host, sessionId: string): Promis
         return JSON.parse(await readFile(file, 'utf-8'));
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
-        throw new Error(`[ERROR] failed to read workflow session file ${file}: ${reason}`);
+        throw new Error(`[ERROR] не удалось прочитать файл сессии workflow ${file}: ${reason}`);
       }
     }
   }
-  log('debug', `workflow session not found: ${sessionId}`);
+  log('debug', `сессия workflow не найдена: ${sessionId}`);
   return null;
 }

@@ -11,8 +11,7 @@ export const noSession: Scenario = {
     const result = await step(host, sessionId, model, {
       instruction:
         'Use the bash tool to run exactly this command: git log --oneline -1. Do nothing else.',
-      expect: (s) =>
-        s.state === null || 'the plugin wrote a workflow session for an ungoverned session',
+      expect: (s) => s.state === null || 'плагин записал сессию workflow для неуправляемой сессии',
     });
     return {
       ok: result.ok,

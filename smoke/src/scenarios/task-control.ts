@@ -11,7 +11,7 @@ export const taskControl: Scenario = {
     await step(host, sessionId, model, {
       instruction: 'Call the tool `workflow-create` with schemaId "smoke". Do nothing else.',
       agent: ORCHESTRATOR,
-      expect: (s) => s.state !== null || 'workflow-create did not run',
+      expect: (s) => s.state !== null || 'workflow-create не выполнился',
     });
     const set = await step(host, sessionId, model, {
       instruction:
@@ -23,7 +23,7 @@ export const taskControl: Scenario = {
         const list = tasks.implementation ?? [];
         return (
           list.length === 1 ||
-          `the orchestrator could not set the task list (persisted lists: ${JSON.stringify(tasks)})`
+          `orchestrator не смог задать список задач (сохранённые списки: ${JSON.stringify(tasks)})`
         );
       },
     });
@@ -43,8 +43,8 @@ export const taskControl: Scenario = {
         const tasks = (s.state as { tasks?: Record<string, Array<{ status: string }>> } | null)
           ?.tasks;
         const status = tasks?.implementation?.[0]?.status;
-        if (status === 'completed') return 'a worker agent closed its own task';
-        return /refus/i.test(s.transcript) || `no refusal surfaced (status stayed ${status})`;
+        if (status === 'completed') return 'worker-агент закрыл собственную задачу';
+        return /refus/i.test(s.transcript) || `отказ не обнаружен (статус остался ${status})`;
       },
     });
     return {

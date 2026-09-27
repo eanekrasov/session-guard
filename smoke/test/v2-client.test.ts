@@ -272,8 +272,8 @@ describe('the prompt budget', () => {
 
       const failure = client.prompt('ses-1', 'Call the tool `workflow-create`.');
       await expect(failure).rejects.toThrow(PromptTimeoutError);
-      await expect(failure).rejects.toThrow('session.wait did not settle within 50ms');
-      await expect(failure).rejects.toThrow('the host had no form pending');
+      await expect(failure).rejects.toThrow('session.wait не завершился за 50 мс');
+      await expect(failure).rejects.toThrow('у хоста нет ожидающей формы');
       // Завис именно wait, а не enqueue.
       expect(routes.some((route) => route.endsWith('/wait'))).toBe(true);
     } finally {
@@ -297,9 +297,7 @@ describe('the prompt budget', () => {
     try {
       const client = createV2SmokeClient(fakeHost(), { promptTimeoutMs: 50 });
 
-      await expect(client.prompt('ses-1', 'go')).rejects.toThrow(
-        'the host still waits on 1 form(s)'
-      );
+      await expect(client.prompt('ses-1', 'go')).rejects.toThrow('хост всё ещё ожидает 1 форм');
     } finally {
       globalThis.fetch = originalFetch;
     }

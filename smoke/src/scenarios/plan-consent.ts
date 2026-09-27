@@ -15,16 +15,16 @@ export const planConsent: Scenario = {
     await step(host, sessionId, model, {
       instruction: 'Call the tool `workflow-create` with schemaId "smoke". Do nothing else.',
       agent: ORCHESTRATOR,
-      expect: (s) => s.state !== null || 'workflow-create did not run',
+      expect: (s) => s.state !== null || 'workflow-create не выполнился',
     });
     const result = await step(host, sessionId, model, {
       instruction: CONSENT_INSTRUCTION,
       agent: ORCHESTRATOR,
       expect: (s) => {
         const refs = (s.state as { refs?: Record<string, string> } | null)?.refs ?? {};
-        if (!refs.plan) return 'the plan reference was never recorded';
+        if (!refs.plan) return 'ссылка на план не была записана';
         const currentStage = stage(s);
-        return currentStage === 'tasks_ready' || `stage is ${currentStage}, expected tasks_ready`;
+        return currentStage === 'tasks_ready' || `стадия — ${currentStage}, ожидалась tasks_ready`;
       },
     });
     return {

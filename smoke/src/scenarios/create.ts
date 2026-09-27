@@ -13,9 +13,9 @@ export const create: Scenario = {
         'Call the tool `workflow-create` with schemaId "smoke". Do nothing else and add no commentary.',
       agent: ORCHESTRATOR,
       expect: (s) => {
-        if (!s.state) return 'no workflow session was persisted';
+        if (!s.state) return 'сессия workflow не сохранена';
         const currentStage = stage(s);
-        return currentStage === 'planning' || `stage is ${currentStage}, expected planning`;
+        return currentStage === 'planning' || `стадия — ${currentStage}, ожидалась planning`;
       },
     });
     return {

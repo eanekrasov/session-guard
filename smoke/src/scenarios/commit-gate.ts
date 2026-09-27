@@ -11,7 +11,7 @@ export const commitGate: Scenario = {
     await step(host, sessionId, model, {
       instruction: 'Call the tool `workflow-create` with schemaId "smoke". Do nothing else.',
       agent: ORCHESTRATOR,
-      expect: (s) => s.state !== null || 'workflow-create did not run',
+      expect: (s) => s.state !== null || 'workflow-create не выполнился',
     });
     const result = await step(host, sessionId, model, {
       instruction:
@@ -20,8 +20,8 @@ export const commitGate: Scenario = {
       agent: ORCHESTRATOR,
       expect: (s) => {
         const receipt = (s.state as { deliveryReceipt?: string | null } | null)?.deliveryReceipt;
-        if (receipt) return 'a delivery receipt was written before the gates passed';
-        return /cannot commit|refus|not allowed/i.test(s.transcript) || 'no refusal surfaced';
+        if (receipt) return 'квитанция о поставке записана до прохождения гейтов';
+        return /cannot commit|refus|not allowed/i.test(s.transcript) || 'отказ не обнаружен';
       },
     });
     return {

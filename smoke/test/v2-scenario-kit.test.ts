@@ -180,8 +180,8 @@ describe('runV2Scenario', () => {
       expect(outcome.ok).toBe(true);
       expect(outcome.attempts).toBe(1);
       expect(calls.filter((call) => call.startsWith('prompt:'))).toHaveLength(1);
-      expect(outcome.evidence).toContain('the turn was still running');
-      expect(outcome.evidence).toContain('session.wait did not settle within 50ms');
+      expect(outcome.evidence).toContain('ход всё ещё выполнялся');
+      expect(outcome.evidence).toContain('session.wait не завершился за 50 мс');
       expect(calls).toContain('remove:v2-session');
     } finally {
       fake.cleanup();
@@ -206,7 +206,7 @@ describe('runV2Scenario', () => {
 
       expect(outcome.ok).toBe(false);
       expect(outcome.evidence).toContain('workflow state was validation');
-      expect(outcome.evidence).toContain('the turn was still running');
+      expect(outcome.evidence).toContain('ход всё ещё выполнялся');
     } finally {
       fake.cleanup();
     }

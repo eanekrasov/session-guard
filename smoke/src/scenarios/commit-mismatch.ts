@@ -39,9 +39,9 @@ export const commitMismatch: Scenario = {
           deliveryReceipt?: string | null;
           deliveryPermit?: unknown;
         } | null;
-        if (state?.deliveryReceipt) return 'a commit of unrelated files was receipted';
-        if (state?.deliveryPermit) return 'the stale permit was left in place';
-        if (headOf(host) === before) return 'the commit never happened, so nothing was tested';
+        if (state?.deliveryReceipt) return 'коммит посторонних файлов получил квитанцию';
+        if (state?.deliveryPermit) return 'устаревшее разрешение осталось на месте';
+        if (headOf(host) === before) return 'коммит не произошёл, поэтому проверить было нечего';
         return true;
       },
     });

@@ -25,9 +25,9 @@ export const commitCwd: Scenario = {
       agent: ORCHESTRATOR,
       expect: (s) => {
         const receipt = (s.state as { deliveryReceipt?: string | null } | null)?.deliveryReceipt;
-        if (!receipt) return `no delivery receipt was written: ${s.transcript.slice(0, 300)}`;
+        if (!receipt) return `квитанция о поставке не записана: ${s.transcript.slice(0, 300)}`;
         const head = headOf(host);
-        return receipt === head || `receipt ${receipt} does not match HEAD ${head}`;
+        return receipt === head || `квитанция ${receipt} не соответствует HEAD ${head}`;
       },
     });
     return {

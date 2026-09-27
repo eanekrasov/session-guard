@@ -10,7 +10,7 @@ export const v2WorkflowCreate: V2Scenario = {
     {
       instruction:
         'Call the tool `workflow-create` with schemaId "smoke". Do nothing else and add no commentary.',
-      expect: (state) => state.currentStage === 'planning' || `workflow state was ${stage(state)}`,
+      expect: (state) => state.currentStage === 'planning' || `состояние workflow: ${stage(state)}`,
     },
   ],
 };

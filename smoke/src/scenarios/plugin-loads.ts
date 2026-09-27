@@ -16,7 +16,7 @@ export const pluginLoads: Scenario = {
       // profilesDir — временный путь, который модель не может сфабриковать.
       expect: (s) =>
         (s.transcript.includes('profilesDir') && s.transcript.includes('smoke')) ||
-        `workflow-list did not report the smoke profile: ${s.transcript.slice(0, 300)}`,
+        `workflow-list не сообщил профиль smoke: ${s.transcript.slice(0, 300)}`,
     });
     return {
       ok: result.ok,

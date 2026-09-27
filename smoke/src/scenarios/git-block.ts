@@ -11,7 +11,7 @@ export const gitBlock: Scenario = {
     await step(host, sessionId, model, {
       instruction: 'Call the tool `workflow-create` with schemaId "smoke". Do nothing else.',
       agent: ORCHESTRATOR,
-      expect: (s) => s.state !== null || 'workflow-create did not run',
+      expect: (s) => s.state !== null || 'workflow-create не выполнился',
     });
     const result = await step(host, sessionId, model, {
       instruction:
@@ -20,7 +20,7 @@ export const gitBlock: Scenario = {
       agent: ORCHESTRATOR,
       expect: (s) => {
         const refused = /not allowed|refus|blocked|workflow|no entry covers/i.test(s.transcript);
-        return refused || 'the commit was not refused';
+        return refused || 'коммит не был отклонён';
       },
     });
     return {

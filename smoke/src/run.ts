@@ -71,7 +71,11 @@ async function main(): Promise<void> {
     ? scenarios.filter((scenario) => wanted.includes(scenario.id))
     : scenarios;
   if (selected.length === 0) {
-    logEvent(`No such scenario. Known: ${scenarios.map((s) => s.id).join(', ')}`, 'red', 'error');
+    logEvent(
+      `Сценарий не найден. Известные: ${scenarios.map((s) => s.id).join(', ')}`,
+      'red',
+      'error'
+    );
     process.exit(2);
   }
 
@@ -80,10 +84,10 @@ async function main(): Promise<void> {
   const plugin = process.env.HOST_SMOKE_PLUGIN ?? buildPlugin();
   process.env.HOST_SMOKE_PLUGIN = plugin;
 
-  logEvent(`model:  ${model}`, 'gray', 'run.start', { model, plugin, version: hostVersion });
+  logEvent(`модель:  ${model}`, 'gray', 'run.start', { model, plugin, version: hostVersion });
   if (OUTPUT_FORMAT !== 'jsonl') {
-    logEvent(`plugin: ${plugin}`, 'gray');
-    logEvent(`opencode: ${binary}`, 'gray');
+    logEvent(`плагин: ${plugin}`, 'gray');
+    logEvent(`бинарник: ${binary}`, 'gray');
   }
 
   const results: ScenarioResult[] = [];
@@ -128,8 +132,8 @@ async function main(): Promise<void> {
       });
       logEvent(
         outcome.ok
-          ? `PASS (${outcome.attempts} attempt(s), ${formatDuration(durationMs)})`
-          : `FAIL (${formatDuration(durationMs)})`,
+          ? `ПРОЙДЕНО (попыток: ${outcome.attempts}, ${formatDuration(durationMs)})`
+          : `ОШИБКА (${formatDuration(durationMs)})`,
         outcome.ok ? 'green' : 'red',
         'scenario.result',
         {
@@ -149,10 +153,10 @@ async function main(): Promise<void> {
         ok: false,
         status: 'fail',
         attempts: 0,
-        evidence: `harness error: ${message}\n${host.logs().slice(-1500)}`,
+        evidence: `ошибка харнесса: ${message}\n${host.logs().slice(-1500)}`,
         durationMs: Date.now() - startedAt,
       });
-      logEvent('ERROR', 'red', 'scenario.result', {
+      logEvent('ОШИБКА', 'red', 'scenario.result', {
         scenario: scenario.id,
         status: 'error',
         durationMs: Date.now() - startedAt,
@@ -170,20 +174,20 @@ async function main(): Promise<void> {
     ? results.reduce((total, result) => total + result.durationMs, 0) / results.length
     : 0;
   const report = [
-    '# Host smoke — session-guard against a real opencode',
+    '# Проверка хоста — session-guard с реальным opencode',
     '',
-    `| Model | \`${model}\` |`,
+    `| Модель | \`${model}\` |`,
     '|---|---|',
-    `| Host version | ${hostVersion} (\`${binary}\`) |`,
-    `| Plugin | \`${plugin.split('/').at(-1)}\` |`,
-    `| Result | ${passed}/${results.length} scenarios passed |`,
-    `| Average duration | ${formatDuration(averageDurationMs)} per scenario |`,
+    `| Версия хоста | ${hostVersion} (\`${binary}\`) |`,
+    `| Плагин | \`${plugin.split('/').at(-1)}\` |`,
+    `| Результат | ${passed}/${results.length} пройдено |`,
+    `| Средняя длительность | ${formatDuration(averageDurationMs)} на сценарий |`,
     '',
-    '| # | Scenario | Result | Attempts | Duration | Evidence |',
+    '| № | Сценарий | Результат | Попытки | Длительность | Доказательство |',
     '|---|---|---|---|---|---|',
     ...results.map(
       (result, index) =>
-        `| ${index + 1} | ${result.title} | ${result.status === 'pass' ? '**PASS**' : result.status === 'blocked' ? '**BLOCKED**' : '**FAIL**'} | ${
+        `| ${index + 1} | ${result.title} | ${result.status === 'pass' ? '**ПРОЙДЕНО**' : result.status === 'blocked' ? '**ЗАБЛОКИРОВАНО**' : '**ОШИБКА**'} | ${
           result.attempts
         } | ${formatDuration(result.durationMs)} | ${result.evidence.replace(/\n/g, ' ').slice(0, 300)} |`
     ),
@@ -193,7 +197,7 @@ async function main(): Promise<void> {
   const reportPath = join(REPO_ROOT, 'docs/plans/host-smoke.md');
   await writeSmokeReport(reportPath, report);
   logEvent(
-    `\n${passed}/${results.length} passed — report written to ${reportPath}`,
+    `\n${passed}/${results.length} пройдено — отчёт записан в ${reportPath}`,
     passed === results.length ? 'green' : 'red',
     'run.summary',
     { passed, total: results.length, averageDurationMs, reportPath }
@@ -212,17 +216,17 @@ async function runV2Smoke(): Promise<boolean> {
     : v2Scenarios;
   if (selected.length === 0) {
     logEvent(
-      `No such V2 scenario. Known: ${v2Scenarios.map((scenario) => scenario.id).join(', ')}`,
+      `Сценарий V2 не найден. Известные: ${v2Scenarios.map((scenario) => scenario.id).join(', ')}`,
       'red',
       'error'
     );
     return false;
   }
 
-  logEvent(`model:  ${model}`, 'gray', 'run.start', { model, plugin, version: 'v2' });
+  logEvent(`модель:  ${model}`, 'gray', 'run.start', { model, plugin, version: 'v2' });
   if (OUTPUT_FORMAT !== 'jsonl') {
-    logEvent(`plugin: ${plugin}`, 'gray');
-    logEvent(`opencode: ${binary}`, 'gray');
+    logEvent(`плагин: ${plugin}`, 'gray');
+    logEvent(`бинарник: ${binary}`, 'gray');
   }
 
   let passed = 0;
@@ -242,8 +246,8 @@ async function runV2Smoke(): Promise<boolean> {
       if (outcome.ok) passed += 1;
       logEvent(
         outcome.ok
-          ? `PASS (${outcome.attempts} attempt(s), ${formatDuration(durationMs)})`
-          : `FAIL (${formatDuration(durationMs)})`,
+          ? `ПРОЙДЕНО (попыток: ${outcome.attempts}, ${formatDuration(durationMs)})`
+          : `ОШИБКА (${formatDuration(durationMs)})`,
         outcome.ok ? 'green' : 'red',
         'scenario.result',
         {
@@ -263,7 +267,7 @@ async function runV2Smoke(): Promise<boolean> {
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      logEvent('ERROR', 'red', 'scenario.result', {
+      logEvent('ОШИБКА', 'red', 'scenario.result', {
         scenario: scenario.id,
         status: 'error',
         durationMs: Date.now() - startedAt,
@@ -277,7 +281,7 @@ async function runV2Smoke(): Promise<boolean> {
   }
 
   logEvent(
-    `\n${passed}/${selected.length} passed`,
+    `\n${passed}/${selected.length} пройдено`,
     passed === selected.length ? 'green' : 'red',
     'run.summary',
     { passed, total: selected.length, version: 'v2' }

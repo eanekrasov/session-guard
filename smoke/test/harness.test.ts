@@ -117,7 +117,7 @@ describe('host version selection', () => {
   });
 
   test('rejects unknown versions', () => {
-    expect(() => hostVersionFromEnv('v3')).toThrow('expected "v1" or "v2"');
+    expect(() => hostVersionFromEnv('v3')).toThrow('ожидается «v1» или «v2»');
   });
 });
 
@@ -138,7 +138,7 @@ describe('smoke environment and persisted state diagnostics', () => {
     writeFileSync(file, '{broken');
     try {
       await expect(readWorkflowSession({ homeDir } as never, 'broken')).rejects.toThrow(
-        `[ERROR] failed to read workflow session file ${file}`
+        `[ERROR] не удалось прочитать файл сессии workflow ${file}`
       );
     } finally {
       rmSync(homeDir, { recursive: true, force: true });

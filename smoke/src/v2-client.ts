@@ -52,7 +52,7 @@ export function promptTimeoutMs(env: Record<string, string | undefined> = proces
  */
 export class PromptTimeoutError extends Error {
   constructor(operation: string, budgetMs: number, detail: string) {
-    super(`[ERROR] ${operation} did not settle within ${budgetMs}ms: ${detail}`);
+    super(`[ERROR] ${operation} не завершился за ${budgetMs} мс: ${detail}`);
     this.name = 'PromptTimeoutError';
   }
 }
@@ -215,7 +215,7 @@ export function createV2SmokeClient(host: Host, options: V2SmokeClientOptions = 
         // скрывать ту, которая всё ещё ждёт.
         seen.delete(form.id);
         notes.push(
-          `reply to form ${form.id} failed: ${error instanceof Error ? error.message : String(error)}`
+          `не удалось ответить на форму ${form.id}: ${error instanceof Error ? error.message : String(error)}`
         );
       }
     }
@@ -245,8 +245,8 @@ export function createV2SmokeClient(host: Host, options: V2SmokeClientOptions = 
 
       const pendingNote = (): string =>
         waitingForms > 0
-          ? `the host still waits on ${waitingForms} form(s)`
-          : 'the host had no form pending';
+          ? `хост всё ещё ожидает ${waitingForms} форм`
+          : 'у хоста нет ожидающей формы';
 
       /**
        * Выполнить один вызов хоста в рамках бюджета промпта. Вызов, превышающий

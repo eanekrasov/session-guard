@@ -109,7 +109,7 @@ export async function runV2Scenario(
           evidence: [
             detail,
             `state: ${JSON.stringify(state).slice(0, 600)}`,
-            ...stillRunning.map((note) => `the turn was still running: ${note}`),
+            ...stillRunning.map((note) => `ход всё ещё выполнялся: ${note}`),
           ].join('\n'),
         };
       }
@@ -118,14 +118,14 @@ export async function runV2Scenario(
     const offScript = client.offScript();
     const notes = [
       ...(offScript.length ? [`off-script answers: ${offScript.join('; ')}`] : []),
-      ...stillRunning.map((note) => `the turn was still running: ${note}`),
+      ...stillRunning.map((note) => `ход всё ещё выполнялся: ${note}`),
     ];
     return {
       ok: true,
       attempts,
       evidence: notes.length
         ? notes.join('\n')
-        : 'every instruction produced the durable workflow state it claimed',
+        : 'каждая инструкция привела к устойчивому состоянию workflow, которое она обещала',
     };
   } finally {
     // Сессия, которую хост уже удалил, не повод терять результат.

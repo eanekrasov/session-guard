@@ -21,18 +21,18 @@ export const verifyLoop: Scenario = {
     for (const entry of [
       {
         instruction: 'Call the tool `workflow-create` with schemaId "smoke". Do nothing else.',
-        expect: (s: Session) => s.state !== null || 'workflow-create did not run',
+        expect: (s: Session) => s.state !== null || 'workflow-create не выполнился',
       },
       {
         instruction: CONSENT_INSTRUCTION,
         expect: (s: Session) =>
-          stage(s) === 'tasks_ready' || `stage is ${stage(s)}, expected tasks_ready`,
+          stage(s) === 'tasks_ready' || `стадия — ${stage(s)}, ожидалась tasks_ready`,
       },
       {
         instruction:
           'Call the tool `workflow-tasks-set` with tasks ' +
           '[{"writeScope":["src/smoke-1.ts"],"status":"pending"}]. Do nothing else.',
-        expect: (s: Session) => stage(s) === 'execution' || `stage is ${stage(s)}`,
+        expect: (s: Session) => stage(s) === 'execution' || `стадия — ${stage(s)}`,
       },
       {
         // Стадия code: настоящее редактирование, поэтому гейт инвариантов заработан.
@@ -50,10 +50,12 @@ export const verifyLoop: Scenario = {
           // она делает этот шаг проверкой работы, а не отчёта о ней.
           const changed = (s.state as { changedFiles?: string[] } | null)?.changedFiles ?? [];
           if (!changed.includes('src/smoke-1.ts')) {
-            return `the coder reported a pass but nothing was written (changedFiles: ${JSON.stringify(changed)})`;
+            return `coder сообщил об успехе, но ничего не записано (изменённые файлы: ${JSON.stringify(changed)})`;
           }
           const run = firstRun(s);
-          return run?.stage === 'verify' || `the task is at ${run?.stage ?? '(no run)'}`;
+          return (
+            run?.stage === 'verify' || `задача находится на стадии ${run?.stage ?? '(нет запуска)'}`
+          );
         },
       },
       {
@@ -64,9 +66,9 @@ export const verifyLoop: Scenario = {
         expect: (s: Session) => {
           const run = firstRun(s);
           if (run?.gates?.review !== 'passed') {
-            return `the review gate is ${run?.gates?.review ?? '(unset)'}`;
+            return `гейт review имеет статус ${run?.gates?.review ?? '(не задан)'}`;
           }
-          return run.stage === 'verify' || 'the stage moved on a single verdict';
+          return run.stage === 'verify' || 'стадия перешла дальше по одному вердикту';
         },
       },
       {
@@ -77,7 +79,7 @@ export const verifyLoop: Scenario = {
           const tasks = (s.state as { tasks?: Record<string, Array<{ status: string }>> } | null)
             ?.tasks;
           const status = tasks?.implementation?.[0]?.status;
-          return status === 'completed' || `the task is ${status ?? '(missing)'}`;
+          return status === 'completed' || `статус задачи: ${status ?? '(отсутствует)'}`;
         },
       },
     ]) {

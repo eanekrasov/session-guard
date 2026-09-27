@@ -26,12 +26,12 @@ export const cicdFullCycle: Scenario = {
     for (const entry of [
       {
         instruction: 'Call the tool `workflow-create` with schemaId "cicd". Do nothing else.',
-        expect: (s: Session) => s.state !== null || 'workflow-create did not run',
+        expect: (s: Session) => s.state !== null || 'workflow-create не выполнился',
       },
       {
         instruction: CONSENT_INSTRUCTION,
         expect: (s: Session) =>
-          stage(s) === 'checkout' || `stage is ${stage(s)}, expected checkout`,
+          stage(s) === 'checkout' || `стадия — ${stage(s)}, ожидалась checkout`,
       },
       {
         instruction:
@@ -47,7 +47,7 @@ export const cicdFullCycle: Scenario = {
           // просил оператора создать недостающий файл — цикл,
           // переживший тайм-аут клиента и не сообщивший ничего.
           if (!existsSync(join(host.workDir, 'src', 'ci-demo.ts'))) {
-            return 'setup reported a pass but src/ci-demo.ts was never created';
+            return 'setup сообщил об успехе, но src/ci-demo.ts так и не создан';
           }
           const gates =
             (s.state as { stageGateResults?: Array<{ id: string; status: string }> } | null)
@@ -55,7 +55,7 @@ export const cicdFullCycle: Scenario = {
           const checkout = gates.find((g) => g.id === 'checkout_done');
           return (
             checkout?.status === 'passed' ||
-            `checkout_done gate is ${checkout?.status ?? '(unset)'}`
+            `гейт checkout_done имеет статус ${checkout?.status ?? '(не задан)'}`
           );
         },
       },
@@ -65,7 +65,7 @@ export const cicdFullCycle: Scenario = {
           '"[workflow-task:build] build the project", telling it to verify ' +
           'src/ci-demo.ts compiles correctly and then finish with exactly ' +
           '<workflow-result>{"gate":"build_done","status":"pass","summary":"build successful","evidence":["src/ci-demo.ts"]}</workflow-result>',
-        expect: (s: Session) => stage(s) === 'test' || `stage is ${stage(s)}, expected test`,
+        expect: (s: Session) => stage(s) === 'test' || `стадия — ${stage(s)}, ожидалась test`,
       },
       {
         // `test` — это цикл по `test_suite`, а цикл без задач не
@@ -84,7 +84,7 @@ export const cicdFullCycle: Scenario = {
           const tasks = (s.state as { tasks?: Record<string, unknown[]> } | null)?.tasks ?? {};
           return (
             (tasks.test_suite ?? []).length === 1 ||
-            `the test_suite list is ${JSON.stringify(tasks.test_suite ?? [])}`
+            `список test_suite: ${JSON.stringify(tasks.test_suite ?? [])}`
           );
         },
       },
@@ -107,7 +107,10 @@ export const cicdFullCycle: Scenario = {
           // работу. Поэтому доказательство того, что `unit` пройдена, —
           // это текущее положение задачи, а не значение гейта.
           const run = firstRun(s);
-          return run?.stage === 'integration' || `the task is at ${run?.stage ?? '(no run)'}`;
+          return (
+            run?.stage === 'integration' ||
+            `задача находится на стадии ${run?.stage ?? '(нет запуска)'}`
+          );
         },
       },
       {
@@ -120,7 +123,7 @@ export const cicdFullCycle: Scenario = {
           const tasks = (s.state as { tasks?: Record<string, Array<{ status: string }>> } | null)
             ?.tasks;
           const status = tasks?.test_suite?.[0]?.status;
-          return status === 'completed' || `the test task is ${status ?? '(missing)'}`;
+          return status === 'completed' || `статус тестовой задачи: ${status ?? '(отсутствует)'}`;
         },
       },
       {
@@ -134,7 +137,9 @@ export const cicdFullCycle: Scenario = {
             (s.state as { stageGateResults?: Array<{ id: string; status: string }> } | null)
               ?.stageGateResults ?? [];
           const deployed = gates.find((gate) => gate.id === 'deploy_done')?.status;
-          return deployed === 'passed' || `deploy_done gate is ${deployed ?? '(unset)'}`;
+          return (
+            deployed === 'passed' || `гейт deploy_done имеет статус ${deployed ?? '(не задан)'}`
+          );
         },
       },
       {
@@ -150,8 +155,8 @@ export const cicdFullCycle: Scenario = {
           const granted = approvals.some(
             (approval) => approval.type === 'deploy' && approval.status === 'granted'
           );
-          if (!granted) return 'the deploy consent was never granted';
-          return stage(s) === 'smoke' || `stage is ${stage(s)}, expected smoke`;
+          if (!granted) return 'согласие deploy так и не было предоставлено';
+          return stage(s) === 'smoke' || `стадия — ${stage(s)}, ожидалась smoke`;
         },
       },
       {
@@ -160,7 +165,7 @@ export const cicdFullCycle: Scenario = {
           '"[workflow-task:smoke] smoke test deployment", telling it to verify the ' +
           'deployment and then finish with exactly ' +
           '<workflow-result>{"gate":"smoke_result","status":"pass","summary":"smoke tests passed","evidence":["deployment-ok"]}</workflow-result>',
-        expect: (s: Session) => stage(s) === 'done' || `stage is ${stage(s)}, expected done`,
+        expect: (s: Session) => stage(s) === 'done' || `стадия — ${stage(s)}, ожидалась done`,
       },
     ]) {
       const result = await step(host, sessionId, model, { ...entry, agent: ORCHESTRATOR });

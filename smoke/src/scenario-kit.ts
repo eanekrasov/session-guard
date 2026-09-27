@@ -107,7 +107,7 @@ export function answerQuestions(
             if (!consent) {
               const text = (question.question ?? '').replace(/\s+/gu, ' ').slice(0, 160);
               offScript.push(
-                `${choice.refusal ? 'declined' : 'answered with the only option offered'}: "${text}"`
+                `${choice.refusal ? 'отказано' : 'дан ответ единственным предложенным вариантом'}: "${text}"`
               );
             }
             return [choice.label];
@@ -140,7 +140,7 @@ export function modelResponseText(parts: Part[], error: string): string {
     )
     .filter(Boolean)
     .join('\n');
-  return [error, response].filter(Boolean).join('\n') || '(empty response)';
+  return [error, response].filter(Boolean).join('\n') || '(пустой ответ)';
 }
 
 /** Сохранять ограниченный санитизированный обмен `say` только в явном trace-режиме. */
@@ -226,7 +226,7 @@ export async function say(
   // причину, а не гадало про стадию.
   const strayed = operator
     .offScript()
-    .map((entry) => `[off-script question] ${entry}`)
+    .map((entry) => `[вопрос вне сценария] ${entry}`)
     .join('\n');
   const transcript = [
     strayed,
@@ -300,7 +300,7 @@ export async function step(
       );
     }
     if (verdict === true) return { ok: true, attempts: attempt, detail: '', session };
-    detail = typeof verdict === 'string' ? verdict : 'expectation not met';
+    detail = typeof verdict === 'string' ? verdict : 'ожидание не выполнено';
   }
   return { ok: false, attempts: ATTEMPTS, detail, session };
 }
@@ -423,12 +423,13 @@ export async function prepareCommittableSession(
     {
       instruction: 'Call the tool `workflow-create` with schemaId "smoke". Do nothing else.',
       agent: ORCHESTRATOR,
-      expect: (s) => s.state !== null || 'workflow-create did not run',
+      expect: (s) => s.state !== null || 'workflow-create не выполнил действие',
     },
     {
       instruction: CONSENT_INSTRUCTION,
       agent: ORCHESTRATOR,
-      expect: (s) => stage(s) === 'tasks_ready' || `stage is ${stage(s)}, expected tasks_ready`,
+      expect: (s) =>
+        stage(s) === 'tasks_ready' || `текущая стадия — ${stage(s)}, ожидалась tasks_ready`,
     },
     {
       instruction:
@@ -436,7 +437,8 @@ export async function prepareCommittableSession(
         JSON.stringify(files.map((path) => ({ writeScope: [path], status: 'pending' }))) +
         '. Do nothing else.',
       agent: ORCHESTRATOR,
-      expect: (s) => stage(s) === 'execution' || `stage is ${stage(s)}, expected execution`,
+      expect: (s) =>
+        stage(s) === 'execution' || `текущая стадия — ${stage(s)}, ожидалась execution`,
     },
     {
       instruction:
@@ -453,7 +455,7 @@ export async function prepareCommittableSession(
         const checks = Object.values(runs ?? {}).map((run) => run.checks);
         return (
           checks.some((value) => value === 'passed') ||
-          `no run reports passing checks (got ${JSON.stringify(checks)})`
+          `ни один прогон не сообщил об успешных проверках (получено: ${JSON.stringify(checks)})`
         );
       },
     },
@@ -468,7 +470,7 @@ export async function prepareCommittableSession(
         const list = tasks?.implementation ?? [];
         return (
           list[index]?.status === 'completed' ||
-          `task-${index} is ${list[index]?.status ?? '(missing)'}`
+          `task-${index}: статус ${list[index]?.status ?? '(отсутствует)'}`
         );
       },
     })),
@@ -489,7 +491,7 @@ export async function prepareCommittableSession(
           s.state as { stageGateResults?: Array<{ id: string; status: string }> } | null
         )?.stageGateResults;
         const review = gates?.find((gate) => gate.id === 'review')?.status;
-        return review === 'passed' || `the session review gate is ${review ?? '(unset)'}`;
+        return review === 'passed' || `гейт review сессии имеет статус ${review ?? '(не задан)'}`;
       },
     },
     {
@@ -500,7 +502,8 @@ export async function prepareCommittableSession(
         '"evidence":["src/smoke-1.ts"]}</workflow-result>',
       agent: ORCHESTRATOR,
       expect: (s: Session) =>
-        stage(s) === 'commit' || `stage is ${stage(s)}, expected commit after both verdicts`,
+        stage(s) === 'commit' ||
+        `текущая стадия — ${stage(s)}, ожидалась commit после обоих вердиктов`,
     },
   ];
 
