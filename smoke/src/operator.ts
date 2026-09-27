@@ -48,7 +48,10 @@ export function chooseLabel(
   consent: boolean
 ): LabelChoice {
   if (consent) {
-    const wanted = labels.find((label) => label.toLowerCase().includes(decision));
+    const normalizedDecision = decision.trim().toLowerCase();
+    const wanted =
+      labels.find((label) => label.trim().toLowerCase() === normalizedDecision) ??
+      labels.find((label) => label.toLowerCase().includes(decision));
     return { label: wanted ?? labels[0] ?? decision };
   }
 

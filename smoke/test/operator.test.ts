@@ -20,6 +20,21 @@ describe('the operator answer policy', () => {
     );
   });
 
+  test('prefers an exact consent label over a substring match', () => {
+    expect(chooseLabel(['grant-partially', '  GRANT  '], 'grant', true).label).toBe('  GRANT  ');
+  });
+
+  test('uses a substring consent match when no exact label exists', () => {
+    expect(chooseLabel(['grant-partially', 'decline'], 'grant', true).label).toBe(
+      'grant-partially'
+    );
+  });
+
+  test('falls back safely when consent has no matching label', () => {
+    expect(chooseLabel([], 'grant', true).label).toBe('grant');
+    expect(chooseLabel(['approve', 'reject'], 'grant', true).label).toBe('approve');
+  });
+
   test('falls back to the first option when a consent offers no matching one', () => {
     expect(chooseLabel(['approve', 'reject'], 'grant', true).label).toBe('approve');
   });
