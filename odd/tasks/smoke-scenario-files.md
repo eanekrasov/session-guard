@@ -3,9 +3,9 @@
 ## Objective
 
 Stop `smoke/src/run.ts` from being three things at once. The runner keeps the CLI, the host
-lifecycle, the report and the V2 dispatch; the steps every scenario is built from move to a kit;
-each V1 scenario gets its own file, and one registry lists them in the order the report numbers
-them.
+lifecycle, the report and the V2 dispatch; the steps a scenario is built from move to a kit; every
+scenario — V1 and V2 alike — gets its own file, and the registries list them in the order each run
+reports them.
 
 ## Problem
 
@@ -27,14 +27,21 @@ proved `commit-mismatch` also carried `cicd-full-cycle` and the V2 dispatcher.
   `plan-consent`, `commit-cwd`, `commit-mismatch`, `cicd-full-cycle`, `verify-loop`.
 - `smoke/src/scenarios/index.ts` — the ordered registry.
 - `smoke/src/run.ts` — the runner only.
-- `smoke/test/scenarios.test.ts` — the registry's shape, order and auto-approve set.
+- `smoke/src/v2-scenario-kit.ts` — the V2 side of the same idea: `V2State`/`V2Step`/`V2Scenario`,
+  `ORCHESTRATOR`, `stage`, `CONSENT_INSTRUCTION` and `runV2Scenario` (replacing
+  `v2-scenarios.ts`, which held kit and scenarios together).
+- `smoke/src/scenarios/v2-*.ts` — one file per V2 scenario, and `v2Scenarios` in the same
+  `scenarios/index.ts`.
+- `smoke/test/scenarios.test.ts` — both registries' shape, order and auto-approve set.
 
 ## Out of Scope
 
-- The V2 scenarios stay in `smoke/src/v2-scenarios.ts`: they are one shape (`V2_SCENARIOS` with
-  steps, driven by `runV2Scenario` plus `v2-client.ts`), three entries, and splitting them would
-  add a second kit for a fraction of the code. Offered separately.
 - No behaviour change: same scenarios, same assertions, same order, same report.
+- `smoke/src/v2-client.ts` stays whole: it is transport and form-answering, not scenario shape, and
+  both the kit and the scenarios use it as-is.
+- The V2 scenarios were first left in one module ("one shape, three entries, splitting would add a
+  second kit for a fraction of the code") and then split anyway, on the operator's call, for the
+  same reason the V1 ones were: a scenario is reviewed on its own.
 
 ## Constraints
 
@@ -51,6 +58,7 @@ proved `commit-mismatch` also carried `cicd-full-cycle` and the V2 dispatcher.
 - `SF-004`: Keep the runner: CLI, host lifecycle, report, V2 dispatch.
 - `SF-005`: Pin the registry with a test.
 - `SF-006`: Prove it: type coverage, suite tests, `mise run check`, live runs.
+- `SF-007`: Give the V2 scenarios their own files and the same kit/registry shape.
 
 ## Acceptance Criteria
 
@@ -60,6 +68,7 @@ proved `commit-mismatch` also carried `cicd-full-cycle` and the V2 dispatcher.
 4. `bunx tsc --noEmit --listFiles` covers the new files.
 5. `bun test smoke/` passes; `mise run check` passes.
 6. A live V1 run and a live V2 run pass unchanged.
+7. The V2 scenarios are one file each, their kit holds no scenario, and the registry lists them.
 
 ## Checks
 
@@ -81,6 +90,9 @@ proved `commit-mismatch` also carried `cicd-full-cycle` and the V2 dispatcher.
       `main`, `runV2Smoke`.
 - [x] `SF-005` `smoke/test/scenarios.test.ts`: order, uniqueness, per-scenario shape, and the set
       of scenarios that bypass the operator answer.
+- [x] `SF-007` `v2-scenario-kit.ts` + `scenarios/v2-workflow-{create,consent,tasks}.ts`, `v2Scenarios`
+      registered beside the V1 list, `v2-scenarios.ts` deleted, its test renamed to
+      `v2-scenario-kit.test.ts`; the registry test covers both lists.
 - [x] `SF-006` typecheck 0 errors; prettier clean; `bun test smoke/` 47 pass; `mise run check` 1905
       tests 0 fail; the moved scenario bodies compared byte-for-byte (whitespace-insensitive) against
       the originals — all eleven identical; live runs below.
@@ -99,7 +111,14 @@ proved `commit-mismatch` also carried `cicd-full-cycle` and the V2 dispatcher.
 - Cosmetic pass after the mechanical one: blank lines between kit declarations, no shebang in
   `log.ts` (it is a module, not an entry point).
 - The V1 scenarios share `prepareCommittableSession`, `headOf`, `step` and `CONSENT_INSTRUCTION`
-  through the kit rather than importing each other; no scenario imports another.
+  through the kit rather than importing each other; no scenario imports another. The V2 scenarios do
+  the same through `v2-scenario-kit.ts` (their `CONSENT_INSTRUCTION` is shared by two of the three).
+- Both moves are byte-for-byte: the eleven V1 bodies and, separately, the three V2 bodies plus
+  `runV2Scenario`, `CONSENT_INSTRUCTION` and the three type shapes compare equal
+  (whitespace-insensitive) against the pre-split versions.
+- The V2 registry lives in the same `scenarios/index.ts` as the V1 one rather than under its own
+  subdirectory: the `v2-` filename prefix already separates the contracts, and moving the eleven V1
+  files a second time would buy structure at the cost of a rename-only diff.
 
 ## Live Receipt
 
@@ -121,6 +140,13 @@ Which scenarios were run live: three V1 (`plugin-loads`, `create`, `commit-misma
 cover the runner, `step`/`say`, and the kit tail (`prepareCommittableSession`, `headOf`); the other
 eight are verbatim moves pinned by the byte-comparison above and the registry test. A full V1 sweep
 was not run in this task.
+
+After the V2 split, the whole V2 set and one V1 sanity check:
+
+| Command                                                               | Result                                                                              |
+| --------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `HOST_SMOKE_OPENCODE_VERSION=v2 HOST_SMOKE_ATTEMPTS=2 mise run smoke` | **3/3 passed**, exit 0 — `create` 1 attempt/3.6s, `consent` 2/9.2s, `tasks` 3/10.5s |
+| `HOST_SMOKE_ATTEMPTS=2 mise run smoke plugin-loads`                   | **1/1 passed**, 35.9s, report written                                               |
 
 ## Mirror State
 
