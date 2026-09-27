@@ -1,141 +1,143 @@
-# host-smoke — the plugin against a real opencode
+# host-smoke — плагин против настоящего opencode
 
 ```bash
-mise run smoke              # every scenario
-mise run smoke git-block    # one scenario by id
+mise run smoke              # все сценарии
+mise run smoke git-block    # один сценарий по id
 HOST_SMOKE_OPENCODE_VERSION=v2 mise run smoke v2-workflow-create
-bun test smoke/             # this suite's own tests
+bun test smoke/             # тесты самой suite
 ```
 
-## Layout
+## Раскладка
 
-`smoke/` is a small project of its own: `src/run.ts` drives the scenarios,
-`src/harness.ts` owns the host lifecycle, `src/operator.ts` holds the answer
-policy both runs share, `src/report.ts` writes the report, and `profile/` holds
-the fixture profiles the suite governs a throwaway project with.
+`smoke/` — небольшой самостоятельный проект: `src/run.ts` ведёт сценарии,
+`src/harness.ts` отвечает за жизненный цикл хоста, `src/operator.ts` держит
+политику ответов, общую для обоих прогонов, `src/report.ts` пишет отчёт, а
+`profile/` содержит профили-фикстуры, которыми suite управляет во временном
+проекте.
 
-Each scenario is its own file under `src/scenarios/`, named after its id. V1's
-are imperatives and share `src/scenario-kit.ts` (`say`, `step`,
-`prepareCommittableSession`, the session shapes); V2's are declared as steps and
-share `src/v2-scenario-kit.ts` (`runV2Scenario`) plus `src/v2-client.ts` for the
-transport and the host's forms. `src/scenarios/index.ts` lists both, and a test
-pins the order — a scenario file that never reaches its registry stops running
-silently. `test/` sits beside it — the plugin's `test/` tree holds
-only the plugin's own tests. Only the root `src/` means "compiled into `dist/`";
-this one is run directly by bun.
+Каждый сценарий — свой файл в `src/scenarios/`, названный по своему id. V1-сценарии
+императивны и делят `src/scenario-kit.ts` (`say`, `step`,
+`prepareCommittableSession`, формы сессии); V2-сценарии объявлены шагами и делят
+`src/v2-scenario-kit.ts` (`runV2Scenario`) плюс `src/v2-client.ts` — транспорт и
+формы хоста. `src/scenarios/index.ts` перечисляет и те, и другие, а порядок
+закреплён тестом: файл сценария, который не попал в реестр, молча перестаёт
+запускаться. Рядом лежит `test/` — в `test/` плагина остаются только его
+собственные тесты. Только корневой `src/` означает «собирается в `dist/`»; этот
+запускается bun'ом напрямую.
 
-Two things are read from the repository root, on purpose: `profiles/base` (every
-profile is a delta over the shipped base) and `scripts/commit-task.ts` (copied
-into the throwaway project as the commit endpoint the scenarios call). Nothing in
-here imports the plugin's `src/` — scenarios load the built plugin, which is the
-point of the suite.
+Две вещи намеренно читаются из корня репозитория: `profiles/base` (каждый профиль —
+дельта к поставляемой базе) и `scripts/commit-task.ts` (копируется во временный
+проект как точка коммита, которую вызывают сценарии). Ничего здесь не импортирует
+`src/` плагина — сценарии загружают собранный плагин, в этом и смысл suite.
 
-Nothing here calls into the plugin. Each scenario starts a real `opencode
-serve` in a throwaway project, drives it with a live model through the HTTP
-API, and asserts on what the host and the plugin actually did — the session the
-plugin persisted, and the tool parts the host recorded. A scenario that passes
-here is evidence the mechanism works in production.
+Ничто здесь не вызывает плагин напрямую. Каждый сценарий поднимает настоящий
+`opencode serve` во временном проекте, прогоняет его живой моделью через HTTP API
+и проверяет, что хост и плагин **фактически** сделали: сессию, которую плагин
+сохранил, и tool-части, которые записал хост. Сценарий, прошедший здесь, — это
+доказательство того, что механизм работает в продакшене.
 
-## What it isolates, and what it borrows
+## Что изолируется, а что заимствуется
 
-V1 scenarios drive the host through its V1 HTTP API. The V2 scenario uses the
-installed `@opencode/client` API (`session.create`, `session.prompt`, and
-`session.wait`) and asserts the durable workflow state.
+V1-сценарии ведут хост через его V1 HTTP API. V2-сценарий использует
+установленный `@opencode/client` (`session.create`, `session.prompt` и
+`session.wait`) и проверяет сохранённое состояние workflow.
 
-`XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME` and `XDG_CACHE_HOME` point
-at a temp tree, so your own agents, plugins, MCP servers and sessions take no
-part in the run. Two things are borrowed from your setup, because without them
-there is no live model: matching entries from both `provider` and `providers`
-in your opencode config, and `auth.json`. The selected `HOST_SMOKE_MODEL` (or
-top-level config `model`) determines which provider name and model ID remain;
-unrelated providers are removed. Both land in the temp tree and go away with
-it.
+`XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME` и `XDG_CACHE_HOME` указывают
+на временное дерево, поэтому ваши агенты, плагины, MCP-серверы и сессии в прогоне
+не участвуют. Из вашего окружения заимствуются две вещи — без них не будет живой
+модели: совпадающие записи из `provider` и `providers` вашего конфига opencode и
+`auth.json`. Выбранный `HOST_SMOKE_MODEL` (или `model` верхнего уровня в конфиге)
+определяет, какие имя провайдера и id модели останутся; остальные провайдеры
+удаляются. И то, и другое попадает во временное дерево и исчезает вместе с ним.
 
-The project the host runs in is a fresh git repository holding the smoke
-profile, `commit-task.ts` and a plan file. It is deleted when the run ends.
+Проект, в котором работает хост, — свежий git-репозиторий с smoke-профилем,
+`commit-task.ts` и файлом плана. По окончании прогона он удаляется.
 
-## The model is part of the test
+## Модель — часть теста
 
-A live model decides whether to call the tool it was told to call, so a step can
-fail because the model ignored the instruction rather than because the plugin
-misbehaved. Every step is retried (`HOST_SMOKE_ATTEMPTS`, default 3) and the
-report records how many attempts it took and the duration of each scenario,
-including the average. **A step that needed retries is a prompt problem; a
-step that never succeeded is a finding.** Do not use a fixed duration as a
-pass/fail threshold: live-model latency varies by provider and load.
+Живая модель сама решает, вызывать ли инструмент, который её просили вызвать,
+поэтому шаг может упасть из-за того, что модель проигнорировала инструкцию, а не
+из-за того, что плагин повёл себя неверно. Каждый шаг повторяется
+(`HOST_SMOKE_ATTEMPTS`, по умолчанию 3), и отчёт фиксирует, сколько попыток это
+заняло и сколько длился каждый сценарий, включая среднее. **Шаг, которому
+понадобились повторы, — проблема промпта; шаг, не прошедший ни разу, — находка.**
+Не используйте фиксированную длительность как порог pass/fail: задержка живой
+модели зависит от провайдера и нагрузки.
 
-The V2 runner adds one bound: `HOST_SMOKE_PROMPT_TIMEOUT_MS` (default 60s) is
-how long the client waits for a turn to settle. A turn that outlives it is not
-the verdict — a V2 agent keeps working after the call it was asked for — so the
-step is judged by the state the plugin persisted, exactly as V1 judges it by the
-reply, and the report says the turn was still running.
+V2-раннер добавляет одну границу: `HOST_SMOKE_PROMPT_TIMEOUT_MS` (по умолчанию 60 с) —
+сколько клиент ждёт, пока ход завершится. Ход, вышедший за это время, не является
+вердиктом: V2-агент продолжает работу после вызова, который его просили сделать.
+Поэтому шаг судится по состоянию, которое плагин сохранил, — ровно как V1 судит по
+ответу, — а отчёт говорит, что ход всё ещё шёл.
 
-It also runs its session as `orchestrator`, the agent V1 sends with every
-message. V1 passes `agent` on the request; V2 has no such field, so the client
-switches the session's agent after creating it. The smoke profile's stages allow
-no other agent, and a session left on the host default is refused by the
-workflow's own rules (`Refused workflow-tasks-set … allowed: ["orchestrator"]`).
+Ещё V2-раннер ведёт свою сессию под агентом `orchestrator` — тем, с которым V1
+шлёт каждое сообщение. V1 передаёт `agent` в запросе; в V2 такого поля нет, поэтому
+клиент переключает агента сессии после её создания. Стадии smoke-профиля не
+разрешают другого агента, и сессия, оставленная на дефолтном агенте хоста,
+отвергается правилами самого workflow
+(`Refused workflow-tasks-set … allowed: ["orchestrator"]`).
 
-One observed live-model baseline run took:
+Один наблюдавшийся базовый прогон с живой моделью занял:
 
-| Scenario          | Attempts | Duration |
-| ----------------- | -------: | -------: |
-| `plugin-loads`    |        1 |    17.3s |
-| `no-session`      |        1 |    14.4s |
-| `create`          |        1 |    15.9s |
-| `git-block`       |        1 |    30.2s |
-| `task-control`    |        2 |    28.1s |
-| `commit-gate`     |        1 |    26.1s |
-| `commit-cwd`      |        1 |    56.1s |
-| `commit-mismatch` |        8 |     2.7m |
-| `cicd-full-cycle` |       10 |     8.0m |
-| `verify-loop`     |        6 |     2.4m |
+| Сценарий          | Попыток | Длительность |
+| ----------------- | ------: | -----------: |
+| `plugin-loads`    |       1 |        17.3s |
+| `no-session`      |       1 |        14.4s |
+| `create`          |       1 |        15.9s |
+| `git-block`       |       1 |        30.2s |
+| `task-control`    |       2 |        28.1s |
+| `commit-gate`     |       1 |        26.1s |
+| `commit-cwd`      |       1 |        56.1s |
+| `commit-mismatch` |       8 |         2.7m |
+| `cicd-full-cycle` |      10 |         8.0m |
+| `verify-loop`     |       6 |         2.4m |
 
-This is an observation from one run, not a performance target. The runner
-records fresh durations in `docs/plans/host-smoke.md` on every run.
+Это наблюдение одного прогона, а не требование к производительности. Свежие
+длительности раннер записывает в `docs/plans/host-smoke.md` при каждом прогоне.
 
-## Environment
+## Окружение
 
-| Variable                       | Meaning                                                   |
-| ------------------------------ | --------------------------------------------------------- |
-| `HOST_SMOKE_MODEL`             | model id; defaults to the `model` in your opencode config |
-| `HOST_SMOKE_PLUGIN`            | skip the build and load this path instead of `dist`       |
-| `HOST_SMOKE_ATTEMPTS`          | retries per step, default 3                               |
-| `HOST_SMOKE_PROMPT_TIMEOUT_MS` | V2: budget for one prompt, default 60000                  |
-| `HOST_SMOKE_DEBUG`             | print questions, USER/MODEL exchanges and failure details |
-| `HOST_SMOKE_OPENCODE_VERSION`  | `v1` (default) or `v2`                                    |
-| `HOST_SMOKE_OUTPUT`            | `human` (default) or `jsonl`                              |
-| `FORCE_COLOR=1`                | force colors when stderr is not attached to a TTY         |
-| `NO_COLOR=1`                   | disable colors                                            |
+| Переменная                     | Значение                                                   |
+| ------------------------------ | ---------------------------------------------------------- |
+| `HOST_SMOKE_MODEL`             | id модели; по умолчанию `model` из вашего конфига opencode |
+| `HOST_SMOKE_PLUGIN`            | не собирать, а загрузить этот путь вместо `dist`           |
+| `HOST_SMOKE_ATTEMPTS`          | число попыток на шаг, по умолчанию 3                       |
+| `HOST_SMOKE_PROMPT_TIMEOUT_MS` | V2: бюджет одного промпта, по умолчанию 60000              |
+| `HOST_SMOKE_DEBUG`             | печатать вопросы, обмен USER/MODEL и детали падений        |
+| `HOST_SMOKE_OPENCODE_VERSION`  | `v1` (по умолчанию) или `v2`                               |
+| `HOST_SMOKE_OUTPUT`            | `human` (по умолчанию) или `jsonl`                         |
+| `FORCE_COLOR=1`                | форсировать цвета, когда stderr не подключён к TTY         |
+| `NO_COLOR=1`                   | отключить цвета                                            |
 
-For machine-readable output, use JSONL on stderr:
+Для машинно-читаемого вывода используйте JSONL в stderr:
 
 ```bash
 HOST_SMOKE_OUTPUT=jsonl HOST_SMOKE_DEBUG=1 mise run smoke 2>host-smoke.jsonl
 ```
 
-Each line is one event with `timestamp`, `type`, `message` and event-specific
-fields such as `scenario`, `attempts` and `durationMs`. Multiline user and
-model messages remain valid JSON strings rather than breaking the stream.
+Каждая строка — одно событие с `timestamp`, `type`, `message` и полями,
+специфичными для события, например `scenario`, `attempts` и `durationMs`.
+Многострочные сообщения пользователя и модели остаются корректными
+JSON-строками и не ломают поток.
 
-## Things this run established about the host
+## Что этот прогон выяснил про хост
 
-- A plugin loads from a `file://` **directory** (`file://…/dist`), the form an
-  operator writes in their own config. A packed `.tgz` behind a `file://` spec
-  is **not** loaded — worth knowing before shipping that way.
-- The host reads its agent roster once, at startup, so profile agents must be
-  in place before the server comes up.
-- The `question` tool — the whole consent path — is only registered for
-  interactive clients unless `OPENCODE_ENABLE_QUESTION_TOOL` is set, and is
-  denied by default without `permission: { question: "allow" }`.
-- `ToolContext.agent` really does carry the calling agent's name, which is what
-  `taskControlAgents` is enforced against.
+- Плагин загружается из `file://` **каталога** (`file://…/dist`) — именно так его
+  прописывает оператор в своём конфиге. Упакованный `.tgz` за `file://` **не**
+  загружается: это стоит знать, прежде чем поставлять плагин таким способом.
+- Хост читает список агентов один раз, при старте, поэтому агенты профиля должны
+  быть на месте до подъёма сервера.
+- Инструмент `question` — весь путь согласия — регистрируется только для
+  интерактивных клиентов, если не задан `OPENCODE_ENABLE_QUESTION_TOOL`, и по
+  умолчанию запрещён без `permission: { question: "allow" }`.
+- `ToolContext.agent` действительно несёт имя вызывающего агента — именно против
+  него работает `taskControlAgents`.
 
-## Findings this run produced
+## Находки этого прогона
 
-| Finding                                                                                                          | Status                                        |
-| ---------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
-| `workflow-tasks-set` reported success while persisting nothing — a reentrant write overwritten by the outer save | fixed (`SessionQueue`)                        |
-| the consent tag carried a `revision` its own manifest did not, so the plugin's own parser rejected it            | fixed (`workflow-consent`)                    |
-| the answer handler looked for the consent tag in the tool's output instead of the question                       | fixed (`ConsentOrchestrator.after`)           |
-| nothing in `src` ever sets the `review` or `qa` gate, so the shipped base machine cannot reach `commit`          | open — pinned by the `machine-limit` scenario |
+| Находка                                                                                                       | Статус                                         |
+| ------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| `workflow-tasks-set` сообщал об успехе, ничего не сохранив — реентрантная запись, перекрытая внешним save     | исправлено (`SessionQueue`)                    |
+| тег согласия нёс `revision`, которого не было в его собственном манифесте, и парсер плагина его отвергал      | исправлено (`workflow-consent`)                |
+| обработчик ответа искал тег согласия в выводе инструмента, а не в вопросе                                     | исправлено (`ConsentOrchestrator.after`)       |
+| ничто в `src` не выставляет гейты `review` и `qa`, поэтому поставляемая базовая машина не доходит до `commit` | открыто — закреплено сценарием `machine-limit` |
