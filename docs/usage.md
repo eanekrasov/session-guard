@@ -27,13 +27,25 @@ OpenCode `>= 1.18.29` (объявлено в `engines`) и
 ## Подключение в target project
 
 Плагин экспортирует `default` — объект `{ id, server }`, где `server` — фабрика
-серверных хуков OpenCode. В target project его можно подключить двумя способами:
+серверных хуков OpenCode. В target project его можно подключить тремя способами:
 
 1. Клонировать checkout в `<project>/.opencode/session-guard` и подключить
    wrapper из `<project>/.opencode/plugins`.
 2. Установить пакет как зависимость в `<project>/.opencode/package.json`.
+3. Установить опубликованный пакет из npmjs:
 
-В обоих случаях профили должны быть доступны в
+   ```bash
+   bun add @eanekrasov/session-guard
+   # или
+   npm i @eanekrasov/session-guard
+   ```
+
+   Пакет публичный и scoped (`publishConfig.access: public`), поэтому установка
+   из npmjs не требует токена, `.npmrc` и доступа к GitHub Packages.
+   Предварительные версии публикуются под тегом `next`:
+   `npm i @eanekrasov/session-guard@next`.
+
+Во всех случаях профили должны быть доступны в
 `<project>/.opencode/profiles` либо через `SESSION_GUARD_PROFILES_DIR`.
 
 Пример точки входа ниже относится к source repository; в target project

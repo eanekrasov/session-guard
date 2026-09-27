@@ -1,7 +1,12 @@
-name: Publish to GitHub Packages
+name: Publish to npm
 
 on:
   workflow_dispatch:
+    inputs:
+      tag:
+        description: npm dist-tag to publish under (latest or next)
+        required: true
+        default: latest
   repository_dispatch:
     types: [publish-package]
 
@@ -10,7 +15,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
       id-token: write
     steps:
       - uses: actions/checkout@v5
@@ -22,12 +26,8 @@ jobs:
           cache: false
           experimental: true
 
-      - name: Configure npm for GitHub Packages
-        run: |
-          cat <<-EOF > .npmrc
-          //npm.pkg.github.com/:_authToken=${{ secrets.GITHUB_TOKEN }}
-          @eanekrasov:registry=https://npm.pkg.github.com
-          EOF
-
+      # npm-токены не нужны: npm CLI обменивает OIDC-токен GitHub Actions
+      # (permission id-token: write) на краткоживущий publish-токен.
+      # Требует, чтобы publish.yml был указан доверенным издателем на npmjs.com.
       - name: Publish
-        run: mise run publish --tag "${{ github.event.client_payload.tag || 'latest' }}"
+        run: mise run publish --tag "${{ github.event.client_payload.tag || inputs.tag || 'latest' }}"

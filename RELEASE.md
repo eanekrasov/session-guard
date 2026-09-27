@@ -29,6 +29,10 @@
 - После этого для последующих выпусков можно настроить Trusted Publishing через
   GitHub Actions.
 
+Публикация требует включённой двухфакторной аутентификации на аккаунте npm, поэтому
+первый выпуск начинается с её настройки — порядок описан ниже, в разделе
+«Двухфакторная аутентификация».
+
 ### Шаги
 
 1. Убедитесь, что `package.json` настроен корректно:
@@ -39,20 +43,24 @@
    - корректно заполнено поле repository;
    - корректно заполнено поле author.
 
-2. Выполните `npm login`, чтобы аутентифицироваться в npm.
+2. Включите двухфакторную аутентификацию на аккаунте npm. Без неё публикация
+   отклоняется: npm требует либо 2FA, либо granular-токен с включённым bypass 2FA.
 
-3. Выполните `mise run build`, чтобы собрать модуль.
+3. Выполните `npm login`, чтобы аутентифицироваться в npm.
 
-4. Выполните `mise run publish --otp {your-2fa-code}`, чтобы опубликовать первую
-   версию.
+4. Выполните `mise run build`, чтобы собрать модуль.
 
-5. Откройте настройки npm-пакета на npmjs.com и добавьте доверенного издателя для
+5. Выполните `mise run publish --tag latest`, чтобы опубликовать первую версию.
+   npm запросит подтверждение вторым фактором интерактивно; одноразовый код вводить
+   не нужно.
+
+6. Откройте настройки npm-пакета на npmjs.com и добавьте доверенного издателя для
    GitHub Actions со следующими параметрами:
    - **Организация или пользователь**: имя пользователя или организации GitHub;
    - **Репозиторий**: имя репозитория;
    - **Имя workflow-файла**: `publish.yml` (имя workflow выпуска).
 
-6. Для максимальной безопасности [ограничьте доступ токенов](https://docs.npmjs.com/trusted-publishers#recommended-restrict-token-access-when-using-trusted-publishers).
+7. Для максимальной безопасности [ограничьте доступ токенов](https://docs.npmjs.com/trusted-publishers#recommended-restrict-token-access-when-using-trusted-publishers).
 
 ## Workflow выпуска
 
@@ -181,6 +189,31 @@ const MAJOR = '1';
 Релизы автоматически публикуются в NPM после объединения PR выпуска от Release
 Please.
 
+### Двухфакторная аутентификация
+
+Публикация в npm требует второго фактора: либо двухфакторной аутентификации (2FA) на
+аккаунте, либо granular access token с включённым bypass 2FA. Аккаунт без 2FA
+публиковать не может.
+
+2FA в npm — это security key (WebAuthn), а не код из приложения-аутентификатора:
+подойдут Touch ID, Face ID, Windows Hello или физический ключ.
+
+1. Откройте npmjs.com → меню профиля → **Account**.
+2. В разделе **Two-Factor Authentication** нажмите **Enable 2FA**.
+3. Выберите метод (security key) и добавьте ключ.
+4. Сохраните recovery-коды в надёжном месте.
+
+Код при публикации не вводится: npm запрашивает подтверждение ключом интерактивно.
+Опция `npm publish --otp` нужна только для аккаунтов с настроенным TOTP; если `--otp`
+не передан, а реестр запросил одноразовый пароль, npm спросит его в терминале.
+
+**Важно:** recovery-код, использованный для входа, включает временный 72-часовой
+запрет на публикацию пакетов, создание токенов и изменение настроек аккаунта —
+восстановлением доступа публикацию не обойти.
+
+Подробнее: [About two-factor authentication](https://docs.npmjs.com/about-two-factor-authentication)
+и [Configuring two-factor authentication](https://docs.npmjs.com/configuring-two-factor-authentication).
+
 ### NPM Trusted Publishing
 
 Проект использует [NPM Trusted Publishing](https://docs.npmjs.com/trusted-publishers)
@@ -223,8 +256,10 @@ gh workflow run publish.yml --ref main -f tag=latest
 
 Workflow собирает пакет и публикует его через npm Trusted Publishing. GitHub
 Release при этом не создаётся: GitHub Releases создаёт workflow Release Please.
-Для первого локального выпуска выполните `npm login`, затем `mise run build` и
-`mise run publish --tag latest --otp {your-2fa-code}`.
+Для первого локального выпуска включите 2FA, затем выполните `npm login`,
+`mise run build` и `mise run publish --tag latest`: npm запросит подтверждение
+вторым фактором, одноразовый код вводить не нужно. Если на аккаунте настроен
+TOTP-аутентификатор, код из него можно передать опцией `--otp {код}`.
 
 Ручная публикация нужна для:
 
