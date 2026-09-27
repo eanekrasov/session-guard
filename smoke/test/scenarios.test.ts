@@ -1,6 +1,42 @@
 import { describe, expect, test } from 'bun:test';
+import { readdir } from 'node:fs/promises';
+import { join } from 'node:path';
 
 import { scenarios, v2Scenarios } from '../src/scenarios/index.ts';
+
+test('каждый файл сценария присутствует в правильном реестре, и наоборот', async () => {
+  const directory = join(import.meta.dirname, '../src/scenarios');
+  const files = (await readdir(directory)).filter(
+    (file) => file.endsWith('.ts') && file !== 'index.ts'
+  );
+  const v1Ids = new Set(scenarios.map((scenario) => scenario.id));
+  const v2Ids = new Set(v2Scenarios.map((scenario) => scenario.id));
+  const v1FileIds = new Set(
+    files.filter((file) => !file.startsWith('v2-')).map((file) => file.slice(0, -'.ts'.length))
+  );
+  const v2FileIds = new Set(
+    files.filter((file) => file.startsWith('v2-')).map((file) => file.slice(0, -'.ts'.length))
+  );
+
+  for (const file of files) {
+    const id = file.slice(0, -'.ts'.length);
+    const registry = file.startsWith('v2-') ? v2Ids : v1Ids;
+    if (!registry.has(id)) {
+      throw new Error(`Файл сценария «${file}» отсутствует в соответствующем реестре`);
+    }
+  }
+
+  for (const [registryName, ids, fileIds] of [
+    ['V1', v1Ids, v1FileIds],
+    ['V2', v2Ids, v2FileIds],
+  ] as const) {
+    for (const id of ids) {
+      if (!fileIds.has(id)) {
+        throw new Error(`Сценарий «${id}» из реестра ${registryName} не имеет файла сценария`);
+      }
+    }
+  }
+});
 
 /**
  * Исполнитель перебирает реестр и нумерует отчёт. Сценарий, существующий в виде файла,
