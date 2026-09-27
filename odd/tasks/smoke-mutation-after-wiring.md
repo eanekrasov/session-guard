@@ -72,10 +72,56 @@ survive writing its report when `docs/plans` does not exist yet.
       `await this.mutationAfter(...)` from `runtime.ts` and added `tool-execution-policy.ts`
       without wiring its `after`; `changeAfterInput` is not supplied either. Only
       `handleToolFailure` (error paths) and the 30-minute TTL ever release a lock.
-- [ ] `MAW-002` Pending.
-- [ ] `MAW-003` Pending.
-- [ ] `MAW-004` Pending.
-- [ ] `MAW-005` Pending.
+- [x] `MAW-002` `runtime.ts` supplies `changeAfterInput` (line 231) and calls
+      `toolExecutionPolicy.after(...)` in the position the pre-regression code used (line 421,
+      after consent, before transitions).
+- [x] `MAW-003` `scripts/host-smoke/report.ts` creates the report's parent directory;
+      `run.ts` writes through it.
+- [x] `MAW-004` `test/app/mutation-after-wiring.test.ts` (release + verdict, and the next
+      mutation admitted) and `test/app/host-smoke-report.test.ts` (missing parent directory,
+      replacement). Both wiring tests fail against HEAD's `runtime.ts` — verified by restoring
+      the committed revision temporarily — and pass with the fix.
+- [x] `MAW-005` Checks run and recorded under `## Verification Receipt`.
+
+## Verification Receipt
+
+- `bun test test/app/mutation-after-wiring.test.ts test/app/host-smoke-report.test.ts`: 4 pass,
+  0 fail, 9 expectations.
+- Pre-fix check: with `src/app/runtime.ts` restored from HEAD, the two wiring tests fail
+  (`activeOperations['call-write']` still present with `kind: "mutation"`; the second mutation
+  rejects). The fix was restored from a saved copy and re-verified.
+- `mise run check`: passed — 1867 tests, 0 fail, 154 files (typecheck and lint run as its
+  dependencies).
+- `mise run lint-fix`: 0 errors; the six pre-existing `no-explicit-any` warnings in
+  `test/app/v2-tool-surface-adapter.test.ts` remain.
+- `mise run build`: passed, all outputs present, entrypoints distinct.
+- `git diff --check`: clean.
+- `git diff -- dist`: empty — `dist/` is gitignored (`.gitignore:2`), so this check is vacuous
+  here; the built bundle was verified to contain the new wiring
+  (`grep -c changeAfterInput dist/index.js` → 3).
+- Commit: `fa26119` — 6 files, 359 insertions.
+
+## Live V2 Receipt (separate decision, not part of MAW)
+
+One authorized live attempt, no retry:
+`HOST_SMOKE_OPENCODE_VERSION=v2 HOST_SMOKE_ATTEMPTS=1 mise run smoke v2-workflow-create`.
+
+- Result: FAIL, `V2 smoke failed: UnsupportedContentType`, exit 1.
+- Cause, established without a model call: the first client request `POST /api/session` is
+  answered `401` with `www-authenticate: Basic realm="Secure Area"` and an empty body. The
+  generated client's JSON decoder reports the empty non-JSON 401 body as
+  `UnsupportedContentType` instead of an authorization error, so the real reason was hidden.
+- The V2 host generates its own per-run server password and prints it in its log
+  (`server password <value>`); the V2 `/api` group is wrapped in the `Authorization` middleware
+  (`node_modules/@opencode/protocol/dist/api.d.ts:43`). `harness.ts:505-508` deletes
+  `OPENCODE_SERVER_PASSWORD` from the child because "the smoke client talks to this disposable
+  server without an auth header" — true for V1, false for V2. Probing Basic auth with the
+  operator's value fails, so the server ignores that inherited value and generates its own.
+- Therefore the V2 smoke needs its own auth path (a known password passed to the child, or the
+  generated password read from the host log and sent by the transport) before any V2 scenario
+  can assert anything.
+- No V2 success is claimed. The probe lives at `.memory/v2-probe.ts` (gitignored scratch) and
+  reports only statuses and file names.
 
 ## Evidence and Decisions
 
