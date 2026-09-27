@@ -39,8 +39,9 @@ import {
   stopAllHosts,
   type Host,
 } from './harness.ts';
-import { createV2SmokeClient, runV2WorkflowCreate } from './v2-client.ts';
 import { writeSmokeReport } from './report.ts';
+import { chooseLabel } from './operator.ts';
+import { V2_SCENARIOS, runV2Scenario } from './v2-scenarios.ts';
 
 const ATTEMPTS = Number(process.env.HOST_SMOKE_ATTEMPTS ?? 3);
 const OUTPUT_FORMAT = process.env.HOST_SMOKE_OUTPUT ?? 'human';
@@ -127,12 +128,8 @@ interface Session {
 }
 
 /**
- * Words an option uses to say "no". Ordered: the earlier one wins, so an
- * explicit refusal beats a merely negative-sounding label.
+ * Questions the plugin raised carry its consent tag; anything else is the model's own.
  */
-const DECLINING_WORDS = ['decline', 'no,', 'no ', 'cancel', 'stop', 'skip', "don't", 'do not'];
-
-/** Questions the plugin raised carry its consent tag; anything else is the model's own. */
 function isConsentQuestion(request: { questions?: Array<{ question?: string }> }): boolean {
   return (request.questions ?? []).some((entry) =>
     (entry?.question ?? '').includes('<consent-request')
@@ -189,21 +186,14 @@ function answerQuestions(
             const labels = (question.options ?? []).map((option) =>
               typeof option === 'string' ? option : (option.label ?? '')
             );
-            if (consent) {
-              const wanted = labels.find((label) => label.toLowerCase().includes(choose));
-              return [wanted ?? labels[0] ?? choose];
-            }
-            const refusal = DECLINING_WORDS.reduce<string | undefined>(
-              (found, word) => found ?? labels.find((label) => label.toLowerCase().includes(word)),
-              undefined
-            );
+            const choice = chooseLabel(labels, choose, consent);
             if (!consent) {
               const text = (question.question ?? '').replace(/\s+/gu, ' ').slice(0, 160);
               offScript.push(
-                `${refusal ? 'declined' : 'answered with the only option offered'}: "${text}"`
+                `${choice.refusal ? 'declined' : 'answered with the only option offered'}: "${text}"`
               );
             }
-            return [refusal ?? labels[0] ?? 'no'];
+            return [choice.label];
           });
           await api(host, 'POST', `/question/${request.id}/reply`, { answers });
         }
@@ -1315,47 +1305,84 @@ async function runV2Smoke(): Promise<boolean> {
   const model = await defaultModel(binary);
   const plugin = process.env.HOST_SMOKE_PLUGIN ?? buildPlugin();
   process.env.HOST_SMOKE_PLUGIN = plugin;
+
   const requested = process.argv.slice(2);
-  if (requested.length > 0 && !requested.includes('v2-workflow-create')) {
-    logEvent('V2 supports only v2-workflow-create.', 'red', 'error');
+  const selected = requested.length
+    ? V2_SCENARIOS.filter((scenario) => requested.includes(scenario.id))
+    : V2_SCENARIOS;
+  if (selected.length === 0) {
+    logEvent(
+      `No such V2 scenario. Known: ${V2_SCENARIOS.map((scenario) => scenario.id).join(', ')}`,
+      'red',
+      'error'
+    );
     return false;
   }
 
   logEvent(`model:  ${model}`, 'gray', 'run.start', { model, plugin, version: 'v2' });
-  const startedAt = Date.now();
-  let host: Host | undefined;
-  try {
-    host = await startHost({
-      model,
-      version: 'v2',
-      profile: 'smoke',
-      files: { 'plan.md': '# Smoke plan\n\nAdd one file under src/.\n' },
-    });
-    const outcome = await runV2WorkflowCreate(
-      createV2SmokeClient(host),
-      host,
-      'Call the tool `workflow-create` with schemaId "smoke". Do nothing else and add no commentary.'
-    );
-    const state = outcome.state as { currentStage?: unknown } | null;
-    const ok = state?.currentStage === 'planning';
-    const evidence = ok
-      ? 'V2 client created a session, the configured model called workflow-create, and session-guard persisted planning.'
-      : `workflow state was ${JSON.stringify(state)}`;
-    const durationMs = Date.now() - startedAt;
-    logEvent(ok ? 'PASS' : 'FAIL', ok ? 'green' : 'red', 'scenario.result', {
-      scenario: 'v2-workflow-create',
-      status: ok ? 'pass' : 'fail',
-      durationMs,
-    });
-    if (!ok) logEvent(`  ${evidence}`, 'red', 'scenario.evidence');
-    return ok;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    logEvent(`V2 smoke failed: ${message}`, 'red', 'error');
-    return false;
-  } finally {
-    await host?.stop();
+  if (OUTPUT_FORMAT !== 'jsonl') {
+    logEvent(`plugin: ${plugin}`, 'gray');
+    logEvent(`opencode: ${binary}`, 'gray');
   }
+
+  let passed = 0;
+  for (const scenario of selected) {
+    const startedAt = Date.now();
+    logEvent(`▶ ${scenario.id} …`, 'cyan', 'scenario.start', { scenario: scenario.id });
+    let host: Host | undefined;
+    try {
+      host = await startHost({
+        model,
+        version: 'v2',
+        profile: 'smoke',
+        files: { 'plan.md': '# Smoke plan\n\nAdd one file under src/.\n' },
+      });
+      const outcome = await runV2Scenario(host, scenario, ATTEMPTS);
+      const durationMs = Date.now() - startedAt;
+      if (outcome.ok) passed += 1;
+      logEvent(
+        outcome.ok
+          ? `PASS (${outcome.attempts} attempt(s), ${formatDuration(durationMs)})`
+          : `FAIL (${formatDuration(durationMs)})`,
+        outcome.ok ? 'green' : 'red',
+        'scenario.result',
+        {
+          scenario: scenario.id,
+          status: outcome.ok ? 'pass' : 'fail',
+          attempts: outcome.attempts,
+          durationMs,
+        }
+      );
+      logEvent(
+        `  ${outcome.evidence.split('\n').join('\n  ')}`,
+        outcome.ok ? 'gray' : 'red',
+        'scenario.evidence'
+      );
+      if (!outcome.ok && process.env.HOST_SMOKE_DEBUG) {
+        logEvent(host.logs().slice(-4000), 'red', 'scenario.host-log');
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logEvent('ERROR', 'red', 'scenario.result', {
+        scenario: scenario.id,
+        status: 'error',
+        durationMs: Date.now() - startedAt,
+      });
+      logEvent(`  ${message}`, 'red', 'error');
+      if (process.env.HOST_SMOKE_DEBUG)
+        logEvent(host?.logs().slice(-4000) ?? '', 'red', 'scenario.host-log');
+    } finally {
+      await host?.stop();
+    }
+  }
+
+  logEvent(
+    `\n${passed}/${selected.length} passed`,
+    passed === selected.length ? 'green' : 'red',
+    'run.summary',
+    { passed, total: selected.length, version: 'v2' }
+  );
+  return passed === selected.length;
 }
 
 await main();

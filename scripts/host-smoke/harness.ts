@@ -44,6 +44,30 @@ export function opencodeBinary(version: HostVersion): string {
   return V1_BINARY;
 }
 
+/** The credential a V2 host generated for itself, as its own log announces it. */
+export function serverPasswordFromLogs(logs: string): string | null {
+  return /server password\s+(\S+)/.exec(logs)?.[1] ?? null;
+}
+
+/** The `Authorization` value the V2 host accepts that credential under. */
+export function basicAuthHeader(password: string, user = 'opencode'): string {
+  return `Basic ${Buffer.from(`${user}:${password}`).toString('base64')}`;
+}
+
+/** Read the generated password out of the log once it appears, or give up. */
+async function waitForServerPassword(
+  read: () => string,
+  timeoutMs: number
+): Promise<string | null> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const password = serverPasswordFromLogs(read());
+    if (password) return password;
+    if (Date.now() >= deadline) return null;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+}
+
 export interface Host {
   /** Base URL of the running opencode server. */
   url: string;
@@ -51,6 +75,13 @@ export interface Host {
   workDir: string;
   /** Everything the host wrote — config, data, sessions. */
   homeDir: string;
+  /**
+   * `Authorization` value this host's API accepts, when it needs one.
+   *
+   * V1 needs none. V2 ignores `OPENCODE_SERVER_PASSWORD`, generates its own
+   * credential and requires it on every `/api` call.
+   */
+  authHeader?: string;
   stop: () => Promise<void>;
   /** Server stdout+stderr, for diagnosing a scenario that never ran. */
   logs: () => string;
@@ -281,6 +312,72 @@ export function filterOperatorProviders(
   };
 }
 
+/**
+ * The provider key a V2 host can no longer import for itself.
+ *
+ * A fresh V2 data directory never runs the legacy credential import: the
+ * database bootstrap creates the current schema and records **every** migration
+ * as applied without executing any of them
+ * (`packages/core/src/database/migration.ts`), so the `credential` table stays
+ * empty and `20260805200742_import_legacy_credentials` imports nothing. With no
+ * credential the model resolver forces `auth: none` and every prompt fails with
+ * `provider.auth`, which is what the V2 smoke reported as a dead model.
+ *
+ * V1 reads `auth.json` directly, so only V2 needs this.
+ */
+export function legacyApiKeyFor(
+  providerID: string,
+  authFile = join(homedir(), '.local/share/opencode/auth.json')
+): string | undefined {
+  if (!existsSync(authFile)) return undefined;
+  try {
+    const parsed = JSON.parse(readFileSync(authFile, 'utf-8')) as Record<string, unknown>;
+    const entry = parsed[providerID] as { type?: unknown; key?: unknown } | undefined;
+    return entry?.type === 'api' && typeof entry.key === 'string' && entry.key !== ''
+      ? entry.key
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Put that key where the V2 provider entry carries configuration. An entry the
+ * operator already gave a key is left exactly as it is.
+ */
+export function withProviderApiKey(providers: unknown, model: string, authFile?: string): unknown {
+  if (typeof providers !== 'object' || providers === null || Array.isArray(providers)) {
+    return providers;
+  }
+  const providerID = model.split('/')[0] ?? '';
+  const key =
+    authFile === undefined ? legacyApiKeyFor(providerID) : legacyApiKeyFor(providerID, authFile);
+  if (!key) return providers;
+
+  const map = providers as Record<string, unknown>;
+  const entry = map[providerID];
+  if (typeof entry !== 'object' || entry === null) return providers;
+
+  const settings = (entry as { settings?: unknown }).settings;
+  const existing =
+    typeof settings === 'object' && settings !== null
+      ? (settings as Record<string, unknown>).apiKey
+      : undefined;
+  if (typeof existing === 'string' && existing !== '') return providers;
+
+  log('debug', `configured the provider key for ${providerID} from the operator auth database`);
+  return {
+    ...map,
+    [providerID]: {
+      ...(entry as Record<string, unknown>),
+      settings: {
+        ...(typeof settings === 'object' && settings !== null ? settings : {}),
+        apiKey: key,
+      },
+    },
+  };
+}
+
 export async function operatorProviders(requestedModel?: string): Promise<{
   provider?: unknown;
   providers?: unknown;
@@ -382,7 +479,8 @@ export async function writeSmokeConfigs(
   operator: Awaited<ReturnType<typeof operatorProviders>>,
   model: string,
   pluginSpec: string,
-  version: HostVersion = 'v1'
+  version: HostVersion = 'v1',
+  operatorAuthFile?: string
 ): Promise<void> {
   log('debug', `writing smoke config files to ${opencodeDir}`);
   await mkdir(opencodeDir, { recursive: true });
@@ -395,7 +493,14 @@ export async function writeSmokeConfigs(
         $schema: 'https://opencode.ai/config.json',
         model,
         ...(operator.provider ? { provider: operator.provider } : {}),
-        ...(operator.providers ? { providers: operator.providers } : {}),
+        ...(operator.providers
+          ? {
+              providers:
+                version === 'v2'
+                  ? withProviderApiKey(operator.providers, model, operatorAuthFile)
+                  : operator.providers,
+            }
+          : {}),
         ...(operator.disabled_providers ? { disabled_providers: operator.disabled_providers } : {}),
         permission: { '*': 'allow', question: 'allow' },
         ...(version === 'v2'
@@ -580,10 +685,27 @@ export async function startHost(options: HostOptions): Promise<Host> {
       throw error;
     }
 
+    // V2 ignores an inherited OPENCODE_SERVER_PASSWORD and generates its own
+    // credential, announced in its log as `server password <value>`. Every
+    // `/api` call needs it: without the header the server answers 401 with an
+    // empty body, which the generated client reports as
+    // `UnsupportedContentType` — an authorization failure wearing a
+    // content-type costume.
+    let authHeader: string | undefined;
+    if (version === 'v2') {
+      const password = await waitForServerPassword(() => buffer, 5_000);
+      if (password) {
+        authHeader = basicAuthHeader(password);
+      } else {
+        log('warn', 'v2 host announced no server password; its /api calls will be unauthenticated');
+      }
+    }
+
     return {
       url,
       workDir,
       homeDir,
+      ...(authHeader ? { authHeader } : {}),
       logs: () => buffer,
       stop: hostStop,
     };

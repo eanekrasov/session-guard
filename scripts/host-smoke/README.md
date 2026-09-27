@@ -40,6 +40,18 @@ including the average. **A step that needed retries is a prompt problem; a
 step that never succeeded is a finding.** Do not use a fixed duration as a
 pass/fail threshold: live-model latency varies by provider and load.
 
+The V2 runner adds one bound: `HOST_SMOKE_PROMPT_TIMEOUT_MS` (default 60s) is
+how long the client waits for a turn to settle. A turn that outlives it is not
+the verdict — a V2 agent keeps working after the call it was asked for — so the
+step is judged by the state the plugin persisted, exactly as V1 judges it by the
+reply, and the report says the turn was still running.
+
+It also runs its session as `orchestrator`, the agent V1 sends with every
+message. V1 passes `agent` on the request; V2 has no such field, so the client
+switches the session's agent after creating it. The smoke profile's stages allow
+no other agent, and a session left on the host default is refused by the
+workflow's own rules (`Refused workflow-tasks-set … allowed: ["orchestrator"]`).
+
 One observed live-model baseline run took:
 
 | Scenario          | Attempts | Duration |
@@ -60,16 +72,17 @@ records fresh durations in `docs/plans/host-smoke.md` on every run.
 
 ## Environment
 
-| Variable                      | Meaning                                                   |
-| ----------------------------- | --------------------------------------------------------- |
-| `HOST_SMOKE_MODEL`            | model id; defaults to the `model` in your opencode config |
-| `HOST_SMOKE_PLUGIN`           | skip the build and load this path instead of `dist`       |
-| `HOST_SMOKE_ATTEMPTS`         | retries per step, default 3                               |
-| `HOST_SMOKE_DEBUG`            | print questions, USER/MODEL exchanges and failure details |
-| `HOST_SMOKE_OPENCODE_VERSION` | `v1` (default) or `v2`                                    |
-| `HOST_SMOKE_OUTPUT`           | `human` (default) or `jsonl`                              |
-| `FORCE_COLOR=1`               | force colors when stderr is not attached to a TTY         |
-| `NO_COLOR=1`                  | disable colors                                            |
+| Variable                       | Meaning                                                   |
+| ------------------------------ | --------------------------------------------------------- |
+| `HOST_SMOKE_MODEL`             | model id; defaults to the `model` in your opencode config |
+| `HOST_SMOKE_PLUGIN`            | skip the build and load this path instead of `dist`       |
+| `HOST_SMOKE_ATTEMPTS`          | retries per step, default 3                               |
+| `HOST_SMOKE_PROMPT_TIMEOUT_MS` | V2: budget for one prompt, default 60000                  |
+| `HOST_SMOKE_DEBUG`             | print questions, USER/MODEL exchanges and failure details |
+| `HOST_SMOKE_OPENCODE_VERSION`  | `v1` (default) or `v2`                                    |
+| `HOST_SMOKE_OUTPUT`            | `human` (default) or `jsonl`                              |
+| `FORCE_COLOR=1`                | force colors when stderr is not attached to a TTY         |
+| `NO_COLOR=1`                   | disable colors                                            |
 
 For machine-readable output, use JSONL on stderr:
 
