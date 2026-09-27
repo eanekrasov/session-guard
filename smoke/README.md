@@ -4,7 +4,23 @@
 mise run smoke              # every scenario
 mise run smoke git-block    # one scenario by id
 HOST_SMOKE_OPENCODE_VERSION=v2 mise run smoke v2-workflow-create
+bun test smoke/             # this suite's own tests
 ```
+
+## Layout
+
+`smoke/` is a small project of its own: `run.ts` drives the scenarios off
+`harness.ts`, `operator.ts` holds the answer policy both runs share, `report.ts`
+writes the report, `v2-client.ts` and `v2-scenarios.ts` are the V2 side, and
+`profile/` holds the fixture profiles the suite governs a throwaway project with.
+Its tests sit next to it in `smoke/test/` — the plugin's `test/` tree holds only
+the plugin's own tests.
+
+Two things are read from the repository root, on purpose: `profiles/base` (every
+profile is a delta over the shipped base) and `scripts/commit-task.ts` (copied
+into the throwaway project as the commit endpoint the scenarios call). Nothing in
+here imports the plugin's `src/` — scenarios load the built plugin, which is the
+point of the suite.
 
 Nothing here calls into the plugin. Each scenario starts a real `opencode
 serve` in a throwaway project, drives it with a live model through the HTTP

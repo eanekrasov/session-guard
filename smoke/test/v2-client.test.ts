@@ -6,8 +6,8 @@ import {
   createV2SmokeTransport,
   planFormAnswer,
   promptTimeoutMs,
-} from '../../scripts/host-smoke/v2-client.ts';
-import type { Host } from '../../scripts/host-smoke/harness.ts';
+} from '../v2-client.ts';
+import type { Host } from '../harness.ts';
 
 /** Minimal form shapes: the answer plan only reads type, key, label and value. */
 const stringField = (key: string, options?: Array<{ label: string; value: string }>) =>

@@ -18,7 +18,7 @@ import { tmpdir, homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { jsmin } from 'jsmin';
 
-export const REPO_ROOT = resolve(import.meta.dir!, '../..');
+export const REPO_ROOT = resolve(import.meta.dir!, '..');
 
 /**
  * Canonical opencode binary paths.  V1 is the default; V2 is available for

@@ -3,9 +3,9 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { runV2Scenario, type V2Scenario } from '../../scripts/host-smoke/v2-scenarios.ts';
-import { PromptTimeoutError, type V2SmokeClient } from '../../scripts/host-smoke/v2-client.ts';
-import type { Host } from '../../scripts/host-smoke/harness.ts';
+import { runV2Scenario, type V2Scenario } from '../v2-scenarios.ts';
+import { PromptTimeoutError, type V2SmokeClient } from '../v2-client.ts';
+import type { Host } from '../harness.ts';
 
 /**
  * The V2 runner: one session per scenario, removal on every exit path, and a

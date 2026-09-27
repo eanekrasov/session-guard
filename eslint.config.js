@@ -26,7 +26,7 @@ export default [
     },
   },
   {
-    files: ['scripts/**/*.ts', 'test/**/*.ts', 'watcher.ts'],
+    files: ['scripts/**/*.ts', 'smoke/**/*.ts', 'test/**/*.ts', 'watcher.ts'],
     rules: {
       'no-console': 'off',
     },

@@ -14,7 +14,7 @@ import {
   V2_BINARY,
   withProviderApiKey,
   writeSmokeConfigs,
-} from '../../scripts/host-smoke/harness.ts';
+} from '../harness.ts';
 
 let configDirectory: string;
 let savedOperatorConfig: string | undefined;

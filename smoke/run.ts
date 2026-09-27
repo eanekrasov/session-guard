@@ -14,8 +14,8 @@
  * that needed retries is a prompt problem, a step that never succeeded is a
  * finding.
  *
- *   bun run scripts/host-smoke/run.ts              # every scenario
- *   bun run scripts/host-smoke/run.ts git-block    # one scenario by id
+ *   bun run smoke/run.ts              # every scenario
+ *   bun run smoke/run.ts git-block    # one scenario by id
  *
  * Env: HOST_SMOKE_MODEL (default: the model in your opencode config),
  *      HOST_SMOKE_PLUGIN (skip build+pack, use this tarball),
@@ -34,6 +34,7 @@ import {
   log as harnessLog,
   opencodeBinary,
   readWorkflowSession,
+  REPO_ROOT,
   sanitizeTracePayload,
   startHost,
   stopAllHosts,
@@ -207,7 +208,7 @@ function answerQuestions(
   return { stop: () => (stopped = true), offScript: () => [...offScript] };
 }
 
-const SESSION_LOG = join(import.meta.dirname!, '../../.memory/session.log');
+const SESSION_LOG = join(REPO_ROOT, '.memory/session.log');
 
 function modelResponseText(parts: Part[], error: string): string {
   const response = parts
@@ -1199,7 +1200,7 @@ async function main(): Promise<void> {
       profile: scenario.profile ?? 'smoke',
       env: scenario.env,
       files: {
-        'commit-task.ts': await Bun.file(join(import.meta.dir!, '../commit-task.ts')).text(),
+        'commit-task.ts': await Bun.file(join(REPO_ROOT, 'scripts/commit-task.ts')).text(),
         'plan.md': '# Smoke plan\n\nAdd one file under src/.\n',
       },
     });
@@ -1289,7 +1290,7 @@ async function main(): Promise<void> {
     '',
   ].join('\n');
 
-  const reportPath = join(import.meta.dir!, '../../docs/plans/host-smoke.md');
+  const reportPath = join(REPO_ROOT, 'docs/plans/host-smoke.md');
   await writeSmokeReport(reportPath, report);
   logEvent(
     `\n${passed}/${results.length} passed — report written to ${reportPath}`,

@@ -33,7 +33,10 @@ const REPO = join(import.meta.dirname, '..', '..');
 const ROOTS = [
   join(REPO, 'profiles'),
   join(REPO, 'test/fixtures/profiles'),
-  join(REPO, 'scripts/host-smoke/profile'),
+  // The smoke suite's fixture profiles are validated here too: `smoke` is a real
+  // schema with guards. This is the only edge between the plugin's tests and the
+  // suite — the suite itself never imports plugin internals.
+  join(REPO, 'smoke/profile'),
 ];
 
 interface Expression {

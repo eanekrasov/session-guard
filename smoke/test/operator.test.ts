@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { chooseLabel, DECLINING_WORDS } from '../../scripts/host-smoke/operator.ts';
+import { chooseLabel, DECLINING_WORDS } from '../operator.ts';
 
 /**
  * One operator policy for both runs. A consent request gets the decision the
