@@ -18,7 +18,7 @@ import { tmpdir, homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { jsmin } from 'jsmin';
 
-export const REPO_ROOT = resolve(import.meta.dir!, '..');
+export const REPO_ROOT = resolve(import.meta.dir!, '../..');
 
 /**
  * Canonical opencode binary paths.  V1 is the default; V2 is available for
@@ -563,7 +563,7 @@ export async function startHost(options: HostOptions): Promise<Host> {
     await mkdir(profileTarget, { recursive: true });
     const profileSource = existsSync(join(REPO_ROOT, 'profiles', options.profile))
       ? join(REPO_ROOT, 'profiles', options.profile)
-      : join(import.meta.dir!, 'profile', options.profile);
+      : join(import.meta.dir!, '..', 'profile', options.profile);
     await cp(profileSource, join(profileTarget, options.profile), { recursive: true });
     await cp(join(REPO_ROOT, 'profiles', 'base'), join(profileTarget, 'base'), { recursive: true });
 

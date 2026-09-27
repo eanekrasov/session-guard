@@ -1,4 +1,4 @@
 #!/usr/bin/env bash
 #MISE description="Run the host smoke suite against a live opencode"
 
-bun run smoke/run.ts "$@"
+bun run smoke/src/run.ts "$@"

@@ -9,12 +9,13 @@ bun test smoke/             # this suite's own tests
 
 ## Layout
 
-`smoke/` is a small project of its own: `run.ts` drives the scenarios off
-`harness.ts`, `operator.ts` holds the answer policy both runs share, `report.ts`
-writes the report, `v2-client.ts` and `v2-scenarios.ts` are the V2 side, and
-`profile/` holds the fixture profiles the suite governs a throwaway project with.
-Its tests sit next to it in `smoke/test/` — the plugin's `test/` tree holds only
-the plugin's own tests.
+`smoke/` is a small project of its own: `src/run.ts` drives the scenarios off
+`src/harness.ts`, `src/operator.ts` holds the answer policy both runs share,
+`src/report.ts` writes the report, `src/v2-client.ts` and `src/v2-scenarios.ts`
+are the V2 side, and `profile/` holds the fixture profiles the suite governs a
+throwaway project with. `test/` sits beside it — the plugin's `test/` tree holds
+only the plugin's own tests. Only the root `src/` means "compiled into `dist/`";
+this one is run directly by bun.
 
 Two things are read from the repository root, on purpose: `profiles/base` (every
 profile is a delta over the shipped base) and `scripts/commit-task.ts` (copied

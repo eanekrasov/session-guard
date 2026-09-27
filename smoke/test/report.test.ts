@@ -4,7 +4,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { writeSmokeReport } from '../report.ts';
+import { writeSmokeReport } from '../src/report.ts';
 
 /**
  * `docs/plans` is gitignored and absent in a fresh checkout. Writing the run

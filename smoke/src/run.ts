@@ -14,8 +14,8 @@
  * that needed retries is a prompt problem, a step that never succeeded is a
  * finding.
  *
- *   bun run smoke/run.ts              # every scenario
- *   bun run smoke/run.ts git-block    # one scenario by id
+ *   bun run smoke/src/run.ts              # every scenario
+ *   bun run smoke/src/run.ts git-block    # one scenario by id
  *
  * Env: HOST_SMOKE_MODEL (default: the model in your opencode config),
  *      HOST_SMOKE_PLUGIN (skip build+pack, use this tarball),
