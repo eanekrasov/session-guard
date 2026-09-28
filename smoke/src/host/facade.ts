@@ -95,6 +95,8 @@ export interface SmokeHost {
    * рабочего каталога, а не хоста: он одинаков для обоих host kinds.
    */
   readonly workDir: string;
+  /** Домашний каталог изолированного хоста: сценарий может посадить сессию плагина напрямую. */
+  readonly homeDir: string;
   createSession(title: string): Promise<SmokeSession>;
   runPrompt(session: SmokeSession, input: PromptInput): Promise<PromptResult>;
   /**
@@ -118,6 +120,7 @@ export interface RunningSmokeHost extends SmokeHost {
 /** What the facade needs from the started process to expose a running host. */
 export interface SmokeHostRuntime {
   workDir: string;
+  homeDir: string;
   model: string;
   logs: () => string;
   stop: () => Promise<void>;
@@ -255,12 +258,16 @@ export function createSmokeHost(
   return {
     kind,
     workDir: runtime.workDir,
+    homeDir: runtime.homeDir,
     model: runtime.model,
     logs: runtime.logs,
     createSession: (title) => transport.createSession(title),
     runPrompt: async (session, input) => {
       owned(session);
-      const result = await promptWithinBudget(transport.prompt(session, input), turnBudgetMs());
+      const result = await promptWithinBudget(
+        transport.prompt(session, input),
+        input.turnBudgetMs ?? turnBudgetMs()
+      );
       // Ход, прерванный бюджетом, ничего не наблюдал по построению: он не доказательство
       // работы хоста и не повод его требовать.
       if (result.turn.status === 'timed-out' && result.pluginEvidence.hostOperation === 'unknown') {
@@ -307,6 +314,7 @@ export async function startSmokeHost(options: SmokeHostOptions): Promise<Running
   }
   return createSmokeHost(options.kind, createTransport(host, options), {
     workDir: host.workDir,
+    homeDir: host.homeDir,
     model: options.model,
     logs: () => host.logs(),
     stop: () => host.stop(),

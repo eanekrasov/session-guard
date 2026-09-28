@@ -33,7 +33,7 @@ export interface ParityMatrixRowView {
 }
 
 /** Which command produced the report; the parity table exists only for a parity run. */
-export type ReportMode = 'parity' | 'single-host' | 'baseline';
+export type ReportMode = 'parity' | 'single-host';
 
 export interface ParityReportInput {
   mode: ReportMode;
@@ -54,8 +54,6 @@ const HOST_LABELS: Record<HostKind, string> = { v1: 'V1', v2: 'V2' };
 const MODE_NOTES: Record<ReportMode, string> = {
   parity: 'Один и тот же canonical registry запущен через оба host kinds.',
   'single-host': 'Запущен один host kind; паритет V1/V2 требует запуска обоих.',
-  baseline:
-    'Baseline: устаревший runner, только для сравнения; итоговый parity report не формирует.',
 };
 
 function cell(text: string): string {

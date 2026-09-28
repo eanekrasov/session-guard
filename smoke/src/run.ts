@@ -12,10 +12,9 @@
  *   bun run smoke/src/run.ts                    # parity run: canonical scenarios on V1 and V2
  *   bun run smoke/src/run.ts plugin-loads create# only these canonical scenarios, both kinds
  *   HOST_SMOKE_OPENCODE_VERSION=v1 bun run smoke/src/run.ts create   # single-host check
- *   HOST_SMOKE_BASELINE=1 bun run smoke/src/run.ts plugin-loads      # legacy baseline only
  *
  * Environment: HOST_SMOKE_MODEL, HOST_SMOKE_PLUGIN, HOST_SMOKE_ATTEMPTS,
- *      HOST_SMOKE_PROMPT_TIMEOUT_MS, HOST_SMOKE_OPENCODE_VERSION, HOST_SMOKE_BASELINE.
+ *      HOST_SMOKE_PROMPT_TIMEOUT_MS, HOST_SMOKE_OPENCODE_VERSION.
  */
 import { join } from 'node:path';
 
@@ -24,9 +23,7 @@ import {
   attemptsFromEnv,
   buildPlugin,
   hostVersionFromEnv,
-  startHost,
   stopAllHosts,
-  type Host,
 } from './harness.ts';
 import {
   LiveEnvironmentUnavailableError,
@@ -59,10 +56,7 @@ import {
   type HostBinding,
   type ReportMode,
 } from './report.ts';
-import { ATTEMPTS, lastStepState } from './scenario-kit.ts';
 import { runScenario, statePollBudgetMs, DEFAULT_POLL_INTERVAL_MS } from './runner.ts';
-import { scenarios, v2Scenarios } from './scenarios/index.ts';
-import { runV2Scenario } from './v2-scenario-kit.ts';
 
 const REPORT_PATH = join(REPO_ROOT, 'docs/plans/host-smoke.md');
 
@@ -158,7 +152,6 @@ interface RunLedger {
 async function runCanonical(
   selected: CanonicalScenario[],
   kinds: HostKind[],
-  mode: ReportMode,
   models: Map<HostKind, string>,
   unavailable: Map<HostKind, string>,
   commonFiles: Record<string, string>,
@@ -218,11 +211,6 @@ async function runCanonical(
               .join('\n'),
             'red',
             'scenario.host-log'
-          );
-          logEvent(
-            `state: ${JSON.stringify(lastStepState()).slice(0, 1200)}`,
-            'gray',
-            'scenario.state'
           );
         }
       } catch (error) {
@@ -301,11 +289,6 @@ async function main(): Promise<void> {
   const startedAt = Date.now();
   const requested = process.argv.slice(2);
 
-  if (process.env.HOST_SMOKE_BASELINE === '1') {
-    await runBaseline(requested, startedAt);
-    return;
-  }
-
   const selected = selectScenarios(requested);
   const problems = validateScenarioDefinitions(selected);
   if (problems.length > 0) {
@@ -350,7 +333,7 @@ async function main(): Promise<void> {
     parityEntries: [],
     byScenario: new Map(),
   };
-  await runCanonical(selected, kinds, mode, models, unavailable, await commonSmokeFiles(), ledger);
+  await runCanonical(selected, kinds, models, unavailable, await commonSmokeFiles(), ledger);
   collectParityEntries(selected, kinds, mode, unavailable, ledger);
   assertSingleEntryPerScenario(ledger.parityEntries);
 
@@ -386,155 +369,6 @@ async function main(): Promise<void> {
       reportPath: REPORT_PATH,
       notRun: notRun.map((entry) => `${entry.scenarioId}:${entry.notRunReason}`),
     }
-  );
-  process.exit(exitCode);
-}
-
-/**
- * Baseline comparison on the legacy runner of the selected host kind.
- *
- * Kept only while migration is incomplete: it compares old behaviour, reports through the
- * same exit-code path, and never feeds the parity report. It disappears with the last
- * migrated scenario, together with the legacy runner it drives.
- */
-async function runBaseline(requested: string[], startedAt: number): Promise<void> {
-  const kind = hostVersionFromEnv();
-  const plugin = resolvePlugin();
-  const known =
-    kind === 'v1'
-      ? scenarios.map((scenario) => ({ id: scenario.id, title: scenario.title }))
-      : v2Scenarios.map((scenario) => ({ id: scenario.id, title: scenario.title }));
-  const selected =
-    requested.length === 0 ? known : known.filter((entry) => requested.includes(entry.id));
-  if (selected.length === 0) {
-    logEvent(
-      `Сценарий ${kind} не найден. Известные: ${known.map((entry) => entry.id).join(', ')}`,
-      'red',
-      'error'
-    );
-    process.exit(2);
-  }
-
-  let bootstrap: { binary: string; model: string };
-  try {
-    bootstrap = await bootstrapHost(kind);
-  } catch (error) {
-    // An unavailable live environment is exit 5 for the baseline too; anything else is a
-    // broken harness or plugin and stays fatal.
-    if (!(error instanceof LiveEnvironmentUnavailableError)) throw error;
-    logEvent(
-      `живая среда хоста ${kind} недоступна: ${messageOf(error)}`,
-      'red',
-      'host.unavailable',
-      {
-        kind,
-      }
-    );
-    process.exit(5);
-  }
-  const { model } = bootstrap;
-  const files =
-    kind === 'v1'
-      ? await commonSmokeFiles()
-      : { 'plan.md': '# Smoke plan\n\nAdd one file under src/.\n' };
-
-  const results: ScenarioResult[] = [];
-  for (const entry of selected) {
-    const startedAtScenario = Date.now();
-    logEvent(`▶ ${entry.id} (${kind}, baseline) …`, 'cyan', 'scenario.start', {
-      scenario: entry.id,
-      hostKind: kind,
-      baseline: true,
-    });
-    let host: Host | undefined;
-    try {
-      if (kind === 'v1') {
-        const scenario = scenarios.find((candidate) => candidate.id === entry.id)!;
-        host = await startHost({
-          model,
-          version: 'v1',
-          profile: scenario.profile ?? 'smoke',
-          env: scenario.env,
-          files,
-        });
-        const outcome = await scenario.run(host, model);
-        results.push({
-          id: scenario.id,
-          title: scenario.title,
-          hostKind: 'v1',
-          status: outcome.ok ? 'pass' : 'fail',
-          attempts: outcome.attempts,
-          durationMs: Date.now() - startedAtScenario,
-          evidence: outcome.evidence,
-        });
-      } else {
-        const scenario = v2Scenarios.find((candidate) => candidate.id === entry.id)!;
-        host = await startHost({ model, version: 'v2', profile: 'smoke', files });
-        const outcome = await runV2Scenario(host, scenario, ATTEMPTS);
-        results.push({
-          id: scenario.id,
-          title: scenario.title,
-          hostKind: 'v2',
-          status: outcome.ok ? 'pass' : 'fail',
-          attempts: outcome.attempts,
-          durationMs: Date.now() - startedAtScenario,
-          evidence: outcome.evidence,
-        });
-      }
-    } catch (error) {
-      results.push({
-        id: entry.id,
-        title: entry.title,
-        hostKind: kind,
-        status: 'fail',
-        attempts: 0,
-        durationMs: Date.now() - startedAtScenario,
-        evidence: `ошибка baseline-раннера: ${messageOf(error)}`,
-      });
-    } finally {
-      await host?.stop();
-    }
-    const last = results.at(-1)!;
-    logEvent(
-      last.status === 'pass'
-        ? `ПРОЙДЕНО (попыток: ${last.attempts}, ${formatDuration(last.durationMs)})`
-        : `ОШИБКА (${formatDuration(last.durationMs)})`,
-      last.status === 'pass' ? 'green' : 'red',
-      'scenario.result',
-      { scenario: last.id, hostKind: kind, status: last.status, baseline: true }
-    );
-    if (last.status !== 'pass') {
-      logEvent(
-        last.evidence
-          .split('\n')
-          .map((line) => `  ${line}`)
-          .join('\n'),
-        'red',
-        'scenario.evidence'
-      );
-    }
-  }
-
-  const exitCode = aggregateExitCode({ results, notRun: [] });
-  const report = renderParityReport({
-    mode: 'baseline',
-    model,
-    plugin,
-    hosts: [{ kind, binary: bootstrap.binary }],
-    results,
-    // The legacy runner compares behaviour; it never forms the parity report.
-    entries: [],
-    matrix: parityMatrix(),
-    exitCode,
-    durationMs: Date.now() - startedAt,
-  });
-  await writeSmokeReport(REPORT_PATH, report);
-  const passed = results.filter((result) => result.status === 'pass').length;
-  logEvent(
-    `\n${passed}/${results.length} пройдено (baseline, код выхода ${exitCode}) — отчёт записан в ${REPORT_PATH}`,
-    exitCode === 0 ? 'green' : 'red',
-    'run.summary',
-    { passed, total: results.length, exitCode, baseline: true }
   );
   process.exit(exitCode);
 }

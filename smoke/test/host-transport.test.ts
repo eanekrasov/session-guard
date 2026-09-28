@@ -750,6 +750,7 @@ describe('the host operation marker', () => {
     });
     const runtime = {
       workDir: '/nowhere',
+      homeDir: '/tmp/smoke-home',
       model: 'crpt/model',
       logs: () => '',
       stop: async () => {},
@@ -776,6 +777,7 @@ describe('the host operation marker', () => {
     };
     const host = createSmokeHost('v1', transport, {
       workDir: '/nowhere',
+      homeDir: '/tmp/smoke-home',
       model: 'crpt/model',
       logs: () => '',
       stop: async () => {},
@@ -1001,6 +1003,7 @@ describe('the facade session ownership', () => {
 
   const runtime = {
     workDir: '/nowhere',
+    homeDir: '/tmp/smoke-home',
     model: 'crpt/model',
     logs: () => '',
     stop: async () => {},

@@ -1,4 +1,4 @@
-import { OpenCode, type FormField, type FormInfo, type OpenCodeClient } from '@opencode/client';
+import { OpenCode, type FormField, type FormInfo } from '@opencode/client';
 
 import { type Host } from './harness.ts';
 import { chooseLabel, type OperatorDecision } from './operator.ts';
@@ -15,7 +15,13 @@ export interface V2SmokeClient {
    * не завершается, — это находка о хосте, поэтому сценарий сообщает о нём, а не
    * повторяет попытку или ждёт бесконечно.
    */
-  prompt(sessionId: string, text: string, decision?: OperatorDecision): Promise<void>;
+  prompt(
+    sessionId: string,
+    text: string,
+    decision?: OperatorDecision,
+    /** Предел на этот промпт, когда шаг объявляет свой. */
+    budgetOverrideMs?: number
+  ): Promise<void>;
   removeSession(sessionId: string): Promise<void>;
   /**
    * Raw messages of the session, as the generated client reports them. The transport
@@ -283,9 +289,12 @@ export function createV2SmokeClient(host: Host, options: V2SmokeClientOptions = 
     async prompt(
       sessionId: string,
       text: string,
-      decision: OperatorDecision = 'grant'
+      decision: OperatorDecision = 'grant',
+      budgetOverrideMs?: number
     ): Promise<void> {
-      const budgetMs = options.promptTimeoutMs ?? promptTimeoutMs();
+      // Шаг может объявить свой предел: длинный шаг pipeline законно идёт дольше общего
+      // бюджета клиента, и общий бюджет обрывал бы его на нормальном для него времени.
+      const budgetMs = budgetOverrideMs ?? options.promptTimeoutMs ?? promptTimeoutMs();
       const deadline = Date.now() + budgetMs;
 
       const pendingNote = (): string =>
@@ -369,5 +378,3 @@ export function createV2SmokeClient(host: Host, options: V2SmokeClientOptions = 
     offScript: () => [...notes],
   };
 }
-
-export type V2OpenCodeClient = OpenCodeClient;

@@ -72,6 +72,7 @@ function makeHost(
     host: {
       kind,
       workDir: '/tmp/smoke-mock-workspace',
+      homeDir: '/tmp/smoke-mock-home',
       async createSession(title) {
         calls.created.push(title);
         return { id: 'ses-1', hostKind: kind };
@@ -397,6 +398,7 @@ describe('the common scenario runner', () => {
     const host: SmokeHost = {
       kind: 'v2',
       workDir: '/tmp/smoke-mock-workspace',
+      homeDir: '/tmp/smoke-mock-home',
       createSession: async () => {
         throw new Error('[ERROR] no session');
       },
@@ -659,7 +661,6 @@ describe('scenario sources stay free of transport specifics', () => {
     // The scenario layer must describe semantics only: no endpoints, no generated client, no
     // transport module. This is what keeps one scenario runnable on both host kinds.
     const { readFile } = await import('node:fs/promises');
-    const { join } = await import('node:path');
     const forbidden = [
       '/question',
       'session.form',
@@ -670,7 +671,6 @@ describe('scenario sources stay free of transport specifics', () => {
       'OpenCode.make',
     ];
     const files = ['src/registry.ts'];
-    const scenarioDir = join(import.meta.dirname, '../src/scenarios');
 
     for (const file of files) {
       const source = await readFile(join(import.meta.dirname, '..', file), 'utf-8');
@@ -678,9 +678,6 @@ describe('scenario sources stay free of transport specifics', () => {
         expect(source).not.toContain(needle);
       }
     }
-    // The canonical scenarios live in the registry; the legacy per-kind files are the baseline
-    // this stage is migrating away from and are not part of the shared path.
-    expect(scenarioDir.length).toBeGreaterThan(0);
   });
 });
 
@@ -809,6 +806,47 @@ describe('the task-control canonical scenario', () => {
   });
 });
 
+describe('the cicd-full-cycle canonical scenario', () => {
+  const candidate = findScenario('cicd-full-cycle');
+  if (candidate?.migrationState !== 'migrated') {
+    throw new Error('registry не объявляет cicd-full-cycle мигрированным');
+  }
+  const pipeline = candidate;
+
+  test('declares bounded budgets for its long steps', () => {
+    const dispatched = pipeline.steps.filter((step) => step.instruction.includes('task tool'));
+    expect(dispatched.length).toBeGreaterThan(0);
+    for (const step of dispatched) {
+      expect(step.stateBudgetMs).toBeGreaterThan(0);
+      expect(step.turnBudgetMs).toBeGreaterThan(0);
+    }
+  });
+
+  test('does not accept a transcript-only success at the checkout stage', async () => {
+    // Ход объявляет успех словами, но ни файла, ни гейта в состоянии нет: pipeline обязан
+    // остановиться здесь, а не шагом позже, когда build попросит недостающий файл.
+    const { host } = makeHost([
+      turn({ toolCalls: [] }, planning),
+      turn({ toolCalls: [] }, { ...planning, currentStage: 'checkout' }),
+      turn(
+        {
+          toolCalls: [{ name: 'task', status: 'completed' }],
+          transcript: 'setup created the file',
+        },
+        { ...planning, currentStage: 'checkout' }
+      ),
+    ]);
+
+    const result = await runScenario(host, pipeline, {
+      attempts: 1,
+      maxPollBudgetMs: 30,
+    });
+
+    expect(result.status).toBe('fail');
+    expect(result.evidence).toContain('src/ci-demo.ts');
+  });
+});
+
 describe('the commit/mutation canonical scenarios', () => {
   const gate = scenario('commit-gate');
   const cwd = scenario('commit-cwd');
@@ -856,6 +894,7 @@ describe('the commit/mutation canonical scenarios', () => {
       host: {
         kind: 'v1',
         workDir,
+        homeDir: '/tmp/smoke-mock-home',
         async createSession() {
           return { id: 'ses-1', hostKind: 'v1' };
         },

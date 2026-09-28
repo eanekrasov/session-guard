@@ -8,6 +8,7 @@
 
 import { execFileSync } from 'node:child_process';
 
+import { writeWorkflowSession } from './harness.ts';
 import type { SmokeHost } from './host/facade.ts';
 import { buildPromptResult, isPluginTool } from './host/transport.ts';
 import { assertScenarioResultInvariant, createBlockedResult } from './host/types.ts';
@@ -281,7 +282,13 @@ async function runStep(
 ): Promise<StepOutcome> {
   const stepStartedAt = Date.now();
   // Подготовка — мутация, поэтому выполняется один раз за шаг, а не на каждую попытку.
-  if (step.prepare !== undefined) await step.prepare({ workDir: host.workDir });
+  if (step.prepare !== undefined) {
+    await step.prepare({
+      workDir: host.workDir,
+      sessionId: session.id,
+      seed: (state: unknown) => writeWorkflowSession(host, session.id, state),
+    });
+  }
   const headBefore = gitHead(host.workDir);
   const workspace = (): StepWorkspace => ({
     workDir: host.workDir,
@@ -314,6 +321,7 @@ async function runStep(
       last = await host.runPrompt(session, {
         text: step.instruction,
         ...(agent === undefined ? {} : { agent }),
+        ...(step.turnBudgetMs === undefined ? {} : { turnBudgetMs: step.turnBudgetMs }),
       });
     } catch (error) {
       // The prompt died before it answered. Whether it mutated anything is read back below
@@ -381,15 +389,6 @@ async function runStep(
     const polled = await pollOutcome(host, session, step, last, options, workspace);
     pollRounds = polled.rounds;
     if (polled.observation !== undefined) {
-      logEvent(
-        `  ✔ шаг закрыт состоянием за ${secondsSince(stepStartedAt)} s`,
-        'green',
-        'step.state',
-        {
-          attempts: made,
-          polls: polled.rounds.length,
-        }
-      );
       return {
         ok: true,
         attempts: made,
@@ -572,14 +571,30 @@ export async function runScenario(
   try {
     session = await host.createSession(definition.id);
     for (const step of definition.steps) {
+      const stepStartedAt = Date.now();
       const outcome = await runStep(host, session, definition, step, options);
+      // Длительность каждого шага — часть отчёта: без неё «долго» в pipeline не отличить от
+      // «залипло», а именно этот вопрос и возникает на длинных сценариях.
+      const stepSeconds = ((Date.now() - stepStartedAt) / 1000).toFixed(1);
       attempts += outcome.attempts;
       if (outcome.last !== undefined) last = outcome.last;
       observed.push(...outcome.observed);
-      if (outcome.ok && outcome.note !== undefined) notes.push(outcome.note);
+      if (outcome.ok) {
+        notes.push(
+          outcome.note === undefined
+            ? `шаг: ${stepSeconds} s`
+            : `${outcome.note}; шаг: ${stepSeconds} s`
+        );
+      } else if (outcome.note !== undefined) {
+        notes.push(outcome.note);
+      }
       const durationMs = Date.now() - startedAt;
       logEvent(
-        outcome.ok ? '  PASS' : outcome.blockedReason ? '  BLOCKED' : '  FAIL',
+        outcome.ok
+          ? `  PASS (${stepSeconds} s)`
+          : outcome.blockedReason
+            ? `  BLOCKED (${stepSeconds} s)`
+            : `  FAIL (${stepSeconds} s)`,
         outcome.ok ? 'green' : outcome.blockedReason ? 'yellow' : 'red',
         'step.result',
         {

@@ -8,9 +8,12 @@ import {
   type CanonicalScenario,
 } from '../src/registry.ts';
 import { scenarioHostOptions } from '../src/host/facade.ts';
-import { scenarios as legacyScenarios } from '../src/scenarios/index.ts';
 
-const LEGACY_IDS = [
+/**
+ * Канонический порядок: базовые сценарии плюс `workflow-result`, у которого нет legacy-версии —
+ * он проверяет сам механизм вердикта и появился уже после перехода на один реестр.
+ */
+const CANONICAL_IDS = [
   'plugin-loads',
   'no-session',
   'create',
@@ -21,6 +24,7 @@ const LEGACY_IDS = [
   'commit-cwd',
   'commit-mismatch',
   'cicd-full-cycle',
+  'workflow-result',
   'verify-loop',
 ];
 
@@ -28,30 +32,53 @@ describe('the canonical scenario registry', () => {
   test('is the one list both host kinds run, in the order the report numbers them', () => {
     const ids = canonicalScenarios.map((scenario) => scenario.id);
 
-    expect(ids).toEqual(LEGACY_IDS);
+    expect(ids).toEqual(CANONICAL_IDS);
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  test('keeps the published id, title and profile of every current scenario', () => {
-    // `env` is compared too, with one deliberately documented exception: the legacy
-    // `plan-consent` set HARNESS_AUTO_APPROVE, which made the plugin grant consent by itself,
-    // so the canonical scenario drops it and proves the operator's answer instead.
-    const envOverrides: Record<string, string> = {
-      'plan-consent':
-        'runs without HARNESS_AUTO_APPROVE: the operator answer must be what grants consent',
-      'verify-loop':
-        'runs without HARNESS_AUTO_APPROVE: the operator answer must be what opens the tasks stage',
+  test('keeps the published id, title and env of every baseline scenario', () => {
+    // Раньше это сверялось с legacy-реестром; он удалён вместе с compatibility bridge, поэтому
+    // опубликованный контракт живёт здесь. Два сценария отмечены явно: canonical-варианты
+    // `plan-consent` и `verify-loop` сознательно не выставляют `HARNESS_AUTO_APPROVE`, чтобы
+    // согласие давал оператор, а не плагин сам себе. `workflow-result` появился после перехода на
+    // один реестр и базовой версии не имеет.
+    const published: Record<string, { title: string; env?: Record<string, string> }> = {
+      'plugin-loads': {
+        title: 'Хост загружает упакованный плагин и регистрирует его инструменты',
+      },
+      'no-session': { title: 'Без workflow-сессии плагин не вмешивается в работу' },
+      create: { title: 'workflow-create передаёт сессию под управление конечного автомата' },
+      'git-block': { title: 'Прямой git commit отклоняется внутри управляемой сессии' },
+      'task-control': {
+        title: 'Только orchestrator может изменять состояние задач workflow',
+      },
+      'commit-gate': { title: 'commit-task отклоняется, пока гейты не пройдены' },
+      'plan-consent': { title: 'Одобренный план переводит сессию из стадии planning' },
+      'commit-cwd': {
+        title: 'Коммит, соответствующий разрешению, получает квитанцию',
+        env: { HARNESS_AUTO_APPROVE: 'true' },
+      },
+      'commit-mismatch': {
+        title: 'Коммит с посторонним файлом не получает квитанцию',
+        env: { HARNESS_AUTO_APPROVE: 'true' },
+      },
+      'cicd-full-cycle': {
+        title:
+          'Полный CI/CD-пайплайн: init → checkout → build → test(unit+integration) → deploy → smoke → done',
+        env: { HARNESS_AUTO_APPROVE: 'true' },
+      },
+      'verify-loop': { title: 'Живой субагент закрывает гейт собственным workflow-result' },
     };
+
     for (const scenario of canonicalScenarios) {
-      const legacy = legacyScenarios.find((candidate) => candidate.id === scenario.id);
-      if (legacy === undefined) throw new Error(`сценарий «${scenario.id}» отсутствует в baseline`);
-      expect(scenario.title).toBe(legacy.title);
-      expect(scenario.profile).toBe(legacy.profile);
-      if (envOverrides[scenario.id] !== undefined) {
-        expect(scenario.env).not.toEqual(legacy.env);
+      const baseline = published[scenario.id];
+      if (baseline === undefined) {
+        expect(scenario.id).toBe('workflow-result');
         continue;
       }
-      expect(scenario.env).toEqual(legacy.env);
+      expect(scenario.title).toBe(baseline.title);
+      expect(scenario.env).toEqual(baseline.env);
+      if (scenario.id === 'cicd-full-cycle') expect(scenario.profile).toBe('cicd');
     }
   });
 
@@ -78,6 +105,8 @@ describe('the canonical scenario registry', () => {
       'plan-consent',
       'commit-cwd',
       'commit-mismatch',
+      'cicd-full-cycle',
+      'workflow-result',
       'verify-loop',
     ]);
     for (const scenario of canonicalScenarios) {
@@ -136,6 +165,22 @@ describe('the canonical scenario registry', () => {
         { mutation: 'mutating', retry: 'poll-state' },
         { mutation: 'mutating', retry: 'poll-state' },
       ],
+      // Pipeline: длинные шаги объявляют свои пределы, но стратегия та же — инструкция одна,
+      // дальше читается состояние.
+      'cicd-full-cycle': [
+        { mutation: 'mutating', retry: 'poll-state' },
+        { mutation: 'mutating', retry: 'poll-state' },
+        { mutation: 'mutating', retry: 'poll-state' },
+        { mutation: 'mutating', retry: 'poll-state' },
+        { mutation: 'mutating', retry: 'poll-state' },
+        { mutation: 'mutating', retry: 'poll-state' },
+        { mutation: 'mutating', retry: 'poll-state' },
+        { mutation: 'mutating', retry: 'poll-state' },
+        { mutation: 'mutating', retry: 'poll-state' },
+        { mutation: 'mutating', retry: 'poll-state' },
+      ],
+      // Проверка вердикта: один шаг — сессия сажается сразу на стадию с гейтом.
+      'workflow-result': [{ mutation: 'mutating', retry: 'poll-state' }],
       'commit-mismatch': [
         { mutation: 'mutating', retry: 'poll-state' },
         { mutation: 'mutating', retry: 'poll-state' },
@@ -166,16 +211,29 @@ describe('the canonical scenario registry', () => {
     });
   });
 
-  test('leaves exactly the commit and pipeline scenarios pending, with no steps to run', () => {
+  test('leaves nothing pending: every canonical scenario is migrated and runnable', () => {
     const pending = canonicalScenarios
       .filter((scenario) => scenario.migrationState === 'pending')
       .map((scenario) => scenario.id);
 
-    expect(pending).toEqual(['cicd-full-cycle']);
+    expect(pending).toEqual([]);
+    expect(canonicalScenarios).toHaveLength(12);
     for (const scenario of canonicalScenarios) {
-      if (scenario.migrationState !== 'pending') continue;
-      expect(scenario.steps).toBeUndefined();
+      expect(scenario.migrationState).toBe('migrated');
+      expect(scenario.steps?.length ?? 0).toBeGreaterThan(0);
     }
+  });
+
+  test('runs every scenario on both host kinds, so no leg can be not-run', () => {
+    const matrix = parityMatrix();
+
+    expect(matrix).toHaveLength(canonicalScenarios.length);
+    for (const row of matrix) {
+      expect(row.requiredOn).toEqual({ v1: true, v2: true });
+    }
+    // Два хоста на сценарий — это ровно тот набор ног, который отчёт обязан заполнить.
+    const legs = matrix.length * 2;
+    expect(legs).toBe(canonicalScenarios.length * 2);
   });
 
   test('requires the guarded commit on both host kinds and expects the same semantics', () => {
@@ -301,17 +359,14 @@ describe('the canonical scenario registry', () => {
   test('derives the parity matrix from the registry, requiring every scenario on both hosts', () => {
     const matrix = parityMatrix();
 
-    expect(matrix.map((row) => row.scenarioId)).toEqual(LEGACY_IDS);
+    expect(matrix.map((row) => row.scenarioId)).toEqual(CANONICAL_IDS);
     for (const row of matrix) {
       expect(row.requiredOn).toEqual({ v1: true, v2: true });
       expect(row.reason.length).toBeGreaterThan(10);
     }
-    const migratedRow = matrix.find((row) => row.scenarioId === 'create');
-    expect(migratedRow?.reason).toContain('migrated');
-    for (const id of ['commit-gate', 'commit-cwd', 'commit-mismatch']) {
-      expect(matrix.find((row) => row.scenarioId === id)?.reason).toContain('migrated');
+    for (const row of matrix) {
+      expect(row.reason).toContain('migrated');
+      expect(row.reason).not.toContain('pending migration');
     }
-    const pendingRow = matrix.find((row) => row.scenarioId === 'cicd-full-cycle');
-    expect(pendingRow?.reason).toContain('pending migration');
   });
 });

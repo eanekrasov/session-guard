@@ -112,7 +112,7 @@ export function createSessionClientTransport(
         `say request: session=${session.id} instruction.length=${input.text.length}`
       );
       try {
-        await client.prompt(session.id, input.text, input.decision ?? 'grant');
+        await client.prompt(session.id, input.text, input.decision ?? 'grant', input.turnBudgetMs);
       } catch (caught) {
         if (!(caught instanceof PromptTimeoutError)) throw caught;
         timedOut = true;

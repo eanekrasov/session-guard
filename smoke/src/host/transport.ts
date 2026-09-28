@@ -27,9 +27,6 @@ import type {
  */
 export const PLUGIN_TOOL_PREFIX = 'workflow-';
 
-/** The tag the plugin puts on its own consent requests, whichever transport carries it. */
-export const CONSENT_TAG = '<consent-request';
-
 /**
  * Shared name for the host's shell-command tool.
  *
@@ -43,10 +40,6 @@ const TOOL_ALIASES: Record<string, string> = { bash: SHELL_TOOL, shell: SHELL_TO
 /** The shared name of a host tool, for capabilities both hosts name differently. */
 export function sharedToolName(name: string): string {
   return TOOL_ALIASES[name] ?? name;
-}
-
-export function hasConsentTag(text: string): boolean {
-  return text.includes(CONSENT_TAG);
 }
 
 /** Whether a reported tool name belongs to the plugin's own tool surface. */
@@ -425,6 +418,24 @@ function normalizeStageGates(value: unknown): Record<string, string> | undefined
   return seen ? gates : undefined;
 }
 
+/**
+ * Согласия, выданные сессии, как их хранит плагин: массив записей `{ type, status }`.
+ * Pipeline доказывает согласие на `deploy` этой записью, а не ответом оператора.
+ */
+function normalizeApprovals(value: unknown): Array<{ type?: string; status?: string }> | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const approvals: Array<{ type?: string; status?: string }> = [];
+  for (const entry of value) {
+    const record = fields(entry);
+    if (typeof record.type !== 'string' && typeof record.status !== 'string') continue;
+    approvals.push({
+      ...(typeof record.type === 'string' ? { type: record.type } : {}),
+      ...(typeof record.status === 'string' ? { status: record.status } : {}),
+    });
+  }
+  return approvals.length === 0 ? undefined : approvals;
+}
+
 /** Files the core recorded as changed, with non-string entries dropped. */
 function normalizeChangedFiles(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) return undefined;
@@ -495,6 +506,7 @@ export function normalizeWorkflowState(sessionId: string, raw: unknown): SmokeWo
   const changedFiles = normalizeChangedFiles(session.changedFiles);
   const runs = normalizeRuns(session.loopRuns);
   const stageGates = normalizeStageGates(session.stageGateResults);
+  const approvals = normalizeApprovals(session.approvals);
   // Разрешение и квитанция — это ответ на вопрос «состоялась ли поставка», а не деталь
   // конкретного хоста: плагин хранит их в самой сессии, и сценарий обязан их видеть.
   const permit = session.deliveryPermit;
@@ -509,6 +521,7 @@ export function normalizeWorkflowState(sessionId: string, raw: unknown): SmokeWo
     ...(changedFiles === undefined ? {} : { changedFiles }),
     ...(runs === undefined ? {} : { runs }),
     ...(stageGates === undefined ? {} : { stageGates }),
+    ...(approvals === undefined ? {} : { approvals }),
     ...(permit === null || permit === undefined ? {} : { deliveryPermit: true }),
     ...(typeof receipt === 'string' && receipt.length > 0 ? { deliveryReceipt: receipt } : {}),
     durableMutation: 'applied',

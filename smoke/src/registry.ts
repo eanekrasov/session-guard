@@ -7,18 +7,19 @@
  * produces no scenario result at all.
  */
 
+import { existsSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { SHELL_TOOL } from './host/transport.ts';
 import type {
   HostKind,
-  NormalizedInteraction,
   NormalizedToolCall,
   PromptResult,
   ScenarioDefinition,
   ScenarioStep,
   SmokeWorkflowState,
+  StepWorkspace,
 } from './host/types.ts';
 /** Which migration stage a scenario belongs to; the parity matrix is derived from it. */
 export type ScenarioStage =
@@ -79,10 +80,6 @@ const workflowCreateStep: ScenarioStep = {
     return stage === 'planning' || `стадия — ${stage}, ожидалась planning`;
   },
 };
-
-/** The one task list the smoke profile declares, with a single task the orchestrator owns. */
-/** How long one step may take to appear in the store, when the step does not say. */
-export const DEFAULT_STEP_STATE_BUDGET_MS = 5_000;
 
 /** The refusal sentence the plugin's task guard answers with, used only as a fallback. */
 const TASK_REFUSAL_SENTENCE = /is refused/i;
@@ -220,7 +217,11 @@ function subagentStep(options: {
   description: string;
   task: string;
   verdict?: string;
-  expect: (state: SmokeWorkflowState | null) => true | string;
+  /** Длинный шаг pipeline объявляет свои пределы вместо общих. */
+  turnBudgetMs?: number;
+  stateBudgetMs?: number;
+  /** Ожидание видит и состояние, и рабочий каталог: файл проверяется на диске. */
+  expect: (state: SmokeWorkflowState | null, workspace?: StepWorkspace) => true | string;
 }): ScenarioStep {
   const verdict =
     options.verdict === undefined ? '' : ` and then finish with exactly ${options.verdict}`;
@@ -230,8 +231,9 @@ function subagentStep(options: {
       `"${options.description}", ${options.task}${verdict}`,
     mutation: 'mutating',
     retry: 'poll-state',
-    stateBudgetMs: SUBAGENT_STATE_BUDGET_MS,
-    expect: (result) => options.expect(result.workflowState),
+    stateBudgetMs: options.stateBudgetMs ?? SUBAGENT_STATE_BUDGET_MS,
+    ...(options.turnBudgetMs === undefined ? {} : { turnBudgetMs: options.turnBudgetMs }),
+    expect: (result, workspace) => options.expect(result.workflowState, workspace),
   };
 }
 
@@ -434,12 +436,7 @@ const UNRELATED_FILE = 'unrelated.txt';
  * тем, что записано в состоянии: durable-ссылка на план и переход стадии.
  */
 const autoApprovedConsentStep: ScenarioStep = {
-  instruction:
-    'Do this in two tool calls and nothing else. ' +
-    'First call `workflow-consent` with files ["plan.md"] and summary "smoke plan". ' +
-    'Then call the `question` tool once, passing as the question text the ENTIRE ' +
-    '<consent-request ...>...</consent-request> tag that the first tool printed, copied ' +
-    'character for character, with options labelled "grant" and "decline".',
+  instruction: CONSENT_INSTRUCTION,
   mutation: 'mutating',
   retry: 'poll-state',
   expect: (result) => {
@@ -605,6 +602,230 @@ const mismatchCommitStep: ScenarioStep = {
   },
 };
 
+/**
+ * Пределы длинного шага pipeline.
+ *
+ * Субагент, который собирает, тестирует или выкатывает, законно идёт минутами, поэтому общий
+ * предел хода завершал бы pipeline преждевременно. Пределы остаются ограниченными: исход шага
+ * читается из состояния до бюджета, а недоказуемая мутация становится `blocked`.
+ */
+const PIPELINE_TURN_BUDGET_MS = 240_000;
+const PIPELINE_STATE_BUDGET_MS = 180_000;
+
+/**
+ * Шагам, чей результат — переход состояния (создание сессии, согласие), длинный ход не нужен:
+ * подтверждение приходит из состояния, а брошенный ход — это чистое ожидание. V2 как раз на
+ * таких шагах и жёг полный бюджет.
+ */
+const PIPELINE_SHORT_TURN_BUDGET_MS = 90_000;
+
+/** Файл, который pipeline создаёт на стадии checkout и потом проверяет. */
+const PIPELINE_FILE = 'src/ci-demo.ts';
+
+const pipelineBudgets = {
+  turnBudgetMs: PIPELINE_TURN_BUDGET_MS,
+  stateBudgetMs: PIPELINE_STATE_BUDGET_MS,
+} as const;
+
+/**
+ * Создание сессии pipeline-профиля. Стадия не называется: у профиля `cicd` своя первая стадия,
+ * и сценарий доказывает, что сессия под управлением, а не что она называется так же, как в
+ * smoke-профиле.
+ */
+const cicdCreateStep: ScenarioStep = {
+  instruction: 'Call the tool `workflow-create` with schemaId "cicd". Do nothing else.',
+  mutation: 'mutating',
+  retry: 'poll-state',
+  turnBudgetMs: PIPELINE_SHORT_TURN_BUDGET_MS,
+  stateBudgetMs: PIPELINE_STATE_BUDGET_MS,
+  expect: (result) => {
+    const state = result.workflowState;
+    if (state === null) return 'сессия workflow не сохранена';
+    const stage = state.currentStage;
+    return stage !== undefined ? true : 'стадия сессии не записана';
+  },
+};
+
+/** Согласие под `HARNESS_AUTO_APPROVE`: переход открывает стадия `checkout`. */
+const cicdPlanConsentStep: ScenarioStep = {
+  turnBudgetMs: PIPELINE_SHORT_TURN_BUDGET_MS,
+  stateBudgetMs: PIPELINE_STATE_BUDGET_MS,
+  instruction: CONSENT_INSTRUCTION,
+  mutation: 'mutating',
+  retry: 'poll-state',
+  expect: (result) => {
+    const stage = result.workflowState?.currentStage ?? '(не задана)';
+    return stage === 'checkout' || `стадия — ${stage}, ожидалась checkout`;
+  },
+};
+
+/**
+ * Setup: субагент создаёт файл и закрывает `checkout_done`. Файл проверяется раньше гейта —
+ * агент, закрывший гейт без записи, иначе прошёл бы здесь и сорвал pipeline двумя шагами позже.
+ */
+const cicdSetupStep = subagentStep({
+  type: 'setup',
+  description: '[workflow-task:checkout] prepare the project',
+  task: `telling it to create ${PIPELINE_FILE} containing \`export const appVersion = "1.0.0";\``,
+  verdict: `<workflow-result>{"gate":"checkout_done","status":"pass","summary":"created source file","evidence":["${PIPELINE_FILE}"]}</workflow-result>`,
+  ...pipelineBudgets,
+  expect: (state, workspace) => {
+    // Файл проверяется на диске, а не по `changedFiles`: диспатчи pipeline описываются как
+    // `[workflow-task:checkout]`, а admission ведёт запись изменений только для
+    // `[workflow-task:task-N]`. Так же проверял и legacy, и это и есть «фактический файл».
+    const file = join(workspace?.workDir ?? '', PIPELINE_FILE);
+    if (!existsSync(file)) {
+      return `файла ${PIPELINE_FILE} нет в проекте прогона`;
+    }
+    const gate = state?.stageGates?.checkout_done;
+    return gate === 'passed' || `гейт checkout_done имеет статус ${gate ?? '(не задан)'}`;
+  },
+});
+
+const cicdBuildStep = subagentStep({
+  type: 'builder',
+  description: '[workflow-task:build] build the project',
+  task: `telling it to verify ${PIPELINE_FILE} compiles correctly`,
+  verdict: `<workflow-result>{"gate":"build_done","status":"pass","summary":"build successful","evidence":["${PIPELINE_FILE}"]}</workflow-result>`,
+  ...pipelineBudgets,
+  expect: (state) => {
+    const stage = state?.currentStage ?? '(не задана)';
+    return stage === 'test' || `стадия — ${stage}, ожидалась test`;
+  },
+});
+
+/**
+ * Список тестовых задач. Без `writeScope`: тестировщик сообщает, а не записывает, а цикл без
+ * задач не диспетчеризует ничего — каждый вызов был бы отклонён.
+ */
+const cicdTestSuiteStep: ScenarioStep = {
+  instruction:
+    'Call the tool `workflow-tasks-set` with listKey "test_suite" and tasks ' +
+    '[{"status":"pending"}]. Do nothing else.',
+  mutation: 'mutating',
+  retry: 'poll-state',
+  expect: (result) => {
+    const tasks = result.workflowState?.tasks?.test_suite ?? [];
+    return tasks.length === 1 || `список test_suite: ${JSON.stringify(tasks)}`;
+  },
+};
+
+/**
+ * Одна задача проходит обе вложенные стадии: unit, затем integration. Доказательство того, что
+ * unit пройдена, — текущее положение задачи, а не значение гейта: перемещение очищает гейты,
+ * по которым выносилось суждение.
+ */
+const cicdUnitStep = subagentStep({
+  type: 'tester',
+  description: '[workflow-task:task-0] unit test',
+  task: `telling it to run unit tests on ${PIPELINE_FILE}`,
+  verdict: `<workflow-result>{"gate":"unit","status":"pass","summary":"unit tests passed","evidence":["${PIPELINE_FILE}"]}</workflow-result>`,
+  ...pipelineBudgets,
+  expect: (state) => {
+    const stage = state?.runs?.[0]?.stage ?? '(нет запуска)';
+    return stage === 'integration' || `задача находится на стадии ${stage}`;
+  },
+});
+
+const cicdIntegrationStep = subagentStep({
+  type: 'tester',
+  description: '[workflow-task:task-0] integration test',
+  task: `telling it to verify ${PIPELINE_FILE} works with the environment`,
+  verdict: `<workflow-result>{"gate":"integration","status":"pass","summary":"integration tests passed","evidence":["${PIPELINE_FILE}"]}</workflow-result>`,
+  ...pipelineBudgets,
+  expect: (state) => {
+    const status = state?.tasks?.test_suite?.[0]?.status;
+    return status === 'completed' || `статус тестовой задачи: ${status ?? '(отсутствует)'}`;
+  },
+});
+
+const cicdDeployStep = subagentStep({
+  type: 'deployer',
+  description: '[workflow-task:deploy] deploy the build',
+  task: 'telling it to register the deployment of version 1.0.0',
+  verdict:
+    '<workflow-result>{"gate":"deploy_done","status":"pass","summary":"deploy successful","evidence":["version=1.0.0"]}</workflow-result>',
+  ...pipelineBudgets,
+  expect: (state) => {
+    const gate = state?.stageGates?.deploy_done;
+    return gate === 'passed' || `гейт deploy_done имеет статус ${gate ?? '(не задан)'}`;
+  },
+});
+
+/**
+ * Согласие на `deploy`: ребро `deploy → smoke` объявляет его, поэтому переход закрыт без
+ * выданного согласия. Доказательство — durable-запись approvals, а не ответ оператора.
+ */
+const cicdDeployConsentStep: ScenarioStep = {
+  turnBudgetMs: PIPELINE_SHORT_TURN_BUDGET_MS,
+  stateBudgetMs: PIPELINE_STATE_BUDGET_MS,
+  instruction:
+    'Do this in two tool calls and nothing else. ' +
+    'First call `workflow-consent` with files ["plan.md"] and summary "smoke plan" and type "deploy". ' +
+    'Then call the `question` tool once, passing as the question text the ENTIRE ' +
+    '<consent-request ...>...</consent-request> tag that the first tool printed, copied ' +
+    'character for character, with options labelled "grant" and "decline".',
+  mutation: 'mutating',
+  retry: 'poll-state',
+  expect: (result) => {
+    const state = result.workflowState;
+    const granted = (state?.approvals ?? []).some(
+      (approval) => approval.type === 'deploy' && approval.status === 'granted'
+    );
+    if (!granted) return 'согласие deploy так и не было предоставлено';
+    const stage = state?.currentStage ?? '(не задана)';
+    return stage === 'smoke' || `стадия — ${stage}, ожидалась smoke`;
+  },
+};
+
+const cicdSmokeStep = subagentStep({
+  type: 'smoke',
+  description: '[workflow-task:smoke] smoke test deployment',
+  task: 'telling it to verify the deployment',
+  verdict:
+    '<workflow-result>{"gate":"smoke_result","status":"pass","summary":"smoke tests passed","evidence":["deployment-ok"]}</workflow-result>',
+  ...pipelineBudgets,
+  expect: (state) => {
+    const stage = state?.currentStage ?? '(не задана)';
+    return stage === 'done' || `стадия — ${stage}, ожидалась done`;
+  },
+});
+
+/**
+ * Проверка самого механизма вердикта — одним шагом.
+ *
+ * Сценарий не проходит предыдущие стадии схемы: файл сессии плагина сажается сразу на стадию,
+ * объявляющую гейт `review`, и проверяется ровно один durable факт — что вердикт субагента записан
+ * гейтом стадии. Так проверяется механизм, а не путь до стадии; путь проверяют другие сценарии.
+ */
+const verdictProbeStep: ScenarioStep = {
+  instruction:
+    'Use the task tool with subagent_type "reviewer" and description "report the workflow result", ' +
+    'telling it to review the work and then finish with exactly ' +
+    '<workflow-result>{"gate":"review","status":"pass","summary":"verdict reached the gate",' +
+    '"evidence":["verdict-probe"]}</workflow-result>',
+  mutation: 'mutating',
+  retry: 'poll-state',
+  // Ход с диспатчем вердикта — работа субагента: на V2 он не укладывается в общий предел, а
+  // подтвердить исход из состояния нельзя, пока гейт не записан. Поэтому предел свой.
+  turnBudgetMs: PIPELINE_TURN_BUDGET_MS,
+  stateBudgetMs: PIPELINE_STATE_BUDGET_MS,
+  prepare: async ({ sessionId, seed }) => {
+    await seed({
+      sessionId,
+      profileId: 'smoke',
+      schemaId: 'smoke',
+      currentStage: 'validation',
+      status: 'running',
+      refs: {},
+    });
+  },
+  expect: (result) => {
+    const gate = result.workflowState?.stageGates?.review;
+    return gate === 'passed' || `гейт review стадии имеет статус ${gate ?? '(не задан)'}`;
+  },
+};
+
 export const canonicalScenarios: CanonicalScenario[] = [
   {
     id: 'plugin-loads',
@@ -708,10 +929,31 @@ export const canonicalScenarios: CanonicalScenario[] = [
     id: 'cicd-full-cycle',
     title:
       'Полный CI/CD-пайплайн: init → checkout → build → test(unit+integration) → deploy → smoke → done',
-    migrationState: 'pending',
+    migrationState: 'migrated',
     stage: 'pipeline',
     profile: 'cicd',
     env: { HARNESS_AUTO_APPROVE: 'true' },
+    agent: ORCHESTRATOR,
+    steps: [
+      cicdCreateStep,
+      cicdPlanConsentStep,
+      cicdSetupStep,
+      cicdBuildStep,
+      cicdTestSuiteStep,
+      cicdUnitStep,
+      cicdIntegrationStep,
+      cicdDeployStep,
+      cicdDeployConsentStep,
+      cicdSmokeStep,
+    ],
+  },
+  {
+    id: 'workflow-result',
+    title: 'Вердикт субагента доезжает до workflow-гейта',
+    migrationState: 'migrated',
+    stage: 'task',
+    agent: ORCHESTRATOR,
+    steps: [verdictProbeStep],
   },
   {
     id: 'verify-loop',

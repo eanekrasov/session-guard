@@ -9,6 +9,12 @@ export interface PromptInput {
   text: string;
   agent?: string;
   /**
+   * Предел на этот ход, когда шаг объявляет свой. Длинный шаг pipeline (субагент, который
+   * собирает, тестирует или выкатывает) законно идёт дольше общего предела, и общий предел
+   * завершал бы pipeline преждевременно; шаг говорит, сколько ему нужно.
+   */
+  turnBudgetMs?: number;
+  /**
    * The answer the operator gives to any interaction this prompt raises, in the scenario's own
    * vocabulary. V1 and V2 word those answers differently; the facade maps this into whichever
    * one the host offers. Defaults to `grant`.
@@ -107,8 +113,12 @@ export interface SmokeWorkflowState {
    * вердикты review и qa доехали до стадии, именно по этой записи.
    */
   stageGates?: Record<string, string>;
-  operationId?: string;
-  operationStatus?: 'pending' | 'completed' | 'failed' | 'unknown';
+  /**
+   * Согласия, выданные сессии: тип → статус. Переход, объявляющий `consent: deploy`, не
+   * откроется без выданного `deploy`, поэтому pipeline доказывает согласие этой записью, а не
+   * ответом оператора.
+   */
+  approvals?: Array<{ type?: string; status?: string }>;
   /**
    * Whether durable state exists for this host session. `none` means the facade read the
    * plugin's store and found nothing, which is the only observable proof that a mutating
@@ -182,7 +192,6 @@ export interface PromptResult {
   interactions?: NormalizedInteraction[];
 }
 
-export type MigrationState = 'migrated' | 'pending';
 export type RetryStrategy = 'same-session' | 'new-session' | 'poll-state' | 'none';
 
 /**
@@ -218,11 +227,25 @@ export interface ScenarioStep {
    */
   stateBudgetMs?: number;
   /**
-   * Подготовка рабочего каталога до инструкции: файл вне разрешённого скоупа, фикстура,
-   * дополнительный артефакт. Выполняется один раз за шаг, а не на каждую попытку, потому что
-   * сама является мутацией.
+   * Предел на ход этого шага. По умолчанию действует общий предел хоста; длинный шаг
+   * объявляет свой, чтобы pipeline не завершался на обычном для него времени.
    */
-  prepare?: (workspace: { workDir: string }) => Promise<void> | void;
+  turnBudgetMs?: number;
+  /**
+   * Подготовка до инструкции: файл вне разрешённого скоупа, фикстура, дополнительный артефакт,
+   * а также посадка сессии плагина на нужную стадию напрямую. Выполняется один раз за шаг, а не
+   * на каждую попытку, потому что сама является мутацией.
+   */
+  prepare?: (context: {
+    workDir: string;
+    /** Сессия, для которой шаг сейчас работает. */
+    sessionId: string;
+    /**
+     * Записать файл сессии плагина напрямую. Сценарию, проверяющему один механизм, незачем
+     * проходить все предыдущие стадии схемы: сессию можно посадить сразу на нужную.
+     */
+    seed: (state: unknown) => Promise<void>;
+  }) => Promise<void> | void;
   expect: (result: PromptResult, workspace?: StepWorkspace) => true | string;
 }
 

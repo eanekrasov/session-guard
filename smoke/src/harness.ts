@@ -978,6 +978,26 @@ export function isTraceEnabled(): boolean {
  * сохраняется, и сценарий, проверяющий, КАК завершился прогон, должен читать её
  * там, где она теперь находится.
  */
+/**
+ * Записать файл сессии плагина напрямую.
+ *
+ * Сценарию, который проверяет один механизм (например, доезжает ли вердикт субагента до гейта),
+ * незачем проходить все предыдущие стадии схемы: сессию можно посадить сразу на нужную стадию.
+ * Плагин читает файл как обычную сессию, поэтому запись должна быть валидной по его схеме —
+ * обязательны `sessionId`, `profileId`, `schemaId`, `currentStage` и `status`, остальное
+ * заполняется умолчаниями.
+ */
+export async function writeWorkflowSession(
+  host: { homeDir: string },
+  sessionId: string,
+  state: unknown
+): Promise<void> {
+  const runtime = join(host.homeDir, 'data', 'opencode', 'session-guard', 'runtime');
+  await mkdir(runtime, { recursive: true });
+  await writeFile(join(runtime, `${sessionId}.json`), JSON.stringify(state, null, 2), 'utf-8');
+  log('debug', `сессия workflow записана напрямую: ${join(runtime, `${sessionId}.json`)}`);
+}
+
 export async function readWorkflowSession(host: Host, sessionId: string): Promise<unknown | null> {
   // Плагин размещает свой runtime в data dir opencode (см. src/app/paths.ts),
   // который harness направил в изолированную домашнюю директорию.

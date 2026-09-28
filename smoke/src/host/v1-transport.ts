@@ -14,7 +14,7 @@ import {
   sanitizeTracePayload,
 } from '../harness.ts';
 import { logBlock } from '../log.ts';
-import { answerQuestions, logExchange, modelResponseText, type Part } from '../scenario-kit.ts';
+import { answerQuestions, logExchange, modelResponseText, type Part } from './v1-exchange.ts';
 import {
   buildPromptResult,
   compactParts,
