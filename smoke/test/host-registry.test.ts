@@ -74,7 +74,10 @@ describe('the canonical scenario registry', () => {
       'create',
       'git-block',
       'task-control',
+      'commit-gate',
       'plan-consent',
+      'commit-cwd',
+      'commit-mismatch',
       'verify-loop',
     ]);
     for (const scenario of canonicalScenarios) {
@@ -117,6 +120,32 @@ describe('the canonical scenario registry', () => {
         { mutation: 'mutating', retry: 'poll-state' },
         { mutation: 'mutating', retry: 'none' },
       ],
+      // Ранняя поставка — mutation, но её исход читается из состояния: HEAD, разрешение и
+      // квитанция. Поэтому шаг ждёт durable-исход, а не повторяет команду.
+      'commit-gate': [
+        { mutation: 'mutating', retry: 'poll-state' },
+        { mutation: 'mutating', retry: 'poll-state' },
+      ],
+      'commit-cwd': [
+        { mutation: 'mutating', retry: 'poll-state' },
+        { mutation: 'mutating', retry: 'poll-state' },
+        { mutation: 'mutating', retry: 'poll-state' },
+        { mutation: 'mutating', retry: 'poll-state' },
+        { mutation: 'mutating', retry: 'poll-state' },
+        { mutation: 'mutating', retry: 'poll-state' },
+        { mutation: 'mutating', retry: 'poll-state' },
+        { mutation: 'mutating', retry: 'poll-state' },
+      ],
+      'commit-mismatch': [
+        { mutation: 'mutating', retry: 'poll-state' },
+        { mutation: 'mutating', retry: 'poll-state' },
+        { mutation: 'mutating', retry: 'poll-state' },
+        { mutation: 'mutating', retry: 'poll-state' },
+        { mutation: 'mutating', retry: 'poll-state' },
+        { mutation: 'mutating', retry: 'poll-state' },
+        { mutation: 'mutating', retry: 'poll-state' },
+        { mutation: 'mutating', retry: 'poll-state' },
+      ],
       'task-control': [
         { mutation: 'mutating', retry: 'poll-state' },
         { mutation: 'mutating', retry: 'poll-state' },
@@ -142,7 +171,7 @@ describe('the canonical scenario registry', () => {
       .filter((scenario) => scenario.migrationState === 'pending')
       .map((scenario) => scenario.id);
 
-    expect(pending).toEqual(['commit-gate', 'commit-cwd', 'commit-mismatch', 'cicd-full-cycle']);
+    expect(pending).toEqual(['cicd-full-cycle']);
     for (const scenario of canonicalScenarios) {
       if (scenario.migrationState !== 'pending') continue;
       expect(scenario.steps).toBeUndefined();
@@ -279,7 +308,10 @@ describe('the canonical scenario registry', () => {
     }
     const migratedRow = matrix.find((row) => row.scenarioId === 'create');
     expect(migratedRow?.reason).toContain('migrated');
-    const pendingRow = matrix.find((row) => row.scenarioId === 'commit-gate');
+    for (const id of ['commit-gate', 'commit-cwd', 'commit-mismatch']) {
+      expect(matrix.find((row) => row.scenarioId === id)?.reason).toContain('migrated');
+    }
+    const pendingRow = matrix.find((row) => row.scenarioId === 'cicd-full-cycle');
     expect(pendingRow?.reason).toContain('pending migration');
   });
 });

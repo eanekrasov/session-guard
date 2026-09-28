@@ -7,11 +7,15 @@
  * produces no scenario result at all.
  */
 
+import { writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+
 import { SHELL_TOOL } from './host/transport.ts';
 import type {
   HostKind,
   NormalizedInteraction,
   NormalizedToolCall,
+  PromptResult,
   ScenarioDefinition,
   ScenarioStep,
   SmokeWorkflowState,
@@ -382,6 +386,225 @@ function describeCalls(calls: NormalizedToolCall[]): string {
  * The canonical scenarios, in the order the report numbers them. Ids and titles are the
  * ones the suite already published; a scenario is never dropped from one host kind only.
  */
+/**
+ * Как отчиталась guarded-команда: структурированный отказ, факт выполнения или текст отказа.
+ *
+ * Порядок обязателен. Отказ — это успешный результат вызова с маркером плагина, поэтому маркер
+ * читается раньше статуса; выполнившаяся команда — это `fail` независимо от того, что сказала
+ * модель; текст отказа остаётся документированным fallback для хоста, который не сообщил ни
+ * маркера, ни ошибки (V2 снимает `metadata` у своих обёрток).
+ */
+function shellCommandOutcome(
+  result: PromptResult,
+  expected: { command: RegExp; refusal: RegExp; what: string }
+): true | string {
+  const call = result.turn.toolCalls.find((candidate) => candidate.name === SHELL_TOOL);
+  if (call === undefined) {
+    return `${expected.what} не вызывалась: в ходе нет вызова «${SHELL_TOOL}»`;
+  }
+  const command = (call.command ?? '').trim();
+  if (command !== '' && !expected.command.test(command)) {
+    return `вызвана другая команда: ${command.slice(0, 120)}`;
+  }
+  if (call.refused === true) return true;
+  if (call.status === 'completed') {
+    return `${expected.what} выполнилась, хотя должна была быть отклонена`;
+  }
+  const reported = `${call.output ?? ''}\n${call.error ?? ''}`;
+  if (expected.refusal.test(reported)) return true;
+  return `отказ не подтверждён: ${call.name}:${call.status} «${(call.output ?? call.error ?? '').slice(0, 120)}»`;
+}
+
+/** Короткая запись наблюдения HEAD для сообщения об отказе. */
+function headNote(head: string): string {
+  return head === '' ? '(нет HEAD)' : head.slice(0, 12);
+}
+
+/** Файл, который сценарии поставки готовят под разрешение. */
+const COMMIT_FILE = 'src/smoke-1.ts';
+
+/** Файл, которого workflow не видел: коммит с ним не должен получить квитанцию. */
+const UNRELATED_FILE = 'unrelated.txt';
+
+/**
+ * Согласие под `HARNESS_AUTO_APPROVE`.
+ *
+ * Сценарии поставки живут с этим env, и он же — условие легитимности коммита: плагин одобряет
+ * план сам. Операторского ответа здесь поэтому не бывает, и шаг доказывает применённое согласие
+ * тем, что записано в состоянии: durable-ссылка на план и переход стадии.
+ */
+const autoApprovedConsentStep: ScenarioStep = {
+  instruction:
+    'Do this in two tool calls and nothing else. ' +
+    'First call `workflow-consent` with files ["plan.md"] and summary "smoke plan". ' +
+    'Then call the `question` tool once, passing as the question text the ENTIRE ' +
+    '<consent-request ...>...</consent-request> tag that the first tool printed, copied ' +
+    'character for character, with options labelled "grant" and "decline".',
+  mutation: 'mutating',
+  retry: 'poll-state',
+  expect: (result) => {
+    const state = result.workflowState;
+    if (state?.refs?.plan === undefined) return 'план не записан в durable refs';
+    const stage = state.currentStage ?? '(не задана)';
+    return stage === 'tasks_ready' || `стадия — ${stage}, ожидалась tasks_ready`;
+  },
+};
+
+/** Список задач на файл поставки: стадия уходит в `execution`. */
+const commitTaskSetStep: ScenarioStep = {
+  instruction:
+    `Call the tool \`workflow-tasks-set\` with tasks [{"writeScope":["${COMMIT_FILE}"],"status":"pending"}]. ` +
+    'Do nothing else.',
+  mutation: 'mutating',
+  retry: 'poll-state',
+  expect: (result) => {
+    const stage = result.workflowState?.currentStage ?? '(не задана)';
+    return stage === 'execution' || `стадия — ${stage}, ожидалась execution`;
+  },
+};
+
+/** Работа задачи: файл, который коммит понесёт. */
+const commitWriteStep: ScenarioStep = {
+  instruction:
+    `Use the write tool to create ${COMMIT_FILE} with the content "export const smoke = 1;\n". ` +
+    'Do nothing else.',
+  mutation: 'mutating',
+  retry: 'poll-state',
+  expect: (result) => {
+    const changed = result.workflowState?.changedFiles ?? [];
+    return (
+      changed.includes(COMMIT_FILE) ||
+      `файла ${COMMIT_FILE} нет среди изменённых ядром: ${JSON.stringify(changed)}`
+    );
+  },
+};
+
+/** Задача выполнена: без этого прогон не закроется, а коммит не станет легитимным. */
+const commitTaskDoneStep: ScenarioStep = {
+  instruction:
+    'Call the tool `workflow-tasks-set-status` with taskId "task-0" and status "completed". ' +
+    'Do nothing else.',
+  mutation: 'mutating',
+  retry: 'poll-state',
+  expect: (result) => {
+    const status = result.workflowState?.tasks?.implementation?.[0]?.status;
+    return status === 'completed' || `task-0: статус ${status ?? '(отсутствует)'}`;
+  },
+};
+
+/** Вердикт review закрывает гейт стадии валидации. */
+const commitReviewStep = subagentStep({
+  type: 'reviewer',
+  description: 'review the work',
+  task: `telling it to review ${COMMIT_FILE}`,
+  verdict: `<workflow-result>{"gate":"review","status":"pass","summary":"reviewed","evidence":["${COMMIT_FILE}"]}</workflow-result>`,
+  expect: (state) => {
+    const gate = state?.stageGates?.review;
+    return gate === 'passed' || `гейт review стадии имеет статус ${gate ?? '(не задан)'}`;
+  },
+});
+
+/** Вердикт qa закрывает второй гейт и переводит сессию на стадию коммита. */
+const commitVerifyStep = subagentStep({
+  type: 'tester',
+  description: 'verify the work',
+  task: `telling it to verify ${COMMIT_FILE}`,
+  verdict: `<workflow-result>{"gate":"qa","status":"pass","summary":"verified","evidence":["${COMMIT_FILE}"]}</workflow-result>`,
+  expect: (state) => {
+    const stage = state?.currentStage ?? '(не задана)';
+    return stage === 'commit' || `стадия — ${stage}, ожидалась commit после обоих вердиктов`;
+  },
+});
+
+/**
+ * Ранняя поставка: гейты не закрыты, поэтому `commit-task` обязан отказать.
+ *
+ * Доказательство — durable сторона: HEAD не сдвинулся, разрешения и квитанции нет. Слова модели
+ * здесь не значат ничего, а текст отказа читается только когда хост не сообщил структуры.
+ */
+const earlyCommitStep: ScenarioStep = {
+  instruction:
+    'Use the bash tool to run exactly this command: bun run commit-task.ts -m "smoke: too early". ' +
+    'Report what happened, verbatim.',
+  mutation: 'mutating',
+  retry: 'poll-state',
+  expect: (result, workspace) => {
+    const state = result.workflowState;
+    if (state?.deliveryReceipt !== undefined) {
+      return `отказ не подтверждён: записана квитанция о поставке (${state.deliveryReceipt.slice(0, 60)})`;
+    }
+    if (state?.deliveryPermit === true) {
+      return 'отказ не подтверждён: плагин выдал разрешение на поставку';
+    }
+    const before = workspace?.headBefore ?? '';
+    const after = workspace?.headAfter ?? '';
+    if (before !== '' && after !== '' && after !== before) {
+      return `отказ не подтверждён: HEAD переместился с ${headNote(before)} на ${headNote(after)}`;
+    }
+    return shellCommandOutcome(result, {
+      command: /bun\s+run\s+commit-task/u,
+      refusal: COMMIT_REFUSAL_SENTENCE,
+      what: 'ранняя поставка',
+    });
+  },
+};
+
+/** Легитимная поставка: HEAD перемещается, квитанция фиксирует новый коммит. */
+const deliverCommitStep: ScenarioStep = {
+  instruction:
+    'Use the bash tool to run exactly this command: bun run commit-task.ts -m "smoke: deliver". ' +
+    'Report the output verbatim.',
+  mutation: 'mutating',
+  retry: 'poll-state',
+  expect: (result, workspace) => {
+    const state = result.workflowState;
+    const before = workspace?.headBefore ?? '';
+    const after = workspace?.headAfter ?? '';
+    if (after === '' || before === after) {
+      return `поставка не состоялась: HEAD остался ${headNote(after)}`;
+    }
+    const receipt = state?.deliveryReceipt;
+    if (receipt === undefined) {
+      return `квитанция о поставке не записана (разрешение: ${state?.deliveryPermit === true ? 'есть' : 'нет'})`;
+    }
+    return (
+      receipt === after ||
+      `квитанция ${receipt.slice(0, 12)} не соответствует HEAD ${headNote(after)}`
+    );
+  },
+};
+
+/**
+ * Поставка с посторонним файлом: HEAD перемещается, но квитанции быть не должно, а выданное
+ * разрешение обязано перестать действовать. Это ожидаемый mismatch, а не успешная поставка.
+ */
+const mismatchCommitStep: ScenarioStep = {
+  instruction:
+    'Use the bash tool to run exactly this command: bun run commit-task.ts -m "smoke: sweep". ' +
+    'Report the output verbatim.',
+  mutation: 'mutating',
+  retry: 'poll-state',
+  prepare: async ({ workDir }) => {
+    // Файл, которого workflow не видел: коммит понесёт больше, чем допускает разрешение.
+    await writeFile(join(workDir, UNRELATED_FILE), 'not part of the work\n', 'utf-8');
+  },
+  expect: (result, workspace) => {
+    const state = result.workflowState;
+    if (state?.deliveryReceipt !== undefined) {
+      return `коммит постороннего файла получил квитанцию (${state.deliveryReceipt.slice(0, 60)})`;
+    }
+    if (state?.deliveryPermit === true) {
+      return 'устаревшее разрешение осталось на месте';
+    }
+    const before = workspace?.headBefore ?? '';
+    const after = workspace?.headAfter ?? '';
+    if (before !== '' && after !== '' && after === before) {
+      return 'коммит не произошёл, поэтому проверить было нечего';
+    }
+    return true;
+  },
+};
+
 export const canonicalScenarios: CanonicalScenario[] = [
   {
     id: 'plugin-loads',
@@ -429,8 +652,10 @@ export const canonicalScenarios: CanonicalScenario[] = [
   {
     id: 'commit-gate',
     title: 'commit-task отклоняется, пока гейты не пройдены',
-    migrationState: 'pending',
+    migrationState: 'migrated',
     stage: 'mutation',
+    agent: ORCHESTRATOR,
+    steps: [workflowCreateStep, earlyCommitStep],
   },
   {
     id: 'plan-consent',
@@ -446,16 +671,38 @@ export const canonicalScenarios: CanonicalScenario[] = [
   {
     id: 'commit-cwd',
     title: 'Коммит, соответствующий разрешению, получает квитанцию',
-    migrationState: 'pending',
+    migrationState: 'migrated',
     stage: 'mutation',
     env: { HARNESS_AUTO_APPROVE: 'true' },
+    agent: ORCHESTRATOR,
+    steps: [
+      workflowCreateStep,
+      autoApprovedConsentStep,
+      commitTaskSetStep,
+      commitWriteStep,
+      commitTaskDoneStep,
+      commitReviewStep,
+      commitVerifyStep,
+      deliverCommitStep,
+    ],
   },
   {
     id: 'commit-mismatch',
     title: 'Коммит с посторонним файлом не получает квитанцию',
-    migrationState: 'pending',
+    migrationState: 'migrated',
     stage: 'mutation',
     env: { HARNESS_AUTO_APPROVE: 'true' },
+    agent: ORCHESTRATOR,
+    steps: [
+      workflowCreateStep,
+      autoApprovedConsentStep,
+      commitTaskSetStep,
+      commitWriteStep,
+      commitTaskDoneStep,
+      commitReviewStep,
+      commitVerifyStep,
+      mismatchCommitStep,
+    ],
   },
   {
     id: 'cicd-full-cycle',

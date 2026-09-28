@@ -6,6 +6,8 @@
  * is judged by its own expectation against structured evidence.
  */
 
+import { execFileSync } from 'node:child_process';
+
 import type { SmokeHost } from './host/facade.ts';
 import { buildPromptResult, isPluginTool } from './host/transport.ts';
 import { assertScenarioResultInvariant, createBlockedResult } from './host/types.ts';
@@ -20,6 +22,7 @@ import type {
   ScenarioStep,
   SmokeSession,
   SmokeWorkflowState,
+  StepWorkspace,
 } from './host/types.ts';
 import { logEvent } from './log.ts';
 
@@ -141,7 +144,8 @@ async function pollOutcome(
   session: SmokeSession,
   step: ScenarioStep,
   last: PromptResult | undefined,
-  options: RunnerOptions
+  options: RunnerOptions,
+  workspace: () => StepWorkspace
 ): Promise<PollOutcome> {
   // A step whose instruction dispatches a subagent declares its own budget, the run's applies
   // only when it does not, and the run may cap both. Every read is recorded: a step that fails
@@ -157,7 +161,7 @@ async function pollOutcome(
     const reading = await readDurable(host, session);
     if (reading.outcome === 'present') {
       const observation = observationFromState(last, '', reading.state);
-      const verdict = step.expect(observation);
+      const verdict = step.expect(observation, workspace());
       if (verdict === true) return { observation, rounds };
       rounds.push(`${elapsed} ${summarizeState(reading.state)} → ${verdict}`);
     } else {
@@ -196,6 +200,25 @@ async function resumeAfterDispatch(
       'subagent you already dispatched, and the current workflow state, then finish the turn.',
     ...(agent === undefined ? {} : { agent }),
   });
+}
+
+/**
+ * git HEAD проекта прогона, или пустая строка, когда git его не знает.
+ *
+ * Наблюдение нужно сценариям поставки: мутация доказывается сменой HEAD, а не отчётом модели.
+ * Отсутствие HEAD — не ошибка runner'а: сценарий без git просто не может им пользоваться.
+ */
+function gitHead(workDir: string): string {
+  try {
+    return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: workDir, encoding: 'utf-8' }).trim();
+  } catch {
+    return '';
+  }
+}
+
+/** Первые восемь символов git HEAD: достаточно, чтобы сравнить два наблюдения. */
+function shortHead(head: string): string {
+  return head === '' ? '(none)' : head.slice(0, 8);
 }
 
 /** How long a step has been running, in seconds with one decimal. */
@@ -257,6 +280,14 @@ async function runStep(
   options: RunnerOptions
 ): Promise<StepOutcome> {
   const stepStartedAt = Date.now();
+  // Подготовка — мутация, поэтому выполняется один раз за шаг, а не на каждую попытку.
+  if (step.prepare !== undefined) await step.prepare({ workDir: host.workDir });
+  const headBefore = gitHead(host.workDir);
+  const workspace = (): StepWorkspace => ({
+    workDir: host.workDir,
+    headBefore,
+    headAfter: gitHead(host.workDir),
+  });
   const planned = plannedAttempts(step, options);
   let made = 0;
   let detail = '';
@@ -293,7 +324,7 @@ async function runStep(
     if (last.turn.status === 'timed-out') timedOut = true;
     if (last.turn.status === 'failed') failedTurn = true;
     observed.push(...last.turn.toolCalls);
-    const verdict = step.expect(last);
+    const verdict = step.expect(last, workspace());
     if (verdict === true) {
       return {
         ok: true,
@@ -322,7 +353,7 @@ async function runStep(
     step.mutation === 'mutating' && unprovable && reading.outcome === 'present'
       ? observationFromState(last, thrown ?? '', reading.state)
       : undefined;
-  if (satisfied !== undefined && step.expect(satisfied) === true) {
+  if (satisfied !== undefined && step.expect(satisfied, workspace()) === true) {
     return {
       ok: true,
       attempts: made,
@@ -347,7 +378,7 @@ async function runStep(
   // only the durable store is read until its deadline.
   let pollRounds: string[] = [];
   if (step.retry === 'poll-state') {
-    const polled = await pollOutcome(host, session, step, last, options);
+    const polled = await pollOutcome(host, session, step, last, options, workspace);
     pollRounds = polled.rounds;
     if (polled.observation !== undefined) {
       logEvent(
@@ -389,7 +420,7 @@ async function runStep(
       if (resumed.turn.status === 'timed-out') timedOut = true;
       if (resumed.turn.status === 'failed') failedTurn = true;
       observed.push(...resumed.turn.toolCalls);
-      const rePolled = await pollOutcome(host, session, step, resumed, options);
+      const rePolled = await pollOutcome(host, session, step, resumed, options, workspace);
       if (rePolled.observation !== undefined) {
         return {
           ok: true,
@@ -444,7 +475,9 @@ async function runStep(
 function passEvidence(
   definition: MigratedScenarioDefinition,
   attempts: number,
-  last: PromptResult | undefined
+  last: PromptResult | undefined,
+  headBefore: string,
+  headAfter: string
 ): string {
   return [
     `шагов: ${definition.steps.length}, попыток: ${attempts}`,
@@ -453,6 +486,8 @@ function passEvidence(
     describeInteractions(last?.interactions),
     `stage=${last?.workflowState?.currentStage ?? '(none)'}`,
     `delivery=${deliveryEvidence(last?.workflowState)}`,
+    `head=${shortHead(headBefore)}→${shortHead(headAfter)}`,
+    `files=${JSON.stringify(last?.workflowState?.changedFiles ?? [])}`,
   ].join('; ');
 }
 
@@ -525,6 +560,9 @@ export async function runScenario(
   options: RunnerOptions = {}
 ): Promise<ScenarioResult> {
   const startedAt = Date.now();
+  // Наблюдение рабочего каталога до первой инструкции: сценарий поставки доказывает мутацию
+  // сменой git HEAD, и сравнить её можно только с тем, что было в начале прогона.
+  const scenarioHeadBefore = gitHead(host.workDir);
   let attempts = 0;
   let session: SmokeSession | undefined;
   let last: PromptResult | undefined;
@@ -585,7 +623,10 @@ export async function runScenario(
       status: 'pass',
       attempts,
       durationMs: Date.now() - startedAt,
-      evidence: [passEvidence(definition, attempts, last), ...notes].join('\n'),
+      evidence: [
+        passEvidence(definition, attempts, last, scenarioHeadBefore, gitHead(host.workDir)),
+        ...notes,
+      ].join('\n'),
     };
     assertScenarioResultInvariant(result);
     return result;

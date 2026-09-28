@@ -1,4 +1,8 @@
 import { describe, expect, test } from 'bun:test';
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import type { SmokeHost } from '../src/host/facade.ts';
 import { SHELL_TOOL, pluginObservationFrom } from '../src/host/transport.ts';
@@ -67,6 +71,7 @@ function makeHost(
     calls,
     host: {
       kind,
+      workDir: '/tmp/smoke-mock-workspace',
       async createSession(title) {
         calls.created.push(title);
         return { id: 'ses-1', hostKind: kind };
@@ -391,6 +396,7 @@ describe('the common scenario runner', () => {
   test('fails without a session to close when the host cannot create one', async () => {
     const host: SmokeHost = {
       kind: 'v2',
+      workDir: '/tmp/smoke-mock-workspace',
       createSession: async () => {
         throw new Error('[ERROR] no session');
       },
@@ -800,6 +806,274 @@ describe('the task-control canonical scenario', () => {
     expect(result.blockedReason).toBe('indeterminate_mutation');
     // create + the one task-list mutation: the mutation is never sent twice.
     expect(calls.prompts).toHaveLength(2);
+  });
+});
+
+describe('the commit/mutation canonical scenarios', () => {
+  const gate = scenario('commit-gate');
+  const cwd = scenario('commit-cwd');
+  const mismatch = scenario('commit-mismatch');
+
+  function scenario(id: string): MigratedScenarioDefinition {
+    const found = findScenario(id);
+    if (found?.migrationState !== 'migrated') throw new Error(`${id} не мигрирован`);
+    return found;
+  }
+
+  /** Настоящий git-проект: проверки HEAD должны быть проверками, а не декларацией. */
+  function workspace(): { workDir: string; commit: (message: string) => string } {
+    const workDir = mkdtempSync(join(tmpdir(), 'smoke-workspace-'));
+    const git = (args: string[]): string =>
+      execFileSync('git', args, { cwd: workDir, encoding: 'utf-8' }).trim();
+    git(['init', '-q']);
+    git(['config', 'user.email', 'smoke@example.com']);
+    git(['config', 'user.name', 'smoke']);
+    git(['commit', '-q', '--allow-empty', '-m', 'seed']);
+    return {
+      workDir,
+      commit: (message: string) => {
+        git(['commit', '-q', '--allow-empty', '-m', message]);
+        return git(['rev-parse', 'HEAD']);
+      },
+    };
+  }
+
+  /**
+   * Хост, который отдаёт заготовленные ходы и читает состояние последнего хода.
+   *
+   * Ходы — фабрики, а не значения: сценарий поставки доказывает мутацию сменой HEAD, поэтому
+   * тест обязан уметь сходить в git между промптом и проверкой ожидания.
+   */
+  function commitHost(
+    workDir: string,
+    turns: Array<() => PromptResult>
+  ): { host: SmokeHost; calls: { prompts: PromptInput[]; closed: string[] } } {
+    const calls = { prompts: [] as PromptInput[], closed: [] as string[] };
+    let index = 0;
+    let state: SmokeWorkflowState | null = null;
+    return {
+      calls,
+      host: {
+        kind: 'v1',
+        workDir,
+        async createSession() {
+          return { id: 'ses-1', hostKind: 'v1' };
+        },
+        async runPrompt(_session, input) {
+          calls.prompts.push(input);
+          const reply = turns[Math.min(index, turns.length - 1)]!();
+          index += 1;
+          state = reply.workflowState;
+          return reply;
+        },
+        async readWorkflowState() {
+          return state;
+        },
+        async closeSession(session) {
+          calls.closed.push(session.id);
+        },
+      },
+    };
+  }
+
+  const planningTurn = (): PromptResult => turn({ toolCalls: [] }, planning);
+  const consentTurn = (): PromptResult =>
+    turn(
+      { toolCalls: [] },
+      { ...planning, currentStage: 'tasks_ready', refs: { plan: 'plan.md' } }
+    );
+  const taskSetTurn = (): PromptResult =>
+    turn({ toolCalls: [] }, { ...planning, currentStage: 'execution' });
+  const writeTurn = (): PromptResult =>
+    turn(
+      { toolCalls: [] },
+      { ...planning, currentStage: 'execution', changedFiles: ['src/smoke-1.ts'] }
+    );
+  const doneTurn = (): PromptResult =>
+    turn(
+      { toolCalls: [] },
+      {
+        ...planning,
+        currentStage: 'execution',
+        changedFiles: ['src/smoke-1.ts'],
+        tasks: { implementation: [{ id: 'task-0', status: 'completed' }] },
+      }
+    );
+  const reviewTurn = (): PromptResult =>
+    turn(
+      { toolCalls: [] },
+      {
+        ...planning,
+        currentStage: 'validation',
+        stageGates: { review: 'passed' },
+      }
+    );
+  const deliveredState = (receipt: string): SmokeWorkflowState => ({
+    ...planning,
+    currentStage: 'commit',
+    deliveryReceipt: receipt,
+  });
+  const deliveredTurn = (receipt: string): PromptResult =>
+    turn({ toolCalls: [] }, deliveredState(receipt));
+  const verifyTurn = (): PromptResult =>
+    turn({ toolCalls: [] }, { ...planning, currentStage: 'commit' });
+  const shellCall = (command: string, refused: boolean) => ({
+    name: SHELL_TOOL,
+    status: 'completed' as const,
+    command,
+    ...(refused ? { refused: true } : {}),
+  });
+  const earlyCommand = 'bun run commit-task.ts -m "smoke: too early"';
+  const deliverCommand = 'bun run commit-task.ts -m "smoke: deliver"';
+  const mismatchCommand = 'bun run commit-task.ts -m "smoke: sweep"';
+  const prepTurns = (): Array<() => PromptResult> => [
+    planningTurn,
+    consentTurn,
+    taskSetTurn,
+    writeTurn,
+    doneTurn,
+    reviewTurn,
+    verifyTurn,
+  ];
+
+  test('commit-gate: passes on a refused early commit that left HEAD alone', async () => {
+    const space = workspace();
+    const { host, calls } = commitHost(space.workDir, [
+      planningTurn,
+      () => turn({ toolCalls: [shellCall(earlyCommand, true)] }, planning),
+    ]);
+
+    const result = await runScenario(host, gate, { attempts: 1, maxPollBudgetMs: 30 });
+
+    expect(result.status).toBe('pass');
+    expect(result.evidence).toContain('delivery=none');
+    expect(calls.closed).toEqual(['ses-1']);
+  });
+
+  test('commit-gate: fails when the early commit moved HEAD', async () => {
+    const space = workspace();
+    const { host } = commitHost(space.workDir, [
+      planningTurn,
+      () => {
+        space.commit('too early');
+        return turn({ toolCalls: [shellCall(earlyCommand, true)] }, planning);
+      },
+    ]);
+
+    const result = await runScenario(host, gate, { attempts: 1, maxPollBudgetMs: 30 });
+
+    expect(result.status).toBe('fail');
+    expect(result.evidence).toContain('HEAD переместился');
+  });
+
+  test('commit-gate: fails when the guarded command ran instead of being refused', async () => {
+    const space = workspace();
+    const { host } = commitHost(space.workDir, [
+      planningTurn,
+      () => turn({ toolCalls: [shellCall(earlyCommand, false)] }, planning),
+    ]);
+
+    const result = await runScenario(host, gate, { attempts: 1, maxPollBudgetMs: 30 });
+
+    expect(result.status).toBe('fail');
+    expect(result.evidence).toContain('должна была быть отклонена');
+  });
+
+  test('commit-gate: fails when a receipt was recorded anyway', async () => {
+    const space = workspace();
+    const { host } = commitHost(space.workDir, [
+      planningTurn,
+      () => turn({ toolCalls: [shellCall(earlyCommand, true)] }, deliveredState('receipt-1')),
+    ]);
+
+    const result = await runScenario(host, gate, { attempts: 1, maxPollBudgetMs: 30 });
+
+    expect(result.status).toBe('fail');
+    expect(result.evidence).toContain('записана квитанция о поставке');
+  });
+
+  test('commit-cwd: passes when the delivery moved HEAD and the receipt matches it', async () => {
+    const space = workspace();
+    const { host, calls } = commitHost(space.workDir, [
+      ...prepTurns(),
+      () => {
+        const head = space.commit('smoke: deliver');
+        return deliveredTurn(head);
+      },
+    ]);
+
+    const result = await runScenario(host, cwd, { attempts: 1, maxPollBudgetMs: 30 });
+
+    expect(result.status).toBe('pass');
+    expect(result.evidence).toContain('delivery=receipt:');
+    expect(calls.closed).toEqual(['ses-1']);
+  });
+
+  test('commit-cwd: fails when the receipt does not match HEAD', async () => {
+    const space = workspace();
+    const { host } = commitHost(space.workDir, [
+      ...prepTurns(),
+      () => {
+        space.commit('smoke: deliver');
+        return deliveredTurn('deadbeefdeadbeef');
+      },
+    ]);
+
+    const result = await runScenario(host, cwd, { attempts: 1, maxPollBudgetMs: 30 });
+
+    expect(result.status).toBe('fail');
+    expect(result.evidence).toContain('не соответствует HEAD');
+  });
+
+  test('commit-mismatch: passes when the extra file left HEAD moved without a receipt', async () => {
+    const space = workspace();
+    const { host } = commitHost(space.workDir, [
+      ...prepTurns(),
+      () => {
+        space.commit('smoke: sweep');
+        return turn({ toolCalls: [shellCall(mismatchCommand, true)] }, planning);
+      },
+    ]);
+
+    const result = await runScenario(host, mismatch, { attempts: 1, maxPollBudgetMs: 30 });
+
+    expect(result.status).toBe('pass');
+    expect(result.evidence).toContain('delivery=none');
+    // Подготовка шага — это то, что делает коммит посторонним: файл создан до инструкции.
+    expect(existsSync(join(space.workDir, 'unrelated.txt'))).toBe(true);
+  });
+
+  test('commit-mismatch: fails when the mismatched commit got a receipt', async () => {
+    const space = workspace();
+    const { host, calls } = commitHost(space.workDir, [
+      ...prepTurns(),
+      () => {
+        space.commit('smoke: sweep');
+        return turn({ toolCalls: [shellCall(mismatchCommand, true)] }, deliveredState('receipt-1'));
+      },
+    ]);
+
+    const result = await runScenario(host, mismatch, { attempts: 1, maxPollBudgetMs: 30 });
+
+    expect(result.status).toBe('fail');
+    expect(result.evidence).toContain('получил квитанцию');
+    expect(calls.closed).toEqual(['ses-1']);
+  });
+
+  test('an unprovable delivery blocks without repeating the commit prompt', async () => {
+    const space = workspace();
+    const { host, calls } = commitHost(space.workDir, [
+      ...prepTurns(),
+      () => turn({ status: 'timed-out', toolCalls: [shellCall(deliverCommand, false)] }, planning),
+    ]);
+
+    const result = await runScenario(host, cwd, { attempts: 1, maxPollBudgetMs: 30 });
+
+    expect(result.status).toBe('blocked');
+    expect(result.blockedReason).toBe('indeterminate_mutation');
+    // Восемь шагов — по одному промпту на шаг: commit-команда не повторялась.
+    expect(calls.prompts).toHaveLength(8);
+    expect(calls.closed).toEqual(['ses-1']);
   });
 });
 

@@ -96,7 +96,17 @@ export interface SmokeWorkflowState {
     stage?: string;
     status?: string;
     gates?: Record<string, string>;
+    /**
+     * Вердикт ядра о ходе задачи: прошли ли проверки над ним. Ценность именно в том, что его
+     * выносит движок, посмотрев на диск, а не агент через `<workflow-result>`.
+     */
+    checks?: string;
   }>;
+  /**
+   * Гейты стадий, закрытые сессией: id гейта → статус. Сценарий поставки доказывает, что
+   * вердикты review и qa доехали до стадии, именно по этой записи.
+   */
+  stageGates?: Record<string, string>;
   operationId?: string;
   operationStatus?: 'pending' | 'completed' | 'failed' | 'unknown';
   /**
@@ -175,6 +185,22 @@ export interface PromptResult {
 export type MigrationState = 'migrated' | 'pending';
 export type RetryStrategy = 'same-session' | 'new-session' | 'poll-state' | 'none';
 
+/**
+ * Что runner наблюдает о рабочем каталоге прогона, когда проверяет ожидание шага.
+ *
+ * Это наблюдаемая сторона контракта, а не внутренний тип плагина: путь проекта и git HEAD.
+ * Сценарий поставки доказывает мутацию именно этим — HEAD до и после операции, — а не словами
+ * модели, поэтому наблюдение обязано быть доступно ожиданию.
+ */
+export interface StepWorkspace {
+  /** Абсолютный путь проекта прогона. */
+  workDir: string;
+  /** git HEAD до того, как шаг отправил инструкцию. */
+  headBefore: string;
+  /** git HEAD на момент проверки ожидания. */
+  headAfter: string;
+}
+
 export interface ScenarioStep {
   instruction: string;
   mutation: 'read-only' | 'mutating';
@@ -191,7 +217,13 @@ export interface ScenarioStep {
    * budget is not enough for it; the step says what it needs instead of the whole run waiting.
    */
   stateBudgetMs?: number;
-  expect: (result: PromptResult) => true | string;
+  /**
+   * Подготовка рабочего каталога до инструкции: файл вне разрешённого скоупа, фикстура,
+   * дополнительный артефакт. Выполняется один раз за шаг, а не на каждую попытку, потому что
+   * сама является мутацией.
+   */
+  prepare?: (workspace: { workDir: string }) => Promise<void> | void;
+  expect: (result: PromptResult, workspace?: StepWorkspace) => true | string;
 }
 
 interface ScenarioDefinitionBase {

@@ -407,6 +407,24 @@ function normalizeRefs(value: unknown): Record<string, string> | undefined {
   return seen ? normalized : undefined;
 }
 
+/**
+ * Гейты стадий, закрытые сессией, как их хранит плагин: `stageGateResults` — массив записей
+ * `{ stage, id, status }`. Сценарию нужен ответ «закрыт ли гейт review», поэтому запись
+ * сводится к `id → status`; при повторном закрытии одного id побеждает последняя запись.
+ */
+function normalizeStageGates(value: unknown): Record<string, string> | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const gates: Record<string, string> = {};
+  let seen = false;
+  for (const entry of value) {
+    const record = fields(entry);
+    if (typeof record.id !== 'string' || typeof record.status !== 'string') continue;
+    seen = true;
+    gates[record.id] = record.status;
+  }
+  return seen ? gates : undefined;
+}
+
 /** Files the core recorded as changed, with non-string entries dropped. */
 function normalizeChangedFiles(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) return undefined;
@@ -415,10 +433,14 @@ function normalizeChangedFiles(value: unknown): string[] | undefined {
 }
 
 /** Task runs as the loop engine tracks them, narrowed without inventing fields. */
-function normalizeRuns(
-  value: unknown
-):
-  | Array<{ taskId?: string; stage?: string; status?: string; gates?: Record<string, string> }>
+function normalizeRuns(value: unknown):
+  | Array<{
+      taskId?: string;
+      stage?: string;
+      status?: string;
+      gates?: Record<string, string>;
+      checks?: string;
+    }>
   | undefined {
   if (typeof value !== 'object' || value === null) return undefined;
   const runs: Array<{
@@ -426,6 +448,7 @@ function normalizeRuns(
     stage?: string;
     status?: string;
     gates?: Record<string, string>;
+    checks?: string;
   }> = [];
   for (const entry of Object.values(value)) {
     const run = fields(entry);
@@ -438,6 +461,7 @@ function normalizeRuns(
       ...(typeof run.stage === 'string' ? { stage: run.stage } : {}),
       ...(typeof run.status === 'string' ? { status: run.status } : {}),
       ...(Object.keys(gates).length === 0 ? {} : { gates }),
+      ...(typeof run.checks === 'string' ? { checks: run.checks } : {}),
     });
   }
   return runs.length === 0 ? undefined : runs;
@@ -470,6 +494,7 @@ export function normalizeWorkflowState(sessionId: string, raw: unknown): SmokeWo
   const refs = normalizeRefs(session.refs);
   const changedFiles = normalizeChangedFiles(session.changedFiles);
   const runs = normalizeRuns(session.loopRuns);
+  const stageGates = normalizeStageGates(session.stageGateResults);
   // Разрешение и квитанция — это ответ на вопрос «состоялась ли поставка», а не деталь
   // конкретного хоста: плагин хранит их в самой сессии, и сценарий обязан их видеть.
   const permit = session.deliveryPermit;
@@ -483,6 +508,7 @@ export function normalizeWorkflowState(sessionId: string, raw: unknown): SmokeWo
     ...(refs === undefined ? {} : { refs }),
     ...(changedFiles === undefined ? {} : { changedFiles }),
     ...(runs === undefined ? {} : { runs }),
+    ...(stageGates === undefined ? {} : { stageGates }),
     ...(permit === null || permit === undefined ? {} : { deliveryPermit: true }),
     ...(typeof receipt === 'string' && receipt.length > 0 ? { deliveryReceipt: receipt } : {}),
     durableMutation: 'applied',
