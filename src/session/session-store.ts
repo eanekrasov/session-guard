@@ -194,12 +194,22 @@ export class WorkflowStore {
     const lockPath = `${this.sessionPath(sessionId)}.lock`;
     const deadline = Date.now() + LOCK_TIMEOUT_MS;
 
+    let retries = 0;
     for (;;) {
       try {
         await (await open(lockPath, 'wx')).close();
         break;
       } catch (err) {
         if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+        retries++;
+        if (retries === 1) {
+          void this.log('debug', 'WorkflowStore: waiting for file lock', {
+            sessionId,
+            lockPath,
+            retries,
+            deadline: new Date(deadline).toISOString(),
+          });
+        }
 
         const age = await stat(lockPath).then(
           (info) => Date.now() - info.mtimeMs,
@@ -220,6 +230,9 @@ export class WorkflowStore {
     }
 
     try {
+      if (retries > 0) {
+        void this.log('debug', 'WorkflowStore: lock acquired', { sessionId, retries });
+      }
       return await write();
     } finally {
       await unlink(lockPath).catch(() => {});
@@ -268,7 +281,10 @@ export class WorkflowStore {
 
   async load(sessionId: string): Promise<WorkflowSession | null> {
     const filePath = this.sessionPath(sessionId);
-    if (!existsSync(filePath)) return null;
+    if (!existsSync(filePath)) {
+      void this.log('debug', 'WorkflowStore: load miss', { sessionId, filePath });
+      return null;
+    }
 
     let raw: string;
     try {
@@ -363,6 +379,7 @@ export class WorkflowStore {
     const filePath = this.sessionPath(sessionId);
     const targetPath = path.join(archiveDirOf(this.directory), sessionFileName(sessionId));
 
+    void this.log('debug', 'WorkflowStore: archive started', { sessionId, targetPath });
     const key = sessionId;
     const prev = this.locks.get(key) ?? Promise.resolve();
     let moved = false;
@@ -382,7 +399,13 @@ export class WorkflowStore {
 
     this.locks.set(key, chain);
     await chain;
-    if (moved) void this.log('info', `Session archived: ${sessionId}`, { path: targetPath });
+    if (moved) {
+      void this.log('info', `Session archived: ${sessionId}`, { path: targetPath });
+    } else {
+      void this.log('debug', 'WorkflowStore: archive skipped — session file not found', {
+        sessionId,
+      });
+    }
     return moved ? targetPath : null;
   }
 

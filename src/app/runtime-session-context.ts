@@ -1,3 +1,4 @@
+import type { LogFn } from './logger.ts';
 import type { WorkflowSession } from '../session/session-schema.ts';
 import type { WorkflowStore } from '../session/session-store.ts';
 import type { ResolveParentFn, SessionExecutor } from './session-executor.ts';
@@ -19,11 +20,13 @@ export class RuntimeSessionContextImpl implements RuntimeSessionContext {
   constructor(
     private readonly store: WorkflowStore,
     private readonly executor: SessionExecutor,
-    private readonly resolveParent?: ResolveParentFn
+    private readonly resolveParent?: ResolveParentFn,
+    private readonly log?: LogFn
   ) {}
 
   async load(sessionID: string | undefined): Promise<WorkflowSession | null> {
     if (!sessionID) return null;
+    void this.log?.('debug', 'RuntimeSessionContext: load session', { sessionID });
     const session = await this.store.load(await this.rootOf(sessionID));
     return session === null ? null : structuredClone(session);
   }
@@ -59,6 +62,7 @@ export class RuntimeSessionContextImpl implements RuntimeSessionContext {
    */
   normalizeTool(tool: string): string {
     const normalized = tool.toLowerCase();
+    void this.log?.('debug', 'RuntimeSessionContext: normalizeTool', { tool, normalized });
     return TOOL_ALIASES[normalized] ?? normalized;
   }
 }

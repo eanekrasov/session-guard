@@ -51,6 +51,11 @@ export class ConsentOrchestrator {
    * queue.enqueue чтобы не блокировать лок сессии с I/O.
    */
   async before(sessionID: string, callID: string, questionText: string): Promise<void> {
+    void this.log('debug', 'ConsentOrchestrator: before', {
+      sessionID,
+      callID,
+      textLength: questionText.length,
+    });
     const consentRequest = parseConsentRequest(questionText);
     if (!consentRequest) return;
 
@@ -135,6 +140,12 @@ export class ConsentOrchestrator {
         status: 'pending',
         evidence: documentEvidence,
         files: documentRefs,
+      });
+      void this.log('debug', 'ConsentOrchestrator: pending approval recorded', {
+        sessionID,
+        callID,
+        type: consentType,
+        evidencePrefix: documentEvidence.slice(0, 8),
       });
       // Ссылка на документ живёт под именем согласия: `refs.plan` для плана,
       // `refs.deploy` для деплоя. Guard-ы схемы уже читают `session.refs.<имя>`
@@ -266,6 +277,7 @@ export class ConsentOrchestrator {
     args: unknown,
     output: { title: string; output: string; metadata: unknown }
   ): Promise<void> {
+    void this.log('debug', 'ConsentOrchestrator: after', { sessionID, callID });
     let wasGranted = false;
     let evidence = '';
     let grantedType = DEFAULT_CONSENT_TYPE;

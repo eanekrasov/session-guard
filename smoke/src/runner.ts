@@ -10,6 +10,7 @@ import { execFileSync } from 'node:child_process';
 
 import { writeWorkflowSession } from './harness.ts';
 import { log } from './log.ts';
+import { formatToolTrace, summarizeWorkflowCheckpoint } from './trace.ts';
 import type { SmokeHost } from './host/facade.ts';
 import { buildPromptResult, isPluginTool } from './host/transport.ts';
 import { assertScenarioResultInvariant, createBlockedResult } from './host/types.ts';
@@ -264,6 +265,12 @@ async function runStep(
   step: ScenarioStep,
   options: RunnerOptions
 ): Promise<StepOutcome> {
+  const finishTrace = (attempt: number, status: string, verdict: string): void => {
+    log('debug', 'session.step.finished', {
+      type: 'session.step.finished',
+      fields: { attempt, status, verdict },
+    });
+  };
   const stepStartedAt = Date.now();
   // Подготовка — мутация, поэтому выполняется один раз за шаг, а не на каждую попытку.
   if (step.prepare !== undefined) {
@@ -297,6 +304,14 @@ async function runStep(
       color: 'blue',
       fields: { attempt, mutation: step.mutation, retry: step.retry },
     });
+    log('debug', 'session.step.started', {
+      type: 'session.step.started',
+      fields: { attempt, agent: step.agent ?? definition.agent, mutation: step.mutation },
+    });
+    log('debug', 'prompt started', {
+      type: 'prompt.started',
+      fields: { attempt, hostKind: host.kind },
+    });
     made = attempt;
     const agent = step.agent ?? definition.agent;
     try {
@@ -309,13 +324,30 @@ async function runStep(
       // The prompt died before it answered. Whether it mutated anything is read back below
       // instead of guessed, and no mutation is repeated to find out.
       thrown = messageOf(error);
+      finishTrace(attempt, 'thrown', thrown);
       break;
     }
     if (last.turn.status === 'timed-out') timedOut = true;
     if (last.turn.status === 'failed') failedTurn = true;
     observed.push(...last.turn.toolCalls);
+    log('debug', `tool.execute.after: ${formatToolTrace(last.turn.toolCalls)}`, {
+      type: 'tool.execute.after',
+      fields: { attempt, status: last.turn.status },
+    });
+    log(
+      'debug',
+      `workflow checkpoint: ${summarizeWorkflowCheckpoint(
+        last.workflowState,
+        last.workflowState?.revision
+      )}`,
+      {
+        type: 'workflow.checkpoint',
+        fields: { attempt, revision: last.workflowState?.revision },
+      }
+    );
     const verdict = evaluateExpectation(step, last, workspace);
     if (verdict === true) {
+      finishTrace(attempt, last.turn.status, 'pass');
       return {
         ok: true,
         attempts: made,
@@ -332,6 +364,7 @@ async function runStep(
       color: 'yellow',
       fields: { attempt },
     });
+    finishTrace(attempt, last.turn.status, detail);
   }
 
   // Neither a timed-out turn nor a thrown prompt says what the instruction did, so the

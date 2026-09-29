@@ -515,6 +515,7 @@ export function normalizeWorkflowState(sessionId: string, raw: unknown): SmokeWo
     sessionId,
     status:
       normalizeWorkflowStatus(session.status) ?? (stage === undefined ? 'unknown' : 'running'),
+    ...(typeof session.revision === 'number' ? { revision: session.revision } : {}),
     ...(stage === undefined ? {} : { currentStage: stage }),
     ...(tasks === undefined ? {} : { tasks }),
     ...(refs === undefined ? {} : { refs }),

@@ -106,12 +106,27 @@ export class SessionExecutor {
     // Выполнить инлайн в существующей транзакции — нет I/O, нет очереди.
     const current = this.active.getStore();
     if (current && current.root === rootSessionId) {
+      void this.log('debug', 'SessionExecutor: reentrant call — executing inline', {
+        rootSessionId,
+        sessionID,
+      });
       return action(current.tx);
     }
 
     const prev = this.queues.get(rootSessionId) ?? Promise.resolve();
+    void this.log('debug', 'SessionExecutor: queue wait started', {
+      rootSessionId,
+      sessionID,
+      queueDepth: this.queues.size,
+    });
     const currentPromise: Promise<T> = prev.then(async () => {
       const loaded = await this.store.load(rootSessionId);
+      void this.log('debug', 'SessionExecutor: session loaded for transaction', {
+        rootSessionId,
+        sessionID,
+        hasSession: loaded !== null,
+        revision: loaded?.revision,
+      });
       const snapshot = loaded !== null ? JSON.stringify(loaded) : null;
 
       const deferredFns: Array<() => Promise<void>> = [];
@@ -132,11 +147,27 @@ export class SessionExecutor {
       if (loaded !== null) {
         const after = JSON.stringify(loaded);
         if (after !== snapshot) {
+          void this.log('debug', 'SessionExecutor: session changed — saving', {
+            rootSessionId,
+            sessionID,
+            revision: loaded.revision,
+          });
           await this.store.save(loaded);
           // Отложенные эффекты запускаются только после успешного save.
+          if (deferredFns.length > 0) {
+            void this.log('debug', 'SessionExecutor: running deferred callbacks', {
+              rootSessionId,
+              count: deferredFns.length,
+            });
+          }
           for (const fn of deferredFns) {
             await fn();
           }
+        } else {
+          void this.log('debug', 'SessionExecutor: session unchanged — skipping save', {
+            rootSessionId,
+            sessionID,
+          });
         }
       }
 
@@ -188,6 +219,7 @@ export class SessionExecutor {
    * который не может ответить, оставляет сессию своим собственным корнем.
    */
   private async resolveRoot(sessionID: string): Promise<string> {
+    void this.log('debug', 'SessionExecutor: resolving root', { sessionID });
     const walked: string[] = [];
     let current = sessionID;
     const visited = new Set<string>();

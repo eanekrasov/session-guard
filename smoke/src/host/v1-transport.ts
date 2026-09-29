@@ -23,6 +23,7 @@ import {
   readNormalizedWorkflowState,
   type HostTransport,
 } from './transport.ts';
+import { formatToolTrace, summarizeWorkflowCheckpoint } from '../trace.ts';
 import type { PromptInput, PromptResult, SmokeSession, SmokeWorkflowState } from './types.ts';
 
 export interface LegacyTransportOptions {
@@ -105,7 +106,16 @@ export function createLegacyHttpTransport(
 ): HostTransport {
   return {
     async createSession(title: string): Promise<SmokeSession> {
-      const created = (await api(host, 'POST', '/session', { title })) as { id?: unknown };
+      // Поле agent в POST /session читается сервером как Session.CreateInput.agent:
+      //   packages/opencode/src/server/routes/instance/httpapi/handlers/session.ts:159-176
+      //   → createRaw парсит тело как Session.CreateInput
+      //   packages/opencode/src/session/session.ts:260-271
+      //   → CreateInput: { title?: string, agent?: string, model?, parentID?, ... }
+      // Агент, переданный при создании, фиксируется в сессии и используется для всех
+      // последующих сообщений, если сообщение не переопределит его своим параметром agent.
+      const body: Record<string, unknown> = { title };
+      if (options.agent !== undefined) body.agent = options.agent;
+      const created = (await api(host, 'POST', '/session', body)) as { id?: unknown };
       if (typeof created?.id !== 'string') {
         throw new Error('[ERROR] хост V1 не вернул идентификатор сессии при её создании');
       }
@@ -161,7 +171,7 @@ export function createLegacyHttpTransport(
       await logExchange(input.text, agent, error, rawParts);
 
       const parts = compactParts(rawParts.map((part) => normalizeLegacyPart(part)));
-      return buildPromptResult(
+      const result = buildPromptResult(
         {
           status: error ? 'failed' : 'completed',
           parts,
@@ -184,6 +194,15 @@ export function createLegacyHttpTransport(
         // This strategy holds a live `Host`, so the evidence really comes from one.
         'real-host'
       );
+      harnessLog('debug', `tool.execute.after: ${formatToolTrace(result.turn.toolCalls)}`);
+      harnessLog(
+        'debug',
+        `workflow checkpoint: ${summarizeWorkflowCheckpoint(
+          result.workflowState,
+          result.workflowState?.revision
+        )}`
+      );
+      return result;
     },
 
     readWorkflowState(session: SmokeSession): Promise<SmokeWorkflowState | null> {

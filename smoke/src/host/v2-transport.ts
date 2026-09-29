@@ -16,6 +16,7 @@ import {
   readNormalizedWorkflowState,
   type HostTransport,
 } from './transport.ts';
+import { formatToolTrace, summarizeWorkflowCheckpoint } from '../trace.ts';
 import type {
   NormalizedPart,
   PromptInput,
@@ -131,7 +132,7 @@ export function createSessionClientTransport(
         notes.push(`не удалось прочитать сообщения сессии: ${reason}`);
       }
 
-      return buildPromptResult(
+      const result = buildPromptResult(
         {
           status: timedOut ? 'timed-out' : 'completed',
           parts,
@@ -151,6 +152,15 @@ export function createSessionClientTransport(
         // This strategy holds a live `Host`, so the evidence really comes from one.
         'real-host'
       );
+      harnessLog('debug', `tool.execute.after: ${formatToolTrace(result.turn.toolCalls)}`);
+      harnessLog(
+        'debug',
+        `workflow checkpoint: ${summarizeWorkflowCheckpoint(
+          result.workflowState,
+          result.workflowState?.revision
+        )}`
+      );
+      return result;
     },
 
     readWorkflowState(session: SmokeSession): Promise<SmokeWorkflowState | null> {

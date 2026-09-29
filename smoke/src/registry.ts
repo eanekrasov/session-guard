@@ -67,7 +67,7 @@ const pluginLoadsStep: ScenarioStep = {
 /** Creating the workflow session; `create` and every later stage start with it. */
 const workflowCreateStep: ScenarioStep = {
   instruction:
-    'Call the tool `workflow-create` with schemaId "smoke". Do nothing else and add no commentary.',
+    'Call the tool `workflow-create` with schemaId "smoke/smoke". Do nothing else and add no commentary.',
   // Creating the session changes durable state, so its instruction is never repeated. The
   // outcome is a session at `planning`, which the store shows, so `poll-state` waits for it
   // instead of blocking on a turn that outlived the prompt budget.
@@ -662,7 +662,7 @@ const pipelineBudgets = {
  * smoke-профиле.
  */
 const cicdCreateStep: ScenarioStep = {
-  instruction: 'Call the tool `workflow-create` with schemaId "cicd". Do nothing else.',
+  instruction: 'Call the tool `workflow-create` with schemaId "cicd/cicd". Do nothing else.',
   mutation: 'mutating',
   retry: 'poll-state',
   turnBudgetMs: PIPELINE_SHORT_TURN_BUDGET_MS,

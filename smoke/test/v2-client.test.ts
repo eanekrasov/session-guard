@@ -356,6 +356,261 @@ describe('the prompt budget', () => {
   });
 });
 
+describe('execution and step SSE events', () => {
+  test('records the execution started and succeeded events from the SSE stream', async () => {
+    const originalFetch = globalThis.fetch;
+    const events: Array<{ type: string; data: Record<string, unknown> }> = [];
+    globalThis.fetch = Object.assign(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.includes('/event')) {
+          const sse = [
+            { type: 'session.created', data: { sessionID: 'ses-1' } },
+            { type: 'session.execution.started', data: { sessionID: 'ses-1' } },
+            {
+              type: 'session.execution.succeeded',
+              data: { sessionID: 'ses-1' },
+            },
+          ]
+            .map((event) => `data: ${JSON.stringify(event)}\n\n`)
+            .join('');
+          return new Response(sse, { headers: { 'content-type': 'text/event-stream' } });
+        }
+        if (url.includes('/wait')) return new Promise<Response>(() => {});
+        if (url.includes('/prompt')) return dataResponse({ id: 'msg-1', sessionID: 'ses-1' });
+        return dataResponse({});
+      },
+      { preconnect: originalFetch.preconnect }
+    );
+    try {
+      const client = createV2SmokeClient(fakeHost(), { promptTimeoutMs: 50 });
+
+      await expect(client.prompt('ses-1', 'go')).rejects.toThrow(PromptTimeoutError);
+
+      const execution = client.lastExecution();
+      expect(execution).not.toBeNull();
+      expect(execution?.status).toBe('succeeded');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('records the execution failed event with error details', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = Object.assign(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.includes('/event')) {
+          const sse = [
+            { type: 'session.created', data: { sessionID: 'ses-1' } },
+            { type: 'session.execution.started', data: { sessionID: 'ses-1' } },
+            {
+              type: 'session.execution.failed',
+              data: {
+                sessionID: 'ses-1',
+                error: { type: 'provider.auth', message: 'token expired', status: 401 },
+              },
+            },
+          ]
+            .map((event) => `data: ${JSON.stringify(event)}\n\n`)
+            .join('');
+          return new Response(sse, { headers: { 'content-type': 'text/event-stream' } });
+        }
+        if (url.includes('/wait')) return new Promise<Response>(() => {});
+        if (url.includes('/prompt')) return dataResponse({ id: 'msg-1', sessionID: 'ses-1' });
+        return dataResponse({});
+      },
+      { preconnect: originalFetch.preconnect }
+    );
+    try {
+      const client = createV2SmokeClient(fakeHost(), { promptTimeoutMs: 50 });
+
+      await expect(client.prompt('ses-1', 'go')).rejects.toThrow(PromptTimeoutError);
+
+      const execution = client.lastExecution();
+      expect(execution).not.toBeNull();
+      expect(execution?.status).toBe('failed');
+      expect(execution?.error?.type).toBe('provider.auth');
+      expect(execution?.error?.message).toBe('token expired');
+      expect(execution?.error?.status).toBe(401);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('records step events (started, ended, failed) from the SSE stream', async () => {
+    const originalFetch = globalThis.fetch;
+    let eventCalled = false;
+    globalThis.fetch = Object.assign(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.includes('/event') && !eventCalled) {
+          eventCalled = true;
+          const sse = [
+            { type: 'session.created', data: { sessionID: 'ses-1' } },
+            { type: 'session.execution.started', data: { sessionID: 'ses-1' } },
+            {
+              type: 'session.step.started',
+              data: {
+                sessionID: 'ses-1',
+                assistantMessageID: 'msg-1',
+                agent: 'orchestrator',
+                model: { providerID: 'crpt', modelID: 'deepseek-v4' },
+                started: Date.now(),
+              },
+            },
+            {
+              type: 'session.step.ended',
+              data: {
+                sessionID: 'ses-1',
+                assistantMessageID: 'msg-1',
+                finish: 'tool-calls',
+              },
+            },
+            {
+              type: 'session.step.started',
+              data: {
+                sessionID: 'ses-1',
+                assistantMessageID: 'msg-2',
+                agent: 'orchestrator',
+                model: { providerID: 'crpt', modelID: 'deepseek-v4' },
+                started: Date.now(),
+              },
+            },
+            {
+              type: 'session.step.failed',
+              data: {
+                sessionID: 'ses-1',
+                assistantMessageID: 'msg-2',
+                error: { type: 'provider.timeout', message: 'LLM timed out' },
+              },
+            },
+            { type: 'session.execution.succeeded', data: { sessionID: 'ses-1' } },
+          ]
+            .map((event) => `data: ${JSON.stringify(event)}\n\n`)
+            .join('');
+          return new Response(sse, { headers: { 'content-type': 'text/event-stream' } });
+        }
+        if (url.includes('/wait')) return new Promise<Response>(() => {});
+        if (url.includes('/prompt')) return dataResponse({ id: 'msg-1', sessionID: 'ses-1' });
+        return dataResponse({});
+      },
+      { preconnect: originalFetch.preconnect }
+    );
+    try {
+      const client = createV2SmokeClient(fakeHost(), { promptTimeoutMs: 50 });
+
+      await expect(client.prompt('ses-1', 'go')).rejects.toThrow(PromptTimeoutError);
+
+      const steps = client.lastStepEvents();
+      expect(steps).toHaveLength(3);
+      expect(steps[0]?.status).toBe('started');
+      expect(steps[0]?.assistantMessageID).toBe('msg-1');
+      expect(steps[0]?.agent).toBe('orchestrator');
+      expect(steps[0]?.model).toEqual({ providerID: 'crpt', modelID: 'deepseek-v4' });
+      expect(steps[1]?.status).toBe('ended');
+      expect(steps[1]?.finish).toBe('tool-calls');
+      expect(steps[2]?.status).toBe('failed');
+      expect(steps[2]?.error?.type).toBe('provider.timeout');
+      expect(steps[2]?.error?.message).toBe('LLM timed out');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('clears step and execution events between prompts', async () => {
+    const originalFetch = globalThis.fetch;
+    let callCount = 0;
+    globalThis.fetch = Object.assign(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.includes('/event') && callCount === 0) {
+          callCount++;
+          const sse = [
+            { type: 'session.created', data: { sessionID: 'ses-1' } },
+            { type: 'session.execution.started', data: { sessionID: 'ses-1' } },
+            {
+              type: 'session.step.started',
+              data: { sessionID: 'ses-1', assistantMessageID: 'msg-1', started: Date.now() },
+            },
+          ]
+            .map((event) => `data: ${JSON.stringify(event)}\n\n`)
+            .join('');
+          return new Response(sse, { headers: { 'content-type': 'text/event-stream' } });
+        }
+        if (url.includes('/event') && callCount > 0) {
+          callCount++;
+          // Второй SSE вызов — только session.created, без execution/step событий
+          const sse = [{ type: 'session.created', data: { sessionID: 'ses-1' } }]
+            .map((event) => `data: ${JSON.stringify(event)}\n\n`)
+            .join('');
+          return new Response(sse, { headers: { 'content-type': 'text/event-stream' } });
+        }
+        if (url.includes('/wait')) return new Promise<Response>(() => {});
+        if (url.includes('/prompt')) return dataResponse({ id: 'msg-1', sessionID: 'ses-1' });
+        return dataResponse({});
+      },
+      { preconnect: originalFetch.preconnect }
+    );
+    try {
+      const client = createV2SmokeClient(fakeHost(), { promptTimeoutMs: 50 });
+
+      // Первый prompt с execution.started и step.started
+      await expect(client.prompt('ses-1', 'first')).rejects.toThrow(PromptTimeoutError);
+      expect(client.lastExecution()?.status).toBe('started');
+      expect(client.lastStepEvents().length).toBe(1);
+      expect(client.lastStepEvents()[0]?.status).toBe('started');
+
+      // Второй prompt должен сбросить события. SSE возвращает только session.created,
+      // поэтому lastExecution должен быть сброшен.
+      await expect(client.prompt('ses-1', 'second')).rejects.toThrow(PromptTimeoutError);
+      expect(client.lastExecution()).toBeNull();
+      expect(client.lastStepEvents()).toEqual([]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('ignores execution and step events from unrelated sessions', async () => {
+    const originalFetch = globalThis.fetch;
+    let eventCalled = false;
+    globalThis.fetch = Object.assign(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.includes('/event') && !eventCalled) {
+          eventCalled = true;
+          const sse = [
+            { type: 'session.created', data: { sessionID: 'ses-1' } },
+            { type: 'session.execution.started', data: { sessionID: 'ses-1' } },
+            { type: 'session.execution.started', data: { sessionID: 'other' } },
+            { type: 'session.step.started', data: { sessionID: 'other', assistantMessageID: 'm' } },
+            { type: 'session.execution.succeeded', data: { sessionID: 'ses-1' } },
+          ]
+            .map((event) => `data: ${JSON.stringify(event)}\n\n`)
+            .join('');
+          return new Response(sse, { headers: { 'content-type': 'text/event-stream' } });
+        }
+        if (url.includes('/wait')) return new Promise<Response>(() => {});
+        if (url.includes('/prompt')) return dataResponse({ id: 'msg-1', sessionID: 'ses-1' });
+        return dataResponse({});
+      },
+      { preconnect: originalFetch.preconnect }
+    );
+    try {
+      const client = createV2SmokeClient(fakeHost(), { promptTimeoutMs: 50 });
+
+      await expect(client.prompt('ses-1', 'go')).rejects.toThrow(PromptTimeoutError);
+
+      // Должен записать execution события только для ses-1
+      expect(client.lastExecution()?.status).toBe('succeeded');
+      // step от other сессии не должен быть записан
+      expect(client.lastStepEvents()).toEqual([]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
 /** Сгенерированный клиент извлекает `data`, поэтому ответ хоста обёрнут. */
 function dataResponse(data: unknown): Response {
   return new Response(JSON.stringify({ data }), {

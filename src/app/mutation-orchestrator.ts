@@ -293,6 +293,7 @@ export class MutationOrchestrator {
     const cacheKey = `${profilesDir}\u0000${profileId}\u0000${schemaId ?? ''}`;
     const cached = this.engineCache.get(cacheKey);
     if (cached) {
+      void this.log('debug', 'MutationOrchestrator: engine cache hit', { profileId, schemaId });
       return cached;
     }
 
@@ -375,6 +376,10 @@ export class MutationOrchestrator {
     input: { sessionID: string; callID: string },
     output: { args: unknown }
   ): Promise<void> {
+    void this.log('debug', 'MutationOrchestrator: beginMutation', {
+      sessionID: input.sessionID,
+      callID: input.callID,
+    });
     let engine: SessionGuardEngine;
     try {
       // The hook's id may be a dispatched subagent's; the workflow session is
@@ -494,6 +499,10 @@ export class MutationOrchestrator {
       const projectDir = this.projectDir;
       const frame = tx.session.activeOperations[input.callID]?.baseline;
 
+      void this.log('debug', 'MutationOrchestrator: processing scope and invariants', {
+        sessionID: tx.session.sessionId,
+        callID: input.callID,
+      });
       const { finalPassed } = await processScopeAndInvariants({
         session: tx.session,
         scopeRoot,
@@ -523,6 +532,11 @@ export class MutationOrchestrator {
 
       // Post-factum валидация перехода: если стадия изменилась, валидировать переход
       if (mutationInfo) {
+        void this.log('debug', 'MutationOrchestrator: post-factum transition validation', {
+          sessionID: tx.session.sessionId,
+          stageBefore: mutationInfo.stageBefore,
+          stageAfter: tx.session.currentStage,
+        });
         try {
           const engine = await this.resolveEngine(tx.session.profileId, tx.session.schemaId);
           const stageAfter = tx.session.currentStage;

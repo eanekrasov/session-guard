@@ -34,6 +34,7 @@ import { finishMutation as finishDomainMutation } from '../domain/operation-life
 import type { RuntimeHostAdapter } from './runtime-host-adapter.ts';
 import { createV1RuntimeHostAdapter } from './runtime-host-adapter.ts';
 import type { SessionClient } from './runtime-types.ts';
+import { elapsedMs, errorTrace, summarizeToolArgs, summarizeToolInput } from './trace.ts';
 
 export { schemaToEngineConfig };
 
@@ -127,7 +128,8 @@ class SessionGuardRuntime {
     this.sessionContext = new RuntimeSessionContextImpl(
       this.store,
       this.executor,
-      resolveHostParent
+      resolveHostParent,
+      this.log
     );
 
     this.profilesDir = paths?.profilesDir ?? getProfilesDir(context.directory);
@@ -400,6 +402,25 @@ class SessionGuardRuntime {
         fileToolArgs: args,
       });
 
+      void this.log('debug', 'tool.execute.after workflow state checkpoint', {
+        tool,
+        sessionID: input.sessionID,
+        callID: input.callID,
+        revision: tx.session.revision,
+        currentStage: tx.session.currentStage,
+        activeOperation: operation === undefined ? null : operation.kind,
+        stageGates: tx.session.stageGateResults.map((gate) => ({
+          stage: gate.stage,
+          id: gate.id,
+          status: gate.status,
+        })),
+        approvals: tx.session.approvals.map((approval) => ({
+          type: approval.type,
+          callId: approval.callId,
+          status: approval.status,
+        })),
+      });
+
       // 2. Commit Permit: проверить, что HEAD изменился после commit-task
       if (tool === 'bash') {
         await this.workflowLifecycle.handleCommitTaskAfter(tx.session, input.callID, output);
@@ -407,7 +428,27 @@ class SessionGuardRuntime {
 
       // 3. Question tool — запрос consent (approve/decline plan)
       if (tool === 'question') {
+        void this.log('debug', 'question tool after: entering consent handler', {
+          sessionID: input.sessionID,
+          callID: input.callID,
+          revision: tx.session.revision,
+          outputLength: output.output.length,
+          metadataKeys:
+            typeof output.metadata === 'object' && output.metadata !== null
+              ? Object.keys(output.metadata as Record<string, unknown>)
+              : [],
+        });
         await this.consentAfter(tool, input.sessionID, input.callID, input.args, output);
+        void this.log('debug', 'question tool after: consent handler finished', {
+          sessionID: input.sessionID,
+          callID: input.callID,
+          revision: tx.session.revision,
+          approvals: tx.session.approvals.map((approval) => ({
+            type: approval.type,
+            callId: approval.callId,
+            status: approval.status,
+          })),
+        });
       }
 
       // 5. Finish mutation (Bash/Write/Edit) — единственный путь финализации.
@@ -677,12 +718,23 @@ class SessionGuardRuntime {
       before: async (input, output) => {
         const typedInput = input as Parameters<SessionGuardRuntime['handleToolBefore']>[0];
         const typedOutput = output as Parameters<SessionGuardRuntime['handleToolBefore']>[1];
-        await this.log('debug', `tool.execute.before raw input`, {
-          raw: JSON.stringify(typedInput, null, 0).slice(0, 2000),
+        const startedAt = Date.now();
+        await this.log('debug', 'tool.execute.before started', {
+          ...summarizeToolInput(typedInput),
+          args: summarizeToolArgs(typedOutput.args),
         });
         try {
           await this.handleToolBefore(typedInput, typedOutput);
+          void this.log('debug', 'tool.execute.before finished', {
+            ...summarizeToolInput(typedInput),
+            durationMs: elapsedMs(startedAt),
+          });
         } catch (error) {
+          void this.log('error', 'tool.execute.before failed', {
+            ...summarizeToolInput(typedInput),
+            durationMs: elapsedMs(startedAt),
+            error: errorTrace(error),
+          });
           this.report(errorMessage(error), {
             tool: typedInput.tool,
             sessionID: typedInput.sessionID,
@@ -694,10 +746,27 @@ class SessionGuardRuntime {
       after: async (input, output) => {
         const typedInput = input as Parameters<SessionGuardRuntime['handleToolAfter']>[0];
         const typedOutput = output as Parameters<SessionGuardRuntime['handleToolAfter']>[1];
-        await this.log('debug', `tool.execute.after raw input`, {
-          raw: JSON.stringify(typedInput, null, 0).slice(0, 2000),
+        const startedAt = Date.now();
+        await this.log('debug', 'tool.execute.after started', {
+          ...summarizeToolInput(typedInput),
+          args: summarizeToolArgs(typedInput.args),
+          outputLength: typedOutput.output.length,
         });
-        await this.handleToolAfter(typedInput, typedOutput);
+        try {
+          await this.handleToolAfter(typedInput, typedOutput);
+          void this.log('debug', 'tool.execute.after finished', {
+            ...summarizeToolInput(typedInput),
+            durationMs: elapsedMs(startedAt),
+            outputLength: typedOutput.output.length,
+          });
+        } catch (error) {
+          void this.log('error', 'tool.execute.after failed', {
+            ...summarizeToolInput(typedInput),
+            durationMs: elapsedMs(startedAt),
+            error: errorTrace(error),
+          });
+          throw error;
+        }
       },
       event: (input) =>
         this.handleEvent(input as Parameters<SessionGuardRuntime['handleEvent']>[0]),

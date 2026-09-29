@@ -350,6 +350,16 @@ describe('normalizing a host payload into the shared smoke model', () => {
     });
   });
 
+  test('preserves the durable revision for diagnostic checkpoints', () => {
+    expect(
+      normalizeWorkflowState('ses-1', {
+        revision: 9,
+        currentStage: 'review',
+        stageGateResults: [{ id: 'review', status: 'absent' }],
+      })
+    ).toMatchObject({ revision: 9, currentStage: 'review', stageGates: { review: 'absent' } });
+  });
+
   test('refuses a stored payload that is not a workflow session', () => {
     // `null` may only mean "the store holds nothing". A payload the suite cannot vouch for
     // must not be read as a proven absence of a mutation.
@@ -624,6 +634,8 @@ describe('the V2 transport strategy', () => {
       switchAgent: async () => {},
       answeredForms: () => [],
       offScript: () => [],
+      lastExecution: () => null,
+      lastStepEvents: () => [],
       ...overrides,
     };
   }
@@ -900,7 +912,7 @@ describe('the interaction the facade answered', () => {
 
   test('reports a V2 form and passes the decision to the client', async () => {
     const prompts: Array<{ text: string; decision?: string }> = [];
-    const client = {
+    const client: V2SmokeClient = {
       createSession: async () => 'ses-2',
       prompt: async (_id: string, text: string, decision?: string) => {
         prompts.push({ text, decision });
@@ -918,6 +930,8 @@ describe('the interaction the facade answered', () => {
         },
       ],
       offScript: () => [],
+      lastExecution: () => null,
+      lastStepEvents: () => [],
     };
     const transport = createSessionClientTransport(fakeHost(), {}, () => client);
     const session = await transport.createSession('plan-consent');

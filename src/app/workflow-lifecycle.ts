@@ -117,9 +117,18 @@ export function createWorkflowLifecycle(
     session: WorkflowSession,
     transaction: Pick<SessionTransaction, 'deferAfterSave'>
   ): Promise<void> => {
+    void log('debug', 'WorkflowLifecycle: transition check', {
+      sessionID: session.sessionId,
+      currentStage: session.currentStage,
+    });
     try {
       const moved = await mutationOrchestrator.applyTransitions(session);
       if (!moved.applied) return;
+      void log('info', 'WorkflowLifecycle: transition applied', {
+        from: moved.from,
+        to: moved.to,
+        guard: moved.guard,
+      });
       await recordOutcomeIfFinished(session, moved);
       transaction.deferAfterSave(() => archiveIfFinished(session));
     } catch (error) {
@@ -134,6 +143,10 @@ export function createWorkflowLifecycle(
     input.event.properties?.part ?? input.event.part;
 
   const handleEvent = async (input: LifecycleEventInput): Promise<void> => {
+    void log('debug', 'WorkflowLifecycle: handleEvent', {
+      eventType: input.event.type,
+      callID: input.event.part?.callID ?? input.event.properties?.part?.callID,
+    });
     const part = eventPart(input);
     const isError =
       input.event.type === 'message.part.updated' &&
@@ -171,6 +184,10 @@ export function createWorkflowLifecycle(
     callID: string,
     output: { output: string }
   ): Promise<void> => {
+    void log('debug', 'WorkflowLifecycle: commit check', {
+      sessionID: session.sessionId,
+      hasPermit: !!session.deliveryPermit,
+    });
     if (!session.deliveryPermit) return;
     if (session.deliveryPermit.callID !== callID) return;
 

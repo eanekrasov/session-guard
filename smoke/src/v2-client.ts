@@ -8,6 +8,24 @@ import { chooseLabel, type OperatorDecision } from './operator.ts';
 /** Ответ, который ожидает форма: по одному значению на ключ поля. */
 export type FormAnswer = Record<string, string | number | boolean | Array<string>>;
 
+/** Событие выполнения сессии. */
+export interface ExecutionEvent {
+  status: 'started' | 'succeeded' | 'failed';
+  error?: { type: string; message: string; status?: number };
+  timestamp: number;
+}
+
+/** Событие шага (одного запроса к LLM). */
+export interface StepEvent {
+  status: 'started' | 'ended' | 'failed';
+  assistantMessageID?: string;
+  agent?: string;
+  model?: { providerID: string; modelID: string };
+  finish?: string;
+  error?: { type: string; message: string; status?: number };
+  timestamp: number;
+}
+
 export interface V2SmokeClient {
   createSession(title: string): Promise<string>; /**
    * Отправить одну инструкцию и выполнять оператора, пока сессия не завершится.
@@ -39,6 +57,10 @@ export interface V2SmokeClient {
   answeredForms(): AnsweredForm[];
   /** Ответы на вопросы, которые сценарий не задавал, по порядку. */
   offScript(): string[];
+  /** Последнее событие выполнения сессии (execution.started / succeeded / failed), или null. */
+  lastExecution(): ExecutionEvent | null;
+  /** События шагов (step.started / ended / failed) за последний prompt, в порядке поступления. */
+  lastStepEvents(): StepEvent[];
 }
 
 export type V2SmokeTransport = typeof fetch;
@@ -230,6 +252,9 @@ export function createV2SmokeClient(host: Host, options: V2SmokeClientOptions = 
   let waitingForms = 0;
   // Что именно оператор ответил: форма, решение и выбранная метка.
   const answeredForms: AnsweredForm[] = [];
+  // События execution и step за последний prompt.
+  let lastExecution: ExecutionEvent | null = null;
+  const stepEvents: StepEvent[] = [];
 
   async function answerForm(form: FormInfo, decision: OperatorDecision): Promise<void> {
     if (seen.has(form.id)) return;
@@ -280,6 +305,63 @@ export function createV2SmokeClient(host: Host, options: V2SmokeClientOptions = 
     }
   }
 
+  /** Записать execution-событие в лог и локальную память клиента. */
+  function recordExecutionEvent(type: string, data: Record<string, unknown>): void {
+    // type = "session.execution.started" → status = "started"
+    const status = type.split('.').pop() as ExecutionEvent['status'];
+    const execution: ExecutionEvent = {
+      status,
+      timestamp: Date.now(),
+    };
+    if (typeof data.error === 'object' && data.error !== null) {
+      const err = data.error as Record<string, unknown>;
+      execution.error = {
+        type: String(err.type ?? ''),
+        message: String(err.message ?? ''),
+        ...(typeof err.status === 'number' ? { status: err.status } : {}),
+      };
+    }
+    lastExecution = execution;
+    log('debug', `execution event: ${type}`, {
+      type: 'execution.event',
+      fields: { sessionType: type, data, execution },
+    });
+  }
+
+  /** Записать step-событие в лог и локальную память клиента. */
+  function recordStepEvent(type: string, data: Record<string, unknown>): void {
+    // type = "session.step.started" → status = "started"
+    const status = type.split('.').pop() as StepEvent['status'];
+    const step: StepEvent = {
+      status,
+      timestamp: Date.now(),
+    };
+    if (typeof data.assistantMessageID === 'string')
+      step.assistantMessageID = data.assistantMessageID;
+    if (typeof data.agent === 'string') step.agent = data.agent;
+    if (typeof data.model === 'object' && data.model !== null) {
+      const m = data.model as Record<string, unknown>;
+      step.model = {
+        providerID: String(m.providerID ?? ''),
+        modelID: String(m.modelID ?? ''),
+      };
+    }
+    if (typeof data.finish === 'string') step.finish = data.finish;
+    if (typeof data.error === 'object' && data.error !== null) {
+      const err = data.error as Record<string, unknown>;
+      step.error = {
+        type: String(err.type ?? ''),
+        message: String(err.message ?? ''),
+        ...(typeof err.status === 'number' ? { status: err.status } : {}),
+      };
+    }
+    stepEvents.push(step);
+    log('debug', `step event: ${type}`, {
+      type: 'step.event',
+      fields: { sessionType: type, data, step },
+    });
+  }
+
   async function listenForms(decision: OperatorDecision, signal: AbortSignal): Promise<void> {
     try {
       for await (const event of client.event.subscribe({ signal })) {
@@ -317,6 +399,26 @@ export function createV2SmokeClient(host: Host, options: V2SmokeClientOptions = 
         ) {
           pending.delete(event.data.id);
           waitingForms = pending.size;
+          continue;
+        }
+        // Execution events (session.execution.*)
+        if (
+          (event.type === 'session.execution.started' ||
+            event.type === 'session.execution.succeeded' ||
+            event.type === 'session.execution.failed') &&
+          allowedSessions.has(event.data.sessionID as string)
+        ) {
+          recordExecutionEvent(event.type, event.data as Record<string, unknown>);
+          continue;
+        }
+        // Step events (session.step.*)
+        if (
+          (event.type === 'session.step.started' ||
+            event.type === 'session.step.ended' ||
+            event.type === 'session.step.failed') &&
+          allowedSessions.has(event.data.sessionID as string)
+        ) {
+          recordStepEvent(event.type, event.data as Record<string, unknown>);
         }
       }
     } catch {
@@ -350,6 +452,10 @@ export function createV2SmokeClient(host: Host, options: V2SmokeClientOptions = 
       decision: OperatorDecision = 'grant',
       budgetOverrideMs?: number
     ): Promise<void> {
+      // Сбросить события предыдущего промпта.
+      lastExecution = null;
+      stepEvents.length = 0;
+
       // Шаг может объявить свой предел: длинный шаг pipeline законно идёт дольше общего
       // бюджета клиента, и общий бюджет обрывал бы его на нормальном для него времени.
       const budgetMs = budgetOverrideMs ?? options.promptTimeoutMs ?? promptTimeoutMs();
@@ -415,5 +521,9 @@ export function createV2SmokeClient(host: Host, options: V2SmokeClientOptions = 
     answeredForms: () => [...answeredForms],
 
     offScript: () => [...notes],
+
+    lastExecution: () => lastExecution,
+
+    lastStepEvents: () => [...stepEvents],
   };
 }

@@ -73,6 +73,8 @@ export interface NormalizedTurn {
 export interface SmokeWorkflowState {
   sessionId: string;
   status: 'pending' | 'running' | 'completed' | 'failed' | 'unknown';
+  /** Durable session revision, when the store exposed it. */
+  revision?: number;
   /**
    * Stage the state machine is on, as the plugin persisted it. A scenario proves
    * progress with this instead of matching prose the model produced.
