@@ -18,6 +18,8 @@ import { closeSync, existsSync, mkdtempSync, openSync, readFileSync, rmSync } fr
 import { tmpdir, homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { jsmin } from 'jsmin';
+import { configuredLogLevel, log } from './log.ts';
+export { configuredLogLevel, log, type LogLevel } from './log.ts';
 
 export const REPO_ROOT = resolve(import.meta.dir!, '../..');
 
@@ -27,7 +29,7 @@ export const REPO_ROOT = resolve(import.meta.dir!, '../..');
  *
  * Эти пути должны существовать во время выполнения, иначе harness завершится ошибкой.
  */
-export const V1_BINARY = '/opt/homebrew/Cellar/opencode/1.18.32/bin/opencode';
+export const V1_BINARY = '/opt/homebrew/Cellar/opencode/1.18.33/bin/opencode';
 export const V2_BINARY = '/opt/homebrew/Cellar/opencode-v2/2.0.16/bin/opencode';
 
 const DEFAULT_ATTEMPTS = 3;
@@ -215,49 +217,6 @@ export function isolatedEnvironment(
     inherited[name] = value;
   }
   return inherited;
-}
-
-export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error';
-const LOG_LEVELS: Record<LogLevel, number> = {
-  trace: -1,
-  debug: 0,
-  info: 1,
-  warn: 2,
-  error: 3,
-};
-const LOG_COLORS: Record<LogLevel, string> = {
-  trace: '\u001b[36m',
-  debug: '\u001b[90m',
-  info: '\u001b[37m',
-  warn: '\u001b[33m',
-  error: '\u001b[31m',
-};
-
-export function configuredLogLevel(): LogLevel {
-  const configured = process.env.HOST_SMOKE_LOG_LEVEL?.toLowerCase();
-  if (
-    configured === 'trace' ||
-    configured === 'debug' ||
-    configured === 'info' ||
-    configured === 'warn' ||
-    configured === 'error'
-  ) {
-    return configured;
-  }
-  // HOST_SMOKE_DEBUG=1 остаётся краткой формой debug, если не задан явный уровень.
-  if (process.env.HOST_SMOKE_DEBUG === '1') return 'debug';
-  // Значение '1' также считается краткой формой для debug.
-  if (configured === '1') return 'debug';
-  return 'info';
-}
-
-export function log(level: LogLevel, message: string): void {
-  if (LOG_LEVELS[level] < LOG_LEVELS[configuredLogLevel()]) return;
-  const line = `${new Date().toISOString()} [${level.toUpperCase()}] ${message}`;
-  const colorEnabled =
-    process.env.NO_COLOR === undefined &&
-    (Boolean(process.env.FORCE_COLOR) || process.stderr.isTTY);
-  process.stderr.write(colorEnabled ? `${LOG_COLORS[level]}${line}\u001b[0m\n` : `${line}\n`);
 }
 
 /** Максимальное количество байт для одного поля trace payload до усечения. */
@@ -603,6 +562,17 @@ export function captureResolvedConfig(binary?: string): string {
  * Отделён от `startHost`, чтобы тесты могли проверить структуру файлов без
  * запуска реального процесса opencode.
  */
+const V2_REVIEWER_PERMISSIONS = [
+  { action: 'shell', resource: '*', effect: 'ask' },
+  { action: 'shell', resource: 'git status *', effect: 'allow' },
+  { action: 'shell', resource: 'git diff *', effect: 'allow' },
+  { action: 'shell', resource: 'git log *', effect: 'allow' },
+  { action: 'shell', resource: 'git show *', effect: 'allow' },
+  { action: 'shell', resource: 'git rev-parse *', effect: 'allow' },
+  { action: 'read', resource: '*', effect: 'deny' },
+  { action: 'edit', resource: '*', effect: 'deny' },
+] as const;
+
 export async function writeSmokeConfigs(
   opencodeDir: string,
   operator: Awaited<ReturnType<typeof operatorProviders>>,
@@ -632,6 +602,14 @@ export async function writeSmokeConfigs(
           : {}),
         ...(operator.disabled_providers ? { disabled_providers: operator.disabled_providers } : {}),
         permission: { '*': 'allow', question: 'allow' },
+        ...(version === 'v2'
+          ? {
+              agents: {
+                reviewer: { permissions: V2_REVIEWER_PERMISSIONS },
+                smoke_reviewer: { permissions: V2_REVIEWER_PERMISSIONS },
+              },
+            }
+          : {}),
         ...(version === 'v2'
           ? { plugins: [{ package: pluginSpec }] }
           : { plugin: [`file://${pluginSpec}`] }),
@@ -809,21 +787,22 @@ export async function startHost(options: HostOptions): Promise<Host> {
     child.once('error', (error) => {
       spawnError = error instanceof Error ? error : new Error(String(error));
     });
-    log('info', 'процесс opencode serve запущен; ожидание URL прослушивания');
+    log('info', 'процесс opencode serve создан; ожидание URL прослушивания');
 
     let stopPromise: Promise<void> | undefined;
     const hostStop = async (): Promise<void> => {
       if (stopPromise) return stopPromise;
       stopPromise = (async () => {
-        log('debug', 'остановка изолированного хоста opencode');
+        log('info', 'остановка изолированного хоста opencode');
         if (child.exitCode === null) {
           child.kill('SIGTERM');
           await new Promise((resolve) => setTimeout(resolve, 300));
           if (child.exitCode === null) child.kill('SIGKILL');
         }
+        log('info', 'процесс opencode serve остановлен');
         await rm(root, { recursive: true, force: true });
         activeHostStops.delete(hostStop);
-        log('debug', 'изолированный хост остановлен, временный каталог удалён');
+        log('info', 'изолированный хост остановлен, временный каталог удалён');
       })();
       return stopPromise;
     };
@@ -918,10 +897,7 @@ export async function api<T>(host: Host, method: string, path: string, body?: un
       ? ''
       : ` sincePrevious=${(startedAt - previousRequestAt).toFixed(1)}ms`;
   const requestMeta = `req=${requestId} call=${requestCount}${sincePrevious}`;
-  const isQuestionPoll = method === 'GET' && path === '/question';
-  if (!isQuestionPoll) {
-    log('debug', `${method} ${path} ${requestMeta}${bodySize > 0 ? ` body=${bodySize}b` : ''}`);
-  }
+  log('debug', `${method} ${path} ${requestMeta}${bodySize > 0 ? ` body=${bodySize}b` : ''}`);
   if (isTraceEnabled() && body !== undefined) {
     const sanitized = sanitizeTracePayload(JSON.stringify(body));
     log('trace', `${method} ${path} request body: ${truncatePayload(sanitized, 2000)}`);
@@ -935,7 +911,6 @@ export async function api<T>(host: Host, method: string, path: string, body?: un
   const responseSize = Buffer.byteLength(text, 'utf-8');
   const sanitizedResponse = sanitizeTracePayload(text);
   const debugResponse = truncatePayload(sanitizedResponse, 2000);
-  const isEmptyQuestionResponse = isQuestionPoll && text.trim() === '[]';
   if (!response.ok) {
     log(
       'error',
@@ -949,24 +924,22 @@ export async function api<T>(host: Host, method: string, path: string, body?: un
     }
     throw new Error(`${method} ${path} → ${response.status}: ${text}`);
   }
-  if (!isEmptyQuestionResponse) {
+  log(
+    'debug',
+    `${method} ${path} ${requestMeta} returned HTTP ${response.status} (duration=${(performance.now() - startedAt).toFixed(1)}ms, resp=${responseSize}b) body=${debugResponse}`
+  );
+  if (isTraceEnabled()) {
     log(
-      'debug',
-      `${method} ${path} ${requestMeta} returned HTTP ${response.status} (duration=${(performance.now() - startedAt).toFixed(1)}ms, resp=${responseSize}b) body=${debugResponse}`
+      'trace',
+      `${method} ${path} ${requestMeta} response body: ${truncatePayload(sanitizedResponse, 4000)}`
     );
-    if (isTraceEnabled()) {
-      log(
-        'trace',
-        `${method} ${path} ${requestMeta} response body: ${truncatePayload(sanitizedResponse, 4000)}`
-      );
-    }
   }
   return text ? (JSON.parse(text) as T) : (undefined as T);
 }
 
 /** Включает ли текущий уровень логирования `trace` (т.е. равен `trace`). */
 export function isTraceEnabled(): boolean {
-  return LOG_LEVELS[configuredLogLevel()] <= LOG_LEVELS['trace'];
+  return configuredLogLevel() === 'trace';
 }
 
 /**

@@ -814,7 +814,9 @@ describe('the cicd-full-cycle canonical scenario', () => {
   const pipeline = candidate;
 
   test('declares bounded budgets for its long steps', () => {
-    const dispatched = pipeline.steps.filter((step) => step.instruction.includes('task tool'));
+    const dispatched = pipeline.steps.filter((step) =>
+      step.instruction.includes('subagent-dispatch tool')
+    );
     expect(dispatched.length).toBeGreaterThan(0);
     for (const step of dispatched) {
       expect(step.stateBudgetMs).toBeGreaterThan(0);
@@ -1327,7 +1329,7 @@ describe('the verify-loop canonical scenario', () => {
     expect(result.evidence).toContain('шаг занял:');
   });
 
-  test('asks the host once more when a dispatched subagent left the state unmoved', async () => {
+  test('does not ask the host again when a dispatched subagent left the state unmoved', async () => {
     const unmoved = base({ runs: [{ stage: 'code', status: 'running' }] });
     const { host, calls } = makeHost(
       [
@@ -1336,8 +1338,6 @@ describe('the verify-loop canonical scenario', () => {
         turn({ toolCalls: [] }, base()),
         // The coder's turn dispatched a subagent and ended; the store never moved.
         turn({ toolCalls: [{ name: 'subagent', status: 'completed' }] }, unmoved),
-        // The read-only follow-up answers, and the store still does not move.
-        turn({ toolCalls: [] }, unmoved),
       ],
       { states: [unmoved] }
     );
@@ -1345,10 +1345,9 @@ describe('the verify-loop canonical scenario', () => {
     const result = await runScenario(host, definition, { attempts: 1, maxPollBudgetMs: 30 });
 
     expect(result.status).toBe('fail');
-    // Four scenario turns, then exactly one follow-up: the mutation is never repeated.
-    expect(calls.prompts).toHaveLength(5);
-    expect(calls.prompts[4]?.text).toContain('Do not dispatch anything again');
-    expect(result.evidence).toContain('повторного обращения');
+    // Four scenario turns and no follow-up model request: the mutation is never repeated.
+    expect(calls.prompts).toHaveLength(4);
+    expect(result.evidence).not.toContain('повторного обращения');
   });
 
   test('fails when one verdict of two moves the task on', async () => {

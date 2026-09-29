@@ -131,4 +131,35 @@ describe('WorkflowResultSettler', () => {
     expect(session.loopRuns['run-1']?.gates).toEqual({});
     expect(session.verifications).toHaveLength(0);
   });
+
+  test('records a verdict owned by the current outer stage', async () => {
+    const session = createSession('settler-stage', 'profile', 'schema', 'review');
+    const stageEngine = {
+      getLoopStage: () => undefined,
+      getStages: () => ({
+        review: { allowedAgents: ['reviewer'], gates: ['review'] },
+      }),
+    } as never;
+    const settler = new WorkflowResultSettlerImpl({
+      resolveEngine: async () => stageEngine,
+      log: async () => undefined,
+    });
+
+    await settler.settle({
+      tool: 'task',
+      session,
+      callID: 'call-stage',
+      args: { subagent_type: 'reviewer' },
+      output: {
+        output:
+          '<workflow-result>{"gate":"review","status":"pass","summary":"ok","evidence":["ok"]}</workflow-result>',
+      },
+      projectDir: '/tmp/test-project',
+      profilesDir: '/tmp/test-profiles',
+    });
+
+    expect(session.stageGateResults).toEqual([
+      expect.objectContaining({ stage: 'review', id: 'review', status: 'passed' }),
+    ]);
+  });
 });

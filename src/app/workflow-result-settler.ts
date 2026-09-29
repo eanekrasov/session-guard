@@ -94,7 +94,7 @@ export class WorkflowResultSettlerImpl implements WorkflowResultSettler {
       await this.runTaskInvariants(session, callID, projectDir, profilesDir, operation);
     }
 
-    // 1b. Workflow result — parse and record <workflow-result> tags (only for task tools)
+    // 1b. Workflow result — the runtime normalizes V1/V2 delegated tools to `task`.
     if (tool === 'task') {
       await this.processWorkflowResult(session, callID, args, output);
     }
@@ -227,6 +227,15 @@ export class WorkflowResultSettlerImpl implements WorkflowResultSettler {
   ): Promise<void> {
     const parsed = parseWorkflowResult(output.output);
     const reportingAgent = this.dispatchedAgent(args);
+    void this.log('debug', 'Workflow result received', {
+      sessionID: session.sessionId,
+      callID,
+      reportingAgent,
+      currentStage: session.currentStage,
+      parsedGate: parsed?.gate,
+      parsedStatus: parsed?.status,
+      tool: 'task',
+    });
     session.processedResultCallIDs ??= [];
     if (session.processedResultCallIDs.includes(callID)) {
       output.output +=
@@ -278,6 +287,14 @@ export class WorkflowResultSettlerImpl implements WorkflowResultSettler {
 
     const owner = await this.resolveGateOwner(session, parsed.gate, provenance, operation);
     if (owner.kind === 'refused') {
+      void this.log('warn', 'Workflow result rejected: no matching stage owner', {
+        sessionID: session.sessionId,
+        callID,
+        gate: parsed.gate,
+        currentStage: session.currentStage,
+        stageLabel: owner.stageLabel,
+        declaredGates: owner.declaredGates,
+      });
       output.output +=
         `\n\n[workflow-result-rejected]\n` +
         (owner.declaredGates.length > 0
@@ -465,6 +482,13 @@ export class WorkflowResultSettlerImpl implements WorkflowResultSettler {
     output: { output: string }
   ): Promise<void> {
     if (!this.mayVerify(agent, owner.stage, session.profileId)) {
+      void this.log('warn', 'Workflow result rejected: agent is not allowed', {
+        sessionID: session.sessionId,
+        stage: owner.stageId,
+        gate: parsed.gate,
+        agent,
+        allowedAgents: owner.stage.allowedAgents ?? [],
+      });
       output.output += `\n\n[workflow-result-rejected]\nStage ${owner.stageId} accepts results from [${(owner.stage.allowedAgents ?? []).join(', ') || '(no roster)'}], and this one came from '${agent ?? '(unknown agent)'}'. Nothing was recorded.`;
       return;
     }

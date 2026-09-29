@@ -9,6 +9,7 @@
 import { execFileSync } from 'node:child_process';
 
 import { writeWorkflowSession } from './harness.ts';
+import { log } from './log.ts';
 import type { SmokeHost } from './host/facade.ts';
 import { buildPromptResult, isPluginTool } from './host/transport.ts';
 import { assertScenarioResultInvariant, createBlockedResult } from './host/types.ts';
@@ -25,7 +26,6 @@ import type {
   SmokeWorkflowState,
   StepWorkspace,
 } from './host/types.ts';
-import { logEvent } from './log.ts';
 
 export interface RunnerOptions {
   /** Attempts a step that declared `read-only` + `same-session` may take. Defaults to one. */
@@ -162,7 +162,7 @@ async function pollOutcome(
     const reading = await readDurable(host, session);
     if (reading.outcome === 'present') {
       const observation = observationFromState(last, '', reading.state);
-      const verdict = step.expect(observation, workspace());
+      const verdict = evaluateExpectation(step, observation, workspace);
       if (verdict === true) return { observation, rounds };
       rounds.push(`${elapsed} ${summarizeState(reading.state)} → ${verdict}`);
     } else {
@@ -171,36 +171,6 @@ async function pollOutcome(
     if (Date.now() >= deadline) return { rounds };
     await new Promise((resolve) => setTimeout(resolve, interval));
   }
-}
-
-/**
- * Ask the host once more when a dispatched subagent left no trace.
- *
- * A step that dispatches a subagent sends its instruction once and then reads the durable store.
- * If the store never moves, nothing else in the run asks the host anything: the turn that
- * dispatched the subagent is over, and whether the subagent ran at all is only visible by asking.
- * This is a read-only follow-up — it repeats no mutation — and it is sent only when the step's own
- * turn actually dispatched a subagent, so a step that simply failed is not asked twice.
- */
-async function resumeAfterDispatch(
-  host: SmokeHost,
-  session: SmokeSession,
-  observed: NormalizedToolCall[],
-  agent: string | undefined
-): Promise<PromptResult | undefined> {
-  const dispatched = observed.some((call) => call.name === 'task' || call.name === 'subagent');
-  if (!dispatched) return undefined;
-  logEvent(
-    '  ↻ субагент вызван, но состояние не сдвинулось: спрашиваю хост о его результате',
-    'yellow',
-    'step.resume'
-  );
-  return host.runPrompt(session, {
-    text:
-      'Do not dispatch anything again and do not change any status. Report the result of the ' +
-      'subagent you already dispatched, and the current workflow state, then finish the turn.',
-    ...(agent === undefined ? {} : { agent }),
-  });
 }
 
 /**
@@ -273,6 +243,20 @@ function observationFromState(
   return buildPromptResult({ status: 'failed', parts: [], error }, state, 'unknown');
 }
 
+/** Keep malformed transport results inside the scenario failure evidence. */
+function evaluateExpectation(
+  step: ScenarioStep,
+  result: PromptResult | null | undefined,
+  workspace: () => StepWorkspace
+): true | string {
+  try {
+    return step.expect(result as PromptResult, workspace());
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return `предикат шага не обработал результат хоста: ${reason}`;
+  }
+}
+
 async function runStep(
   host: SmokeHost,
   session: SmokeSession,
@@ -308,13 +292,11 @@ async function runStep(
   const unmet: string[] = [];
 
   for (let attempt = 1; attempt <= planned; attempt += 1) {
-    if (process.env.HOST_SMOKE_DEBUG) {
-      logEvent(`  step[${attempt}]: ${step.instruction.slice(0, 90)}`, 'blue', 'step.start', {
-        attempt,
-        mutation: step.mutation,
-        retry: step.retry,
-      });
-    }
+    log('debug', `  step[${attempt}]: ${step.instruction}`, {
+      type: 'step.start',
+      color: 'blue',
+      fields: { attempt, mutation: step.mutation, retry: step.retry },
+    });
     made = attempt;
     const agent = step.agent ?? definition.agent;
     try {
@@ -332,7 +314,7 @@ async function runStep(
     if (last.turn.status === 'timed-out') timedOut = true;
     if (last.turn.status === 'failed') failedTurn = true;
     observed.push(...last.turn.toolCalls);
-    const verdict = step.expect(last, workspace());
+    const verdict = evaluateExpectation(step, last, workspace);
     if (verdict === true) {
       return {
         ok: true,
@@ -345,9 +327,11 @@ async function runStep(
     }
     detail = verdict;
     if (attempt < planned) unmet.push(`попытка ${attempt}: ${detail}`.slice(0, 200));
-    if (process.env.HOST_SMOKE_DEBUG) {
-      logEvent(`  wait: ${detail.slice(0, 180)}`, 'yellow', 'step.state', { attempt });
-    }
+    log('debug', `  wait: ${detail.slice(0, 180)}`, {
+      type: 'step.state',
+      color: 'yellow',
+      fields: { attempt },
+    });
   }
 
   // Neither a timed-out turn nor a thrown prompt says what the instruction did, so the
@@ -361,7 +345,7 @@ async function runStep(
     step.mutation === 'mutating' && unprovable && reading.outcome === 'present'
       ? observationFromState(last, thrown ?? '', reading.state)
       : undefined;
-  if (satisfied !== undefined && step.expect(satisfied, workspace()) === true) {
+  if (satisfied !== undefined && evaluateExpectation(step, satisfied, workspace) === true) {
     return {
       ok: true,
       attempts: made,
@@ -406,38 +390,23 @@ async function runStep(
       step,
       options
     )} мс`;
-    // Ничего больше не спрашивает хост о субагенте, поэтому спрашиваем сами — один раз и без
-    // повтора мутации. Ответ либо закрывает шаг, либо показывает, что субагент не вернул ничего.
-    const resumed = await resumeAfterDispatch(
-      host,
-      session,
-      observed,
-      step.agent ?? definition.agent
-    );
-    if (resumed !== undefined) {
-      last = resumed;
-      if (resumed.turn.status === 'timed-out') timedOut = true;
-      if (resumed.turn.status === 'failed') failedTurn = true;
-      observed.push(...resumed.turn.toolCalls);
-      const rePolled = await pollOutcome(host, session, step, resumed, options, workspace);
-      if (rePolled.observation !== undefined) {
+    reading = await readDurable(host, session);
+    if (reading.outcome === 'present') {
+      const finalObservation = observationFromState(last, '', reading.state);
+      if (evaluateExpectation(step, finalObservation, workspace) === true) {
         return {
           ok: true,
           attempts: made,
           evidence: '',
-          last: rePolled.observation,
+          last: finalObservation,
           observed,
           note: [
             ...unmet,
-            'исход подтверждён состоянием после повторного обращения к хосту (мутация не повторялась)',
-            `опросов после обращения: ${rePolled.rounds.length}`,
+            'исход подтверждён финальным чтением состояния после границы ожидания',
           ].join('; '),
         };
       }
-      pollRounds = [...pollRounds, ...rePolled.rounds];
-      freshRead = `${freshRead}; после повторного обращения состояние тоже не подтвердило ожидание`;
     }
-    reading = await readDurable(host, session);
   }
 
   const blockedReason = unprovenMutation(step, reading, { running, failedTurn });
@@ -589,20 +558,23 @@ export async function runScenario(
         notes.push(outcome.note);
       }
       const durationMs = Date.now() - startedAt;
-      logEvent(
+      log(
+        outcome.ok ? 'info' : outcome.blockedReason ? 'warn' : 'error',
         outcome.ok
           ? `  PASS (${stepSeconds} s)`
           : outcome.blockedReason
             ? `  BLOCKED (${stepSeconds} s)`
             : `  FAIL (${stepSeconds} s)`,
-        outcome.ok ? 'green' : outcome.blockedReason ? 'yellow' : 'red',
-        'step.result',
         {
-          scenario: definition.id,
-          attempts: outcome.attempts,
-          ...(outcome.ok || outcome.blockedReason !== undefined
-            ? {}
-            : { failureKind: failureKindOf(observed) }),
+          type: 'step.result',
+          color: outcome.ok ? 'green' : outcome.blockedReason ? 'yellow' : 'red',
+          fields: {
+            scenario: definition.id,
+            attempts: outcome.attempts,
+            ...(outcome.ok || outcome.blockedReason !== undefined
+              ? {}
+              : { failureKind: failureKindOf(observed) }),
+          },
         }
       );
       if (outcome.ok) continue;

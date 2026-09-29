@@ -181,6 +181,20 @@ describe('host smoke configuration', () => {
       });
       expect(JSON.parse(readFileSync(join(v2, 'opencode.json'), 'utf-8'))).toMatchObject({
         plugins: [{ package: '/plugin/dist' }],
+        agents: {
+          reviewer: {
+            permissions: expect.arrayContaining([
+              { action: 'read', resource: '*', effect: 'deny' },
+              { action: 'shell', resource: 'git log *', effect: 'allow' },
+            ]),
+          },
+          smoke_reviewer: {
+            permissions: expect.arrayContaining([
+              { action: 'read', resource: '*', effect: 'deny' },
+              { action: 'shell', resource: 'git log *', effect: 'allow' },
+            ]),
+          },
+        },
       });
     } finally {
       rmSync(v1, { recursive: true, force: true });

@@ -1,0 +1,7 @@
+# Minimal workflow used to isolate stage-level `<workflow-result>` handling.
+# It deliberately has one stage and no task loop.
+
+stages:
+  review:
+    allowedAgents: [orchestrator, reviewer]
+    gates: [review]

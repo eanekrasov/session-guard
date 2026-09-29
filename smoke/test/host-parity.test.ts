@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { formatJsonlEvent } from '../src/log.ts';
+import { formatJsonlEvent, log } from '../src/log.ts';
 import {
   aggregateExitCode,
   assertSingleEntryPerScenario,
@@ -375,6 +375,7 @@ describe('the machine-readable output', () => {
   test('serializes one whole event per line, however long the message is', () => {
     const line = formatJsonlEvent({
       timestamp: '2026-09-27T00:00:00.000Z',
+      level: 'error',
       type: 'scenario.evidence',
       message: 'first line\nsecond line',
       scenario: 'create',
@@ -389,5 +390,67 @@ describe('the machine-readable output', () => {
     expect(parsed.attempts).toBe(2);
     expect(parsed.type).toBe('scenario.evidence');
     expect(parsed.timestamp).toBe('2026-09-27T00:00:00.000Z');
+  });
+
+  test('preserves the level in a flat JSONL event', () => {
+    const parsed = JSON.parse(
+      formatJsonlEvent({
+        timestamp: '2026-09-27T00:00:00.000Z',
+        level: 'info',
+        type: 'scenario.start',
+        message: 'started',
+        scenario: 'create',
+      })
+    ) as Record<string, unknown>;
+
+    expect(parsed.level).toBe('info');
+    expect(parsed.scenario).toBe('create');
+  });
+
+  test('uses white for info and preserves an explicit color override', () => {
+    const originalWrite = process.stderr.write;
+    const originalNoColor = process.env.NO_COLOR;
+    const originalForceColor = process.env.FORCE_COLOR;
+    let output = '';
+    delete process.env.NO_COLOR;
+    process.env.FORCE_COLOR = '1';
+    process.stderr.write = ((chunk: string | Uint8Array) => {
+      output += typeof chunk === 'string' ? chunk : new TextDecoder().decode(chunk);
+      return true;
+    }) as typeof process.stderr.write;
+    try {
+      log('info', 'white message');
+      expect(output).toContain('\u001b[37m');
+      output = '';
+      log('info', 'green message', { color: 'green' });
+      expect(output).toContain('\u001b[32m');
+    } finally {
+      process.stderr.write = originalWrite;
+      if (originalNoColor === undefined) delete process.env.NO_COLOR;
+      else process.env.NO_COLOR = originalNoColor;
+      if (originalForceColor === undefined) delete process.env.FORCE_COLOR;
+      else process.env.FORCE_COLOR = originalForceColor;
+    }
+  });
+
+  test('filters events through HOST_SMOKE_LOG_LEVEL', () => {
+    const originalWrite = process.stderr.write;
+    const originalLevel = process.env.HOST_SMOKE_LOG_LEVEL;
+    let output = '';
+    process.env.HOST_SMOKE_LOG_LEVEL = 'error';
+    process.stderr.write = ((chunk: string | Uint8Array) => {
+      output += typeof chunk === 'string' ? chunk : new TextDecoder().decode(chunk);
+      return true;
+    }) as typeof process.stderr.write;
+    try {
+      log('info', 'filtered');
+      log('error', 'visible');
+      expect(output).not.toContain('filtered');
+      expect(output).toContain('visible');
+    } finally {
+      process.stderr.write = originalWrite;
+      if (originalLevel === undefined) delete process.env.HOST_SMOKE_LOG_LEVEL;
+      else process.env.HOST_SMOKE_LOG_LEVEL = originalLevel;
+    }
   });
 });

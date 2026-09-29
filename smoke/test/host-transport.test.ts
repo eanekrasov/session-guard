@@ -503,7 +503,6 @@ describe('the V1 transport strategy', () => {
       if (url.endsWith('/session/ses-1/message') && method === 'GET') {
         return json(turnComplete ? listing : []);
       }
-      if (url.includes('/question')) return json([]);
       return json([]);
     });
 
@@ -825,19 +824,36 @@ describe('the interaction the facade answered', () => {
     const stub = stubFetch(async (url, init) => {
       const method = init?.method ?? 'GET';
       if (url.endsWith('/session') && method === 'POST') return json({ id: 'ses-1' });
-      if (url.endsWith('/question') && method === 'GET') {
-        return json([
-          {
-            id: 'q-1',
-            questions: [
-              {
-                question: '<consent-request type="plan">approve?</consent-request>',
-                options: [{ label: 'grant' }, { label: 'decline' }],
+      if (url.endsWith('/event'))
+        return new Response(
+          [
+            { type: 'session.created', properties: { info: { id: 'child', parentID: 'ses-1' } } },
+            {
+              type: 'session.created',
+              properties: { info: { id: 'grandchild', parentID: 'child' } },
+            },
+            {
+              type: 'session.created',
+              properties: { info: { id: 'independent', parentID: 'other' } },
+            },
+            ...['ses-1', 'child', 'grandchild', 'independent'].map((sessionID, index) => ({
+              type: 'question.asked',
+              properties: {
+                id: `q-${index + 1}`,
+                sessionID,
+                questions: [
+                  {
+                    question: '<consent-request type="plan">approve?</consent-request>',
+                    options: [{ label: 'grant' }, { label: 'decline' }],
+                  },
+                ],
               },
-            ],
-          },
-        ]);
-      }
+            })),
+          ]
+            .map((event) => `data: ${JSON.stringify(event)}\n\n`)
+            .join(''),
+          { headers: { 'content-type': 'text/event-stream' } }
+        );
       if (url.includes('/question/q-1/reply') && method === 'POST') return json({});
       if (url.endsWith('/session/ses-1/message') && method === 'POST') {
         // Give the operator loop time to answer while the turn is still running.
@@ -861,18 +877,22 @@ describe('the interaction the facade answered', () => {
         decision: 'decline',
       });
 
-      expect(result.interactions).toEqual([
-        {
-          kind: 'question',
-          id: 'q-1',
-          isConsent: true,
-          decision: 'decline',
-          label: 'decline',
-          offered: ['grant', 'decline'],
-        },
+      expect(result.interactions).toHaveLength(3);
+      expect(result.interactions?.map((interaction) => interaction.id)).toEqual([
+        'q-1',
+        'q-2',
+        'q-3',
       ]);
       const reply = stub.requests.find((request) => request.path.includes('/question/q-1/reply'));
       expect(reply?.body).toContain('decline');
+      expect(
+        stub.requests.some((request) => request.method === 'GET' && request.path.endsWith('/event'))
+      ).toBe(true);
+      expect(
+        stub.requests.some(
+          (request) => request.method === 'GET' && request.path.endsWith('/question')
+        )
+      ).toBe(false);
     } finally {
       stub.restore();
     }

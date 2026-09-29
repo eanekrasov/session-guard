@@ -11,7 +11,7 @@ import { appendFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { REPO_ROOT, api, isTraceEnabled, sanitizeTracePayload, type Host } from '../harness.ts';
-import { logEvent } from '../log.ts';
+import { log } from '../log.ts';
 import { chooseLabel } from '../operator.ts';
 
 export interface Part {
@@ -19,6 +19,35 @@ export interface Part {
   tool?: string;
   text?: string;
   state?: { status?: string; error?: string; output?: string; input?: unknown };
+}
+
+export interface V1SseEvent {
+  type: string;
+  data: unknown;
+}
+
+/** Parse one complete SSE record. Blank records and malformed payloads are ignored. */
+export function parseV1SseEvent(record: string): V1SseEvent | undefined {
+  let eventType = '';
+  const data: string[] = [];
+  for (const line of record.split(/\r?\n/gu)) {
+    if (line.startsWith('event:')) eventType = line.slice(6).trim();
+    if (line.startsWith('data:')) data.push(line.slice(5).trimStart());
+  }
+  if (data.length === 0) return undefined;
+  try {
+    const payload = JSON.parse(data.join('\n')) as {
+      type?: unknown;
+      properties?: unknown;
+    };
+    if (typeof payload.type === 'string' && 'properties' in payload) {
+      return { type: payload.type, data: payload.properties };
+    }
+    if (!eventType) return undefined;
+    return { type: eventType, data: payload };
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -56,66 +85,117 @@ export function isConsentQuestion(request: { questions?: Array<{ question?: stri
  */
 export function answerQuestions(
   host: Host,
-  choose: 'grant' | 'decline'
+  choose: 'grant' | 'decline',
+  sessionId?: string
 ): {
   stop: () => void;
   offScript: () => string[];
   answered: () => AnsweredQuestion[];
 } {
   let stopped = false;
+  const events = new AbortController();
   const seen = new Set<string>();
+  const allowedSessions = new Set(sessionId === undefined ? [] : [sessionId]);
   const offScript: string[] = [];
   const answered: AnsweredQuestion[] = [];
 
-  const loop = async (): Promise<void> => {
-    while (!stopped) {
-      try {
-        const pending = (await api(host, 'GET', '/question')) as Array<{
-          id: string;
-          questions?: Array<{ question?: string; options?: Array<{ label?: string } | string> }>;
-        }>;
-        for (const request of pending ?? []) {
-          if (seen.has(request.id)) continue;
-          seen.add(request.id);
-          if (process.env.HOST_SMOKE_DEBUG) {
-            logEvent(`  question: ${JSON.stringify(request).slice(0, 400)}`, 'yellow', 'question');
-          }
-          const consent = isConsentQuestion(request);
-          const labels: string[] = [];
-          const answers = (request.questions ?? [{}]).map((question) => {
-            const options = (question.options ?? []).map((option) =>
-              typeof option === 'string' ? option : (option.label ?? '')
-            );
-            labels.push(...options);
-            const choice = chooseLabel(options, choose, consent);
-            if (!consent) {
-              const text = (question.question ?? '').replace(/\s+/gu, ' ').slice(0, 160);
-              offScript.push(
-                `${choice.refusal ? 'отказано' : 'дан ответ единственным предложенным вариантом'}: "${text}"`
-              );
-            }
-            // The answer the host will actually receive, so a caller can report what was sent.
-            answered.push({
-              id: request.id,
-              kind: 'question',
-              decision: choose,
-              label: choice.label,
-              offered: options,
-              consent,
-            });
-            return [choice.label];
-          });
-          await api(host, 'POST', `/question/${request.id}/reply`, { answers });
-        }
-      } catch {
-        // Сервер занят или недоступен; сам промпт сообщит об ошибке.
+  const handle = async (event: V1SseEvent): Promise<void> => {
+    if (event.type === 'question.replied') return;
+    if (event.type === 'session.created') {
+      if (typeof event.data !== 'object' || event.data === null) return;
+      const info = (event.data as { info?: unknown }).info;
+      if (typeof info !== 'object' || info === null) return;
+      const session = info as { id?: unknown; parentID?: unknown };
+      if (
+        typeof session.id === 'string' &&
+        typeof session.parentID === 'string' &&
+        allowedSessions.has(session.parentID)
+      ) {
+        allowedSessions.add(session.id);
       }
-      await new Promise((resolve) => setTimeout(resolve, 400));
+      return;
+    }
+    if (event.type !== 'question.asked' || typeof event.data !== 'object' || event.data === null)
+      return;
+    const request = event.data as {
+      id?: unknown;
+      sessionID?: unknown;
+      questions?: Array<{ question?: string; options?: Array<{ label?: string } | string> }>;
+    };
+    if (
+      typeof request.id !== 'string' ||
+      typeof request.sessionID !== 'string' ||
+      !allowedSessions.has(request.sessionID) ||
+      seen.has(request.id)
+    )
+      return;
+    seen.add(request.id);
+    const consent = isConsentQuestion(request);
+    const answers = (request.questions ?? [{}]).map((question) => {
+      const options = (question.options ?? []).map((option) =>
+        typeof option === 'string' ? option : (option.label ?? '')
+      );
+      const choice = chooseLabel(options, choose, consent);
+      if (!consent) {
+        const text = (question.question ?? '').replace(/\s+/gu, ' ').slice(0, 160);
+        offScript.push(
+          `${choice.refusal ? 'отказано' : 'дан ответ единственным предложенным вариантом'}: "${text}"`
+        );
+      }
+      answered.push({
+        id: request.id as string,
+        kind: 'question',
+        decision: choose,
+        label: choice.label,
+        offered: options,
+        consent,
+      });
+      return [choice.label];
+    });
+    for (const entry of answered.filter((item) => item.id === request.id)) {
+      log('debug', `operator answered: ${entry.label}`, {
+        type: 'interaction.answer',
+        fields: {
+          kind: entry.kind,
+          id: entry.id,
+          isConsent: entry.consent,
+          decision: entry.decision,
+          label: entry.label,
+          offered: entry.offered,
+        },
+      });
+    }
+    await api(host, 'POST', `/question/${request.id}/reply`, { answers });
+  };
+
+  const loop = async (): Promise<void> => {
+    try {
+      const response = await fetch(`${host.url}/event`, { signal: events.signal });
+      if (!response.ok || !response.body) return;
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (!stopped) {
+        const next = await reader.read();
+        if (next.done) break;
+        buffer += decoder.decode(next.value, { stream: true });
+        const records = buffer.split(/\r?\n\r?\n/gu);
+        buffer = records.pop() ?? '';
+        for (const record of records) {
+          const event = parseV1SseEvent(record);
+          if (event) await handle(event);
+        }
+      }
+    } catch {
+      // The prompt reports the failure; this listener must not reject its caller.
     }
   };
   void loop();
   return {
-    stop: () => (stopped = true),
+    stop: () => {
+      stopped = true;
+      events.abort();
+    },
     offScript: () => [...offScript],
     answered: () => [...answered],
   };

@@ -33,7 +33,7 @@ import {
   type RunningSmokeHost,
 } from './host/facade.ts';
 import type { HostKind, ParityReportEntry, ScenarioResult } from './host/types.ts';
-import { logEvent } from './log.ts';
+import { log } from './log.ts';
 import {
   aggregateExitCode,
   assertSingleEntryPerScenario,
@@ -97,7 +97,7 @@ function resolvePlugin(): string {
     process.env.HOST_SMOKE_PLUGIN = plugin;
     return plugin;
   } catch (error) {
-    logEvent(`сборка плагина не удалась: ${messageOf(error)}`, 'red', 'error');
+    log('error', `сборка плагина не удалась: ${messageOf(error)}`, { type: 'error' });
     return process.exit(2);
   }
 }
@@ -112,12 +112,12 @@ function selectScenarios(requested: string[]): CanonicalScenario[] {
     else selected.push(scenario);
   }
   if (unknown.length > 0) {
-    logEvent(
+    log(
+      'error',
       `Сценарий не найден: ${unknown.join(', ')}. Известные: ${canonicalScenarios
         .map((scenario) => scenario.id)
         .join(', ')}`,
-      'red',
-      'error'
+      { type: 'error' }
     );
     process.exit(2);
   }
@@ -167,9 +167,10 @@ async function runCanonical(
     if (model === undefined) continue;
     for (const scenario of selected) {
       if (scenario.migrationState !== 'migrated') continue;
-      logEvent(`▶ ${scenario.id} (${kind}) …`, 'cyan', 'scenario.start', {
-        scenario: scenario.id,
-        hostKind: kind,
+      log('info', `▶ ${scenario.id} (${kind}) …`, {
+        type: 'scenario.start',
+        color: 'cyan',
+        fields: { scenario: scenario.id, hostKind: kind },
       });
       let host: RunningSmokeHost | undefined;
       try {
@@ -177,47 +178,53 @@ async function runCanonical(
         const result = await runScenario(host, scenario, { attempts, ...polls });
         ledger.results.push(result);
         recordResult(ledger.byScenario, scenario.id, result);
-        logEvent(
+        log(
+          result.status === 'pass' ? 'info' : result.status === 'blocked' ? 'warn' : 'error',
           result.status === 'pass'
             ? `ПРОЙДЕНО (попыток: ${result.attempts}, ${formatDuration(result.durationMs)})`
             : `${result.status === 'blocked' ? 'ЗАБЛОКИРОВАНО' : 'ОШИБКА'} (${formatDuration(result.durationMs)})`,
-          result.status === 'pass' ? 'green' : result.status === 'blocked' ? 'yellow' : 'red',
-          'scenario.result',
           {
-            scenario: scenario.id,
-            hostKind: kind,
-            status: result.status,
-            attempts: result.attempts,
-            durationMs: result.durationMs,
+            type: 'scenario.result',
+            color:
+              result.status === 'pass' ? 'green' : result.status === 'blocked' ? 'yellow' : 'red',
+            fields: {
+              scenario: scenario.id,
+              hostKind: kind,
+              status: result.status,
+              attempts: result.attempts,
+              durationMs: result.durationMs,
+            },
           }
         );
-        if (result.status !== 'pass' || process.env.HOST_SMOKE_DEBUG) {
-          logEvent(
+        {
+          log(
+            result.status === 'pass' ? 'debug' : 'error',
             result.evidence
               .split('\n')
               .map((line) => `  ${line}`)
               .join('\n'),
-            result.status === 'pass' ? 'gray' : 'red',
-            'scenario.evidence'
+            { type: 'scenario.evidence', color: result.status === 'pass' ? 'gray' : 'red' }
           );
         }
-        if (result.status !== 'pass' && process.env.HOST_SMOKE_DEBUG) {
-          logEvent(
+        if (result.status !== 'pass') {
+          log(
+            'error',
             host
               .logs()
               .split('\n')
               .filter((line) => /session-guard|consent|DIAG|workflow/i.test(line))
               .slice(-25)
               .join('\n'),
-            'red',
-            'scenario.host-log'
+            { type: 'scenario.host-log', color: 'red' }
           );
         }
       } catch (error) {
         if (!(error instanceof LiveEnvironmentUnavailableError)) throw error;
         unavailable.set(kind, messageOf(error));
-        logEvent(`хост ${kind} недоступен: ${messageOf(error)}`, 'red', 'host.unavailable', {
-          kind,
+        log('error', `хост ${kind} недоступен: ${messageOf(error)}`, {
+          type: 'host.unavailable',
+          color: 'red',
+          fields: { kind },
         });
         break;
       } finally {
@@ -293,9 +300,11 @@ async function main(): Promise<void> {
   const problems = validateScenarioDefinitions(selected);
   if (problems.length > 0) {
     for (const problem of problems) {
-      logEvent(`[ERROR] ${problem.scenarioId}: ${problem.problem}`, 'red', 'registry.problem');
+      log('error', `[ERROR] ${problem.scenarioId}: ${problem.problem}`, {
+        type: 'registry.problem',
+      });
     }
-    logEvent('canonical registry не готов к запуску', 'red', 'error');
+    log('error', 'canonical registry не готов к запуску', { type: 'error' });
     process.exit(2);
   }
 
@@ -317,14 +326,11 @@ async function main(): Promise<void> {
       // plugin must end the run instead of hiding behind `not-run`.
       if (!(error instanceof LiveEnvironmentUnavailableError)) throw error;
       unavailable.set(kind, messageOf(error));
-      logEvent(
-        `хост ${kind} недоступен до запуска сценариев: ${messageOf(error)}`,
-        'red',
-        'host.unavailable',
-        {
-          kind,
-        }
-      );
+      log('error', `хост ${kind} недоступен до запуска сценариев: ${messageOf(error)}`, {
+        type: 'host.unavailable',
+        color: 'red',
+        fields: { kind },
+      });
     }
   }
 
@@ -358,16 +364,19 @@ async function main(): Promise<void> {
   await writeSmokeReport(REPORT_PATH, report);
 
   const passed = ledger.results.filter((result) => result.status === 'pass').length;
-  logEvent(
+  log(
+    exitCode === 0 ? 'info' : 'error',
     `\n${passed}/${ledger.results.length} пройдено (код выхода ${exitCode}) — отчёт записан в ${REPORT_PATH}`,
-    exitCode === 0 ? 'green' : 'red',
-    'run.summary',
     {
-      passed,
-      total: ledger.results.length,
-      exitCode,
-      reportPath: REPORT_PATH,
-      notRun: notRun.map((entry) => `${entry.scenarioId}:${entry.notRunReason}`),
+      type: 'run.summary',
+      color: exitCode === 0 ? 'green' : 'red',
+      fields: {
+        passed,
+        total: ledger.results.length,
+        exitCode,
+        reportPath: REPORT_PATH,
+        notRun: notRun.map((entry) => `${entry.scenarioId}:${entry.notRunReason}`),
+      },
     }
   );
   process.exit(exitCode);
@@ -376,7 +385,7 @@ async function main(): Promise<void> {
 try {
   await main();
 } catch (error) {
-  logEvent(`фатальная ошибка запуска: ${messageOf(error)}`, 'red', 'error');
+  log('error', `фатальная ошибка запуска: ${messageOf(error)}`, { type: 'error' });
   await stopAllHosts();
   process.exit(2);
 }

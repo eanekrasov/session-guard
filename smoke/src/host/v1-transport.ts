@@ -13,7 +13,7 @@ import {
   isTraceEnabled,
   sanitizeTracePayload,
 } from '../harness.ts';
-import { logBlock } from '../log.ts';
+import { log } from '../log.ts';
 import { answerQuestions, logExchange, modelResponseText, type Part } from './v1-exchange.ts';
 import {
   buildPromptResult,
@@ -134,7 +134,7 @@ export function createLegacyHttpTransport(
       // Measure the turn's lower boundary before the prompt: an answered question lands in the
       // session as a user message of its own, which a role-based boundary would misread.
       const boundary = await listedCount(host, session.id);
-      const operator = answerQuestions(host, requested);
+      const operator = answerQuestions(host, requested, session.id);
       let reply: LegacyMessage;
       try {
         reply = (await api(host, 'POST', `/session/${session.id}/message`, {
@@ -152,10 +152,12 @@ export function createLegacyHttpTransport(
         'debug',
         `say response: ${rawParts.length} parts${error ? ` error=${error.slice(0, 200)}` : ''} duration=${(performance.now() - startedAt).toFixed(1)}ms`
       );
-      if (process.env.HOST_SMOKE_DEBUG) {
-        logBlock('  USER:', input.text, 'cyan', 'user');
-        logBlock('  MODEL:', modelResponseText(rawParts, error), 'magenta', 'model');
-      }
+      log('debug', input.text, { type: 'user', color: 'cyan', label: '  USER:' });
+      log('debug', modelResponseText(rawParts, error), {
+        type: 'model',
+        color: 'magenta',
+        label: '  MODEL:',
+      });
       await logExchange(input.text, agent, error, rawParts);
 
       const parts = compactParts(rawParts.map((part) => normalizeLegacyPart(part)));

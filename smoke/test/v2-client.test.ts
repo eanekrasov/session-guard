@@ -229,8 +229,8 @@ describe('the session agent', () => {
       const id = await client.createSession('v2-test');
 
       expect(id).toBe('ses-1');
-      const switched = requests.find((request) => request.path.endsWith('/ses-1/agent'));
-      expect(switched?.body).toContain('orchestrator');
+      const created = requests.find((request) => request.path === '/api/session');
+      expect(created?.body).toContain('"agent":"orchestrator"');
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -282,7 +282,6 @@ describe('the prompt budget', () => {
         const url = String(input);
         routes.push(`${init?.method ?? 'GET'} ${new URL(url).pathname}`);
         if (url.includes('/wait')) return new Promise<Response>(() => {});
-        if (url.includes('/form')) return dataResponse([]);
         if (url.includes('/prompt')) return dataResponse({ id: 'msg-1', sessionID: 'ses-1' });
         return dataResponse({});
       },
@@ -304,13 +303,39 @@ describe('the prompt budget', () => {
 
   test('reports a form the host is still waiting on when the budget runs out', async () => {
     const originalFetch = globalThis.fetch;
+    const routes: string[] = [];
+    const repliedForms: string[] = [];
     globalThis.fetch = Object.assign(
-      async (input: RequestInfo | URL) => {
+      async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
+        routes.push(`${init?.method ?? 'GET'} ${new URL(url).pathname}`);
         if (url.includes('/wait')) return new Promise<Response>(() => {});
-        if (url.includes('/reply')) return new Promise<Response>(() => {});
-        if (url.includes('/form'))
-          return dataResponse([{ id: 'form-1', title: 'Approve?', fields: [] }]);
+        if (url === 'http://127.0.0.1:1/api/session') {
+          const body = JSON.parse(String(init?.body)) as {
+            agent?: string;
+            location?: { directory?: string };
+          };
+          expect(body.agent).toBe('orchestrator');
+          expect(body.location?.directory).toBe(process.cwd());
+        }
+        if (url.includes('/event')) {
+          const events = [
+            { type: 'session.created', data: { sessionID: 'child', parentID: 'ses-1' } },
+            { type: 'session.created', data: { sessionID: 'grandchild', parentID: 'child' } },
+            { type: 'session.created', data: { sessionID: 'independent', parentID: 'other' } },
+            ...['ses-1', 'child', 'grandchild', 'independent'].map((sessionID, index) => ({
+              type: 'form.created',
+              data: { form: { id: `form-${index + 1}`, sessionID, title: 'Approve?', fields: [] } },
+            })),
+          ]
+            .map((event) => `data: ${JSON.stringify(event)}\n\n`)
+            .join('');
+          return new Response(events, { headers: { 'content-type': 'text/event-stream' } });
+        }
+        if (url.includes('/reply')) {
+          repliedForms.push(new URL(url).pathname.split('/').at(-2) ?? '');
+          return new Response(null, { status: 204 });
+        }
         return dataResponse({});
       },
       { preconnect: originalFetch.preconnect }
@@ -318,7 +343,13 @@ describe('the prompt budget', () => {
     try {
       const client = createV2SmokeClient(fakeHost(), { promptTimeoutMs: 50 });
 
-      await expect(client.prompt('ses-1', 'go')).rejects.toThrow('хост всё ещё ожидает 1 форм');
+      await expect(client.prompt('ses-1', 'go')).rejects.toThrow('хост всё ещё ожидает 3 форм');
+      expect(repliedForms).toEqual(['form-1', 'form-2', 'form-3']);
+      expect(repliedForms).not.toContain('form-4');
+      expect(routes.some((route) => route === 'GET /api/event')).toBe(true);
+      expect(routes.some((route) => route.startsWith('GET ') && route.includes('/form'))).toBe(
+        false
+      );
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -336,8 +367,8 @@ function dataResponse(data: unknown): Response {
 function fakeHost(): Host {
   return {
     url: 'http://127.0.0.1:1',
-    workDir: '/nowhere',
-    homeDir: '/nowhere',
+    workDir: process.cwd(),
+    homeDir: process.cwd(),
     logs: () => '',
     stop: async () => {},
   };

@@ -81,6 +81,20 @@ const workflowCreateStep: ScenarioStep = {
   },
 };
 
+/** Create the minimal one-stage schema used by the isolated workflow-result probe. */
+const verdictWorkflowCreateStep: ScenarioStep = {
+  instruction:
+    'Call the tool `workflow-create` with schemaId "smoke/verdict". Do nothing else and add no commentary.',
+  mutation: 'mutating',
+  retry: 'poll-state',
+  expect: (result) => {
+    const state = result.workflowState;
+    if (state === null) return 'сессия workflow не сохранена';
+    const stage = state.currentStage ?? '(не задана)';
+    return stage === 'review' || `стадия — ${stage}, ожидалась review`;
+  },
+};
+
 /** The refusal sentence the plugin's task guard answers with, used only as a fallback. */
 const TASK_REFUSAL_SENTENCE = /is refused/i;
 
@@ -103,8 +117,9 @@ const COMMIT_REFUSAL_SENTENCE = /refus|not allowed|no entry covers|not permitted
  */
 const directCommitStep: ScenarioStep = {
   instruction:
-    'Use the bash tool to run exactly this command: git commit --allow-empty -m "smoke". ' +
-    'Report what happened, verbatim.',
+    'Use the bash tool exactly once to run this command: git commit --allow-empty -m "smoke". ' +
+    'Do not modify or retry it, and do not call any other tool. ' +
+    'Report what happened, verbatim, then finish the turn.',
   mutation: 'mutating',
   retry: 'none',
   expect: (result) => {
@@ -148,6 +163,8 @@ const directCommitStep: ScenarioStep = {
  * absence of progress, not the duration of a subagent's own turn.
  */
 const SUBAGENT_STATE_BUDGET_MS = 20_000;
+const VERDICT_PROBE_TURN_BUDGET_MS = 60_000;
+const VERDICT_PROBE_STATE_BUDGET_MS = 10_000;
 
 /**
  * Replacing the task list is a mutation of the workflow's own state; `poll-state` reads its
@@ -217,6 +234,7 @@ function subagentStep(options: {
   description: string;
   task: string;
   verdict?: string;
+  prepare?: ScenarioStep['prepare'];
   /** Длинный шаг pipeline объявляет свои пределы вместо общих. */
   turnBudgetMs?: number;
   stateBudgetMs?: number;
@@ -224,16 +242,22 @@ function subagentStep(options: {
   expect: (state: SmokeWorkflowState | null, workspace?: StepWorkspace) => true | string;
 }): ScenarioStep {
   const verdict =
-    options.verdict === undefined ? '' : ` and then finish with exactly ${options.verdict}`;
+    options.verdict === undefined
+      ? ' After the subagent returns, report its result and finish this turn. Do not dispatch another task or start the next workflow step.'
+      : ' After the subagent returns, do not dispatch another task, start the next workflow step, ' +
+        'or change any workflow status directly. Finish this turn by emitting exactly this ' +
+        `workflow-result, with no surrounding commentary: ${options.verdict}`;
   return {
     instruction:
-      `Use the task tool with subagent_type "${options.type}" and description ` +
-      `"${options.description}", ${options.task}${verdict}`,
+      `Use the host's subagent-dispatch tool exactly once (V1 name: task; V2 name: subagent) ` +
+      `with subagent_type "${options.type}" and description ` +
+      `"${options.description}". ${options.task}.${verdict}`,
     mutation: 'mutating',
     retry: 'poll-state',
     stateBudgetMs: options.stateBudgetMs ?? SUBAGENT_STATE_BUDGET_MS,
     ...(options.turnBudgetMs === undefined ? {} : { turnBudgetMs: options.turnBudgetMs }),
-    expect: (result, workspace) => options.expect(result.workflowState, workspace),
+    ...(options.prepare === undefined ? {} : { prepare: options.prepare }),
+    expect: (result, workspace) => options.expect(result?.workflowState ?? null, workspace),
   };
 }
 
@@ -333,7 +357,9 @@ function normalizeCommand(command: string): string {
 }
 
 const noSessionStep: ScenarioStep = {
-  instruction: `Use the bash tool to run exactly this command: ${NO_SESSION_COMMAND}. Do nothing else.`,
+  instruction:
+    `Use the bash tool exactly once to run this command: ${NO_SESSION_COMMAND}. ` +
+    'Do not modify or retry it, and do not call any other tool. Finish the turn after reporting the result.',
   // The command is read-only, so a repeat in the same session is allowed.
   mutation: 'read-only',
   retry: 'same-session',
@@ -521,8 +547,9 @@ const commitVerifyStep = subagentStep({
  */
 const earlyCommitStep: ScenarioStep = {
   instruction:
-    'Use the bash tool to run exactly this command: bun run commit-task.ts -m "smoke: too early". ' +
-    'Report what happened, verbatim.',
+    'Use the bash tool exactly once to run this command: bun run commit-task.ts -m "smoke: too early". ' +
+    'Do not modify or retry it, and do not call any other tool. ' +
+    'If it is refused, report the refusal exactly as returned and finish the turn.',
   mutation: 'mutating',
   retry: 'poll-state',
   expect: (result, workspace) => {
@@ -549,8 +576,9 @@ const earlyCommitStep: ScenarioStep = {
 /** Легитимная поставка: HEAD перемещается, квитанция фиксирует новый коммит. */
 const deliverCommitStep: ScenarioStep = {
   instruction:
-    'Use the bash tool to run exactly this command: bun run commit-task.ts -m "smoke: deliver". ' +
-    'Report the output verbatim.',
+    'Use the bash tool exactly once to run this command: bun run commit-task.ts -m "smoke: deliver". ' +
+    'Do not modify or retry it, and do not call any other tool. ' +
+    'Report the output verbatim, then finish the turn.',
   mutation: 'mutating',
   retry: 'poll-state',
   expect: (result, workspace) => {
@@ -577,8 +605,9 @@ const deliverCommitStep: ScenarioStep = {
  */
 const mismatchCommitStep: ScenarioStep = {
   instruction:
-    'Use the bash tool to run exactly this command: bun run commit-task.ts -m "smoke: sweep". ' +
-    'Report the output verbatim.',
+    'Use the bash tool exactly once to run this command: bun run commit-task.ts -m "smoke: sweep". ' +
+    'Do not modify or retry it, and do not call any other tool. ' +
+    'Report the output verbatim, then finish the turn.',
   mutation: 'mutating',
   retry: 'poll-state',
   prepare: async ({ workDir }) => {
@@ -792,39 +821,31 @@ const cicdSmokeStep = subagentStep({
 });
 
 /**
- * Проверка самого механизма вердикта — одним шагом.
+ * Проверка механизма вердикта после создания настоящей workflow-сессии.
  *
- * Сценарий не проходит предыдущие стадии схемы: файл сессии плагина сажается сразу на стадию,
- * объявляющую гейт `review`, и проверяется ровно один durable факт — что вердикт субагента записан
- * гейтом стадии. Так проверяется механизм, а не путь до стадии; путь проверяют другие сценарии.
+ * Сценарий создаёт одноэтапную сессию и отдельным verdict probe закрывает её внешний
+ * workflow-гейт `review`; payload сессии вручную не формируется.
  */
-const verdictProbeStep: ScenarioStep = {
-  instruction:
-    'Use the task tool with subagent_type "reviewer" and description "report the workflow result", ' +
-    'telling it to review the work and then finish with exactly ' +
+const verdictProbeStep = subagentStep({
+  type: 'reviewer',
+  description: 'report the workflow result',
+  task:
+    'telling it to finish immediately with the requested workflow result; this is a protocol probe, not a code review. ' +
+    'Use the host subagent-dispatch tool exactly once: its V2 name is `subagent` and its V1 name is `task`. ' +
+    'Do not call `workflow-tasks-set`, `workflow-tasks-set-status`, `workflow-create`, or `execute`; ' +
+    'this schema has no task list.',
+  verdict:
     '<workflow-result>{"gate":"review","status":"pass","summary":"verdict reached the gate",' +
     '"evidence":["verdict-probe"]}</workflow-result>',
-  mutation: 'mutating',
-  retry: 'poll-state',
   // Ход с диспатчем вердикта — работа субагента: на V2 он не укладывается в общий предел, а
   // подтвердить исход из состояния нельзя, пока гейт не записан. Поэтому предел свой.
-  turnBudgetMs: PIPELINE_TURN_BUDGET_MS,
-  stateBudgetMs: PIPELINE_STATE_BUDGET_MS,
-  prepare: async ({ sessionId, seed }) => {
-    await seed({
-      sessionId,
-      profileId: 'smoke',
-      schemaId: 'smoke',
-      currentStage: 'validation',
-      status: 'running',
-      refs: {},
-    });
-  },
-  expect: (result) => {
-    const gate = result.workflowState?.stageGates?.review;
+  turnBudgetMs: VERDICT_PROBE_TURN_BUDGET_MS,
+  stateBudgetMs: VERDICT_PROBE_STATE_BUDGET_MS,
+  expect: (state) => {
+    const gate = state?.stageGates?.review;
     return gate === 'passed' || `гейт review стадии имеет статус ${gate ?? '(не задан)'}`;
   },
-};
+});
 
 export const canonicalScenarios: CanonicalScenario[] = [
   {
@@ -953,7 +974,7 @@ export const canonicalScenarios: CanonicalScenario[] = [
     migrationState: 'migrated',
     stage: 'task',
     agent: ORCHESTRATOR,
-    steps: [verdictProbeStep],
+    steps: [verdictWorkflowCreateStep, verdictProbeStep],
   },
   {
     id: 'verify-loop',

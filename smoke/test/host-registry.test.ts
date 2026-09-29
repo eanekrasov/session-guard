@@ -179,8 +179,12 @@ describe('the canonical scenario registry', () => {
         { mutation: 'mutating', retry: 'poll-state' },
         { mutation: 'mutating', retry: 'poll-state' },
       ],
-      // Проверка вердикта: один шаг — сессия сажается сразу на стадию с гейтом.
-      'workflow-result': [{ mutation: 'mutating', retry: 'poll-state' }],
+      // Изолированный probe: реальная workflow-create сессия на одноэтапной схеме,
+      // затем один stage-level workflow-result.
+      'workflow-result': [
+        { mutation: 'mutating', retry: 'poll-state' },
+        { mutation: 'mutating', retry: 'poll-state' },
+      ],
       'commit-mismatch': [
         { mutation: 'mutating', retry: 'poll-state' },
         { mutation: 'mutating', retry: 'poll-state' },

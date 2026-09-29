@@ -151,7 +151,7 @@ mise run smoke    # прогон против живого opencode
 pipeline, persistence и интеграцию с хостом.
 
 Полезные переменные прогона: `HOST_SMOKE_MODEL`, `HOST_SMOKE_ATTEMPTS`,
-`HOST_SMOKE_DEBUG` (печатает шаги со временем, вопросы оператору и снимок
+`HOST_SMOKE_LOG_LEVEL=debug` (печатает шаги со временем, вопросы оператору и снимок
 состояния при падении).
 
 Один сценарий по имени:

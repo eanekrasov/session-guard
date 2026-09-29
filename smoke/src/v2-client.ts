@@ -1,6 +1,8 @@
 import { OpenCode, type FormField, type FormInfo } from '@opencode/client';
+import { realpath } from 'node:fs/promises';
 
 import { type Host } from './harness.ts';
+import { log } from './log.ts';
 import { chooseLabel, type OperatorDecision } from './operator.ts';
 
 /** Ответ, который ожидает форма: по одному значению на ключ поля. */
@@ -202,11 +204,6 @@ export interface V2SmokeClientOptions {
   agent?: string;
 }
 
-/** Что показал один обход: сколько форм было отвечено. */
-interface SweepResult {
-  answered: number;
-}
-
 /** Одна форма, на которую оператор ответил: что ушло хосту. */
 export interface AnsweredForm {
   id: string;
@@ -225,6 +222,8 @@ export function createV2SmokeClient(host: Host, options: V2SmokeClientOptions = 
   // было отвечено, переживает один промпт: форма, отвеченная в раннем промпте,
   // никогда не отвечается дважды.
   const seen = new Set<string>();
+  const pending = new Set<string>();
+  const allowedSessions = new Set<string>();
   const notes: string[] = [];
   // Чего хост, по его последнему сообщению, ждал. Записывается до ответов,
   // чтобы ответ, который хост так и не получил, всё равно появился в сообщении о тайм-ауте.
@@ -232,57 +231,110 @@ export function createV2SmokeClient(host: Host, options: V2SmokeClientOptions = 
   // Что именно оператор ответил: форма, решение и выбранная метка.
   const answeredForms: AnsweredForm[] = [];
 
-  /** Ответить на всё, чего ждёт хост, и сообщить, что осталось. */
-  async function sweep(sessionId: string, decision: OperatorDecision): Promise<SweepResult> {
-    const forms = await client.session.form.list({ sessionID: sessionId });
-    const unanswered = (): number => forms.filter((form) => !seen.has(form.id)).length;
-    waitingForms = unanswered();
-    let answered = 0;
-    for (const form of forms) {
-      if (seen.has(form.id)) continue;
-      seen.add(form.id);
-      const plan = planFormAnswer(form, decision);
-      notes.push(...plan.offScript);
-      try {
-        await client.session.form.reply({
-          sessionID: sessionId,
-          formID: form.id,
-          answer: plan.answer,
+  async function answerForm(form: FormInfo, decision: OperatorDecision): Promise<void> {
+    if (seen.has(form.id)) return;
+    seen.add(form.id);
+    pending.add(form.id);
+    waitingForms = pending.size;
+    const plan = planFormAnswer(form, decision);
+    notes.push(...plan.offScript);
+    try {
+      await client.session.form.reply({
+        sessionID: form.sessionID,
+        formID: form.id,
+        answer: plan.answer,
+      });
+      // Report the form and the choice behind each field, so the caller can say what was sent
+      // without knowing anything about the form's own shape.
+      for (const choice of plan.choices) {
+        answeredForms.push({
+          id: form.id,
+          consent: plan.consent,
+          decision: choice.decision,
+          label: choice.label,
+          offered: choice.offered,
         });
-        answered += 1;
-        // Report the form and the choice behind each field, so the caller can say what was sent
-        // without knowing anything about the form's own shape.
-        for (const choice of plan.choices) {
-          answeredForms.push({
+      }
+      for (const choice of plan.choices) {
+        log('debug', 'operator interaction answered', {
+          type: 'interaction.answer',
+          fields: {
+            kind: 'form',
             id: form.id,
-            consent: plan.consent,
+            isConsent: plan.consent,
             decision: choice.decision,
             label: choice.label,
             offered: choice.offered,
-          });
-        }
-      } catch (error) {
-        // Оставляем отвечаемой: форма, отменённая хостом во время ответа, не должна
-        // скрывать ту, которая всё ещё ждёт.
-        seen.delete(form.id);
-        notes.push(
-          `не удалось ответить на форму ${form.id}: ${error instanceof Error ? error.message : String(error)}`
-        );
+            key: choice.key,
+          },
+        });
       }
+    } catch (error) {
+      // Оставляем отвечаемой: форма, отменённая хостом во время ответа, не должна
+      // скрывать ту, которая всё ещё ждёт.
+      seen.delete(form.id);
+      pending.delete(form.id);
+      notes.push(
+        `не удалось ответить на форму ${form.id}: ${error instanceof Error ? error.message : String(error)}`
+      );
     }
-    waitingForms = unanswered();
-    return { answered };
+  }
+
+  async function listenForms(decision: OperatorDecision, signal: AbortSignal): Promise<void> {
+    try {
+      for await (const event of client.event.subscribe({ signal })) {
+        // Keep the raw SSE stream visible before any session filtering. This is intentionally
+        // broader than form handling: unrelated sessions and host lifecycle events are useful
+        // when diagnosing a prompt that never reaches model execution.
+        const serialized = (() => {
+          try {
+            return JSON.stringify(event);
+          } catch {
+            return String(event);
+          }
+        })();
+        log('trace', `V2 SSE event: ${serialized}`, {
+          type: 'sse.event',
+          fields: { event },
+        });
+        if (event.type === 'session.created') {
+          if (
+            typeof event.data.parentID === 'string' &&
+            allowedSessions.has(event.data.parentID) &&
+            typeof event.data.sessionID === 'string'
+          ) {
+            allowedSessions.add(event.data.sessionID);
+          }
+          continue;
+        }
+        if (event.type === 'form.created' && allowedSessions.has(event.data.form.sessionID)) {
+          await answerForm(event.data.form, decision);
+          continue;
+        }
+        if (
+          (event.type === 'form.replied' || event.type === 'form.cancelled') &&
+          allowedSessions.has(event.data.sessionID)
+        ) {
+          pending.delete(event.data.id);
+          waitingForms = pending.size;
+        }
+      }
+    } catch {
+      // The prompt reports the failure; this listener must not reject its caller.
+    }
   }
 
   return {
     async createSession(title: string): Promise<string> {
+      // OpenCode resolves the Git worktree through realpath before Snapshot compares it with
+      // the session location. macOS commonly exposes the temporary directory through /var,
+      // while realpath returns /private/var; use one canonical spelling for both sides.
+      const directory = await realpath(host.workDir);
       const session = await client.session.create({
         title,
-        location: { directory: host.workDir },
+        ...(options.agent === undefined ? {} : { agent: options.agent }),
+        location: { directory },
       });
-      if (options.agent) {
-        await client.session.switchAgent({ sessionID: session.id, agent: options.agent });
-      }
       return session.id;
     },
 
@@ -328,35 +380,16 @@ export function createV2SmokeClient(host: Host, options: V2SmokeClientOptions = 
         }
       };
 
-      let stopped = false;
-      const sweeper = (async () => {
-        // Остановиться на дедлайне: обход, превысивший бюджет, скрыл бы его.
-        while (!stopped && Date.now() < deadline) {
-          try {
-            await bound('form sweep', sweep(sessionId, decision));
-          } catch {
-            // Сервер занят или бюджет исчерпан; промпт сообщит об этом.
-          }
-          await new Promise((resolve) => setTimeout(resolve, 300));
-        }
-      })();
+      const events = new AbortController();
+      allowedSessions.add(sessionId);
+      const listener = listenForms(decision, events.signal);
 
       try {
         await bound('session.prompt', client.session.prompt({ sessionID: sessionId, text }));
         await bound('session.wait', client.session.wait({ sessionID: sessionId }));
-        // Ответ меняет то, что делает остальная часть промпта, поэтому всё, что
-        // всё ещё ждёт, отвечается и ожидается снова.
-        for (let round = 0; round < 5; round += 1) {
-          const swept = await bound('form sweep', sweep(sessionId, decision));
-          if (swept.answered === 0) break;
-          await bound('session.wait', client.session.wait({ sessionID: sessionId }));
-        }
       } finally {
-        stopped = true;
-        // Обходчик должен остановиться, а не завершиться: обход, всё ещё выполняющийся,
-        // иначе удерживал бы промпт, который уже завершился, на остаток
-        // бюджета. Запоздалая форма покрывается раундами выше, а не этим циклом.
-        await Promise.race([sweeper, new Promise((resolve) => setTimeout(resolve, 1_000))]);
+        events.abort();
+        await Promise.race([listener, new Promise((resolve) => setTimeout(resolve, 1_000))]);
       }
     },
 
