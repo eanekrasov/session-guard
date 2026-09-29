@@ -206,7 +206,7 @@ afterEach(async () => {
 describe('a guard that cannot be parsed is refused at load', () => {
   it('refuses a transition guard that does not parse', () => {
     // The widest hole in the compiler: `session.gates.(((` compiled clean and
-    // then read `false` for ever, so the transition simply never fired. The
+    // then read `false` forever, so the transition simply never fired. The
     // evaluator reported the parse failure at runtime, which is far too late.
     const input = schema({ a: {}, b: {} }, [{ from: 'a', to: 'b', guard: 'session.gates.(((' }]);
 

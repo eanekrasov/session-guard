@@ -329,7 +329,13 @@ export function createV2SmokeClient(host: Host, options: V2SmokeClientOptions = 
       // OpenCode resolves the Git worktree through realpath before Snapshot compares it with
       // the session location. macOS commonly exposes the temporary directory through /var,
       // while realpath returns /private/var; use one canonical spelling for both sides.
-      const directory = await realpath(host.workDir);
+      let directory = host.workDir;
+      try {
+        directory = await realpath(host.workDir);
+      } catch {
+        // Test transports may intentionally use a symbolic, non-existent work directory.
+        // A live host still gets the canonical path; the fallback preserves the client request.
+      }
       const session = await client.session.create({
         title,
         ...(options.agent === undefined ? {} : { agent: options.agent }),
