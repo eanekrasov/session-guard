@@ -39,11 +39,11 @@ afterEach(() => {
   }
 });
 
-function createPluginInput(): PluginInput {
+function createPluginInput(log: (input?: unknown) => Promise<void> = async () => {}): PluginInput {
   return {
     client: {
       app: {
-        log: async () => {},
+        log,
       },
     } as unknown as PluginInput['client'],
     project: {
@@ -65,6 +65,48 @@ async function createRuntime() {
   const mod = await import('../../src/app/runtime.ts');
   return mod.createRuntime(createPluginInput());
 }
+
+describe('event session lookup', () => {
+  test('does not load the workflow session for message part events', async () => {
+    let loadCount = 0;
+    const log = async (input?: unknown): Promise<void> => {
+      if (
+        typeof input === 'object' &&
+        input !== null &&
+        'body' in input &&
+        typeof input.body === 'object' &&
+        input.body !== null &&
+        'message' in input.body &&
+        input.body.message === 'Session loaded: part-events-no-load'
+      ) {
+        loadCount += 1;
+      }
+    };
+    const mod = await import('../../src/app/runtime.ts');
+    const hooks = mod.createRuntime(createPluginInput(log));
+    const sessionId = 'part-events-no-load';
+    await createTestSession(sessionId);
+
+    await hooks.event!(
+      hostPayload({
+        event: {
+          type: 'message.part.delta',
+          properties: { sessionID: sessionId, delta: 'text' },
+        },
+      })
+    );
+    await hooks.event!(
+      hostPayload({
+        event: {
+          type: 'message.part.updated',
+          properties: { sessionID: sessionId, part: { status: 'completed' } },
+        },
+      })
+    );
+
+    expect(loadCount).toBe(0);
+  });
+});
 
 async function createTestSession(
   sessionId: string,

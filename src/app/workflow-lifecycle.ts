@@ -144,8 +144,7 @@ export function createWorkflowLifecycle(
 
   const handleEvent = async (input: LifecycleEventInput): Promise<void> => {
     void log('debug', 'WorkflowLifecycle: handleEvent', {
-      eventType: input.event.type,
-      callID: input.event.part?.callID ?? input.event.properties?.part?.callID,
+      ...input.event,
     });
     const part = eventPart(input);
     const isError =

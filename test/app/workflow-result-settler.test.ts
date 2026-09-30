@@ -39,6 +39,44 @@ const engine = {
 } as never;
 
 describe('WorkflowResultSettler', () => {
+  test('logs marker delivery at the plugin hook boundary', async () => {
+    const session = sessionWithRun();
+    const entries: Array<{ message: string; extra?: Record<string, unknown> }> = [];
+    const settler = new WorkflowResultSettlerImpl(
+      {
+        resolveEngine: async () => engine,
+        log: async () => undefined,
+      },
+      async (_level, message, extra) => {
+        entries.push({ message, extra });
+      }
+    );
+
+    await settler.settle({
+      tool: 'task',
+      session,
+      callID: 'call-1',
+      args: { subagent_type: 'reviewer' },
+      output: {
+        output:
+          '<workflow-result>{"gate":"review","status":"pass","summary":"ok","evidence":["ok"]}</workflow-result>',
+      },
+      projectDir: '/tmp/test-project',
+      profilesDir: '/tmp/test-profiles',
+      operation: session.activeOperations['call-1'] as ActiveOperation,
+    });
+
+    const hookEntry = entries.find(
+      (entry) => entry.message === 'Plugin workflow-result hook input'
+    );
+    expect(hookEntry?.extra).toMatchObject({
+      markerDetected: true,
+      markerCount: 1,
+      parsedGate: 'review',
+      parsedStatus: 'pass',
+    });
+  });
+
   test('settles a supplied session without loading or saving it', async () => {
     const session = sessionWithRun();
     let loads = 0;

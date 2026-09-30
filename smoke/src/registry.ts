@@ -244,9 +244,10 @@ function subagentStep(options: {
   const verdict =
     options.verdict === undefined
       ? ' After the subagent returns, report its result and finish this turn. Do not dispatch another task or start the next workflow step.'
-      : ' After the subagent returns, do not dispatch another task, start the next workflow step, ' +
-        'or change any workflow status directly. Finish this turn by emitting exactly this ' +
-        `workflow-result, with no surrounding commentary: ${options.verdict}`;
+      : ` Tell the subagent to finish its own final response by emitting exactly this workflow-result, ` +
+        `with no surrounding commentary: ${options.verdict}. After the subagent returns, report its ` +
+        'result and finish this turn. Do not dispatch another task, start the next workflow step, ' +
+        'or change any workflow status directly.';
   return {
     instruction:
       `Use the host's subagent-dispatch tool exactly once (V1 name: task; V2 name: subagent) ` +

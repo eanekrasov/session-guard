@@ -374,105 +374,142 @@ class SessionGuardRuntime {
     input: { tool: string; sessionID: string; callID: string; args: unknown },
     output: { title: string; output: string; metadata: unknown }
   ): Promise<void> {
-    await this.executor.run(input.sessionID, async (tx) => {
-      // 0. Opt-in gate — no workflow session means no plugin mechanics at all.
-      if (!tx.session) return;
+    void this.log('debug', 'plugin.tool-after.received', {
+      tool: input.tool,
+      sessionID: input.sessionID,
+      callID: input.callID,
+      outputTitle: output.title,
+      outputLength: output.output.length,
+      outputHasWorkflowResult: output.output.includes('<workflow-result>'),
+      outputHasDsmlToolResult: output.output.includes('<｜DSML｜tool-result>'),
+      argsType: input.args === null ? 'null' : typeof input.args,
+      argsKeys:
+        typeof input.args === 'object' && input.args !== null
+          ? Object.keys(input.args as Record<string, unknown>)
+          : [],
+    });
+    try {
+      await this.executor.run(input.sessionID, async (tx) => {
+        // 0. Opt-in gate — no workflow session means no plugin mechanics at all.
+        if (!tx.session) return;
 
-      // Normalize tool name to lowercase (SDK may send any casing)
-      const tool = this.sessionContext.normalizeTool(input.tool);
+        // Normalize tool name to lowercase (SDK may send any casing)
+        const tool = this.sessionContext.normalizeTool(input.tool);
 
-      // 1. Guardrails — всегда санитизировать вывод
-      output.output = this.guardrailAfter(output.output, tool);
+        // 1. Guardrails — всегда санитизировать вывод
+        output.output = this.guardrailAfter(output.output, tool);
 
-      // 1c. Rules — PostToolUse оценка + файловые наблюдения
-      await this.rulesRuntime.handleToolExecuteAfter(input, output);
+        // 1c. Rules — PostToolUse оценка + файловые наблюдения
+        await this.rulesRuntime.handleToolExecuteAfter(input, output);
 
-      // 1a/1b/1d. Инварианты + Результат workflow + Файловый инструмент — всё в settler
-      const operation = tx.session.activeOperations[input.callID];
-      const args = input.args as { filePath?: unknown; path?: unknown; file?: unknown } | undefined;
-      await this.workflowResultSettler.settle({
-        tool,
-        session: tx.session,
-        callID: input.callID,
-        args: input.args,
-        output,
-        projectDir: this.projectDir,
-        profilesDir: this.profilesDir,
-        operation,
-        fileToolArgs: args,
-      });
-
-      void this.log('debug', 'tool.execute.after workflow state checkpoint', {
-        tool,
-        sessionID: input.sessionID,
-        callID: input.callID,
-        revision: tx.session.revision,
-        currentStage: tx.session.currentStage,
-        activeOperation: operation === undefined ? null : operation.kind,
-        stageGates: tx.session.stageGateResults.map((gate) => ({
-          stage: gate.stage,
-          id: gate.id,
-          status: gate.status,
-        })),
-        approvals: tx.session.approvals.map((approval) => ({
-          type: approval.type,
-          callId: approval.callId,
-          status: approval.status,
-        })),
-      });
-
-      // 2. Commit Permit: проверить, что HEAD изменился после commit-task
-      if (tool === 'bash') {
-        await this.workflowLifecycle.handleCommitTaskAfter(tx.session, input.callID, output);
-      }
-
-      // 3. Question tool — запрос consent (approve/decline plan)
-      if (tool === 'question') {
-        void this.log('debug', 'question tool after: entering consent handler', {
-          sessionID: input.sessionID,
+        // 1a/1b/1d. Инварианты + Результат workflow + Файловый инструмент — всё в settler
+        const operation = tx.session.activeOperations[input.callID];
+        const args = input.args as
+          { filePath?: unknown; path?: unknown; file?: unknown } | undefined;
+        await this.workflowResultSettler.settle({
+          tool,
+          session: tx.session,
           callID: input.callID,
-          revision: tx.session.revision,
-          outputLength: output.output.length,
-          metadataKeys:
-            typeof output.metadata === 'object' && output.metadata !== null
-              ? Object.keys(output.metadata as Record<string, unknown>)
-              : [],
+          args: input.args,
+          output,
+          projectDir: this.projectDir,
+          profilesDir: this.profilesDir,
+          operation,
+          fileToolArgs: args,
         });
-        await this.consentAfter(tool, input.sessionID, input.callID, input.args, output);
-        void this.log('debug', 'question tool after: consent handler finished', {
+
+        void this.log('debug', 'tool.execute.after workflow state checkpoint', {
+          tool,
           sessionID: input.sessionID,
           callID: input.callID,
           revision: tx.session.revision,
+          currentStage: tx.session.currentStage,
+          activeOperation: operation === undefined ? null : operation.kind,
+          stageGates: tx.session.stageGateResults.map((gate) => ({
+            stage: gate.stage,
+            id: gate.id,
+            status: gate.status,
+          })),
           approvals: tx.session.approvals.map((approval) => ({
             type: approval.type,
             callId: approval.callId,
             status: approval.status,
           })),
         });
-      }
 
-      // 5. Finish mutation (Bash/Write/Edit) — единственный путь финализации.
-      //    MutationOrchestrator.finishMutation вычисляет scope, валидацию
-      //    инвариантов, снимает активную операцию и выносит вердикт через один
-      //    вызов domain finishMutation.
-      //
-      //    Этот вызов был потерян: `before` подключали, `after` — нет, и
-      //    успешный write не получал вердикта, а его лок жил до TTL. Порядок
-      //    восстановлен по версии до регрессии: сразу перед переходами.
-      await this.toolExecutionPolicy.after(
-        {
+        // 2. Commit Permit: проверить, что HEAD изменился после commit-task
+        if (tool === 'bash') {
+          await this.workflowLifecycle.handleCommitTaskAfter(tx.session, input.callID, output);
+        }
+
+        // 3. Question tool — запрос consent (approve/decline plan)
+        if (tool === 'question') {
+          void this.log('debug', 'question tool after: entering consent handler', {
+            sessionID: input.sessionID,
+            callID: input.callID,
+            revision: tx.session.revision,
+            outputLength: output.output.length,
+            metadataKeys:
+              typeof output.metadata === 'object' && output.metadata !== null
+                ? Object.keys(output.metadata as Record<string, unknown>)
+                : [],
+          });
+          await this.consentAfter(tool, input.sessionID, input.callID, input.args, output);
+          void this.log('debug', 'question tool after: consent handler finished', {
+            sessionID: input.sessionID,
+            callID: input.callID,
+            revision: tx.session.revision,
+            approvals: tx.session.approvals.map((approval) => ({
+              type: approval.type,
+              callId: approval.callId,
+              status: approval.status,
+            })),
+          });
+        }
+
+        // 5. Finish mutation (Bash/Write/Edit) — единственный путь финализации.
+        //    MutationOrchestrator.finishMutation вычисляет scope, валидацию
+        //    инвариантов, снимает активную операцию и выносит вердикт через один
+        //    вызов domain finishMutation.
+        //
+        //    Этот вызов был потерян: `before` подключали, `after` — нет, и
+        //    успешный write не получал вердикта, а его лок жил до TTL. Порядок
+        //    восстановлен по версии до регрессии: сразу перед переходами.
+        await this.toolExecutionPolicy.after(
+          {
+            tool,
+            sessionID: input.sessionID,
+            callID: input.callID,
+            args: input.args,
+            session: tx.session,
+          },
+          output
+        );
+
+        void this.log('debug', 'plugin.tool-after.completed', {
           tool,
           sessionID: input.sessionID,
           callID: input.callID,
-          args: input.args,
-          session: tx.session,
-        },
-        output
-      );
+          outputLength: output.output.length,
+          outputHasWorkflowResult: output.output.includes('<workflow-result>'),
+          outputHasDsmlToolResult: output.output.includes('<｜DSML｜tool-result>'),
+          revision: tx.session.revision,
+          currentStage: tx.session.currentStage,
+        });
 
-      // 6. Try transitions — после любого инструмента проверяем, можно ли перейти
-      await this.workflowLifecycle.afterTool(tx.session, tx);
-    });
+        // 6. Try transitions — после любого инструмента проверяем, можно ли перейти
+        await this.workflowLifecycle.afterTool(tx.session, tx);
+      });
+    } catch (error) {
+      void this.log('error', 'plugin.tool-after.failed', {
+        tool: input.tool,
+        sessionID: input.sessionID,
+        callID: input.callID,
+        outputLength: output.output.length,
+        error: error instanceof Error ? (error.stack ?? error.message) : String(error),
+      });
+      throw error;
+    }
   }
 
   /**
@@ -584,6 +621,8 @@ class SessionGuardRuntime {
     }
   ): Promise<void> {
     await this.workflowLifecycle.handleEvent(event);
+
+    if (event.event.type !== 'message.removed') return;
 
     // Правила — механика на сессию. Подсистема правил читает сессию из
     // `event.properties.sessionID` (не из `part`), поэтому гейтим по тому же

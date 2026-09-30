@@ -226,7 +226,34 @@ export class WorkflowResultSettlerImpl implements WorkflowResultSettler {
     output: { output: string }
   ): Promise<void> {
     const parsed = parseWorkflowResult(output.output);
+    const markerCount = [
+      ...output.output.matchAll(/<workflow-result>[\s\S]*?<\/workflow-result>/gu),
+    ].length;
     const reportingAgent = this.dispatchedAgent(args);
+    const operation = session.activeOperations[callID];
+    void this.log('debug', 'workflow-result.settlement.started', {
+      sessionID: session.sessionId,
+      callID,
+      currentStage: session.currentStage,
+      revision: session.revision,
+      operation: operation
+        ? { taskId: operation.taskId, runId: operation.runId, status: operation.status }
+        : null,
+      reportingAgent,
+    });
+    void this.log('debug', 'Plugin workflow-result hook input', {
+      sessionID: session.sessionId,
+      callID,
+      markerCount,
+      markerDetected: markerCount > 0,
+      parsedGate: parsed?.gate,
+      parsedStatus: parsed?.status,
+      outputLength: output.output.length,
+      outputHasWorkflowResult: output.output.includes('<workflow-result>'),
+      outputHasDsmlToolResult: output.output.includes('<｜DSML｜tool-result>'),
+      currentStage: session.currentStage,
+      tool: 'task',
+    });
     void this.log('debug', 'Workflow result received', {
       sessionID: session.sessionId,
       callID,
@@ -251,7 +278,6 @@ export class WorkflowResultSettlerImpl implements WorkflowResultSettler {
       }
     }
 
-    const operation = session.activeOperations[callID];
     const provenance = session.verdictProvenance?.[callID];
     const stampedRunId = provenance?.runId ?? operation?.runId;
     const stampedRound = provenance?.round ?? operation?.round;
@@ -274,6 +300,12 @@ export class WorkflowResultSettlerImpl implements WorkflowResultSettler {
     }
 
     if (!parsed) {
+      void this.log('debug', 'workflow-result.settlement.missing', {
+        sessionID: session.sessionId,
+        callID,
+        currentStage: session.currentStage,
+        operation: operation?.taskId ?? null,
+      });
       const silent = this.runForCall(session, provenance, operation);
       if (silent) {
         output.output +=
@@ -286,6 +318,15 @@ export class WorkflowResultSettlerImpl implements WorkflowResultSettler {
     }
 
     const owner = await this.resolveGateOwner(session, parsed.gate, provenance, operation);
+    void this.log('debug', 'workflow-result.settlement.owner', {
+      sessionID: session.sessionId,
+      callID,
+      gate: parsed.gate,
+      status: parsed.status,
+      owner: owner.kind,
+      currentStage: session.currentStage,
+      revision: session.revision,
+    });
     if (owner.kind === 'refused') {
       void this.log('warn', 'Workflow result rejected: no matching stage owner', {
         sessionID: session.sessionId,
@@ -364,6 +405,14 @@ export class WorkflowResultSettlerImpl implements WorkflowResultSettler {
       }
     }
     this.releaseVerdict(session, callID);
+    void this.log('debug', 'workflow-result.settlement.completed', {
+      sessionID: session.sessionId,
+      callID,
+      gate: parsed.gate,
+      status: parsed.status,
+      currentStage: session.currentStage,
+      revision: session.revision,
+    });
   }
 
   private async moveTask(

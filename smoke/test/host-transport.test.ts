@@ -29,9 +29,53 @@ import {
   assistantContentAfterLastUser,
   createSessionClientTransport,
 } from '../src/host/v2-transport.ts';
-import { PromptTimeoutError } from '../src/v2-client.ts';
+import {
+  extractTaskChildSessionId,
+  rawV1ResponseDiagnostics,
+  subscribeToV1Events,
+} from '../src/host/v1-exchange.ts';
+import { workflowResultMarkers } from '../src/host/v1-transport.ts';
 import type { V2SmokeClient } from '../src/v2-client.ts';
 import type { ScenarioDefinition } from '../src/host/types.ts';
+
+describe('V1 raw response diagnostics', () => {
+  test('extracts the child session ID from a task result', () => {
+    expect(
+      extractTaskChildSessionId(
+        '<task id="child-123" state="completed"><task_result>result</task_result></task>'
+      )
+    ).toBe('child-123');
+  });
+
+  test('recognizes the canonical workflow-result marker', () => {
+    const diagnostics = rawV1ResponseDiagnostics(
+      [{ type: 'text', text: '<workflow-result>{"gate":"deploy_done"}</workflow-result>' }],
+      ''
+    );
+
+    expect(diagnostics.hasWorkflowResult).toBe(true);
+    expect(diagnostics.hasDsmlToolResult).toBe(false);
+  });
+
+  test('flags a DSML-wrapped task result as missing the canonical marker', () => {
+    const diagnostics = rawV1ResponseDiagnostics(
+      [
+        {
+          type: 'tool',
+          tool: 'task',
+          state: {
+            status: 'completed',
+            output: '<｜DSML｜tool-result>{"gate":"deploy_done"}</｜DSML｜tool-result>',
+          },
+        },
+      ],
+      ''
+    );
+
+    expect(diagnostics.hasWorkflowResult).toBe(false);
+    expect(diagnostics.hasDsmlToolResult).toBe(true);
+  });
+});
 
 function fakeHost(overrides: Partial<Host> = {}): Host {
   return {
@@ -71,6 +115,16 @@ function json(data: unknown): Response {
     status: 200,
     headers: { 'content-type': 'application/json' },
   });
+}
+
+function v1IdleEvent(sessionId = 'ses-1'): Response {
+  return new Response(
+    `data: ${JSON.stringify({
+      type: 'session.status',
+      properties: { sessionID: sessionId, status: { type: 'idle' } },
+    })}\n\n`,
+    { headers: { 'content-type': 'text/event-stream' } }
+  );
 }
 
 describe('normalizing a host payload into the shared smoke model', () => {
@@ -375,6 +429,55 @@ describe('normalizing a host payload into the shared smoke model', () => {
 });
 
 describe('the V1 transport strategy', () => {
+  test('classifies workflow-result markers in the V1 normalized response', () => {
+    expect(
+      workflowResultMarkers(
+        'before <workflow-result>{"gate":"checkout_done","status":"pass"}</workflow-result>'
+      )
+    ).toEqual({ count: 1, gates: ['checkout_done'] });
+    expect(workflowResultMarkers('no marker')).toEqual({ count: 0, gates: [] });
+  });
+
+  test('logs every parsed SSE record like the V2 transport', async () => {
+    const originalWrite = process.stderr.write;
+    const originalLevel = process.env.HOST_SMOKE_LOG_LEVEL;
+    const lines: string[] = [];
+    process.env.HOST_SMOKE_LOG_LEVEL = 'trace';
+    process.stderr.write = ((chunk: string | Uint8Array) => {
+      lines.push(String(chunk));
+      return true;
+    }) as typeof process.stderr.write;
+
+    try {
+      const response = new Response(
+        [
+          `data: ${JSON.stringify({ type: 'session.created', properties: { id: 'ses-1' } })}`,
+          '',
+          `data: ${JSON.stringify({
+            type: 'session.status',
+            properties: { sessionID: 'ses-1', status: { type: 'idle' } },
+          })}`,
+          '',
+        ].join('\n'),
+        { headers: { 'content-type': 'text/event-stream' } }
+      );
+      const fetchStub = stubFetch(() => response);
+      const subscription = subscribeToV1Events(fakeHost(), () => {});
+      await subscription.done;
+      fetchStub.restore();
+
+      expect(lines).toHaveLength(2);
+      expect(lines[0]).toContain('[TRACE] V1 SSE event:');
+      expect(lines[1]).toContain('[TRACE] V1 SSE event:');
+      expect(lines[0]).toContain('session.created');
+      expect(lines[1]).toContain('session.status');
+    } finally {
+      process.stderr.write = originalWrite;
+      if (originalLevel === undefined) delete process.env.HOST_SMOKE_LOG_LEVEL;
+      else process.env.HOST_SMOKE_LOG_LEVEL = originalLevel;
+    }
+  });
+
   test('reads the turn from the stored messages, where the tool call actually is', async () => {
     const stateDir = await mkdtemp(join(tmpdir(), 'host-smoke-v1-'));
     const runtime = join(stateDir, 'data', 'opencode', 'session-guard', 'runtime', 'archive');
@@ -420,6 +523,7 @@ describe('the V1 transport strategy', () => {
         turnComplete = true;
         return json({ parts: [{ type: 'text', text: 'here is the output' }] });
       }
+      if (url.endsWith('/event')) return v1IdleEvent();
       if (url.endsWith('/session/ses-1/message') && method === 'GET') {
         return json(turnComplete ? listing : []);
       }
@@ -510,6 +614,7 @@ describe('the V1 transport strategy', () => {
         turnComplete = true;
         return json({ parts: [{ type: 'text', text: 'consent recorded' }] });
       }
+      if (url.endsWith('/event')) return v1IdleEvent();
       if (url.endsWith('/session/ses-1/message') && method === 'GET') {
         return json(turnComplete ? listing : []);
       }
@@ -551,6 +656,7 @@ describe('the V1 transport strategy', () => {
           ],
         });
       }
+      if (url.endsWith('/event')) return v1IdleEvent();
       if (url.endsWith('/session/ses-1/message') && method === 'GET') {
         return new Response('boom', { status: 500 });
       }
@@ -688,20 +794,18 @@ describe('the V2 transport strategy', () => {
     ]);
   });
 
-  test('turns a prompt that outlived its budget into a timed-out turn, not an exception', async () => {
+  test('propagates a V2 execution failure from the SSE lifecycle', async () => {
     const client = fakeClient({
       prompt: async () => {
-        throw new PromptTimeoutError('session.wait', 50, 'хост всё ещё ожидает 1 форм', 1);
+        throw new Error('[ERROR] session execution failed: provider unavailable');
       },
     });
     const transport = createSessionClientTransport(fakeHost(), {}, () => client);
     const session = await transport.createSession('create');
 
-    const result = await transport.prompt(session, { text: 'create' });
-
-    expect(result.turn.status).toBe('timed-out');
-    expect(result.turn.pendingInteraction).toBe(true);
-    expect(result.turn.transcript).toContain('хост всё ещё ожидает 1 форм');
+    await expect(transport.prompt(session, { text: 'create' })).rejects.toThrow(
+      'session execution failed'
+    );
   });
 
   test('switches the session agent for a step that names another one', async () => {
@@ -861,6 +965,10 @@ describe('the interaction the facade answered', () => {
                 ],
               },
             })),
+            {
+              type: 'session.status',
+              properties: { sessionID: 'ses-1', status: { type: 'idle' } },
+            },
           ]
             .map((event) => `data: ${JSON.stringify(event)}\n\n`)
             .join(''),
@@ -956,6 +1064,7 @@ describe('the interaction the facade answered', () => {
       const method = init?.method ?? 'GET';
       if (url.endsWith('/session') && method === 'POST') return json({ id: 'ses-1' });
       if (url.endsWith('/session/ses-1/message') && method === 'POST') return json({ parts: [] });
+      if (url.endsWith('/event')) return v1IdleEvent();
       return json([]);
     });
 

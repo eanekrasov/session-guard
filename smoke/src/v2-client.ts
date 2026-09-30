@@ -4,13 +4,14 @@ import { realpath } from 'node:fs/promises';
 import { type Host } from './harness.ts';
 import { log } from './log.ts';
 import { chooseLabel, type OperatorDecision } from './operator.ts';
+import { createSessionEventStream, type SessionEventStream } from './host/session-events.ts';
 
 /** Ответ, который ожидает форма: по одному значению на ключ поля. */
 export type FormAnswer = Record<string, string | number | boolean | Array<string>>;
 
 /** Событие выполнения сессии. */
 export interface ExecutionEvent {
-  status: 'started' | 'succeeded' | 'failed';
+  status: 'started' | 'succeeded' | 'failed' | 'interrupted';
   error?: { type: string; message: string; status?: number };
   timestamp: number;
 }
@@ -29,19 +30,9 @@ export interface StepEvent {
 export interface V2SmokeClient {
   createSession(title: string): Promise<string>; /**
    * Отправить одну инструкцию и выполнять оператора, пока сессия не завершится.
-   *
-   * Выбрасывает `PromptTimeoutError`, когда хост превышает бюджет промпта
-   * (`HOST_SMOKE_PROMPT_TIMEOUT_MS`, по умолчанию 60 с): промпт, который никогда
-   * не завершается, — это находка о хосте, поэтому сценарий сообщает о нём, а не
-   * повторяет попытку или ждёт бесконечно.
    */
-  prompt(
-    sessionId: string,
-    text: string,
-    decision?: OperatorDecision,
-    /** Предел на этот промпт, когда шаг объявляет свой. */
-    budgetOverrideMs?: number
-  ): Promise<void>;
+  prompt(sessionId: string, text: string, decision?: OperatorDecision): Promise<void>;
+  waitForStateChange?(sessionId: string, signal?: AbortSignal): Promise<void>;
   removeSession(sessionId: string): Promise<void>;
   /**
    * Raw messages of the session, as the generated client reports them. The transport
@@ -64,43 +55,6 @@ export interface V2SmokeClient {
 }
 
 export type V2SmokeTransport = typeof fetch;
-
-/**
- * Как долго может выполняться один промпт, прежде чем клиент сочтёт его находкой.
- *
- * Живая модель медленная, не зависшая; на этом хосте одна инструкция с вызовом
- * инструментов провела ~32 с внутри `session.wait` и завершилась. Бюджет должен
- * быть всего в несколько раз больше, потому что его задача — превратить
- * неограниченное ожидание в сообщаемую ошибку, а не засекать время модели.
- */
-const DEFAULT_PROMPT_TIMEOUT_MS = 60_000;
-
-/** Определить бюджет промпта; непригодное значение откатывается к умолчанию. */
-export function promptTimeoutMs(env: Record<string, string | undefined> = process.env): number {
-  const raw = env.HOST_SMOKE_PROMPT_TIMEOUT_MS;
-  if (raw === undefined || raw.trim() === '') return DEFAULT_PROMPT_TIMEOUT_MS;
-  const value = Number(raw);
-  return Number.isFinite(value) && value > 0 ? value : DEFAULT_PROMPT_TIMEOUT_MS;
-}
-
-/**
- * Промпт, превысивший свой бюджет.
- *
- * Клиент не может отличить медленную модель от зависшего хоста, поэтому когда
- * бюджет исчерпан, он прекращает ожидание и передаёт сценарию находку для
- * сообщения, а не зависает. Сообщение содержит то, чего всё ещё ждал хост,
- * потому что это единственное свидетельство, оставшееся после отказа от вызова.
- */
-export class PromptTimeoutError extends Error {
-  /** Forms the host was still waiting on when the budget ran out; 0 when it awaited none. */
-  readonly pendingForms: number;
-
-  constructor(operation: string, budgetMs: number, detail: string, pendingForms = 0) {
-    super(`[ERROR] ${operation} не завершился за ${budgetMs} мс: ${detail}`);
-    this.name = 'PromptTimeoutError';
-    this.pendingForms = pendingForms;
-  }
-}
 
 /**
  * Хост V2 игнорирует унаследованный `OPENCODE_SERVER_PASSWORD`: он генерирует
@@ -212,8 +166,6 @@ function optionsOf(field: FormField): Array<{ label: string; value: string }> | 
 }
 
 export interface V2SmokeClientOptions {
-  /** Как долго может выполняться один промпт; по умолчанию `HOST_SMOKE_PROMPT_TIMEOUT_MS`. */
-  promptTimeoutMs?: number;
   /**
    * Агент, под которым выполняется сессия.
    *
@@ -255,6 +207,10 @@ export function createV2SmokeClient(host: Host, options: V2SmokeClientOptions = 
   // События execution и step за последний prompt.
   let lastExecution: ExecutionEvent | null = null;
   const stepEvents: StepEvent[] = [];
+  const executionStream: SessionEventStream<ExecutionEvent> = createSessionEventStream();
+  const events = new AbortController();
+  let listener: Promise<void> | undefined;
+  let activeDecision: OperatorDecision = 'grant';
 
   async function answerForm(form: FormInfo, decision: OperatorDecision): Promise<void> {
     if (seen.has(form.id)) return;
@@ -362,7 +318,13 @@ export function createV2SmokeClient(host: Host, options: V2SmokeClientOptions = 
     });
   }
 
-  async function listenForms(decision: OperatorDecision, signal: AbortSignal): Promise<void> {
+  async function listenForms(decision: () => OperatorDecision, signal: AbortSignal): Promise<void> {
+    let streamEnded = false;
+    const reportStreamEnd = (error: Error): void => {
+      if (streamEnded) return;
+      streamEnded = true;
+      executionStream.fail(error);
+    };
     try {
       for await (const event of client.event.subscribe({ signal })) {
         // Keep the raw SSE stream visible before any session filtering. This is intentionally
@@ -390,7 +352,7 @@ export function createV2SmokeClient(host: Host, options: V2SmokeClientOptions = 
           continue;
         }
         if (event.type === 'form.created' && allowedSessions.has(event.data.form.sessionID)) {
-          await answerForm(event.data.form, decision);
+          await answerForm(event.data.form, decision());
           continue;
         }
         if (
@@ -405,10 +367,12 @@ export function createV2SmokeClient(host: Host, options: V2SmokeClientOptions = 
         if (
           (event.type === 'session.execution.started' ||
             event.type === 'session.execution.succeeded' ||
-            event.type === 'session.execution.failed') &&
+            event.type === 'session.execution.failed' ||
+            event.type === 'session.execution.interrupted') &&
           allowedSessions.has(event.data.sessionID as string)
         ) {
           recordExecutionEvent(event.type, event.data as Record<string, unknown>);
+          executionStream.dispatch(lastExecution!);
           continue;
         }
         // Step events (session.step.*)
@@ -421,10 +385,27 @@ export function createV2SmokeClient(host: Host, options: V2SmokeClientOptions = 
           recordStepEvent(event.type, event.data as Record<string, unknown>);
         }
       }
-    } catch {
-      // The prompt reports the failure; this listener must not reject its caller.
+    } catch (error) {
+      reportStreamEnd(error instanceof Error ? error : new Error(String(error)));
     }
+    reportStreamEnd(new Error('[ERROR] V2 SSE завершился до terminal-события'));
   }
+
+  const startEvents = (): void => {
+    if (listener !== undefined) return;
+    listener = listenForms(() => activeDecision, events.signal);
+  };
+
+  const waitForExecutionTerminal = (signal?: AbortSignal): Promise<ExecutionEvent> => {
+    let started = false;
+    return executionStream.waitFor((event) => {
+      if (event.status === 'started') {
+        started = true;
+        return false;
+      }
+      return started;
+    }, signal);
+  };
 
   return {
     async createSession(title: string): Promise<string> {
@@ -449,8 +430,7 @@ export function createV2SmokeClient(host: Host, options: V2SmokeClientOptions = 
     async prompt(
       sessionId: string,
       text: string,
-      decision: OperatorDecision = 'grant',
-      budgetOverrideMs?: number
+      decision: OperatorDecision = 'grant'
     ): Promise<void> {
       // Сбросить события предыдущего промпта.
       lastExecution = null;
@@ -458,54 +438,35 @@ export function createV2SmokeClient(host: Host, options: V2SmokeClientOptions = 
 
       // Шаг может объявить свой предел: длинный шаг pipeline законно идёт дольше общего
       // бюджета клиента, и общий бюджет обрывал бы его на нормальном для него времени.
-      const budgetMs = budgetOverrideMs ?? options.promptTimeoutMs ?? promptTimeoutMs();
-      const deadline = Date.now() + budgetMs;
-
-      const pendingNote = (): string =>
-        waitingForms > 0
-          ? `хост всё ещё ожидает ${waitingForms} форм`
-          : 'у хоста нет ожидающей формы';
-
-      /**
-       * Выполнить один вызов хоста в рамках бюджета промпта. Вызов, превышающий
-       * его, — это находка: саму проверку нельзя переждать, но
-       * прерванный вызов сохраняет всё, что уже сообщил нам.
-       */
-      const bound = async <T>(operation: string, work: Promise<T>): Promise<T> => {
-        const left = deadline - Date.now();
-        if (left <= 0)
-          throw new PromptTimeoutError(operation, budgetMs, pendingNote(), waitingForms);
-        let timer: ReturnType<typeof setTimeout> | undefined;
-        try {
-          return await Promise.race([
-            work,
-            new Promise<never>((_, reject) => {
-              timer = setTimeout(
-                () =>
-                  reject(new PromptTimeoutError(operation, budgetMs, pendingNote(), waitingForms)),
-                left
-              );
-            }),
-          ]);
-        } finally {
-          if (timer !== undefined) clearTimeout(timer);
-        }
-      };
-
-      const events = new AbortController();
       allowedSessions.add(sessionId);
-      const listener = listenForms(decision, events.signal);
+      activeDecision = decision;
+      const execution = waitForExecutionTerminal();
+      startEvents();
 
       try {
-        await bound('session.prompt', client.session.prompt({ sessionID: sessionId, text }));
-        await bound('session.wait', client.session.wait({ sessionID: sessionId }));
+        await client.session.prompt({ sessionID: sessionId, text });
+        const terminal = await execution;
+        if (terminal.status !== 'succeeded') {
+          const detail = terminal.error?.message ?? `execution ${terminal.status}`;
+          throw new Error(`[ERROR] session execution ${terminal.status}: ${detail}`);
+        }
       } finally {
-        events.abort();
-        await Promise.race([listener, new Promise((resolve) => setTimeout(resolve, 1_000))]);
       }
     },
 
+    async waitForStateChange(_sessionId: string, signal?: AbortSignal): Promise<void> {
+      const stateChange = waitForExecutionTerminal(signal);
+      startEvents();
+      await stateChange;
+    },
+
     async removeSession(sessionId: string): Promise<void> {
+      events.abort();
+      executionStream.close();
+      await Promise.race([
+        listener ?? Promise.resolve(),
+        new Promise((resolve) => setTimeout(resolve, 1_000)),
+      ]);
       await client.session.remove({ sessionID: sessionId });
     },
 

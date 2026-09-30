@@ -19,7 +19,7 @@
 - `@opencode/client`;
 - `session.create`;
 - `session.prompt`;
-- `session.wait`;
+- SSE terminal events (`session.execution.*`);
 - `session.form.list`;
 - `session.form.reply`;
 - `session.switchAgent`;

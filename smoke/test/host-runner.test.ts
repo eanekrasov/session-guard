@@ -824,6 +824,16 @@ describe('the cicd-full-cycle canonical scenario', () => {
     }
   });
 
+  test('asks the subagent to return the workflow result in its own final response', () => {
+    const build = pipeline.steps.find((step) => step.instruction.includes('build the project'));
+
+    expect(build).toBeDefined();
+    expect(build?.instruction).toContain('subagent to finish its own final response');
+    expect(build?.instruction).not.toContain(
+      'Finish this turn by emitting exactly this workflow-result'
+    );
+  });
+
   test('does not accept a transcript-only success at the checkout stage', async () => {
     // Ход объявляет успех словами, но ни файла, ни гейта в состоянии нет: pipeline обязан
     // остановиться здесь, а не шагом позже, когда build попросит недостающий файл.

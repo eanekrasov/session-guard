@@ -170,6 +170,22 @@ async function pollOutcome(
       rounds.push(`${elapsed} состояние ${reading.outcome}`);
     }
     if (Date.now() >= deadline) return { rounds };
+    if (host.waitForStateChange !== undefined) {
+      const waitController = new AbortController();
+      const remaining = Math.max(0, deadline - Date.now());
+      const timer = setTimeout(() => waitController.abort(), remaining);
+      try {
+        await Promise.race([
+          host.waitForStateChange(session, waitController.signal),
+          new Promise<void>((resolve) => {
+            waitController.signal.addEventListener('abort', () => resolve(), { once: true });
+          }),
+        ]);
+      } finally {
+        clearTimeout(timer);
+      }
+      continue;
+    }
     await new Promise((resolve) => setTimeout(resolve, interval));
   }
 }

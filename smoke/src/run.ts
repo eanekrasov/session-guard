@@ -14,7 +14,7 @@
  *   HOST_SMOKE_OPENCODE_VERSION=v1 bun run smoke/src/run.ts create   # single-host check
  *
  * Environment: HOST_SMOKE_MODEL, HOST_SMOKE_PLUGIN, HOST_SMOKE_ATTEMPTS,
- *      HOST_SMOKE_PROMPT_TIMEOUT_MS, HOST_SMOKE_OPENCODE_VERSION.
+ *      HOST_SMOKE_OPENCODE_VERSION.
  */
 import { join } from 'node:path';
 

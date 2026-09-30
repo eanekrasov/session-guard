@@ -30,7 +30,7 @@ export const REPO_ROOT = resolve(import.meta.dir!, '../..');
  * Эти пути должны существовать во время выполнения, иначе harness завершится ошибкой.
  */
 export const V1_BINARY = '/opt/homebrew/Cellar/opencode/1.18.33/bin/opencode';
-export const V2_BINARY = '/opt/homebrew/Cellar/opencode-v2/2.0.16/bin/opencode';
+export const V2_BINARY = '/opt/homebrew/Cellar/opencode-v2/2.0.20/bin/opencode';
 
 const DEFAULT_ATTEMPTS = 3;
 
@@ -781,6 +781,12 @@ export async function startHost(options: HostOptions): Promise<Host> {
     };
     child.stdout?.on('data', collect);
     child.stderr?.on('data', collect);
+    child.once('exit', (code, signal) => {
+      log(
+        code === 0 && signal === null ? 'debug' : 'error',
+        `процесс opencode serve завершился: code=${code ?? 'null'} signal=${signal ?? 'null'}`
+      );
+    });
     // A process that cannot even be spawned emits `error` and never exits; without this the
     // run would wait for the listen timeout and blame the wrong thing.
     let spawnError: Error | undefined;

@@ -53,6 +53,7 @@ export interface HostTransport {
   prompt(session: SmokeSession, input: PromptInput): Promise<PromptResult>;
   readWorkflowState(session: SmokeSession): Promise<SmokeWorkflowState | null>;
   removeSession(session: SmokeSession): Promise<void>;
+  waitForStateChange?(session: SmokeSession, signal?: AbortSignal): Promise<void>;
 }
 
 /** Untrusted host payload read field by field; a declared type never validates JSON. */

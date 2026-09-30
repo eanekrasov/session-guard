@@ -14,7 +14,15 @@ import {
   sanitizeTracePayload,
 } from '../harness.ts';
 import { log } from '../log.ts';
-import { answerQuestions, logExchange, modelResponseText, type Part } from './v1-exchange.ts';
+import {
+  createV1SessionEvents,
+  extractTaskChildSessionId,
+  logExchange,
+  modelResponseText,
+  rawV1ResponseDiagnostics,
+  type Part,
+  type V1SessionEvents,
+} from './v1-exchange.ts';
 import {
   buildPromptResult,
   compactParts,
@@ -33,6 +41,26 @@ export interface LegacyTransportOptions {
   agent?: string;
 }
 
+const WORKFLOW_RESULT_MARKER_RE = /<workflow-result>([\s\S]*?)<\/workflow-result>/gu;
+
+export function workflowResultMarkers(text: string): { count: number; gates: string[] } {
+  let count = 0;
+  const gates: string[] = [];
+  const regex = new RegExp(WORKFLOW_RESULT_MARKER_RE.source, WORKFLOW_RESULT_MARKER_RE.flags);
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(text)) !== null) {
+    count += 1;
+    try {
+      const value: unknown = JSON.parse(match[1]);
+      if (typeof value === 'object' && value !== null && 'gate' in value) {
+        const gate = (value as { gate?: unknown }).gate;
+        if (typeof gate === 'string') gates.push(gate);
+      }
+    } catch {}
+  }
+  return { count, gates };
+}
+
 /** The legacy message response, read field by field. */
 interface LegacyMessage {
   info?: { error?: { data?: { message?: string } } };
@@ -43,6 +71,44 @@ interface LegacyMessage {
 interface LegacyMessageEntry {
   info?: { role?: string; time?: { created?: number } };
   parts?: Part[];
+}
+
+async function logChildSessionResponse(
+  host: Host,
+  parentSessionID: string,
+  taskOutput: string
+): Promise<void> {
+  const childSessionID = extractTaskChildSessionId(taskOutput);
+  if (childSessionID === undefined) return;
+
+  try {
+    const listed = (await api(host, 'GET', `/session/${childSessionID}/message`)) as
+      LegacyMessageEntry[] | undefined;
+    const parts = (Array.isArray(listed) ? listed : [])
+      .filter((message) => message.info?.role === 'assistant')
+      .flatMap((message) => message.parts ?? []);
+    const diagnostics = rawV1ResponseDiagnostics(parts, '');
+    log('debug', 'V1 child session response diagnostic', {
+      type: 'v1.child-response',
+      fields: {
+        parentSessionID,
+        childSessionID,
+        response: sanitizeTracePayload(diagnostics.text),
+        hasWorkflowResult: diagnostics.hasWorkflowResult,
+        hasDsmlToolResult: diagnostics.hasDsmlToolResult,
+        responseLength: diagnostics.text.length,
+      },
+    });
+  } catch (error) {
+    log('warn', 'V1 child session response diagnostic unavailable', {
+      type: 'v1.child-response.error',
+      fields: {
+        parentSessionID,
+        childSessionID,
+        error: error instanceof Error ? error.message : String(error),
+      },
+    });
+  }
 }
 
 /**
@@ -104,6 +170,7 @@ export function createLegacyHttpTransport(
   host: Host,
   options: LegacyTransportOptions
 ): HostTransport {
+  const sessionEvents = new Map<string, V1SessionEvents>();
   return {
     async createSession(title: string): Promise<SmokeSession> {
       // Поле agent в POST /session читается сервером как Session.CreateInput.agent:
@@ -119,7 +186,9 @@ export function createLegacyHttpTransport(
       if (typeof created?.id !== 'string') {
         throw new Error('[ERROR] хост V1 не вернул идентификатор сессии при её создании');
       }
-      return { id: created.id, hostKind: 'v1' };
+      const session = { id: created.id, hostKind: 'v1' as const };
+      sessionEvents.set(session.id, createV1SessionEvents(host, session.id));
+      return session;
     },
 
     async prompt(session: SmokeSession, input: PromptInput): Promise<PromptResult> {
@@ -144,7 +213,24 @@ export function createLegacyHttpTransport(
       // Measure the turn's lower boundary before the prompt: an answered question lands in the
       // session as a user message of its own, which a role-based boundary would misread.
       const boundary = await listedCount(host, session.id);
-      const operator = answerQuestions(host, requested, session.id);
+      const operator = sessionEvents.get(session.id);
+      if (operator === undefined) {
+        throw new Error(`[ERROR] V1 session event stream is missing for ${session.id}`);
+      }
+      operator.setDecision(requested);
+      const terminal = operator.waitForTerminal();
+      log('debug', 'V1 message request diagnostic', {
+        type: 'v1.message-request',
+        fields: {
+          sessionID: session.id,
+          parentSessionID: session.id,
+          agent,
+          model: options.model,
+          decision: requested,
+          instructionLength: input.text.length,
+          boundary,
+        },
+      });
       let reply: LegacyMessage;
       try {
         reply = (await api(host, 'POST', `/session/${session.id}/message`, {
@@ -152,12 +238,29 @@ export function createLegacyHttpTransport(
           ...(agent === undefined ? {} : { agent }),
           parts: [{ type: 'text', text: input.text }],
         })) as LegacyMessage;
+        await terminal;
       } finally {
-        operator.stop();
+        // The event stream is session-scoped and remains active for the next prompt.
       }
 
       const rawParts = (await listedTurnParts(host, session.id, boundary)) ?? reply.parts ?? [];
       const error = reply.info?.error?.data?.message ?? '';
+      const responseText = modelResponseText(rawParts, error);
+      const responseDiagnostics = rawV1ResponseDiagnostics(rawParts, error);
+      const taskChildSessionID = extractTaskChildSessionId(responseText);
+      log('debug', 'V1 message response diagnostic', {
+        type: 'v1.message-response',
+        fields: {
+          sessionID: session.id,
+          parentSessionID: session.id,
+          httpError: error || undefined,
+          rawPartCount: rawParts.length,
+          responseLength: responseText.length,
+          responseHasWorkflowResult: responseDiagnostics.hasWorkflowResult,
+          responseHasDsmlToolResult: responseDiagnostics.hasDsmlToolResult,
+          taskChildSessionID,
+        },
+      });
       harnessLog(
         'debug',
         `say response: ${rawParts.length} parts${error ? ` error=${error.slice(0, 200)}` : ''} duration=${(performance.now() - startedAt).toFixed(1)}ms`
@@ -169,6 +272,30 @@ export function createLegacyHttpTransport(
         label: '  MODEL:',
       });
       await logExchange(input.text, agent, error, rawParts);
+
+      await logChildSessionResponse(host, session.id, responseText);
+      log('debug', 'V1 raw response diagnostic', {
+        type: 'v1.raw-response',
+        fields: {
+          sessionID: session.id,
+          parentSessionID: session.id,
+          response: sanitizeTracePayload(responseText),
+          hasWorkflowResult: responseDiagnostics.hasWorkflowResult,
+          hasDsmlToolResult: responseDiagnostics.hasDsmlToolResult,
+          responseLength: responseText.length,
+        },
+      });
+      const markerDiagnostics = workflowResultMarkers(responseText);
+      harnessLog('debug', 'V1 workflow-result normalization checkpoint', {
+        type: 'workflow-result.normalization',
+        fields: {
+          markerDetected: markerDiagnostics.count > 0,
+          markerCount: markerDiagnostics.count,
+          markerGates: markerDiagnostics.gates,
+          rawPartCount: rawParts.length,
+          responseLength: responseText.length,
+        },
+      });
 
       const parts = compactParts(rawParts.map((part) => normalizeLegacyPart(part)));
       const result = buildPromptResult(
@@ -212,7 +339,20 @@ export function createLegacyHttpTransport(
     async removeSession(session: SmokeSession): Promise<void> {
       // The V1 API does not promise session deletion, and the host's temporary project is
       // removed with the process. Ask, but never lose a result over an unsupported route.
+      const events = sessionEvents.get(session.id);
+      sessionEvents.delete(session.id);
+      await events?.stop();
       await api(host, 'DELETE', `/session/${session.id}`).catch(() => undefined);
+    },
+
+    waitForStateChange(session: SmokeSession, signal?: AbortSignal): Promise<void> {
+      const events = sessionEvents.get(session.id);
+      if (events === undefined) {
+        return Promise.reject(
+          new Error(`[ERROR] V1 session event stream is missing for ${session.id}`)
+        );
+      }
+      return events.waitForTerminal(signal).then(() => undefined);
     },
   };
 }

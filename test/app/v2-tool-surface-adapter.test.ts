@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { ToolEditor } from '@opencode/plugin/promise/tool';
 
 import { registerWorkflowTools } from '../../src/app/v2-tool-surface-adapter.ts';
 import type { WorkflowToolSurfacePorts } from '../../src/app/workflow-tool-surface.ts';
@@ -59,14 +60,20 @@ function createMockPorts(): WorkflowToolSurfacePorts {
 }
 
 function fakeEditor(): {
-  editor: { add: (tool: unknown) => void };
+  editor: ToolEditor;
   tools: CapturedTool[];
 } {
   const tools: CapturedTool[] = [];
+  const editor: ToolEditor = {
+    list: () => [],
+    get: () => undefined,
+    namespace: () => {},
+    add: (tool) => tools.push(tool as unknown as CapturedTool),
+    update: () => {},
+    remove: () => {},
+  };
   return {
-    editor: {
-      add: (tool) => tools.push(tool as CapturedTool),
-    },
+    editor,
     tools,
   };
 }
@@ -88,7 +95,7 @@ describe('V2ToolSurfaceAdapter', () => {
       const ports = createMockPorts();
       const { editor, tools } = fakeEditor();
 
-      registerWorkflowTools(editor as any, ports);
+      registerWorkflowTools(editor, ports);
 
       expect(tools.map((t) => t.name)).toEqual([
         'workflow-list',
@@ -106,7 +113,7 @@ describe('V2ToolSurfaceAdapter', () => {
     // tool call dies with `… .then is not a function` before the tool runs.
     it('returns a Promise from execute, as the promise ToolEditor requires', async () => {
       const { editor, tools } = fakeEditor();
-      registerWorkflowTools(editor as any, createMockPorts());
+      registerWorkflowTools(editor, createMockPorts());
 
       const wl = tools.find((t) => t.name === 'workflow-list')!;
       const returned = wl.execute({}, { sessionID: 'ses-test', agent: '' });
@@ -123,7 +130,7 @@ describe('V2ToolSurfaceAdapter', () => {
       const { editor, tools } = fakeEditor();
       const ports = createMockPorts();
 
-      registerWorkflowTools(editor as any, ports);
+      registerWorkflowTools(editor, ports);
 
       const wl = tools.find((t) => t.name === 'workflow-list')!;
       expect(wl.description).toContain('List all available workflow profiles');
@@ -142,7 +149,7 @@ describe('V2ToolSurfaceAdapter', () => {
   describe('tool metadata', () => {
     it('assigns V2-compatible JSON Schema input to every tool', () => {
       const { editor, tools } = fakeEditor();
-      registerWorkflowTools(editor as any, createMockPorts());
+      registerWorkflowTools(editor, createMockPorts());
 
       for (const tool of tools) {
         expect(tool.input).toMatchObject({
@@ -154,7 +161,7 @@ describe('V2ToolSurfaceAdapter', () => {
 
     it('assigns a non-empty description to every tool', () => {
       const { editor, tools } = fakeEditor();
-      registerWorkflowTools(editor as any, createMockPorts());
+      registerWorkflowTools(editor, createMockPorts());
 
       for (const tool of tools) {
         expect(tool.description.length).toBeGreaterThan(5);
@@ -166,7 +173,7 @@ describe('V2ToolSurfaceAdapter', () => {
     // the model answers it by calling the tool again, forever.
     it('declares a string output schema for every tool', () => {
       const { editor, tools } = fakeEditor();
-      registerWorkflowTools(editor as any, createMockPorts());
+      registerWorkflowTools(editor, createMockPorts());
 
       for (const tool of tools) {
         expect(tool.output).toEqual({ type: 'string' });
@@ -179,7 +186,7 @@ describe('V2ToolSurfaceAdapter', () => {
       const { editor, tools } = fakeEditor();
       const ports = createMockPorts();
 
-      registerWorkflowTools(editor as any, ports);
+      registerWorkflowTools(editor, ports);
 
       const wc = tools.find((t) => t.name === 'workflow-create')!;
       const input = wc.input as { properties: Record<string, unknown> };
@@ -196,7 +203,7 @@ describe('V2ToolSurfaceAdapter', () => {
       const ports = createMockPorts();
       ports.profilesDir = '/nonexistent-path-12345';
 
-      registerWorkflowTools(editor as any, ports);
+      registerWorkflowTools(editor, ports);
 
       const wl = tools.find((t) => t.name === 'workflow-list')!;
       const result = await runTool(wl);

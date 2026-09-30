@@ -14,7 +14,6 @@ import {
   type Host,
   type HostOptions,
 } from '../harness.ts';
-import { pluginObservationFrom } from './transport.ts';
 import type { HostTransport } from './transport.ts';
 import { createLegacyHttpTransport } from './v1-transport.ts';
 import { createSessionClientTransport } from './v2-transport.ts';
@@ -34,56 +33,6 @@ import type {
  * минутный предел резал бы нормальную работу (это выяснилось живым прогоном `no-session`).
  * Патология, ради которой предел и введён, была 1123 s — она ловится и здесь.
  */
-const DEFAULT_TURN_BUDGET_MS = 120_000;
-
-function turnBudgetMs(env: Record<string, string | undefined> = process.env): number {
-  const raw = env.HOST_SMOKE_PROMPT_TIMEOUT_MS;
-  if (raw === undefined || raw.trim() === '') return DEFAULT_TURN_BUDGET_MS;
-  const value = Number(raw);
-  return Number.isFinite(value) && value > 0 ? value : DEFAULT_TURN_BUDGET_MS;
-}
-
-/**
- * Предел на весь ход, а не на отдельный вызов хоста.
- *
- * Клиент V2 ограничивает каждый свой вызов (prompt, wait, обход форм), но ход состоит из
- * нескольких, и залипший вызов между ними оставлял шаг ждать минуты: в живом прогоне один ход
- * шёл 1123 s при объявленном бюджете 60 s. Поэтому бюджет применяется здесь, поверх стратегии,
- * и действует одинаково для обоих хостов.
- *
- * Истёкший ход — это `timed-out` ход, а не выдуманная ошибка: runner уже умеет читать исход
- * такого хода из состояния и никогда не повторяет мутацию, чтобы выяснить его.
- */
-async function promptWithinBudget(
-  work: Promise<PromptResult>,
-  budgetMs: number
-): Promise<PromptResult> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      work,
-      new Promise<PromptResult>((resolve) => {
-        timer = setTimeout(
-          () =>
-            resolve({
-              turn: {
-                status: 'timed-out',
-                transcript: `ход хоста не завершился за бюджет промпта (${budgetMs} мс)`,
-                parts: [],
-                toolCalls: [],
-              },
-              workflowState: null,
-              pluginEvidence: pluginObservationFrom([], 'timed-out'),
-            }),
-          budgetMs
-        );
-      }),
-    ]);
-  } finally {
-    if (timer !== undefined) clearTimeout(timer);
-  }
-}
-
 /** Profile every canonical scenario runs under unless it names its own. */
 export const DEFAULT_PROFILE = 'smoke';
 
@@ -108,6 +57,7 @@ export interface SmokeHost {
    */
   readWorkflowState(session: SmokeSession): Promise<SmokeWorkflowState | null>;
   closeSession(session: SmokeSession): Promise<void>;
+  waitForStateChange?(session: SmokeSession, signal?: AbortSignal): Promise<void>;
 }
 
 /** A running host: the scenario contract plus the lifecycle the CLI owns. */
@@ -160,8 +110,6 @@ export interface SmokeHostOptions {
   git?: boolean;
   /** Agent every prompt of this host runs as. */
   agent?: string;
-  /** Budget one V2 prompt may take; V1 has no client-side budget of its own. */
-  promptTimeoutMs?: number;
 }
 
 /**
@@ -191,9 +139,6 @@ export function createTransport(host: Host, options: SmokeHostOptions): HostTran
   if (options.kind === 'v2') {
     return createSessionClientTransport(host, {
       ...(options.agent === undefined ? {} : { agent: options.agent }),
-      ...(options.promptTimeoutMs === undefined
-        ? {}
-        : { promptTimeoutMs: options.promptTimeoutMs }),
     });
   }
   return createLegacyHttpTransport(host, {
@@ -264,10 +209,7 @@ export function createSmokeHost(
     createSession: (title) => transport.createSession(title),
     runPrompt: async (session, input) => {
       owned(session);
-      const result = await promptWithinBudget(
-        transport.prompt(session, input),
-        input.turnBudgetMs ?? turnBudgetMs()
-      );
+      const result = await transport.prompt(session, input);
       // Ход, прерванный бюджетом, ничего не наблюдал по построению: он не доказательство
       // работы хоста и не повод его требовать.
       if (result.turn.status === 'timed-out' && result.pluginEvidence.hostOperation === 'unknown') {
@@ -292,6 +234,14 @@ export function createSmokeHost(
       owned(session);
       await transport.removeSession(session);
     },
+    ...(transport.waitForStateChange === undefined
+      ? {}
+      : {
+          waitForStateChange: async (session: SmokeSession): Promise<void> => {
+            owned(session);
+            await transport.waitForStateChange?.(session);
+          },
+        }),
     stop: runtime.stop,
   };
 }

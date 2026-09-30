@@ -1,12 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import {
-  PromptTimeoutError,
-  createV2SmokeClient,
-  createV2SmokeTransport,
-  planFormAnswer,
-  promptTimeoutMs,
-} from '../src/v2-client.ts';
+import { createV2SmokeClient, createV2SmokeTransport, planFormAnswer } from '../src/v2-client.ts';
 import type { Host } from '../src/harness.ts';
 
 /** Минимальные формы: план ответа читает только `type`, `key`, `label` и `value`. */
@@ -258,111 +252,15 @@ describe('the session agent', () => {
   });
 });
 
-describe('the prompt budget', () => {
-  test('defaults to a bounded budget, not an unbounded wait', () => {
-    expect(promptTimeoutMs({})).toBe(60_000);
-    expect(promptTimeoutMs({ HOST_SMOKE_PROMPT_TIMEOUT_MS: '' })).toBe(60_000);
-  });
-
-  test('takes the budget the environment asks for', () => {
-    expect(promptTimeoutMs({ HOST_SMOKE_PROMPT_TIMEOUT_MS: '5000' })).toBe(5_000);
-  });
-
-  test('falls back to the default rather than accepting an unusable budget', () => {
-    expect(promptTimeoutMs({ HOST_SMOKE_PROMPT_TIMEOUT_MS: 'soon' })).toBe(60_000);
-    expect(promptTimeoutMs({ HOST_SMOKE_PROMPT_TIMEOUT_MS: '0' })).toBe(60_000);
-    expect(promptTimeoutMs({ HOST_SMOKE_PROMPT_TIMEOUT_MS: '-1' })).toBe(60_000);
-  });
-
-  test('stops waiting on a prompt that outlives it, and says what was pending', async () => {
-    const originalFetch = globalThis.fetch;
-    const routes: string[] = [];
-    globalThis.fetch = Object.assign(
-      async (input: RequestInfo | URL, init?: RequestInit) => {
-        const url = String(input);
-        routes.push(`${init?.method ?? 'GET'} ${new URL(url).pathname}`);
-        if (url.includes('/wait')) return new Promise<Response>(() => {});
-        if (url.includes('/prompt')) return dataResponse({ id: 'msg-1', sessionID: 'ses-1' });
-        return dataResponse({});
-      },
-      { preconnect: originalFetch.preconnect }
-    );
-    try {
-      const client = createV2SmokeClient(fakeHost(), { promptTimeoutMs: 50 });
-
-      const failure = client.prompt('ses-1', 'Call the tool `workflow-create`.');
-      await expect(failure).rejects.toThrow(PromptTimeoutError);
-      await expect(failure).rejects.toThrow('session.wait не завершился за 50 мс');
-      await expect(failure).rejects.toThrow('у хоста нет ожидающей формы');
-      // Завис именно wait, а не enqueue.
-      expect(routes.some((route) => route.endsWith('/wait'))).toBe(true);
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-  });
-
-  test('reports a form the host is still waiting on when the budget runs out', async () => {
-    const originalFetch = globalThis.fetch;
-    const routes: string[] = [];
-    const repliedForms: string[] = [];
-    globalThis.fetch = Object.assign(
-      async (input: RequestInfo | URL, init?: RequestInit) => {
-        const url = String(input);
-        routes.push(`${init?.method ?? 'GET'} ${new URL(url).pathname}`);
-        if (url.includes('/wait')) return new Promise<Response>(() => {});
-        if (url === 'http://127.0.0.1:1/api/session') {
-          const body = JSON.parse(String(init?.body)) as {
-            agent?: string;
-            location?: { directory?: string };
-          };
-          expect(body.agent).toBe('orchestrator');
-          expect(body.location?.directory).toBe(process.cwd());
-        }
-        if (url.includes('/event')) {
-          const events = [
-            { type: 'session.created', data: { sessionID: 'child', parentID: 'ses-1' } },
-            { type: 'session.created', data: { sessionID: 'grandchild', parentID: 'child' } },
-            { type: 'session.created', data: { sessionID: 'independent', parentID: 'other' } },
-            ...['ses-1', 'child', 'grandchild', 'independent'].map((sessionID, index) => ({
-              type: 'form.created',
-              data: { form: { id: `form-${index + 1}`, sessionID, title: 'Approve?', fields: [] } },
-            })),
-          ]
-            .map((event) => `data: ${JSON.stringify(event)}\n\n`)
-            .join('');
-          return new Response(events, { headers: { 'content-type': 'text/event-stream' } });
-        }
-        if (url.includes('/reply')) {
-          repliedForms.push(new URL(url).pathname.split('/').at(-2) ?? '');
-          return new Response(null, { status: 204 });
-        }
-        return dataResponse({});
-      },
-      { preconnect: originalFetch.preconnect }
-    );
-    try {
-      const client = createV2SmokeClient(fakeHost(), { promptTimeoutMs: 50 });
-
-      await expect(client.prompt('ses-1', 'go')).rejects.toThrow('хост всё ещё ожидает 3 форм');
-      expect(repliedForms).toEqual(['form-1', 'form-2', 'form-3']);
-      expect(repliedForms).not.toContain('form-4');
-      expect(routes.some((route) => route === 'GET /api/event')).toBe(true);
-      expect(routes.some((route) => route.startsWith('GET ') && route.includes('/form'))).toBe(
-        false
-      );
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-  });
-});
-
 describe('execution and step SSE events', () => {
   test('records the execution started and succeeded events from the SSE stream', async () => {
     const originalFetch = globalThis.fetch;
+    const routes: string[] = [];
     const events: Array<{ type: string; data: Record<string, unknown> }> = [];
     globalThis.fetch = Object.assign(
       async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
+        routes.push(`${init?.method ?? 'GET'} ${new URL(url).pathname}`);
         if (url.includes('/event')) {
           const sse = [
             { type: 'session.created', data: { sessionID: 'ses-1' } },
@@ -383,13 +281,14 @@ describe('execution and step SSE events', () => {
       { preconnect: originalFetch.preconnect }
     );
     try {
-      const client = createV2SmokeClient(fakeHost(), { promptTimeoutMs: 50 });
+      const client = createV2SmokeClient(fakeHost());
 
-      await expect(client.prompt('ses-1', 'go')).rejects.toThrow(PromptTimeoutError);
+      await client.prompt('ses-1', 'go');
 
       const execution = client.lastExecution();
       expect(execution).not.toBeNull();
       expect(execution?.status).toBe('succeeded');
+      expect(routes.some((route) => route.endsWith('/wait'))).toBe(false);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -423,9 +322,9 @@ describe('execution and step SSE events', () => {
       { preconnect: originalFetch.preconnect }
     );
     try {
-      const client = createV2SmokeClient(fakeHost(), { promptTimeoutMs: 50 });
+      const client = createV2SmokeClient(fakeHost());
 
-      await expect(client.prompt('ses-1', 'go')).rejects.toThrow(PromptTimeoutError);
+      await expect(client.prompt('ses-1', 'go')).rejects.toThrow('session execution failed');
 
       const execution = client.lastExecution();
       expect(execution).not.toBeNull();
@@ -498,21 +397,22 @@ describe('execution and step SSE events', () => {
       { preconnect: originalFetch.preconnect }
     );
     try {
-      const client = createV2SmokeClient(fakeHost(), { promptTimeoutMs: 50 });
+      const client = createV2SmokeClient(fakeHost());
 
-      await expect(client.prompt('ses-1', 'go')).rejects.toThrow(PromptTimeoutError);
+      await client.prompt('ses-1', 'go');
 
       const steps = client.lastStepEvents();
-      expect(steps).toHaveLength(3);
+      expect(steps).toHaveLength(4);
       expect(steps[0]?.status).toBe('started');
       expect(steps[0]?.assistantMessageID).toBe('msg-1');
       expect(steps[0]?.agent).toBe('orchestrator');
       expect(steps[0]?.model).toEqual({ providerID: 'crpt', modelID: 'deepseek-v4' });
       expect(steps[1]?.status).toBe('ended');
       expect(steps[1]?.finish).toBe('tool-calls');
-      expect(steps[2]?.status).toBe('failed');
-      expect(steps[2]?.error?.type).toBe('provider.timeout');
-      expect(steps[2]?.error?.message).toBe('LLM timed out');
+      expect(steps[2]?.status).toBe('started');
+      expect(steps[3]?.status).toBe('failed');
+      expect(steps[3]?.error?.type).toBe('provider.timeout');
+      expect(steps[3]?.error?.message).toBe('LLM timed out');
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -553,17 +453,21 @@ describe('execution and step SSE events', () => {
       { preconnect: originalFetch.preconnect }
     );
     try {
-      const client = createV2SmokeClient(fakeHost(), { promptTimeoutMs: 50 });
+      const client = createV2SmokeClient(fakeHost());
 
       // Первый prompt с execution.started и step.started
-      await expect(client.prompt('ses-1', 'first')).rejects.toThrow(PromptTimeoutError);
+      await expect(client.prompt('ses-1', 'first')).rejects.toThrow(
+        'V2 SSE завершился до terminal-события'
+      );
       expect(client.lastExecution()?.status).toBe('started');
       expect(client.lastStepEvents().length).toBe(1);
       expect(client.lastStepEvents()[0]?.status).toBe('started');
 
       // Второй prompt должен сбросить события. SSE возвращает только session.created,
       // поэтому lastExecution должен быть сброшен.
-      await expect(client.prompt('ses-1', 'second')).rejects.toThrow(PromptTimeoutError);
+      await expect(client.prompt('ses-1', 'second')).rejects.toThrow(
+        'V2 SSE завершился до terminal-события'
+      );
       expect(client.lastExecution()).toBeNull();
       expect(client.lastStepEvents()).toEqual([]);
     } finally {
@@ -597,9 +501,9 @@ describe('execution and step SSE events', () => {
       { preconnect: originalFetch.preconnect }
     );
     try {
-      const client = createV2SmokeClient(fakeHost(), { promptTimeoutMs: 50 });
+      const client = createV2SmokeClient(fakeHost());
 
-      await expect(client.prompt('ses-1', 'go')).rejects.toThrow(PromptTimeoutError);
+      await client.prompt('ses-1', 'go');
 
       // Должен записать execution события только для ses-1
       expect(client.lastExecution()?.status).toBe('succeeded');

@@ -7,7 +7,7 @@
  */
 
 import { log as harnessLog, type Host } from '../harness.ts';
-import { PromptTimeoutError, createV2SmokeClient, type V2SmokeClient } from '../v2-client.ts';
+import { createV2SmokeClient, type V2SmokeClient } from '../v2-client.ts';
 import {
   buildPromptResult,
   compactParts,
@@ -28,8 +28,6 @@ import type {
 export interface SessionClientTransportOptions {
   /** Agent the session is switched to, the V2 equivalent of V1's per-message agent. */
   agent?: string;
-  /** How long one prompt may run before the client reports it instead of waiting. */
-  promptTimeoutMs?: number;
 }
 
 /** Untrusted host payload read field by field; a declared type never validates JSON. */
@@ -72,9 +70,6 @@ export function createSessionClientTransport(
   makeClient: (host: Host) => V2SmokeClient = (target) =>
     createV2SmokeClient(target, {
       ...(options.agent === undefined ? {} : { agent: options.agent }),
-      ...(options.promptTimeoutMs === undefined
-        ? {}
-        : { promptTimeoutMs: options.promptTimeoutMs }),
     })
 ): HostTransport {
   const client = makeClient(host);
@@ -88,9 +83,6 @@ export function createSessionClientTransport(
 
     async prompt(session: SmokeSession, input: PromptInput): Promise<PromptResult> {
       const notes: string[] = [];
-      let timedOut = false;
-      let error = '';
-      let pendingInteraction = false;
 
       // V2 carries the agent on the session, so a step that must run as another agent — the
       // worker the task guard refuses — is switched to before its prompt.
@@ -112,14 +104,7 @@ export function createSessionClientTransport(
         'debug',
         `say request: session=${session.id} instruction.length=${input.text.length}`
       );
-      try {
-        await client.prompt(session.id, input.text, input.decision ?? 'grant', input.turnBudgetMs);
-      } catch (caught) {
-        if (!(caught instanceof PromptTimeoutError)) throw caught;
-        timedOut = true;
-        error = caught.message;
-        pendingInteraction = caught.pendingForms > 0;
-      }
+      await client.prompt(session.id, input.text, input.decision ?? 'grant');
 
       let parts: NormalizedPart[] = [];
       try {
@@ -134,10 +119,8 @@ export function createSessionClientTransport(
 
       const result = buildPromptResult(
         {
-          status: timedOut ? 'timed-out' : 'completed',
+          status: 'completed',
           parts,
-          error,
-          ...(pendingInteraction ? { pendingInteraction: true } : {}),
           notes: [...notes, ...client.offScript()],
           interactions: client.answeredForms().map((form) => ({
             kind: 'form' as const,
@@ -165,6 +148,11 @@ export function createSessionClientTransport(
 
     readWorkflowState(session: SmokeSession): Promise<SmokeWorkflowState | null> {
       return readNormalizedWorkflowState(host, session.id);
+    },
+
+    waitForStateChange(session: SmokeSession, signal?: AbortSignal): Promise<void> {
+      if (client.waitForStateChange === undefined) return Promise.resolve();
+      return client.waitForStateChange(session.id, signal);
     },
 
     async removeSession(session: SmokeSession): Promise<void> {
