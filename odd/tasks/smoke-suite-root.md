@@ -121,7 +121,7 @@ scripts/host-smoke/*.ts` returned nothing, so the refactor declares a boundary
   those, so it costs nothing and reads as a normal project. Verified before moving:
   no glob outside `smoke/**` matches a nested `src/`.
 - The boundary rule was rewritten after it caught itself: a literal `../src/*` bans
-  the suite's *own* sources from its tests once they live in `smoke/src/`. It now bans
+  the suite's _own_ sources from its tests once they live in `smoke/src/`. It now bans
   leaving `smoke/` (one block per depth) plus the package name, which is what the
   boundary actually means.
 - Commit split: the move is one atomic commit (code alone would leave the tests

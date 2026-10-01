@@ -55,6 +55,7 @@ describe('workflow tool surface characterization', () => {
       'workflow-tasks-get',
       'workflow-tasks-set-status',
       'workflow-tasks-resolve-decision',
+      'workflow-gate-set',
     ]);
 
     expect(
@@ -106,6 +107,14 @@ describe('workflow tool surface characterization', () => {
         description:
           'Resolve a pending workflow task retry decision. Accepts an optional decisionId selector. Without it, selects the single unique pending retry context; if zero or multiple are found, outputs diagnostic candidate IDs without mutating.',
         argumentNames: ['decision', 'maximum', 'decisionId'],
+        hasExecuteCallback: true,
+      },
+      'workflow-gate-set': {
+        description:
+          'Set the result of a declared workflow gate and evaluate the transition. ' +
+          'Records the gate verdict in the current loop run or outer stage, ' +
+          'then attempts to advance the task if all gates are met.',
+        argumentNames: ['gate', 'status'],
         hasExecuteCallback: true,
       },
     });
