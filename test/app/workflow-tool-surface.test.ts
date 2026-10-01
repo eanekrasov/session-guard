@@ -45,8 +45,8 @@ describe('WorkflowToolSurface', () => {
       'workflow-tasks-set',
       'workflow-tasks-get',
       'workflow-tasks-set-status',
-      'workflow-gate-set',
       'workflow-tasks-resolve-decision',
+      'workflow-gate-set',
     ]);
 
     const tools = surface.createTools();
@@ -101,7 +101,7 @@ describe('WorkflowToolSurface', () => {
 
       expect(typeof result).toBe('object');
       expect(result).toHaveProperty('output');
-      expect(String(result)).toContain('session');
+      expect((result as { output: string }).output).toContain('session');
     });
   });
 });

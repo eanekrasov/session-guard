@@ -35,6 +35,7 @@ import type {
   MutationTask,
 } from '../session/session-schema.ts';
 import { isOpenLoopRun, nextLoopRunId } from '../session/helpers.ts';
+import { WorkflowGateService } from './workflow-gate-service.ts';
 
 type SdkToolInput = Parameters<typeof toolFn>[0];
 
@@ -173,6 +174,23 @@ class WorkflowToolSurfaceImpl implements WorkflowToolSurface {
           },
           ctx: ToolContext
         ) => this.handleTasksResolveDecision(args, ctx),
+      }),
+      'workflow-gate-set': tool({
+        description:
+          'Set the result of a declared workflow gate and evaluate the transition. ' +
+          'Records the gate verdict in the current loop run or outer stage, ' +
+          'then attempts to advance the task if all gates are met.',
+        args: {
+          gate: z
+            .string()
+            .min(1)
+            .describe('Gate name declared by the current stage (e.g. "review")'),
+          status: z
+            .enum(['pass', 'fail'])
+            .describe('Verdict: "pass" for confirmed, "fail" for rejected'),
+        },
+        execute: async (args: { gate: string; status: 'pass' | 'fail' }, ctx: ToolContext) =>
+          this.handleGateSet(args, ctx),
       }),
     };
   }
@@ -535,6 +553,51 @@ class WorkflowToolSurfaceImpl implements WorkflowToolSurface {
     } catch (error) {
       return { output: error instanceof Error ? error.message : String(error) };
     }
+  }
+
+  private async handleGateSet(
+    args: { gate: string; status: 'pass' | 'fail' },
+    ctx: { sessionID: string; agent?: string }
+  ): Promise<ToolResult> {
+    const session = await this.ports.sessionContext.load(ctx.sessionID);
+    if (!session) {
+      return { output: 'No workflow session found. Call workflow-create first.' };
+    }
+
+    const gateService = new WorkflowGateService({
+      resolveEngine: async (profileId: string, schemaId: string) =>
+        this.ports.mutationOrchestrator.resolveEngine(profileId, schemaId),
+      log: this.ports.log,
+    });
+
+    const operation = session.activeOperations[Object.keys(session.activeOperations ?? {})[0]];
+    const callID = operation?.callId;
+
+    const result = await gateService.applyGate({
+      session,
+      gate: args.gate,
+      status: args.status,
+      reportingAgent: ctx.agent,
+      callID,
+      operation,
+    });
+
+    return {
+      output: `Gate '${args.gate}' — ${result.kind}`,
+      metadata: {
+        sessionId: session.sessionId,
+        gate: args.gate,
+        status: args.status,
+        kind: result.kind,
+        ...(result.kind === 'recorded'
+          ? {
+              verdict: result.verdict,
+            }
+          : result.kind === 'rejected'
+            ? { reason: result.reason }
+            : {}),
+      },
+    };
   }
 
   private async refuseUnlessTaskController(
