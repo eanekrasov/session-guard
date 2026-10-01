@@ -200,4 +200,35 @@ describe('WorkflowResultSettler', () => {
       expect.objectContaining({ stage: 'review', id: 'review', status: 'passed' }),
     ]);
   });
+  test('rejects a gate not declared by the current loop stage', async () => {
+    const session = sessionWithRun();
+    const gateCheckEngine = {
+      getLoopStage: () => ({ stages: { verify: { gates: ['review'] } } }),
+      getStages: () => ({}),
+      evaluateGuard: () => true,
+    } as never;
+
+    const settler = new WorkflowResultSettlerImpl({
+      resolveEngine: async () => gateCheckEngine,
+      log: async () => undefined,
+    });
+
+    const output = {
+      output: '<workflow-result>{"gate":"qa","status":"pass"}</workflow-result>',
+    };
+    await settler.settle({
+      tool: 'task',
+      session,
+      callID: 'call-1',
+      args: { subagent_type: 'reviewer' },
+      output,
+      projectDir: '/tmp/test-project',
+      profilesDir: '/tmp/test-profiles',
+      operation: session.activeOperations['call-1'] as ActiveOperation,
+    });
+
+    // Gate 'qa' is not in ['review'], so nothing should be recorded
+    expect(session.loopRuns['run-1']?.gates).toEqual({});
+    expect(output.output).not.toContain('[workflow-result-replayed]');
+  });
 });

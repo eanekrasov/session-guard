@@ -45,6 +45,7 @@ describe('WorkflowToolSurface', () => {
       'workflow-tasks-set',
       'workflow-tasks-get',
       'workflow-tasks-set-status',
+      'workflow-gate-set',
       'workflow-tasks-resolve-decision',
     ]);
 
@@ -70,5 +71,37 @@ describe('WorkflowToolSurface', () => {
 
     expect(surface.createTools()['workflow-create']).toBeDefined();
     expect(typeof surface.createTools()['workflow-create']!.execute).toBe('function');
+  });
+
+  describe('workflow-gate-set', () => {
+    it('registers workflow-gate-set with gate and status arguments', () => {
+      const surface = createWorkflowToolSurface(createMockPorts());
+      const tools = surface.createTools();
+      const gateSet = tools['workflow-gate-set'];
+
+      expect(gateSet).toBeDefined();
+      expect(gateSet!.description).toBeTruthy();
+      expect(typeof gateSet!.execute).toBe('function');
+
+      const args = gateSet!.args ?? {};
+      expect(args).toHaveProperty('gate');
+      expect(args).toHaveProperty('status');
+    });
+
+    it('reports a missing workflow session without mutating state', async () => {
+      const surface = createWorkflowToolSurface(createMockPorts());
+
+      const result = await surface
+        .createTools()
+        ['workflow-gate-set']!.execute({ gate: 'review', status: 'pass' }, {
+          sessionID: 'nonexistent',
+          messageID: 'msg-1',
+          agent: 'test',
+        } as never);
+
+      expect(typeof result).toBe('object');
+      expect(result).toHaveProperty('output');
+      expect(String(result)).toContain('session');
+    });
   });
 });
