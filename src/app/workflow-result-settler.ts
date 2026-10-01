@@ -1,38 +1,15 @@
-import { approve } from '../domain/approvals.ts';
-import { toGuardContext, type SessionGuardEngine } from '../domain/engine.ts';
 import { parseWorkflowResult } from '../domain/evidence.ts';
-import { nextTaskStage, TASK_DONE } from '../domain/task-movement.ts';
-import { agentIsAllowed } from './agent-names.ts';
 import type { LogFn } from './logger.ts';
 import type { MutationOrchestrator } from './mutation-orchestrator.ts';
 import { computeChangeScope, changedAgainstHead } from './change-scope.ts';
 import { validateFilesForProfile, SUPPORTED_EXTENSIONS } from './invariants.ts';
-import {
-  isOpenLoopRun,
-  findTask,
-  removeActiveTaskContext,
-  setGateStatus,
-  upsertActiveTaskContext,
-} from '../session/helpers.ts';
-import type {
-  ActiveOperation,
-  LoopRun,
-  MutationTask,
-  WorkflowSession,
-} from '../session/session-schema.ts';
-import {
-  firstNestedStageId,
-  nestedStages,
-  type StageDef,
-  type TransitionDef,
-} from '../schema/types.ts';
+import { findTask, isOpenLoopRun } from '../session/helpers.ts';
+import type { ActiveOperation, WorkflowSession } from '../session/session-schema.ts';
 import { matchesScope } from './scope-match.ts';
 import { resolve, relative, isAbsolute } from 'node:path';
 import type { TaskToolArgs } from './tool-args.ts';
 import { existsSync } from 'node:fs';
-
-const DEFAULT_TASK_RETRY_MAXIMUM = 3;
-const RETRY_EXHAUSTED_DECISION_KIND = 'retry_exhausted';
+import { WorkflowGateService, type GateServiceDependencies } from './workflow-gate-service.ts';
 
 export interface WorkflowResultSettlerInput {
   tool: string;
@@ -50,30 +27,28 @@ export interface WorkflowResultSettler {
   settle(input: WorkflowResultSettlerInput): Promise<void>;
 }
 
-interface SettlerDependencies {
-  resolveEngine: (profileId: string, schemaId: string) => Promise<SessionGuardEngine>;
-  log: LogFn;
+type SettlerDependencies = GateServiceDependencies & {
   load?: (sessionId: string) => Promise<WorkflowSession | null>;
   save?: (session: WorkflowSession) => Promise<void>;
-}
-
-type GateOwner =
-  | { kind: 'run'; run: LoopRun; loopStage: StageDef; stage: StageDef | undefined }
-  | { kind: 'stage'; stageId: string; stage: StageDef }
-  | { kind: 'refused'; stageLabel: string; declaredGates: string[] };
+};
 
 export class WorkflowResultSettlerImpl implements WorkflowResultSettler {
   private readonly resolveEngine: SettlerDependencies['resolveEngine'];
   private readonly log: LogFn;
+  private readonly gateService: WorkflowGateService;
 
   constructor(dependencies: SettlerDependencies | MutationOrchestrator, log?: LogFn) {
     if ('resolveEngine' in dependencies && log === undefined) {
       this.resolveEngine = dependencies.resolveEngine.bind(dependencies);
       this.log = async () => undefined;
-      return;
+    } else {
+      this.resolveEngine = (dependencies as MutationOrchestrator).resolveEngine.bind(dependencies);
+      this.log = log ?? (async () => undefined);
     }
-    this.resolveEngine = (dependencies as MutationOrchestrator).resolveEngine.bind(dependencies);
-    this.log = log ?? (async () => undefined);
+    this.gateService = new WorkflowGateService({
+      resolveEngine: this.resolveEngine,
+      log: this.log,
+    });
   }
 
   async settle(input: WorkflowResultSettlerInput): Promise<void> {
@@ -231,6 +206,7 @@ export class WorkflowResultSettlerImpl implements WorkflowResultSettler {
     ].length;
     const reportingAgent = this.dispatchedAgent(args);
     const operation = session.activeOperations[callID];
+
     void this.log('debug', 'workflow-result.settlement.started', {
       sessionID: session.sessionId,
       callID,
@@ -254,51 +230,6 @@ export class WorkflowResultSettlerImpl implements WorkflowResultSettler {
       currentStage: session.currentStage,
       tool: 'task',
     });
-    void this.log('debug', 'Workflow result received', {
-      sessionID: session.sessionId,
-      callID,
-      reportingAgent,
-      currentStage: session.currentStage,
-      parsedGate: parsed?.gate,
-      parsedStatus: parsed?.status,
-      tool: 'task',
-    });
-    session.processedResultCallIDs ??= [];
-    if (session.processedResultCallIDs.includes(callID)) {
-      output.output +=
-        `\n\n[workflow-result-replayed]\n` +
-        `The result for ${callID} has already been recorded. Nothing was recorded again.`;
-      void this.log('warn', 'Workflow result replayed', { sessionID: session.sessionId, callID });
-      return;
-    }
-
-    if (parsed || session.activeOperations[callID]) {
-      session.processedResultCallIDs.push(callID);
-      if (session.processedResultCallIDs.length > 500) {
-        session.processedResultCallIDs.splice(0, session.processedResultCallIDs.length - 500);
-      }
-    }
-
-    const provenance = session.verdictProvenance?.[callID];
-    const stampedRunId = provenance?.runId ?? operation?.runId;
-    const stampedRound = provenance?.round ?? operation?.round;
-    if (stampedRunId !== undefined && stampedRound !== undefined) {
-      const stamped = session.loopRuns[stampedRunId];
-      if (stamped && (!isOpenLoopRun(stamped) || stampedRound !== stamped.round)) {
-        output.output +=
-          `\n\n[workflow-result-stale]\n` +
-          `This result was produced for an earlier round of ${stamped.taskId}, ` +
-          `which has since moved to ${stamped.stage}. Nothing was recorded.`;
-        void this.log('warn', 'Workflow result from a finished round', {
-          sessionID: session.sessionId,
-          taskId: stamped.taskId,
-          resultRound: stampedRound,
-          currentRound: stamped.round,
-        });
-        this.releaseVerdict(session, callID);
-        return;
-      }
-    }
 
     if (!parsed) {
       void this.log('debug', 'workflow-result.settlement.missing', {
@@ -307,7 +238,7 @@ export class WorkflowResultSettlerImpl implements WorkflowResultSettler {
         currentStage: session.currentStage,
         operation: operation?.taskId ?? null,
       });
-      const silent = this.runForCall(session, provenance, operation);
+      const silent = this.runForCall(session, operation);
       if (silent) {
         output.output +=
           `\n\n[workflow-result-missing]\n` +
@@ -318,359 +249,65 @@ export class WorkflowResultSettlerImpl implements WorkflowResultSettler {
       return;
     }
 
-    const owner = await this.resolveGateOwner(session, parsed.gate, provenance, operation);
-    void this.log('debug', 'workflow-result.settlement.owner', {
-      sessionID: session.sessionId,
-      callID,
+    // Delegate to the shared gate service (same logic used by workflow-gate-set tool)
+    const result = await this.gateService.applyGate({
+      session,
       gate: parsed.gate,
       status: parsed.status,
-      owner: owner.kind,
-      currentStage: session.currentStage,
-      revision: session.revision,
+      reportingAgent,
+      callID,
+      operation,
     });
-    if (owner.kind === 'refused') {
-      void this.log('warn', 'Workflow result rejected: no matching stage owner', {
-        sessionID: session.sessionId,
-        callID,
-        gate: parsed.gate,
-        currentStage: session.currentStage,
-        stageLabel: owner.stageLabel,
-        declaredGates: owner.declaredGates,
-      });
-      output.output +=
-        `\n\n[workflow-result-rejected]\n` +
-        (owner.declaredGates.length > 0
-          ? `${owner.stageLabel} is waiting on [${owner.declaredGates.join(', ')}], ` +
-            `and this result reports '${parsed.gate}'. Nothing was recorded.`
-          : `No stage in scope declares the gate '${parsed.gate}'. Nothing was recorded.`);
-      this.releaseVerdict(session, callID);
-      return;
-    }
-    if (owner.kind === 'stage') {
-      await this.recordStageGate(session, owner, parsed, reportingAgent, output);
-      this.releaseVerdict(session, callID);
-      return;
-    }
 
-    const { run, loopStage, stage: currentStage } = owner;
-    const task = findTask(session, run.taskId);
-    const declaredGates = currentStage?.gates ?? [];
-    const mayMove = operation === undefined || operation.status === 'running';
-    if (operation?.checks) run.checks = operation.checks;
-
-    if (task && declaredGates.length > 0) {
-      if (!this.mayVerify(reportingAgent, currentStage, session.profileId)) {
-        output.output +=
-          `\n\n[workflow-result-rejected]\n` +
-          `Stage ${run.stage} accepts results from ` +
-          `[${(currentStage?.allowedAgents ?? []).join(', ') || '(no roster)'}], ` +
-          `and this one came from '${reportingAgent ?? '(unknown agent)'}'. Nothing was recorded.`;
-        delete session.activeOperations[callID];
-        return;
-      }
-      if (!declaredGates.includes(parsed.gate)) {
-        output.output +=
-          `\n\n[workflow-result-rejected]\n` +
-          `Stage ${run.stage} is waiting on [${declaredGates.join(', ')}], ` +
-          `and this result reports '${parsed.gate}'. Nothing was recorded.`;
-        delete session.activeOperations[callID];
-        return;
-      }
-      run.gates[parsed.gate] = parsed.status === 'pass' ? 'passed' : 'failed';
-      session.verifications.push({
-        gate: parsed.gate,
-        status: parsed.status === 'pass' ? 'confirmed' : 'rejected',
-        recordedAt: new Date().toISOString(),
-      });
-
-      const failed = declaredGates.some((gate) => run.gates[gate] === 'failed');
-      const passed = declaredGates.every((gate) => run.gates[gate] === 'passed');
-      if (mayMove && (failed || passed))
-        await this.moveTask(session, run, task, loopStage, passed, failed, output);
-    } else if (task) {
-      session.verifications.push({
-        gate: parsed.gate,
-        status: parsed.status === 'pass' ? 'confirmed' : 'rejected',
-        recordedAt: new Date().toISOString(),
-      });
-      if (mayMove && (parsed.status === 'pass' || parsed.status === 'fail')) {
-        await this.moveTask(
-          session,
-          run,
-          task,
-          loopStage,
-          parsed.status === 'pass',
-          parsed.status === 'fail',
-          output
-        );
-      }
-    }
-    this.releaseVerdict(session, callID);
     void this.log('debug', 'workflow-result.settlement.completed', {
       sessionID: session.sessionId,
       callID,
       gate: parsed.gate,
       status: parsed.status,
       currentStage: session.currentStage,
+      kind: result.kind,
       revision: session.revision,
     });
-  }
 
-  private async moveTask(
-    session: WorkflowSession,
-    run: LoopRun,
-    task: MutationTask,
-    loopStage: StageDef,
-    passed: boolean,
-    failed: boolean,
-    output: { output: string }
-  ): Promise<void> {
-    const engine = await this.resolveEngine(session.profileId, session.schemaId);
-    const movement = nextTaskStage(
-      loopStage,
-      run,
-      passed,
-      (expression, facts) =>
-        engine.evaluateGuard(expression, toGuardContext(session, { ...facts }), {
-          currentLoopListKey: run.listKey,
-        }),
-      (type) =>
-        session.approvals.some(
-          (approval) => approval.type === type && approval.status === 'granted'
-        )
-    );
-    if (movement.kind === 'complete' || movement.kind === 'move') {
-      this.applyApprovalEffects(
-        session,
-        run,
-        movement.kind === 'move' ? movement.to : TASK_DONE,
-        movement.effects
-      );
-    }
-    if (movement.kind === 'complete') {
-      run.status = 'completed';
-      task.status = 'completed';
-      removeActiveTaskContext(session, run.id);
-      return;
-    }
-    if (movement.kind === 'move') {
-      const spendsBudget =
-        failed || (movement.effects ?? []).some((effect) => effect.bumpRetry !== undefined);
-      const exhausted = spendsBudget
-        ? this.applyTaskEffects(session, task, loopStage, movement.effects, failed)
-        : false;
-      run.stage = movement.to;
-      run.gates = {};
-      run.round += 1;
-      this.clearRunProvenance(session, run.id);
-      if (exhausted) {
-        run.status = 'awaiting_decision';
-        this.upsertActiveTaskContextFromSession(session, run.id, 'awaiting_decision');
-        this.upsertPendingDecision(session, task.id, run.id);
-      } else {
-        task.status = 'running';
-        run.status = 'running';
-        this.upsertActiveTaskContextFromSession(session, run.id, 'running');
-      }
-      return;
-    }
-    if (failed && movement.kind === 'unreachable')
-      this.recordTaskRetryFailure(session, run, task, loopStage);
-    if (movement.kind === 'blocked' || (passed && movement.kind === 'unreachable')) {
-      output.output += `\n\n[workflow-task-${movement.kind}]\n${task.id} stayed at ${run.stage}: ${movement.reason}`;
-    }
-  }
-
-  private async resolveGateOwner(
-    session: WorkflowSession,
-    gate: string,
-    provenance: { runId?: string; round?: number } | undefined,
-    operation: ActiveOperation | undefined
-  ): Promise<GateOwner> {
-    const runId = provenance?.runId ?? operation?.runId;
-    if (runId !== undefined) {
-      const run = session.loopRuns[runId];
-      if (run && isOpenLoopRun(run)) {
-        try {
-          const loopStage = await this.resolveEngine(session.profileId, session.schemaId).then(
-            (engine) => engine.getLoopStage(run.listKey)
-          );
-          if (loopStage) {
-            const stage = nestedStages(loopStage).find((entry) => entry.id === run.stage);
-            const declaredGates = stage?.gates ?? [];
-            if (declaredGates.length === 0 || declaredGates.includes(gate))
-              return { kind: 'run', run, loopStage, stage };
-            return { kind: 'refused', stageLabel: run.stage, declaredGates };
-          }
-        } catch (error) {
-          void this.log('warn', 'resolveGateOwner: loop stage could not be resolved', {
-            error: String(error),
+    switch (result.kind) {
+      case 'replayed':
+        output.output += `\n\n[workflow-result-replayed]\n${result.reason}`;
+        void this.log('warn', 'Workflow result detected replayed', {
+          sessionID: session.sessionId,
+          callID,
+        });
+        break;
+      case 'stale':
+        output.output += `\n\n[workflow-result-stale]\n${result.reason}`;
+        void this.log('warn', 'Workflow result from a finished round', {
+          sessionID: session.sessionId,
+          callID,
+        });
+        break;
+      case 'rejected':
+        output.output += `\n\n[workflow-result-rejected]\n${result.reason}`;
+        void this.log('warn', 'Workflow result rejected', {
+          sessionID: session.sessionId,
+          callID,
+          reason: result.reason,
+        });
+        break;
+      case 'recorded':
+        workflow_result_recorded: {
+          const { verdict } = result;
+          void this.log('debug', 'workflow-result.settlement.recorded', {
+            sessionID: session.sessionId,
+            callID,
+            gate: verdict.gate,
+            status: verdict.status,
+            stage: verdict.stage,
+            moved: verdict.moved,
           });
         }
-      }
+        break;
     }
-    const stageId = session.currentStage;
-    if (!stageId) return { kind: 'refused', stageLabel: '(no stage)', declaredGates: [] };
-    try {
-      const stage = (await this.resolveEngine(session.profileId, session.schemaId)).getStages()[
-        stageId
-      ];
-      const declaredGates = stage?.gates ?? [];
-      return stage && declaredGates.includes(gate)
-        ? { kind: 'stage', stageId, stage }
-        : { kind: 'refused', stageLabel: stageId, declaredGates };
-    } catch {
-      return { kind: 'refused', stageLabel: stageId, declaredGates: [] };
-    }
-  }
 
-  private async recordStageGate(
-    session: WorkflowSession,
-    owner: Extract<GateOwner, { kind: 'stage' }>,
-    parsed: { gate: string; status: 'pass' | 'fail' },
-    agent: string | undefined,
-    output: { output: string }
-  ): Promise<void> {
-    if (!this.mayVerify(agent, owner.stage, session.profileId)) {
-      void this.log('warn', 'Workflow result rejected: agent is not allowed', {
-        sessionID: session.sessionId,
-        stage: owner.stageId,
-        gate: parsed.gate,
-        agent,
-        allowedAgents: owner.stage.allowedAgents ?? [],
-      });
-      output.output += `\n\n[workflow-result-rejected]\nStage ${owner.stageId} accepts results from [${(owner.stage.allowedAgents ?? []).join(', ') || '(no roster)'}], and this one came from '${agent ?? '(unknown agent)'}'. Nothing was recorded.`;
-      return;
-    }
-    setGateStatus(
-      session,
-      parsed.gate,
-      parsed.status === 'pass' ? 'passed' : 'failed',
-      undefined,
-      new Date().toISOString()
-    );
-  }
-
-  private applyApprovalEffects(
-    session: WorkflowSession,
-    run: LoopRun,
-    to: string,
-    effects: TransitionDef['effects']
-  ): void {
-    for (const effect of effects ?? [])
-      if (effect.approve)
-        approve(
-          session,
-          effect.approve,
-          '',
-          `transition:${run.stage}->${to}`,
-          new Date().toISOString()
-        );
-  }
-
-  private applyTaskEffects(
-    session: WorkflowSession,
-    task: MutationTask,
-    stage: StageDef | null,
-    effects: TransitionDef['effects'],
-    spendOnFailure = false
-  ): boolean {
-    const declared = (effects ?? []).filter((effect) => effect.bumpRetry !== undefined);
-    if (declared.length === 0 && spendOnFailure)
-      return this.spendTaskAttempt(session, task, stage, undefined);
-    let exhausted = false;
-    for (const effect of declared)
-      if (
-        effect.bumpRetry === 'task.id' &&
-        this.spendTaskAttempt(session, task, stage, effect.maxAttempts)
-      )
-        exhausted = true;
-    return exhausted;
-  }
-
-  private spendTaskAttempt(
-    session: WorkflowSession,
-    task: MutationTask,
-    stage: StageDef | null,
-    maximum: number | undefined
-  ): boolean {
-    const budget = session.retryBudgets[task.id] ?? {
-      attempts: 0,
-      maximum: maximum ?? stage?.retryBudget?.maximum ?? DEFAULT_TASK_RETRY_MAXIMUM,
-    };
-    if (maximum !== undefined) budget.maximum = maximum;
-    budget.attempts += 1;
-    session.retryBudgets[task.id] = budget;
-    return budget.attempts >= budget.maximum;
-  }
-
-  private recordTaskRetryFailure(
-    session: WorkflowSession,
-    run: LoopRun,
-    task: MutationTask,
-    stage: StageDef | null
-  ): void {
-    const budget = session.retryBudgets[task.id] ?? {
-      attempts: 0,
-      maximum: stage?.retryBudget?.maximum ?? DEFAULT_TASK_RETRY_MAXIMUM,
-    };
-    budget.attempts += 1;
-    session.retryBudgets[task.id] = budget;
-    task.status = 'running';
-    run.stage = firstNestedStageId(stage) ?? run.stage;
-    run.gates = {};
-    run.round += 1;
-    this.clearRunProvenance(session, run.id);
-    if (budget.attempts < budget.maximum) {
-      run.status = 'running';
-      this.upsertActiveTaskContextFromSession(session, run.id, 'running');
-      return;
-    }
-    run.status = 'awaiting_decision';
-    this.upsertActiveTaskContextFromSession(session, run.id, 'awaiting_decision');
-    this.upsertPendingDecision(session, task.id, run.id);
-  }
-
-  private upsertPendingDecision(session: WorkflowSession, taskId: string, runId: string): void {
-    const pending = (session.pendingDecisions ??= []);
-    if (
-      pending.some(
-        (decision) =>
-          decision.subject === 'task' &&
-          decision.subjectId === taskId &&
-          decision.kind === RETRY_EXHAUSTED_DECISION_KIND &&
-          decision.status === 'pending'
-      )
-    )
-      return;
-    pending.push({
-      id: `${taskId}:${RETRY_EXHAUSTED_DECISION_KIND}`,
-      subject: 'task',
-      subjectId: taskId,
-      runId,
-      kind: RETRY_EXHAUSTED_DECISION_KIND,
-      status: 'pending',
-      createdAt: new Date().toISOString(),
-    });
-  }
-
-  private upsertActiveTaskContextFromSession(
-    session: WorkflowSession,
-    runId: string,
-    status: 'running' | 'awaiting_decision'
-  ): void {
-    const existing = session.activeTaskContexts.find((context) => context.runId === runId);
-    upsertActiveTaskContext(
-      session,
-      { runId, taskId: existing?.taskId ?? '', agent: existing?.agent ?? '', status },
-      new Date().toISOString()
-    );
-  }
-
-  private clearRunProvenance(session: WorkflowSession, runId: string): void {
-    for (const callId of Object.keys(session.verdictProvenance ?? {}))
-      if (session.verdictProvenance[callId]?.runId === runId)
-        delete session.verdictProvenance[callId];
+    this.releaseVerdict(session, callID);
   }
 
   private releaseVerdict(session: WorkflowSession, callID: string): void {
@@ -680,26 +317,16 @@ export class WorkflowResultSettlerImpl implements WorkflowResultSettler {
 
   private runForCall(
     session: WorkflowSession,
-    provenance: { runId?: string; round?: number } | undefined,
     operation: ActiveOperation | undefined
-  ): LoopRun | undefined {
-    const run = session.loopRuns[provenance?.runId ?? operation?.runId ?? ''];
-    return run && isOpenLoopRun(run) ? run : undefined;
+  ): { stage: string; taskId: string } | undefined {
+    const run = session.loopRuns[operation?.runId ?? ''];
+    if (run && isOpenLoopRun(run)) return { stage: run.stage, taskId: run.taskId };
+    return undefined;
   }
 
   private dispatchedAgent(args: unknown): string | undefined {
     if (!args || typeof args !== 'object') return undefined;
     const taskArgs = args as TaskToolArgs;
     return taskArgs.subagent_type ?? taskArgs.agent ?? taskArgs.type;
-  }
-
-  private mayVerify(
-    agent: string | undefined,
-    stage: { allowedAgents?: string[] } | undefined,
-    profileId: string
-  ): boolean {
-    if (!agent) return false;
-    const roster = stage?.allowedAgents ?? [];
-    return roster.length === 0 || agentIsAllowed(agent, roster, profileId);
   }
 }
