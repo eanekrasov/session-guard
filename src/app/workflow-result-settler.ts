@@ -271,6 +271,7 @@ export class WorkflowResultSettlerImpl implements WorkflowResultSettler {
       void this.log('warn', 'Workflow result replayed', { sessionID: session.sessionId, callID });
       return;
     }
+
     if (parsed || session.activeOperations[callID]) {
       session.processedResultCallIDs.push(callID);
       if (session.processedResultCallIDs.length > 500) {

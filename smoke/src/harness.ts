@@ -29,8 +29,8 @@ export const REPO_ROOT = resolve(import.meta.dir!, '../..');
  *
  * Эти пути должны существовать во время выполнения, иначе harness завершится ошибкой.
  */
-export const V1_BINARY = '/opt/homebrew/Cellar/opencode/1.18.33/bin/opencode';
-export const V2_BINARY = '/opt/homebrew/Cellar/opencode-v2/2.0.20/bin/opencode';
+export const V1_BINARY = '/opt/homebrew/opt/opencode/bin/opencode';
+export const V2_BINARY = '/opt/homebrew/opt/opencode-v2/bin/opencode';
 
 const DEFAULT_ATTEMPTS = 3;
 
