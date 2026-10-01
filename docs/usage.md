@@ -125,7 +125,7 @@ mise run build
 | `config`                               | регистрирует `sm-*` commands, служебного агента и синхронизирует profile agents                             |
 | `chat.message`                         | guardrails и rules над сообщениями                                                                          |
 | `tool.execute.before`                  | допуск: guardrails, правила, согласие, задача, область записи, действия стадии, permit коммита, начало хода |
-| `tool.execute.after`                   | дифф, инварианты, вердикт, разбор `<workflow-result>`, переходы                                             |
+| `tool.execute.after`                   | дифф, инварианты, вердикт, разбор `<workflow-result>` (legacy) или вызов `workflow-gate-set`, переходы      |
 | `event`                                | уборка прерванных ходов                                                                                     |
 | `experimental.chat.system.transform`   | добавляет состояние workflow в system prompt                                                                |
 | `experimental.session.compacting`      | добавляет workflow-контекст при compacting                                                                  |
