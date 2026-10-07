@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { zodToJsonSchema } from 'zod-to-json-schema';
 
 export const ProfileMetadataSchema = z
   .object({
@@ -18,7 +17,16 @@ export const ProfileMetadataSchema = z
 export type ProfileMetadataInput = z.input<typeof ProfileMetadataSchema>;
 export type ProfileMetadataOutput = z.output<typeof ProfileMetadataSchema>;
 
-/** JSON Schema representation for build-time artifact generation */
-export const ProfileMetadataJsonSchema = zodToJsonSchema(ProfileMetadataSchema, {
-  name: 'ProfileMetadata',
+/**
+ * JSON Schema representation for build-time artifact generation.
+ *
+ * Zod 4 emits JSON Schema itself. `zod-to-json-schema` is typed against the
+ * Zod 3 schema classes and silently converts a v4 object to `{}`, so it can no
+ * longer be used here. `io: 'input'` describes what a profile author may write,
+ * where a field carrying a default stays optional.
+ */
+export const ProfileMetadataJsonSchema = z.toJSONSchema(ProfileMetadataSchema, {
+  target: 'draft-7',
+  io: 'input',
+  unrepresentable: 'any',
 });

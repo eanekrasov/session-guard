@@ -76,7 +76,7 @@ export const ActiveOperationSchema = z.object({
    * files are not fully known from arguments alone (see design.md D1/D2).
    * `write`/`edit` name their target in arguments and carry no frame.
    */
-  baseline: z.record(z.string().nullable()).optional(),
+  baseline: z.record(z.string(), z.string().nullable()).optional(),
   /**
    * Вердикт ядра об этом ходе: прошли ли проверки над ним.
    *
@@ -223,7 +223,7 @@ export const LoopRunSchema = z.object({
    * session-wide gate would let the first task to pass review close the stage
    * on behalf of every other task.
    */
-  gates: z.record(z.enum(GATE_STATUS)).default({}),
+  gates: z.record(z.string(), z.enum(GATE_STATUS)).default({}),
   /**
    * Вердикт последнего хода этой задачи — результат проверок ядра над ним.
    *
@@ -238,24 +238,26 @@ export const LoopRunSchema = z.object({
   round: z.number().int().min(0).default(0),
 });
 
-const TasksSchema = z.record(z.array(MutationTaskSchema)).superRefine((taskLists, context) => {
-  const taskIds = new Set<string>();
-  for (const [listKey, tasks] of Object.entries(taskLists)) {
-    for (const task of tasks) {
-      if (taskIds.has(task.id)) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: `Workflow task id must be unique across task lists: ${task.id}`,
-          path: [listKey],
-        });
+const TasksSchema = z
+  .record(z.string(), z.array(MutationTaskSchema))
+  .superRefine((taskLists, context) => {
+    const taskIds = new Set<string>();
+    for (const [listKey, tasks] of Object.entries(taskLists)) {
+      for (const task of tasks) {
+        if (taskIds.has(task.id)) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `Workflow task id must be unique across task lists: ${task.id}`,
+            path: [listKey],
+          });
+        }
+        taskIds.add(task.id);
       }
-      taskIds.add(task.id);
     }
-  }
-});
+  });
 
 const ActiveOperationsSchema = z
-  .record(ActiveOperationSchema)
+  .record(z.string(), ActiveOperationSchema)
   .superRefine((operations, context) => {
     for (const [callId, operation] of Object.entries(operations)) {
       if (callId !== operation.callId) {
@@ -268,7 +270,7 @@ const ActiveOperationsSchema = z
     }
   });
 
-const LoopRunsSchema = z.record(LoopRunSchema).superRefine((loopRuns, context) => {
+const LoopRunsSchema = z.record(z.string(), LoopRunSchema).superRefine((loopRuns, context) => {
   for (const [runId, loopRun] of Object.entries(loopRuns)) {
     if (runId !== loopRun.id) {
       context.addIssue({
@@ -293,17 +295,19 @@ const LoopRunsSchema = z.record(LoopRunSchema).superRefine((loopRuns, context) =
  */
 const BUDGET_KEY = /^(?:task-[0-9]+|[a-z][a-z0-9_-]*)$/;
 
-const RetryBudgetsSchema = z.record(RetryBudgetSchema).superRefine((retryBudgets, context) => {
-  for (const budgetKey of Object.keys(retryBudgets)) {
-    if (!BUDGET_KEY.test(budgetKey)) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: `Retry budget key must be a workflow task id or a workflow-level budget name: ${budgetKey}`,
-        path: [budgetKey],
-      });
+const RetryBudgetsSchema = z
+  .record(z.string(), RetryBudgetSchema)
+  .superRefine((retryBudgets, context) => {
+    for (const budgetKey of Object.keys(retryBudgets)) {
+      if (!BUDGET_KEY.test(budgetKey)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Retry budget key must be a workflow task id or a workflow-level budget name: ${budgetKey}`,
+          path: [budgetKey],
+        });
+      }
     }
-  }
-});
+  });
 
 export const ActiveTaskContextSchema = z.object({
   runId: z.string().min(1),
@@ -369,7 +373,7 @@ export const WorkflowSessionSchema = z
     title: z.string().default(''),
     stageGateResults: z.array(StageGateResultSchema).default([]),
     approvals: z.array(ApprovalSchema).default([]),
-    refs: z.record(z.string()).default({}),
+    refs: z.record(z.string(), z.string()).default({}),
     tasks: TasksSchema.default({}),
     activeOperations: ActiveOperationsSchema.default({}),
     /**
@@ -379,7 +383,7 @@ export const WorkflowSessionSchema = z
      * unlike `activeOperations`, it is not deleted by the mutation lifecycle.
      * See `VerdictProvenanceSchema`.
      */
-    verdictProvenance: z.record(VerdictProvenanceSchema).default({}),
+    verdictProvenance: z.record(z.string(), VerdictProvenanceSchema).default({}),
     activeTaskContexts: z.array(ActiveTaskContextSchema).default([]),
     loopRuns: LoopRunsSchema.default({}),
     deliveryPermit: DeliveryPermitSchema.nullable().default(null),

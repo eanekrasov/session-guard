@@ -10,6 +10,8 @@
 
 import { z } from 'zod';
 
+import type { StageDef as RuntimeStageDef } from './profile-schema.ts';
+
 // ─── Reusable primitives ───────────────────────────────────────────────────────
 
 const LoopSourceSchema = z
@@ -90,7 +92,10 @@ const DispatchDefSchema = z.discriminatedUnion('strategy', [
 
 // ─── Stage definition (recursive) ──────────────────────────────────────────────
 
-const StageDefSchema: z.ZodTypeAny = z.lazy(() =>
+// `z.ZodTypeAny` is an alias for `z.ZodType`, whose output is `unknown` in Zod 4:
+// annotating with it erased the stage shape and every `.data.<field>` read in the
+// contract test became an error. The recursive output is the runtime `StageDef`.
+const StageDefSchema: z.ZodType<RuntimeStageDef> = z.lazy(() =>
   z
     .object({
       loop: LoopSourceSchema.optional(),
@@ -111,7 +116,7 @@ const StageDefSchema: z.ZodTypeAny = z.lazy(() =>
       gates: z.array(z.string()).optional(),
       entryGuards: z.array(z.string()).optional(),
       exitGuards: z.array(z.string()).optional(),
-      stages: z.record(StageDefSchema).optional(),
+      stages: z.record(z.string(), StageDefSchema).optional(),
       transitions: z
         .array(
           z.object({
@@ -131,7 +136,7 @@ const StageDefSchema: z.ZodTypeAny = z.lazy(() =>
 const ProfileSchemaSchema = z
   .object({
     extends: z.string().optional(),
-    stages: z.record(StageDefSchema).optional(),
+    stages: z.record(z.string(), StageDefSchema).optional(),
     stageAssignments: z.array(StageAssignmentRuleSchema).optional(),
     transitions: z
       .array(

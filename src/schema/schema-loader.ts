@@ -9,7 +9,22 @@ import type { StageDef, TransitionDef } from './types.ts';
 import { ProfileConfigurationError, type ProfileSchema, type ResolvedSchema } from './types.ts';
 
 /**
+ * Name the kind of value Zod received, matching the vocabulary its own
+ * messages use (`array` and `null` rather than the raw `typeof` result).
+ */
+function describeReceived(input: unknown): string {
+  if (input === null) return 'null';
+  if (Array.isArray(input)) return 'array';
+  return typeof input;
+}
+
+/**
  * Map a ZodIssue to a readable error object with severity and context.
+ *
+ * Zod 4 renamed the issue codes: `invalid_literal` and `invalid_enum_value`
+ * collapsed into `invalid_value`, `too_small`/`too_big` carry `origin` instead
+ * of `type`, and `invalid_type` exposes the offending `input` instead of a
+ * pre-formatted `received`.
  */
 function mapZodIssue(issue: z.ZodIssue): {
   path: string;
@@ -22,10 +37,10 @@ function mapZodIssue(issue: z.ZodIssue): {
   // Add context based on error code
   switch (issue.code) {
     case 'invalid_type':
-      message = `Expected ${issue.expected}, received ${issue.received}`;
+      message = `Expected ${issue.expected}, received ${describeReceived(issue.input)}`;
       break;
-    case 'invalid_literal':
-      message = `Expected literal value "${issue.expected}", received "${issue.received}"`;
+    case 'invalid_value':
+      message = `Expected one of: ${issue.values.map(String).join(', ')}, received ${JSON.stringify(issue.input)}`;
       break;
     case 'unrecognized_keys':
       message = `Unrecognized key(s): ${issue.keys.join(', ')}`;
@@ -33,14 +48,11 @@ function mapZodIssue(issue: z.ZodIssue): {
     case 'invalid_union':
       message = `Value does not match any of the expected variants`;
       break;
-    case 'invalid_enum_value':
-      message = `Expected one of: ${issue.options.join(', ')}, received "${issue.received}"`;
-      break;
     case 'too_small':
-      message = `Value too small: minimum ${issue.minimum} (${issue.type} ${issue.inclusive ? 'inclusive' : 'exclusive'})`;
+      message = `Value too small: minimum ${issue.minimum} (${issue.origin} ${issue.inclusive ? 'inclusive' : 'exclusive'})`;
       break;
     case 'too_big':
-      message = `Value too big: maximum ${issue.maximum} (${issue.type} ${issue.inclusive ? 'inclusive' : 'exclusive'})`;
+      message = `Value too big: maximum ${issue.maximum} (${issue.origin} ${issue.inclusive ? 'inclusive' : 'exclusive'})`;
       break;
     case 'custom':
       // Custom validation messages already have context

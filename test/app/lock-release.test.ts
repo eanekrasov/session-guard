@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { WorkflowStore, createSession } from '../../src/session/session-store.ts';
 import { SessionExecutor } from '../../src/app/session-executor.ts';
 import { SessionGuardEngine, type EvaluateGuardFn } from '../../src/domain/engine.ts';
+import type { LogFn } from '../../src/app/logger.ts';
 import type { WorkflowSession } from '../../src/session/session-schema.ts';
 import type { EngineConfig } from '../../src/domain/engine.ts';
 import { createTask } from '../support/task-factory.ts';
@@ -34,11 +35,11 @@ async function drainQueue(rootSessionId: string): Promise<void> {
   await executor.run(rootSessionId, async () => {});
 }
 
-function mockLogFn() {
-  return vi.fn();
+function mockLogFn(): LogFn {
+  return vi.fn<LogFn>();
 }
 
-async function makeOrchestrator(engine?: SessionGuardEngine, log?: ReturnType<typeof vi.fn>) {
+async function makeOrchestrator(engine?: SessionGuardEngine, log?: LogFn) {
   const { MutationOrchestrator } = await import('../../src/app/mutation-orchestrator.ts');
 
   // Create orchestrator but override resolveEngine to return our noop engine

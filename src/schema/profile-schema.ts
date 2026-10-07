@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { zodToJsonSchema } from 'zod-to-json-schema';
 
 const ConsentOnTransitionSchema = z.object({
   type: z.string(),
@@ -148,7 +147,7 @@ const StageDefSchema: z.ZodType<StageDef> = z.lazy(() =>
       gates: z.array(z.string()).optional(),
       entryGuards: z.array(z.string()).optional(),
       exitGuards: z.array(z.string()).optional(),
-      stages: z.record(StageDefSchema).optional(),
+      stages: z.record(z.string(), StageDefSchema).optional(),
       transitions: z.array(TransitionDefSchema).optional(),
     })
     .passthrough()
@@ -206,7 +205,7 @@ export const ProfileSchemaSchema = z
      * она ходит циклом, а стадии внутри — тот цикл, который проходит каждая
      * задача.
      */
-    stages: z.record(StageDefSchema).optional(),
+    stages: z.record(z.string(), StageDefSchema).optional(),
 
     /**
      * Стадия, выводимая из условия, а не из графа.
@@ -265,7 +264,15 @@ export const ProfileSchemaSchema = z
 
 export type ProfileSchema = z.infer<typeof ProfileSchemaSchema>;
 
-export const ProfileSchemaJsonSchema = zodToJsonSchema(ProfileSchemaSchema, {
-  name: 'ProfileSchema',
-  target: 'openApi3',
+/**
+ * JSON Schema representation for build-time artifact generation.
+ *
+ * Zod 4 emits JSON Schema itself; see `ProfileMetadataJsonSchema` for why
+ * `zod-to-json-schema` is gone. `unrepresentable: 'any'` keeps the discard
+ * fields declared as `z.undefined()` from aborting the build.
+ */
+export const ProfileSchemaJsonSchema = z.toJSONSchema(ProfileSchemaSchema, {
+  target: 'draft-7',
+  io: 'input',
+  unrepresentable: 'any',
 });

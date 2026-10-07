@@ -21,9 +21,16 @@ function pluginInput(): PluginInput {
   };
 }
 
+type ToolSchema = {
+  /** Zod 4 stores the kind in `_def.type` (Zod 3's `_def.typeName` is gone). */
+  _def?: { type?: unknown };
+  /** Zod 4 exposes the `.describe()` text through the instance getter, not `_def`. */
+  description?: unknown;
+};
+
 type Tool = {
   description: string;
-  args: Record<string, { _def?: Record<string, unknown> }>;
+  args: Record<string, ToolSchema>;
   execute: (...args: unknown[]) => Promise<unknown>;
 };
 
@@ -31,13 +38,13 @@ function tools(): Record<string, Tool> {
   return (createRuntime(pluginInput()) as Hooks & { tool?: Record<string, Tool> }).tool ?? {};
 }
 
-function schemaShape(tool: Tool): Record<string, { typeName: unknown; description?: unknown }> {
+function schemaShape(tool: Tool): Record<string, { type: unknown; description?: unknown }> {
   return Object.fromEntries(
     Object.entries(tool.args).map(([name, schema]) => [
       name,
       {
-        typeName: schema._def?.typeName,
-        description: schema._def?.description,
+        type: schema._def?.type,
+        description: schema.description,
       },
     ])
   );
@@ -127,16 +134,16 @@ describe('workflow tool surface characterization', () => {
     // silently become a renamed or unregistered tool during extraction.
     expect(registered['workflow-create']).toBeDefined();
     expect(schemaShape(registered['workflow-create']!)).toEqual({
-      schemaId: { typeName: 'ZodOptional', description: 'Schema ID without .yaml (e.g., android)' },
+      schemaId: { type: 'optional', description: 'Schema ID without .yaml (e.g., android)' },
     });
     expect(schemaShape(registered['workflow-tasks-set-status']!)).toEqual({
-      taskId: { typeName: 'ZodString' },
-      status: { typeName: 'ZodEnum' },
+      taskId: { type: 'string' },
+      status: { type: 'enum' },
     });
     expect(schemaShape(registered['workflow-tasks-resolve-decision']!)).toEqual({
-      decision: { typeName: 'ZodEnum' },
-      maximum: { typeName: 'ZodOptional' },
-      decisionId: { typeName: 'ZodOptional' },
+      decision: { type: 'enum' },
+      maximum: { type: 'optional' },
+      decisionId: { type: 'optional' },
     });
   });
 });
