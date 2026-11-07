@@ -17,6 +17,8 @@ declare module '@opencode-ai/plugin/tui' {
   export interface TuiSlotMap {
     sidebar_content: { session_id: string };
     home_bottom: { session_id: string };
+    home_prompt_right: {};
+    session_prompt_right: { session_id: string };
   }
 
   export interface TuiSlotContext {

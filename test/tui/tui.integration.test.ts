@@ -138,6 +138,8 @@ describe('sidebar-state: проводка плагина', () => {
       slots: {
         sidebar_content: expect.any(Function),
         home_bottom: expect.any(Function),
+        home_prompt_right: expect.any(Function),
+        session_prompt_right: expect.any(Function),
       },
     });
   });
