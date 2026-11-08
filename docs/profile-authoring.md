@@ -368,9 +368,19 @@ Guard — выражение над фактами. Ошибка вычисле�
 | `session.checks`                 | вердикт ядра о последнем ходе вне цикла  |
 | `session.approved('plan')`       | дано ли согласие с этим именем           |
 | `session.verified(gate, status)` | есть ли такая запись верификации         |
-| `allTasksCompleted('list')`      | все ли задачи списка завершены           |
-| `hasPendingTasks()`              | есть ли задачи в работе                  |
+| `allTasksPending('list')`        | все ли задачи в ожидании                 |
+| `allTasksRunning('list')`        | все ли задачи в работе                   |
+| `allTasksCompleted('list')`      | все ли задачи завершены                  |
+| `allTasksFailed('list')`         | все ли задачи провалены                  |
+| `allTasksCancelled('list')`      | все ли задачи отменены                   |
+| `hasPendingTasks()`              | есть ли задачи в ожидании                |
+| `hasRunningTasks('list')`        | есть ли задачи в работе                  |
+| `hasCompletedTasks('list')`      | есть ли завершенные задачи               |
+| `hasFailedTasks('list')`         | есть ли проваленные задачи               |
+| `hasCancelledTasks('list')`      | есть ли отмененные задачи                |
 | `isExhausted('budget')`          | исчерпан ли бюджет повторов              |
+
+Все функции для задач возвращают `false`, если список с указанным именем отсутствует или пуст.
 
 **Факты задачи** (только внутри цикла):
 
