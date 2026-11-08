@@ -91,8 +91,7 @@ function v2ContextWithParents(
 }
 
 function executionSession(sessionID: string) {
-  const session = createSession(sessionID, 'test-profile', 'cycle');
-  session.currentStage = 'EXECUTION';
+  const session = createSession(sessionID, 'test-profile', 'cycle', 'execution');
   session.tasks.implementation = [createTask()];
   return session;
 }
@@ -977,7 +976,7 @@ describe('V2 plugin setup adapter', () => {
       expect(resolved?.approvals).toContainEqual(
         expect.objectContaining({ type: 'plan', callId: 'call-consent', status: 'granted' })
       );
-      expect(resolved?.currentStage).toBe('planning');
+      expect(resolved?.currentStage).toBe('tasks_ready');
       expect(resolved?.approvals.some((approval) => approval.status === 'pending')).toBe(false);
       expect(resolved?.approvals[0]?.evidence).toBe(
         calculateDocumentSetEvidence([['plan.md', '# V2 plan\n']])

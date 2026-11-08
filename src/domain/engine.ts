@@ -1,6 +1,6 @@
 import { type GuardEvaluationContext, GuardEvaluator } from '../schema/guard-evaluator.ts';
 import type { TaskStatus, WorkflowSession } from '../session/session-schema.ts';
-import type { StageAssignmentRule, StageDef, TransitionDef } from '../schema/types.ts';
+import type { StageDef, TransitionDef } from '../schema/types.ts';
 import { nestedStages } from '../schema/types.ts';
 import type { SessionFacts } from './session-facts.ts';
 import { toSessionFacts } from './session-facts.ts';
@@ -52,7 +52,6 @@ export interface TaskStageConfig {
 
 export interface EngineConfig {
   stages?: Record<string, StageDef>;
-  stageAssignments: StageAssignmentRule[];
   transitions: TransitionDef[];
   /** agents allowed to drive workflow task state (schema-level, last wins) */
   taskControlAgents?: string[];
@@ -83,10 +82,6 @@ export interface TransitionCheck {
 // ─── Inlined deriveStage (from derive-stage.ts) ────────────────────────────────
 
 import type { GuardEvaluationSession } from './session-facts.ts';
-
-function deriveDefaultEvaluateGuard(expr: string, facts: SessionFacts): boolean {
-  return new GuardEvaluator(facts as GuardEvaluationSession).evaluate(expr);
-}
 
 /**
  * Контекст, против которого оценивается каждый гард.
@@ -127,25 +122,6 @@ export function toGuardContext(
  * это стадия, в которой сессия уже находится, единственная стадия, которой мы
  * знаем, что у workflow есть.
  */
-export function deriveStageFn(
-  facts: SessionFacts,
-  rules: StageAssignmentRule[],
-  evaluateGuard?: (expr: string) => boolean
-): string {
-  // `SessionFacts` types this optional, but every real session carries it —
-  // `currentStage` is a required string on the session and is written by
-  // `workflow-create` from the compiled workflow's own first stage.
-  const currentStage = facts.currentStage ?? '';
-  if (rules.length === 0) return currentStage;
-
-  const sorted = [...rules].sort((a, b) => b.priority - a.priority);
-  const guardFn = evaluateGuard ?? ((expr: string) => deriveDefaultEvaluateGuard(expr, facts));
-  for (const rule of sorted) {
-    if (guardFn(rule.condition)) return rule.result;
-  }
-  return currentStage;
-}
-
 // ─── Inlined checkTransition (from validate-transition.ts) ───────────────────
 
 /**
@@ -273,7 +249,6 @@ export class SessionGuardEngine {
   constructor(config: EngineConfig, evaluateGuardFn?: EvaluateGuardFn) {
     this.config = {
       ...config,
-      stageAssignments: config.stageAssignments ?? [],
       transitions: config.transitions ?? [],
     };
     this.evaluateGuardFn = evaluateGuardFn ?? defaultEvaluateGuard;
@@ -299,12 +274,8 @@ export class SessionGuardEngine {
   /**
    * Вывести текущую стадию из WorkflowSession.
    */
-  deriveStage(session: WorkflowSession, evaluationContext: GuardEvaluationContext = {}): StageId {
-    const facts = toSessionFacts(session);
-    const guardContext = toGuardContext(session);
-    return deriveStageFn(facts, this.config.stageAssignments, (expr) =>
-      this.evaluateGuard(expr, guardContext, evaluationContext)
-    );
+  deriveStage(session: WorkflowSession): StageId {
+    return session.currentStage;
   }
 
   /**
@@ -426,7 +397,7 @@ export class SessionGuardEngine {
     session: WorkflowSession,
     evaluationContext: GuardEvaluationContext = {}
   ): TransitionCheck & { applied?: boolean; from?: string } {
-    const currentStage = this.deriveStage(session, evaluationContext);
+    const currentStage = this.deriveStage(session);
     const facts = toGuardContext(session);
 
     const outgoing = this.config.transitions.filter((t) => t.from === currentStage);

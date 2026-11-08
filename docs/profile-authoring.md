@@ -151,7 +151,6 @@ bun run .opencode/session-guard/src/cli.ts sync-agents
 | `gates`             | Список проверок, на которые стадии могут ссылаться               |
 | `editingAgents`     | Агенты, которых workflow считает исполнителями                   |
 | `taskControlAgents` | Кому разрешено менять состояние задач (по умолчанию оркестратор) |
-| `stageAssignments`  | Правила вывода стадии по состоянию сессии вместо `currentStage`  |
 
 Стадия может объявить: `loop`, `dispatch`, `retryBudget`, `allowedAgents`,
 `actions`, `gates`, `entryGuards`, `exitGuards`, `stages`, `transitions` — и
@@ -467,9 +466,6 @@ writeScope: ['src/auth/**']   # совпадает
 - из каждой стадии должен быть путь к концу — забытое ребро это ошибка сборки, а
   не тихое зависание.
 
-Вторая проверка не делается, если объявлены `stageAssignments`: там стадия
-выбирается по условию, а не по рёбрам.
-
 ---
 
 ## 9. Наследование
@@ -491,8 +487,8 @@ extends: 'base/base.yaml'
   `verify → code`.
 - **Рёбра** сливаются по паре `from → to`: переобъявив пару, вы заменяете **всю
   группу** родительских рёбер этой пары, а не одно из них.
-- **Списки верхнего уровня** (`editingAgents`, `gates`, `taskControlAgents`,
-  `stageAssignments`) заменяются целиком.
+- **Списки верхнего уровня** (`editingAgents`, `gates`, `taskControlAgents`)
+  заменяются целиком.
 
 На уровне `profile.json` агенты профилей, напротив, накапливаются по цепочке:
 профиль получает собственных агентов и агентов предков без дублей. `skills` и

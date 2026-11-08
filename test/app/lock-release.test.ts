@@ -9,7 +9,6 @@ import { createTask } from '../support/task-factory.ts';
 
 // ─── Minimal engine config ───────────────────────────────────────
 const NOOP_ENGINE_CONFIG: EngineConfig = {
-  stageAssignments: [],
   transitions: [],
 };
 

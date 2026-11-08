@@ -179,7 +179,7 @@ beforeEach(async () => {
       // `commit` is not a stage of this loop.
       '      - from: verify',
       '        to: commit',
-      'stageAssignments:',
+      'removedField:',
       '  - id: execution',
       '    priority: 1',
       "    condition: 'true'",
@@ -211,17 +211,6 @@ describe('a guard that cannot be parsed is refused at load', () => {
     const input = schema({ a: {}, b: {} }, [{ from: 'a', to: 'b', guard: 'session.gates.(((' }]);
 
     expect(messages(input).join('\n')).toContain('Guard expression does not parse');
-  });
-
-  it('refuses an unparseable stage-assignment condition', () => {
-    const input: ResolvedSchema = {
-      id: 'test',
-      source: 'test.yaml',
-      stages: { a: {} },
-      stageAssignments: [{ id: 'r', priority: 0, condition: '&& ||', result: 'a' }],
-    };
-
-    expect(reported(input)).toContain('stageAssignments[0].condition');
   });
 
   it('refuses an unparseable guard inside a loop', () => {
@@ -416,15 +405,6 @@ describe('a stage nothing reaches is refused when the schema is read', () => {
     expect(reported(input)).toContain("Stage 'commit' is declared but nothing reaches it");
   });
 
-  it('counts a stage named by a stage assignment as reachable', () => {
-    // `stageAssignments` назначают стадию выражением, минуя граф.
-    const input: ResolvedSchema = {
-      ...schema({ planning: {}, audit: {} }, [{ from: 'planning', to: 'planning' }]),
-      stageAssignments: [{ id: 'a', priority: 1, condition: 'true', result: 'audit' }],
-    };
-    expect(messages(input)).toEqual([]);
-  });
-
   it('refuses a nested stage the loop’s own transitions never reach', () => {
     const input = schema({
       execution: {
@@ -488,20 +468,5 @@ describe('у workflow должен быть конец, и из каждой с�
     const joined = reported(input);
     expect(joined).toContain('stages.stuck');
     expect(joined).toContain('has no way to finish');
-  });
-
-  it('при объявленных stageAssignments путь до конца не проверяется', () => {
-    // `deriveStage` выбирает стадию по условию, а не по рёбрам, так что уйти
-    // можно и оттуда, откуда не ведёт ни одно ребро. Назвать такую стадию
-    // тупиком значило бы соврать.
-    const input: ResolvedSchema = {
-      ...schema({ a: {}, stuck: {}, done: {} }, [
-        { from: 'a', to: 'done' },
-        { from: 'a', to: 'stuck' },
-        { from: 'stuck', to: 'stuck' },
-      ]),
-      stageAssignments: [{ id: 'main', priority: 1, condition: 'true', result: 'a' }],
-    };
-    expect(reported(input)).not.toContain('has no way to finish');
   });
 });

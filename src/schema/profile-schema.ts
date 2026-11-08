@@ -170,14 +170,6 @@ const TransitionDefSchema = z.object({
 });
 export type TransitionDef = z.infer<typeof TransitionDefSchema>;
 
-const StageAssignmentRuleSchema = z.object({
-  id: z.string(),
-  priority: z.number(),
-  condition: z.string(),
-  result: z.string(),
-});
-export type StageAssignmentRule = z.infer<typeof StageAssignmentRuleSchema>;
-
 export type DispatchDef = z.infer<typeof DispatchSchema>;
 
 /**
@@ -206,16 +198,6 @@ export const ProfileSchemaSchema = z
      * задача.
      */
     stages: z.record(z.string(), StageDefSchema).optional(),
-
-    /**
-     * Стадия, выводимая из условия, а не из графа.
-     *
-     * Спрашивается раньше сохранённого `currentStage` и выигрывает у него:
-     * стадию называет правило с наибольшим приоритетом, чьё условие истинно, и
-     * только если не сработало ни одно правило — или их не объявлено вовсе —
-     * остаётся стадия, записанная последним переходом.
-     */
-    stageAssignments: z.array(StageAssignmentRuleSchema).optional(),
 
     /**
      * Рёбра workflow: какая стадия может следовать за какой и при каком условии.

@@ -13,7 +13,6 @@ import {
   RetryBudgetYamlSchema,
   LoopSourceYamlSchema,
   DispatchYamlSchema,
-  StageAssignmentRuleYamlSchema,
 } from '../../src/schema/yaml-schemas.ts';
 
 // ─── ActionEntryYamlSchema ────────────────────────────────────────────────────
@@ -646,19 +645,6 @@ describe('ProfileYamlSchema', () => {
       }
     });
 
-    test('parses profile with stageAssignments', () => {
-      const result = ProfileYamlSchema.safeParse({
-        stageAssignments: [
-          { id: 'rule-1', priority: 100, condition: 'session.revision === 0', result: 'planning' },
-          { id: 'rule-2', priority: 50, condition: 'true', result: 'implementation' },
-        ],
-      });
-      expect(result.success).toBe(true);
-      if (result.success) {
-        expect(result.data.stageAssignments).toHaveLength(2);
-      }
-    });
-
     test('parses profile with transitions', () => {
       const result = ProfileYamlSchema.safeParse({
         transitions: [
@@ -697,7 +683,7 @@ describe('ProfileYamlSchema', () => {
             transitions: [{ from: 'review', to: 'delivery', consent: 'review' }],
           },
         },
-        stageAssignments: [{ id: 'initial', priority: 100, condition: 'true', result: 'planning' }],
+
         transitions: [{ from: 'implementation', to: 'review', onFailure: 'retry' }],
         editingAgents: ['coder'],
         taskControlAgents: ['orchestrator'],
@@ -728,55 +714,9 @@ describe('ProfileYamlSchema', () => {
       expect(result.success).toBe(false);
     });
 
-    test('rejects wrong type for stageAssignments', () => {
-      const result = ProfileYamlSchema.safeParse({
-        stageAssignments: 'not-an-array',
-      });
-      expect(result.success).toBe(false);
-    });
-
-    test('rejects invalid stageAssignment rule', () => {
-      const result = ProfileYamlSchema.safeParse({
-        stageAssignments: [
-          { id: 'rule', priority: 'high' }, // wrong type
-        ],
-      });
-      expect(result.success).toBe(false);
-    });
-
     test('rejects wrong type for editingAgents', () => {
       const result = ProfileYamlSchema.safeParse({
         editingAgents: 'coder', // should be array
-      });
-      expect(result.success).toBe(false);
-    });
-  });
-
-  describe('stageAssignments schema', () => {
-    test('parses valid stageAssignment rule', () => {
-      const result = StageAssignmentRuleYamlSchema.safeParse({
-        id: 'rule-1',
-        priority: 100,
-        condition: 'session.approved("plan")',
-        result: 'implementation',
-      });
-      expect(result.success).toBe(true);
-    });
-
-    test('rejects missing required fields', () => {
-      const result = StageAssignmentRuleYamlSchema.safeParse({
-        id: 'rule-1',
-        priority: 100,
-      });
-      expect(result.success).toBe(false);
-    });
-
-    test('rejects wrong types', () => {
-      const result = StageAssignmentRuleYamlSchema.safeParse({
-        id: 123,
-        priority: 'high',
-        condition: true,
-        result: 456,
       });
       expect(result.success).toBe(false);
     });

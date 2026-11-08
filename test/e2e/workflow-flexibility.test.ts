@@ -15,7 +15,6 @@ describe('workflow flexibility — coverage matrix', () => {
         { from: 'CHANGE_2', to: 'COMMIT_2' },
         { from: 'COMMIT_2', to: 'DONE' },
       ],
-      stageAssignments: [{ id: 'main', priority: 1, condition: 'true', result: 'START' }],
     };
 
     const { workflow, errors } = compileWorkflow(schema);
@@ -37,7 +36,6 @@ describe('workflow flexibility — coverage matrix', () => {
         { from: 'PLANNING', to: 'EXECUTION' },
         { from: 'EXECUTION', to: 'DONE' },
       ],
-      stageAssignments: [{ id: 'main', priority: 1, condition: 'true', result: 'PLANNING' }],
     };
 
     const { workflow } = compileWorkflow(schema);
@@ -50,7 +48,6 @@ describe('workflow flexibility — coverage matrix', () => {
       id: 'test',
       stages: { START: { retryBudget: { maximum: 3 }, stages: { step: {} } }, DONE: {} },
       transitions: [{ from: 'START', to: 'DONE' }],
-      stageAssignments: [{ id: 'main', priority: 1, condition: 'true', result: 'START' }],
     };
 
     const { workflow, errors } = compileWorkflow(schema);

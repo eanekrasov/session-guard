@@ -3,7 +3,6 @@
 export type {
   ProfileSchema,
   StageDef,
-  StageAssignmentRule,
   TransitionDef,
   TransitionEffect,
   DispatchDef,
@@ -12,12 +11,7 @@ export type {
   LoopSource,
 } from './profile-schema.ts';
 
-import type {
-  StageDef,
-  StageAssignmentRule,
-  TransitionDef,
-  TransitionEffect,
-} from './profile-schema.ts';
+import type { StageDef, TransitionDef, TransitionEffect } from './profile-schema.ts';
 
 export interface ProfileMetadata {
   id: string;
@@ -77,7 +71,6 @@ export interface ResolvedSchema {
   transitions?: TransitionDef[];
   editingAgents?: string[];
   taskControlAgents?: string[];
-  stageAssignments?: StageAssignmentRule[];
   [key: string]: unknown;
 }
 

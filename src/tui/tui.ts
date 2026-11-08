@@ -100,7 +100,7 @@ export type TaskGateInfo = {
  * The stage the session is in.
  *
  * `currentStage` is authoritative: the engine derives the stage (which may go
- * through `stageAssignments` and guards) and `runtime.ts` persists the result
+ * through the workflow transition rules) and `runtime.ts` persists the result
  * there, so reading it is seeing the engine's own answer rather than guessing
  * at one. Profiles may name stages whatever they like, so no list is applied.
  *

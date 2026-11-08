@@ -17,11 +17,6 @@ stages:
 transitions:
   - from: execution
     to: done
-stageAssignments:
-  - id: execution
-    priority: 1
-    condition: 'true'
-    result: execution
 editingAgents:
   - code
   - debug

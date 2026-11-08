@@ -1,6 +1,6 @@
 # Comprehensive profile — covers every plugin feature and P1/P2 contracts.
 #
-# Inherits: base.yaml (stageAssignments, gates, base stages).
+# Inherits: base.yaml (gates, base stages).
 # Delivers: entryGuards, exitGuards, fail transition with retry,
 #           alternative transitions, gate-based task movement.
 #
@@ -10,9 +10,9 @@
 # The header above has always claimed this inheritance; the `extends` below is
 # what performs it. A profile's schemas became its own — combining is
 # schema-level only — and this delta was left behind, so it resolved to itself
-# alone: no stageAssignments, and no `gates:` declaration, which turns the
-# compiler's check of a stage's gate names off rather than failing it. It
-# compiled clean by declaring nothing to be wrong about.
+# alone: no `gates:` declaration, which turns the compiler's check of a stage's
+# gate names off rather than failing it. It compiled clean by declaring nothing
+# to be wrong about.
 
 extends: 'base/base.yaml'
 

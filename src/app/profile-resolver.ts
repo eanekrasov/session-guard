@@ -296,7 +296,6 @@ export class ProfileResolver {
       transitions: currentSchema.transitions,
       editingAgents: currentSchema.editingAgents,
       taskControlAgents: currentSchema.taskControlAgents,
-      stageAssignments: currentSchema.stageAssignments,
     };
   }
 

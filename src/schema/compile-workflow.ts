@@ -1,5 +1,5 @@
 import { nestedStages } from './types.ts';
-import type { StageDef, TransitionDef, ResolvedSchema, StageAssignmentRule } from './types.ts';
+import type { StageDef, TransitionDef, ResolvedSchema } from './types.ts';
 import { parse as parseGuard } from './guard-ast.ts';
 
 // ─── Compiled Types ──────────────────────────────────────────────────────────
@@ -47,18 +47,10 @@ export interface CompiledDispatch {
   overlapRoles: string[];
 }
 
-export interface CompiledStageAssignment {
-  id: string;
-  priority: number;
-  condition: string;
-  result: string;
-}
-
 export interface CompiledWorkflow {
   version: 1;
   stages: Record<string, CompiledStage>;
   transitions: CompiledTransition[];
-  stageAssignments: CompiledStageAssignment[];
   initialStage: string;
   /**
    * Стадии, которыми workflow заканчивается: объявленные в схеме и не имеющие
@@ -169,9 +161,6 @@ export function compileWorkflow(schema: ResolvedSchema): {
   // Build compiled transitions
   const compiledTransitions = compileTransitions(schema.transitions ?? [], stageIds, errors);
 
-  // Build compiled stage assignments
-  const compiledAssignments = compileAssignments(schema.stageAssignments ?? [], errors);
-
   const initialStage = initialStageOf(schema.stages);
 
   return {
@@ -179,7 +168,6 @@ export function compileWorkflow(schema: ResolvedSchema): {
       version: 1,
       stages: compiledStages,
       transitions: compiledTransitions,
-      stageAssignments: compiledAssignments,
       initialStage,
       terminalStages: terminalStagesOf(schema.stages, schema.transitions),
     },
@@ -206,7 +194,6 @@ const SCHEMA_KEYS = new Set([
   'source',
   'extends',
   'stages',
-  'stageAssignments',
   'transitions',
   'editingAgents',
   'taskControlAgents',
@@ -228,9 +215,7 @@ const STAGE_KEYS = new Set([
 /**
  * Каждая объявленная стадия должна быть достижима.
  *
- * Обход от начальной стадии по рёбрам. Стадия, названная результатом правила
- * `stageAssignments`, тоже достижима — эти правила назначают стадию выражением,
- * минуя граф, и без их учёта проверка ругалась бы на исправные профили.
+ * Обход от начальной стадии по рёбрам.
  *
  * Вложенные стадии цикла проверяются отдельно и по своим рёбрам: старт — первая
  * объявленная, `done` — не стадия, а «задача закончилась». Цикл, не объявивший
@@ -262,14 +247,13 @@ function validateReachability(schema: ResolvedSchema, errors: CompileError[]): v
     return seen;
   };
 
-  const assigned = (schema.stageAssignments ?? []).map((rule) => rule.result);
-  const reached = walk(ids, initialStageOf(stages), schema.transitions ?? [], assigned);
+  const reached = walk(ids, initialStageOf(stages), schema.transitions ?? [], []);
   for (const id of ids) {
     if (reached.has(id)) continue;
     errors.push({
       severity: 'error',
       path: `stages.${id}`,
-      message: `Stage '${id}' is declared but nothing reaches it: no transition leads here from '${initialStageOf(stages)}', and no stage assignment names it`,
+      message: `Stage '${id}' is declared but nothing reaches it: no transition leads here from '${initialStageOf(stages)}'`,
     });
   }
 
@@ -306,10 +290,6 @@ function validateReachability(schema: ResolvedSchema, errors: CompileError[]): v
  * Схема без единого конца — отдельная ошибка: такой workflow не заканчивается
  * никогда, и это почти наверняка не то, что имел в виду автор.
  *
- * При объявленных `stageAssignments` попроцедурная проверка не делается.
- * `deriveStage` выбирает стадию по условию, а не по рёбрам, так что сессия
- * может уйти со стадии, из которой не ведёт ни одно ребро, — назвать такую
- * тупиком значило бы соврать.
  */
 function validateTermination(schema: ResolvedSchema, errors: CompileError[]): void {
   const stages = schema.stages ?? {};
@@ -328,8 +308,6 @@ function validateTermination(schema: ResolvedSchema, errors: CompileError[]): vo
     });
     return;
   }
-
-  if ((schema.stageAssignments ?? []).length > 0) return;
 
   const canFinish = new Set<string>(terminals);
   let grew = true;
@@ -412,9 +390,6 @@ function validateGuardSyntax(schema: ResolvedSchema, errors: CompileError[]): vo
     }
   };
 
-  for (const [index, rule] of (schema.stageAssignments ?? []).entries()) {
-    check(`stageAssignments[${index}].condition`, rule.condition);
-  }
   for (const [index, transition] of (schema.transitions ?? []).entries()) {
     check(`transitions[${index}].guard`, transition.guard);
   }
@@ -673,18 +648,4 @@ function compileTransitions(
       onFailure: t.onFailure ?? null,
     };
   });
-}
-
-function compileAssignments(
-  assignments: StageAssignmentRule[],
-  _errors: CompileError[]
-): CompiledStageAssignment[] {
-  return [...assignments]
-    .sort((a, b) => b.priority - a.priority)
-    .map((a) => ({
-      id: a.id,
-      priority: a.priority,
-      condition: a.condition,
-      result: a.result,
-    }));
 }

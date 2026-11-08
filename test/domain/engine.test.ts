@@ -40,7 +40,6 @@ function makeSession(overrides: Partial<WorkflowSession> = {}): WorkflowSession 
 
 function makeConfig(overrides: Partial<EngineConfig> = {}): EngineConfig {
   return {
-    stageAssignments: [],
     transitions: [],
     ...overrides,
   };
@@ -48,9 +47,7 @@ function makeConfig(overrides: Partial<EngineConfig> = {}): EngineConfig {
 
 describe('SessionGuardEngine', () => {
   it('derives PLANNING stage through engine', () => {
-    const config = makeConfig({
-      stageAssignments: [{ id: 'always', priority: 0, condition: 'true', result: 'PLANNING' }],
-    });
+    const config = makeConfig({});
     const engine = new SessionGuardEngine(config);
     const session = makeSession();
 
@@ -59,13 +56,8 @@ describe('SessionGuardEngine', () => {
     expect(stage).toBe('PLANNING');
   });
 
-  it('derives EXECUTION stage from session with plan approval', () => {
-    const config = makeConfig({
-      stageAssignments: [
-        { id: 'p1', priority: 100, condition: "session.approved('plan')", result: 'EXECUTION' },
-        { id: 'fallback', priority: 0, condition: 'true', result: 'PLANNING' },
-      ],
-    });
+  it('keeps the persisted stage regardless of approval state', () => {
+    const config = makeConfig();
     const engine = new SessionGuardEngine(config);
     const session = makeSession({
       approvals: [{ type: 'plan', callId: 'c1', status: 'granted' }],
@@ -73,7 +65,7 @@ describe('SessionGuardEngine', () => {
 
     const stage = engine.deriveStage(session);
 
-    expect(stage).toBe('EXECUTION');
+    expect(stage).toBe('PLANNING');
   });
 
   it('checkTransition allows valid transition through engine', () => {
@@ -90,7 +82,6 @@ describe('SessionGuardEngine', () => {
   it('tryApplyTransitions enforces external stage exit and entry guards', () => {
     const engine = new SessionGuardEngine(
       makeConfig({
-        stageAssignments: [{ id: 'always', priority: 0, condition: 'true', result: 'a' }],
         stages: {
           a: { exitGuards: ['false'] },
           b: { entryGuards: ['false'] },
@@ -188,9 +179,7 @@ describe('SessionGuardEngine', () => {
   });
 
   it('deriveStage ignores stageOverride (dead field, never read)', () => {
-    const config = makeConfig({
-      stageAssignments: [{ id: 'always', priority: 0, condition: 'true', result: 'PLANNING' }],
-    });
+    const config = makeConfig({});
     const engine = new SessionGuardEngine(config);
     // stageOverride on the session object has no effect on deriveStage
     const session = makeSession({ stageOverride: 'COMMIT' } as never);
@@ -264,7 +253,7 @@ describe('onFailure: retry', () => {
         execution: maximum === undefined ? {} : { retryBudget: { maximum } },
         failed: {},
       },
-      stageAssignments: [],
+
       transitions: [
         { from: 'execution', to: 'execution', onFailure: 'retry' },
         { from: 'execution', to: 'failed', onFailure: 'terminal' },
@@ -333,7 +322,6 @@ describe('alternative transitions between the same two stages', () => {
   // time, so the second guard is never read and the session stays in a.
   const config = () =>
     makeConfig({
-      stageAssignments: [{ id: 'always', priority: 0, condition: 'true', result: 'a' }],
       transitions: [
         { from: 'a', to: 'b', guard: 'false' },
         { from: 'a', to: 'b', guard: 'true' },
@@ -342,7 +330,7 @@ describe('alternative transitions between the same two stages', () => {
 
   it('takes the alternative whose guard holds', () => {
     const engine = new SessionGuardEngine(config());
-    const session = makeSession();
+    const session = makeSession({ currentStage: 'a' });
 
     const result = engine.tryApplyTransitions(session);
 
@@ -353,14 +341,13 @@ describe('alternative transitions between the same two stages', () => {
   it('stays put when no alternative holds', () => {
     const engine = new SessionGuardEngine(
       makeConfig({
-        stageAssignments: [{ id: 'always', priority: 0, condition: 'true', result: 'a' }],
         transitions: [
           { from: 'a', to: 'b', guard: 'false' },
           { from: 'a', to: 'b', guard: 'false' },
         ],
       })
     );
-    const session = makeSession();
+    const session = makeSession({ currentStage: 'a' });
 
     expect(engine.tryApplyTransitions(session).applied).toBe(false);
   });
@@ -369,14 +356,13 @@ describe('alternative transitions between the same two stages', () => {
     // The effect proves which edge ran: the blocked one grants nothing.
     const engine = new SessionGuardEngine(
       makeConfig({
-        stageAssignments: [{ id: 'always', priority: 0, condition: 'true', result: 'a' }],
         transitions: [
           { from: 'a', to: 'b', guard: 'false', effects: [{ approve: 'wrong' }] },
           { from: 'a', to: 'b', guard: 'true', effects: [{ approve: 'right' }] },
         ],
       })
     );
-    const session = makeSession();
+    const session = makeSession({ currentStage: 'a' });
 
     engine.tryApplyTransitions(session);
 

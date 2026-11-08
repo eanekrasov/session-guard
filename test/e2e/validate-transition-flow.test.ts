@@ -18,16 +18,6 @@ afterEach(async () => {
 
 function makeConfig(overrides?: Partial<EngineConfig>): EngineConfig {
   return {
-    stageAssignments: [
-      { id: 'always', priority: 0, condition: 'true', result: 'PLANNING' },
-      { id: 'approved', priority: 100, condition: "session.approved('plan')", result: 'EXECUTION' },
-      {
-        id: 'gates-pass',
-        priority: 200,
-        condition: 'session.gates.invariants == "passed"',
-        result: 'COMMIT',
-      },
-    ],
     transitions: [
       { from: 'PLANNING', to: 'EXECUTION', guard: "session.approved('plan')" },
       // Раньше это были `kind: pass` и `kind: fail`, читавшие список гейтов с

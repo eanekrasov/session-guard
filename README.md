@@ -824,7 +824,7 @@ interface ResolvedProfile {
 // Текущая семантика объединения:
 // - stages объединяются поэлементно, включая вложенные stages и transitions
 // - transitions объединяются по группам from→to; дочерний профиль заменяет соответствующую группу
-// - editingAgents, gates, taskControlAgents и stageAssignments используют приоритет дочернего профиля
+// - editingAgents, gates и taskControlAgents используют приоритет дочернего профиля
 // - отсутствующие поля удаляются из итогового результата
 ```
 

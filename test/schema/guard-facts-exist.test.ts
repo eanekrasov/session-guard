@@ -18,7 +18,7 @@ import type { StageDef } from '../../src/schema/types.ts';
  * load — but `session.taskLists.implementation` parses perfectly and then
  * reads `false` for ever, because the list of task lists is `session.tasks`.
  * The base fixture carried exactly that for months: its `uncommitted →
- * execution` rule never fired once, and nothing was red.
+ * execution` transition guard never fired once, and nothing was red.
  *
  * The evaluator already reports the read through `onError`. This walks the
  * whole corpus and listens.
@@ -51,12 +51,6 @@ function collect(where: string, schema: Record<string, unknown>): Expression[] {
       found.push({ where: `${where}:${path}`, expression: value });
     }
   };
-
-  for (const [index, rule] of (
-    (schema.stageAssignments as Array<Record<string, unknown>>) ?? []
-  ).entries()) {
-    push(`stageAssignments[${index}].condition`, rule.condition);
-  }
 
   const walkTransitions = (path: string, list: unknown): void => {
     for (const [index, transition] of ((list as Array<Record<string, unknown>>) ?? []).entries()) {

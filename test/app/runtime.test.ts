@@ -114,7 +114,7 @@ async function createTestSession(
   overrides?: Partial<import('../../src/session/session-schema.ts').WorkflowSession>
 ): Promise<import('../../src/session/session-schema.ts').WorkflowSession> {
   const store = new WorkflowStore(process.env.SESSION_GUARD_STORE_DIR!);
-  const session = createSession(sessionId, profileId, 'cycle');
+  const session = createSession(sessionId, profileId, 'cycle', 'execution');
   if (overrides) {
     Object.assign(session, overrides);
   }
@@ -138,7 +138,7 @@ function taskCycle(): Pick<
       implementation: [createTask()],
     },
     loopRuns: {},
-    currentStage: 'EXECUTION',
+    currentStage: 'execution',
   };
 }
 
@@ -177,7 +177,7 @@ function activeOperation(
         kind: 'task',
       },
     },
-    currentStage: 'EXECUTION',
+    currentStage: 'execution',
   };
 }
 

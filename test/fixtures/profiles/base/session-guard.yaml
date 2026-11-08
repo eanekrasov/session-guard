@@ -7,19 +7,11 @@ stages:
     # цикл мутации, потому что задач ещё нет; теперь ход вне цикла законен, и
     # запрет обязан быть объявленным.
     #
-    # Эта фикстура сводит весь workflow на одну стадию: её `stageAssignments`
-    # по умолчанию возвращают `planning` при любом состоянии, так что
-    # действующей стадией она остаётся и для коммита. Поэтому объявления здесь
-    # покрывают всё, что фикстура проверяет.
+    # На planning доступны чтение и правки после одобрения плана.
     actions:
       # Осмотреться: чтение дерева планированию не мешает.
       - action: bash
         commands: ['git .*', 'git', 'ls.*', 'rg.*', 'cat.*']
-      # Доставка. `delivers` говорит ядру выдать permit до вызова и сверить
-      # HEAD после — без этой записи объявленный список отказал бы коммиту.
-      - action: bash
-        commands: ['bun run .*commit-task\.ts.*']
-        delivers: true
       # Всё остальное — только по утверждённому плану.
       - action: bash
         guard: "session.approved('plan')"
@@ -50,7 +42,11 @@ stages:
         guard: "task.gates.invariants == 'failed' || task.gates.review == 'failed'"
         effects:
           - bumpRetry: task.id
-  commit: {}
+  commit:
+    actions:
+      - action: bash
+        commands: ['bun run .*commit-task\.ts.*']
+        delivers: true
   done: {}
 transitions:
   - from: planning
@@ -65,29 +61,3 @@ transitions:
   - from: commit
     to: done
     guard: "typeof session.deliveryReceipt == 'string' || typeof session.deliveryPermit == 'string'"
-stageAssignments:
-  - id: default
-    priority: 0
-    condition: 'true'
-    result: planning
-  - id: hasPlanApproval
-    priority: 60
-    condition: "session.approved('plan')"
-    result: tasks_ready
-  - id: uncommitted
-    priority: 70
-    # `session.taskLists` is not a fact this project has — the list of task
-    # lists is `session.tasks`. The rule read it anyway and was therefore dead:
-    # the evaluator reported "Cannot read 'implementation' of undefined"
-    # through onError and the condition was false for ever, so this fixture
-    # never once derived `execution`.
-    condition: "session.approved('plan') && (session.tasks.implementation ?? []).length > 0 && session.tasks.implementation.some(t => t.status != 'completed')"
-    result: execution
-  - id: commitApproval
-    priority: 90
-    condition: "session.approved('commit')"
-    result: commit
-  - id: deliveryReceipt
-    priority: 100
-    condition: "typeof session.deliveryReceipt == 'string' || typeof session.deliveryPermit == 'string'"
-    result: done

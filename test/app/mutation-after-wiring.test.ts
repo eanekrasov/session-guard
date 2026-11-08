@@ -62,7 +62,7 @@ function makeGitDirectory(): string {
 
 async function seedSession(): Promise<WorkflowStore> {
   const store = new WorkflowStore(storeDirectory);
-  const session = createSession('s1', 'scope-enforce', 'cycle');
+  const session = createSession('s1', 'scope-enforce', 'cycle', 'execution');
   session.tasks.implementation = [createTask({ writeScope: ['src/auth/**'] })];
   await store.save(session);
   return store;

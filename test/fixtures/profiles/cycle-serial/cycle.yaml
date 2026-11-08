@@ -10,8 +10,3 @@ stages:
         allowedAgents: ['review']
       qa:
         allowedAgents: ['qa']
-stageAssignments:
-  - id: execution
-    priority: 1
-    condition: 'true'
-    result: execution

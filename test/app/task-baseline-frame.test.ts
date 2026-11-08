@@ -66,7 +66,7 @@ function setFixtureProfilesDir(): void {
 
 async function seed(): Promise<WorkflowStore> {
   const store = new WorkflowStore(storeDirectory);
-  const session = createSession('s1', 'rollup', 'cycle');
+  const session = createSession('s1', 'rollup', 'cycle', 'execution');
   session.tasks.implementation = [createTask()];
   await store.save(session);
   return store;
@@ -147,7 +147,7 @@ function setNestedRollupFixtureProfilesDir(): void {
 
 async function seedTwoTasks(): Promise<WorkflowStore> {
   const store = new WorkflowStore(storeDirectory);
-  const session = createSession('s1', 'nested-rollup', 'cycle');
+  const session = createSession('s1', 'nested-rollup', 'cycle', 'execution');
   session.tasks.implementation = createTasks({}, {});
   await store.save(session);
   return store;

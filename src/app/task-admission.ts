@@ -102,8 +102,15 @@ export class TaskAdmissionImpl implements TaskAdmission {
         );
       }
 
-      const derivedStageId = engine.deriveStage(tx.session);
-      tx.session.currentStage = derivedStageId;
+      // Transitions replace the old state-derived stage selection. Advance the
+      // guarded graph before admitting a task so its own loop can become active.
+      let derivedStageId = engine.deriveStage(tx.session);
+      for (let step = 0; step < Object.keys(engine.getStages()).length; step++) {
+        const currentStage = engine.getStages()[derivedStageId];
+        if (currentStage?.loop && nestedStages(currentStage).length > 0) break;
+        if (!engine.tryApplyTransitions(tx.session).applied) break;
+        derivedStageId = engine.deriveStage(tx.session);
+      }
       const derivedStage = engine.getStages()[derivedStageId];
       if (!derivedStage?.loop || nestedStages(derivedStage).length === 0) {
         blockTaskAdmission(`Stage ${derivedStageId} does not declare an executable task loop`);

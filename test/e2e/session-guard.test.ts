@@ -26,34 +26,6 @@ import { createTask } from '../support/task-factory.ts';
 // ─── Config — mirrors profiles/base/session-guard.yaml behaviour ──────────
 
 const ENGINE_CONFIG: EngineConfig = {
-  stageAssignments: [
-    { id: 'default', priority: 0, condition: 'true', result: 'PLANNING' },
-    {
-      id: 'hasPlanApproval',
-      priority: 60,
-      condition: "session.approved('plan')",
-      result: 'TASKS_READY',
-    },
-    {
-      id: 'uncommitted',
-      priority: 70,
-      condition:
-        "session.approved('plan') && session.tasks.implementation.length > 0 && session.tasks.implementation.some(t => t.status != 'completed')",
-      result: 'EXECUTION',
-    },
-    {
-      id: 'commitApproval',
-      priority: 90,
-      condition: "session.approved('commit')",
-      result: 'COMMIT',
-    },
-    {
-      id: 'deliveryPermit',
-      priority: 100,
-      condition: 'session.deliveryPermit != null',
-      result: 'DONE',
-    },
-  ],
   transitions: [
     { from: 'PLANNING', to: 'TASKS_READY', guard: "session.approved('plan')" },
     {
@@ -62,14 +34,13 @@ const ENGINE_CONFIG: EngineConfig = {
       guard:
         "session.tasks.implementation.length > 0 && session.tasks.implementation.some(t => t.status != 'completed')",
     },
-    { from: 'EXECUTION', to: 'EXECUTION' },
     // Раньше `kind: 'pass'` со списком гейтов на уровне схемы. Ребро называет
     // их само — это и был весь смысл `kind`.
     {
       from: 'EXECUTION',
       to: 'COMMIT',
       guard:
-        "session.gates.invariants == 'passed' && session.gates.review == 'passed' && session.gates.qa == 'passed'",
+        "session.approved('commit') && session.gates.invariants == 'passed' && session.gates.review == 'passed' && session.gates.qa == 'passed'",
     },
     { from: 'EXECUTION', to: 'PLANNING', guard: "!session.approved('plan')" },
     { from: 'COMMIT', to: 'DONE', guard: 'session.deliveryPermit != null' },
@@ -92,7 +63,7 @@ function makeStore(): WorkflowStore {
 }
 
 function baseSession(): WorkflowSession {
-  return createSession('test-session', 'test', 'cycle', 'planning');
+  return createSession('test-session', 'test', 'cycle', 'PLANNING');
 }
 
 function implementationTasks(session: WorkflowSession): WorkflowSession['tasks']['implementation'] {
@@ -163,6 +134,7 @@ describe('E2E: Full state machine flow', () => {
 
     // 2. approve('plan') → TASKS_READY
     approve(session, 'plan', 'ev-1', 'call-1');
+    expect(engine.tryApplyTransitions(session).applied).toBe(true);
     session = await persistAndReload(session);
 
     expect(engine.deriveStage(session)).toBe('TASKS_READY');
@@ -170,6 +142,7 @@ describe('E2E: Full state machine flow', () => {
 
     // 3. addTask → EXECUTION
     addImplementationTask(session);
+    expect(engine.tryApplyTransitions(session).applied).toBe(true);
     session = await persistAndReload(session);
 
     expect(engine.deriveStage(session)).toBe('EXECUTION');
@@ -189,6 +162,7 @@ describe('E2E: Full state machine flow', () => {
 
     // 5. approve('commit') → COMMIT
     approve(session, 'commit', 'ev-2', 'call-2');
+    expect(engine.tryApplyTransitions(session).applied).toBe(true);
     session = await persistAndReload(session);
 
     expect(engine.deriveStage(session)).toBe('COMMIT');
@@ -201,6 +175,7 @@ describe('E2E: Full state machine flow', () => {
       expectedFiles: [],
       startedAt: new Date().toISOString(),
     };
+    expect(engine.tryApplyTransitions(session).applied).toBe(true);
     session = await persistAndReload(session);
 
     expect(engine.deriveStage(session)).toBe('DONE');
@@ -291,9 +266,9 @@ describe('E2E: Full state machine flow', () => {
     expect(validation.reason).toContain('guard failed');
   });
 
-  // ─── TC7: Kind=auto — EXECUTION loop ─────────────────────────────────────
+  // ─── TC7: execution stays put unless an outgoing transition applies ──────
 
-  test('TC7: EXECUTION → EXECUTION (auto loop) is always allowed', () => {
+  test('TC7: no self-transition means execution does not loop automatically', () => {
     store = makeStore();
     const session = baseSession();
     const engine = new SessionGuardEngine(ENGINE_CONFIG);
@@ -302,7 +277,7 @@ describe('E2E: Full state machine flow', () => {
     addImplementationTask(session);
 
     const validation = engine.checkTransition('EXECUTION', 'EXECUTION', session);
-    expect(validation.allowed).toBe(true);
+    expect(validation.allowed).toBe(false);
   });
 
   // ─── TC8: Failed mutation retry cycle ────────────────────────────────────
@@ -314,6 +289,8 @@ describe('E2E: Full state machine flow', () => {
 
     approve(session, 'plan', 'ev', 'c1');
     addImplementationTask(session);
+    expect(engine.tryApplyTransitions(session).applied).toBe(true);
+    expect(engine.tryApplyTransitions(session).applied).toBe(true);
     expect(engine.deriveStage(session)).toBe('EXECUTION');
 
     // First mutation fails. Nothing records the verdict any more — the
@@ -333,6 +310,7 @@ describe('E2E: Full state machine flow', () => {
     setGateStatus(session, 'qa', 'passed');
 
     approve(session, 'commit', 'ev', 'c2');
+    expect(engine.tryApplyTransitions(session).applied).toBe(true);
     expect(engine.deriveStage(session)).toBe('COMMIT');
 
     session.deliveryPermit = {
@@ -341,6 +319,7 @@ describe('E2E: Full state machine flow', () => {
       expectedFiles: [],
       startedAt: new Date().toISOString(),
     };
+    expect(engine.tryApplyTransitions(session).applied).toBe(true);
     expect(engine.deriveStage(session)).toBe('DONE');
   });
 
@@ -386,16 +365,17 @@ describe('E2E: Full state machine flow', () => {
 
   // ─── TC11: Decline then re-approve ───────────────────────────────────────
 
-  test('TC11: clear approvals reverts stage to PLANNING', () => {
+  test('TC11: clearing approval does not rewind the persisted stage', () => {
     store = makeStore();
     const session = baseSession();
     const engine = new SessionGuardEngine(ENGINE_CONFIG);
 
     approve(session, 'plan', 'ev', 'c1');
+    expect(engine.tryApplyTransitions(session).applied).toBe(true);
     expect(engine.deriveStage(session)).toBe('TASKS_READY');
 
     session.approvals = [];
-    expect(engine.deriveStage(session)).toBe('PLANNING');
+    expect(engine.deriveStage(session)).toBe('TASKS_READY');
   });
 
   // ─── TC12: confirm/reject verifications ─────────────────────────────────────
@@ -425,9 +405,9 @@ describe('E2E: Full state machine flow', () => {
     store = makeStore();
     const session = baseSession();
     approve(session, 'plan', 'ev', 'c1');
+    session.currentStage = 'TASKS_READY';
 
     const config: EngineConfig = {
-      stageAssignments: [{ id: 'always', priority: 0, condition: 'true', result: 'TASKS_READY' }],
       transitions: [{ from: 'TASKS_READY', to: 'EXECUTION' }],
     };
     const engine = new SessionGuardEngine(config);
@@ -862,6 +842,7 @@ describe('E2E: Full state machine flow', () => {
     const engine = new SessionGuardEngine(ENGINE_CONFIG);
 
     approve(session, 'plan', 'ev', 'c1');
+    expect(engine.tryApplyTransitions(session).applied).toBe(true);
     // No tasks added — stays in TASKS_READY
 
     expect(engine.deriveStage(session)).toBe('TASKS_READY');
@@ -879,6 +860,7 @@ describe('E2E: Full state machine flow', () => {
 
     approve(session, 'plan', 'ev', 'c1');
     addImplementationTask(session, 'completed');
+    expect(engine.tryApplyTransitions(session).applied).toBe(true);
 
     // All tasks completed → no "running" tasks → not EXECUTION
     expect(engine.deriveStage(session)).toBe('TASKS_READY');
@@ -893,21 +875,13 @@ describe('E2E: Full state machine flow', () => {
     // Engine where deriveStage also checks gate status for commit
     const strictConfig: EngineConfig = {
       ...ENGINE_CONFIG,
-      stageAssignments: [
-        ...ENGINE_CONFIG.stageAssignments.filter((pa) => pa.id !== 'commitApproval'),
-        {
-          id: 'commitApproval',
-          priority: 90,
-          condition:
-            "session.approved('commit') && session.gates.invariants == 'passed' && session.gates.review == 'passed' && session.gates.qa == 'passed'",
-          result: 'COMMIT',
-        },
-      ],
     };
     const engine = new SessionGuardEngine(strictConfig);
 
     approve(session, 'plan', 'ev', 'c1');
     addImplementationTask(session);
+    expect(engine.tryApplyTransitions(session).applied).toBe(true);
+    expect(engine.tryApplyTransitions(session).applied).toBe(true);
     beginMutation(session, 'm-1', 'unknown', () => 'code');
     session.changedFiles = [];
     finishMutation(session, true, 'm-1');
@@ -918,22 +892,18 @@ describe('E2E: Full state machine flow', () => {
     expect(engine.deriveStage(session)).toBe('EXECUTION');
   });
 
-  // ─── TC50: Stage derivation priority — higher wins ───────────────────────
+  // ─── TC50: The stage is persisted, not derived from session facts ────────
 
-  test('TC50: higher priority stage assignment wins over lower', () => {
+  test('TC50: deriveStage returns the persisted stage', () => {
     store = makeStore();
     const session = baseSession();
 
     const priorityConfig: EngineConfig = {
-      stageAssignments: [
-        { id: 'low', priority: 10, condition: 'true', result: 'LOW' },
-        { id: 'high', priority: 100, condition: 'true', result: 'HIGH' },
-      ],
       transitions: [],
     };
     const engine = new SessionGuardEngine(priorityConfig);
 
-    expect(engine.deriveStage(session)).toBe('HIGH');
+    expect(engine.deriveStage(session)).toBe('PLANNING');
   });
 
   // ─── TC52: Concurrent save/load consistency ──────────────────────────────

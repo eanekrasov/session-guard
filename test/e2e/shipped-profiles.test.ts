@@ -119,7 +119,6 @@ describe('shipped profiles', () => {
       source: profile.metadata.id,
       stages: config.stages,
       transitions: config.transitions,
-      stageAssignments: config.stageAssignments,
     });
     expect(errors, errors.map((e) => `${e.path}: ${e.message}`).join('\n')).toEqual([]);
   });

@@ -65,13 +65,6 @@ const TransitionDefSchema = z.object({
   onFailure: z.enum(['retry', 'terminal']).optional(),
 });
 
-const StageAssignmentRuleSchema = z.object({
-  id: z.string(),
-  priority: z.number(),
-  condition: z.string(),
-  result: z.string(),
-});
-
 const DispatchDefSchema = z.discriminatedUnion('strategy', [
   z.object({
     strategy: z.literal('serial'),
@@ -137,7 +130,6 @@ const ProfileSchemaSchema = z
   .object({
     extends: z.string().optional(),
     stages: z.record(z.string(), StageDefSchema).optional(),
-    stageAssignments: z.array(StageAssignmentRuleSchema).optional(),
     transitions: z
       .array(
         z.object({
@@ -183,7 +175,6 @@ export type ProfileRetryBudget = z.infer<typeof RetryBudgetSchema>;
 export type TransitionEffect = z.infer<typeof TransitionEffectSchema>;
 export type ConsentOnTransition = z.infer<typeof ConsentOnTransitionSchema>;
 export type TransitionDef = z.infer<typeof TransitionDefSchema>;
-export type StageAssignmentRule = z.infer<typeof StageAssignmentRuleSchema>;
 export type DispatchDef = z.infer<typeof DispatchDefSchema>;
 export type StageDef = z.infer<typeof StageDefSchema>;
 export type ProfileSchema = z.infer<typeof ProfileSchemaSchema>;
@@ -199,6 +190,5 @@ export const RetryBudgetYamlSchema = RetryBudgetSchema;
 export const LoopSourceYamlSchema = LoopSourceSchema;
 export const ActionIdYamlSchema = ActionIdSchema;
 export const DispatchYamlSchema = DispatchDefSchema;
-export const StageAssignmentRuleYamlSchema = StageAssignmentRuleSchema;
 export const TransitionEffectYamlSchema = TransitionEffectSchema;
 export const ConsentOnTransitionYamlSchema = ConsentOnTransitionSchema;

@@ -7,7 +7,6 @@
 export type {
   ProfileSchema,
   StageDef,
-  StageAssignmentRule,
   TransitionDef,
   TransitionEffect,
   DispatchDef,
@@ -36,7 +35,6 @@ export {
   LoopSourceYamlSchema,
   ActionIdYamlSchema,
   DispatchYamlSchema,
-  StageAssignmentRuleYamlSchema,
   TransitionEffectYamlSchema,
   ConsentOnTransitionYamlSchema,
 } from '../schema/yaml-schemas.ts';

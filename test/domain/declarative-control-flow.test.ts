@@ -39,7 +39,6 @@ function createSession(overrides: Partial<WorkflowSession> = {}): WorkflowSessio
 
 function engineFromCompiled(cw: CompiledWorkflow): SessionGuardEngine {
   return new SessionGuardEngine({
-    stageAssignments: [],
     transitions: cw.transitions.map((t) => ({
       from: t.from,
       to: t.to,
@@ -74,7 +73,6 @@ describe('declarative control flow', () => {
           { from: 'START', to: 'MIDDLE' },
           { from: 'MIDDLE', to: 'END' },
         ],
-        stageAssignments: [{ id: 'main', priority: 1, condition: 'true', result: 'START' }],
       });
 
       const session = createSession({ currentStage: 'START' });
@@ -106,7 +104,6 @@ describe('declarative control flow', () => {
           { from: 'CHOOSE', to: 'PATH_A', guard: "session.gates.review == 'passed'" },
           { from: 'CHOOSE', to: 'PATH_B' },
         ],
-        stageAssignments: [{ id: 'main', priority: 1, condition: 'true', result: 'CHOOSE' }],
       });
 
       const session = createSession({ currentStage: 'CHOOSE' });
@@ -127,7 +124,6 @@ describe('declarative control flow', () => {
           { from: 'CHOOSE', to: 'PATH_A', guard: "session.gates.review == 'passed'" },
           { from: 'CHOOSE', to: 'PATH_B' },
         ],
-        stageAssignments: [{ id: 'main', priority: 1, condition: 'true', result: 'CHOOSE' }],
       });
 
       const session = createSession({ currentStage: 'CHOOSE' });
@@ -148,7 +144,6 @@ describe('declarative control flow', () => {
         id: 'test',
         stages: { ACTIVE: {}, DONE: {} },
         transitions: [{ from: 'ACTIVE', to: 'DONE' }],
-        stageAssignments: [{ id: 'main', priority: 1, condition: 'true', result: 'ACTIVE' }],
       });
 
       const session = createSession({ currentStage: 'ACTIVE' });
@@ -184,7 +179,6 @@ describe('declarative control flow', () => {
           },
           { from: 'REVIEW', to: 'DONE', guard: "session.gates.review == 'passed'" },
         ],
-        stageAssignments: [{ id: 'main', priority: 1, condition: 'true', result: 'CODE' }],
       });
 
       const session = createSession({ currentStage: 'CODE' });
@@ -215,7 +209,6 @@ describe('declarative control flow', () => {
           { from: 'LOOP', to: 'END', guard: "session.gates.qa == 'passed'" },
           { from: 'LOOP', to: 'START', guard: "session.gates.qa == 'failed'" },
         ],
-        stageAssignments: [{ id: 'main', priority: 1, condition: 'true', result: 'START' }],
       });
 
       const session = createSession({ currentStage: 'START' });

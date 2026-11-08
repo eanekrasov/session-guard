@@ -6,8 +6,3 @@ stages:
     stages:
       dev:
         allowedAgents: ['code']
-stageAssignments:
-  - id: execution
-    priority: 1
-    condition: 'true'
-    result: execution

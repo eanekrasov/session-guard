@@ -81,7 +81,7 @@ async function createWorkflowSession(
   childTasks: Record<string, TaskFixture[]> = {}
 ): Promise<WorkflowStore> {
   const store = new WorkflowStore(storeDirectory);
-  const session = createSession('s1', taskRetryProfileId, 'cycle');
+  const session = createSession('s1', taskRetryProfileId, 'cycle', 'execution');
   session.tasks.implementation = tasks.map((task) => ({
     id: task.id,
     status: task.status ?? 'pending',

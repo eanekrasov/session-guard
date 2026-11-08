@@ -184,29 +184,6 @@ describe('ProfileSchemaSchema', () => {
     });
   });
 
-  describe('stageAssignments', () => {
-    it('accepts stageAssignments with id, priority, condition, result', () => {
-      const input = {
-        stageAssignments: [
-          {
-            id: 'rule-1',
-            priority: 10,
-            condition: 'session.tasks.length > 0',
-            result: 'EXECUTION',
-          },
-        ],
-      };
-
-      const result = ProfileSchemaSchema.parse(input);
-
-      expect(result.stageAssignments).toHaveLength(1);
-      expect(result.stageAssignments![0].id).toBe('rule-1');
-      expect(result.stageAssignments![0].priority).toBe(10);
-      expect(result.stageAssignments![0].condition).toBe('session.tasks.length > 0');
-      expect(result.stageAssignments![0].result).toBe('EXECUTION');
-    });
-  });
-
   describe('editingAgents', () => {
     it('accepts editingAgents as a string array', () => {
       const input = {

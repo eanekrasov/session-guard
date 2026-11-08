@@ -76,7 +76,6 @@ function createSession(overrides: Partial<WorkflowSession> = {}): WorkflowSessio
 
 function createEngine(): SessionGuardEngine {
   return new SessionGuardEngine({
-    stageAssignments: [],
     transitions: SCHEMA_TRANSITIONS,
     stages: {},
   });
@@ -307,7 +306,6 @@ describe('QA exhausted path: qa → failed', () => {
 describe('Guard contracts — каждый тип guard-выражения из YAML', () => {
   it("session.gates.invariants == 'passed'", () => {
     const engine = new SessionGuardEngine({
-      stageAssignments: [],
       transitions: [
         { from: 'planning', to: 'code', guard: "session.gates.invariants == 'passed'" },
       ],
@@ -322,7 +320,6 @@ describe('Guard contracts — каждый тип guard-выражения из 
 
   it('session.refs.plan != null', () => {
     const engine = new SessionGuardEngine({
-      stageAssignments: [],
       transitions: [{ from: 'planning', to: 'code', guard: 'session.refs.plan != null' }],
     });
     const session = createSession({ currentStage: 'planning' });
@@ -335,7 +332,6 @@ describe('Guard contracts — каждый тип guard-выражения из 
 
   it('hasPendingTasks()', () => {
     const engine = new SessionGuardEngine({
-      stageAssignments: [],
       transitions: [{ from: 'planning', to: 'code', guard: 'hasPendingTasks()' }],
     });
     const session = createSession({ currentStage: 'planning' });
@@ -348,7 +344,6 @@ describe('Guard contracts — каждый тип guard-выражения из 
 
   it("isExhausted('cycles')", () => {
     const engine = new SessionGuardEngine({
-      stageAssignments: [],
       transitions: [{ from: 'planning', to: 'failed', guard: "isExhausted('cycles')" }],
     });
     const session = createSession({ currentStage: 'planning' });
@@ -363,7 +358,6 @@ describe('Guard contracts — каждый тип guard-выражения из 
 
   it('session.deliveryReceipt != null', () => {
     const engine = new SessionGuardEngine({
-      stageAssignments: [],
       transitions: [{ from: 'planning', to: 'done', guard: 'session.deliveryReceipt != null' }],
     });
     const session = createSession({ currentStage: 'planning' });
@@ -376,7 +370,6 @@ describe('Guard contracts — каждый тип guard-выражения из 
 
   it("Составной guard: session.gates.qa == 'failed' && !isExhausted('cycles')", () => {
     const engine = new SessionGuardEngine({
-      stageAssignments: [],
       transitions: [
         {
           from: 'planning',

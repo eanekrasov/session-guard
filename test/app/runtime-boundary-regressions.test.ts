@@ -65,7 +65,7 @@ describe('a symlink is not a way out of the project', () => {
     symlinkSync(outside, join(projectDirectory, 'allowed/link.ts'));
 
     const store = new WorkflowStore(storeDirectory);
-    const session = createSession('symlink', 'parallel-scope', 'cycle', 'planning');
+    const session = createSession('symlink', 'parallel-scope', 'cycle', 'execution');
     session.tasks.implementation = [
       createTask({ id: 'task-1', status: 'pending', writeScope: ['allowed/**'] }),
     ];
@@ -93,7 +93,7 @@ describe('a symlink is not a way out of the project', () => {
     writeFileSync(join(projectDirectory, 'allowed/real.ts'), 'export const a = 1;\n', 'utf-8');
 
     const store = new WorkflowStore(storeDirectory);
-    const session = createSession('inside', 'parallel-scope', 'cycle', 'planning');
+    const session = createSession('inside', 'parallel-scope', 'cycle', 'execution');
     session.tasks.implementation = [
       createTask({ id: 'task-1', status: 'pending', writeScope: ['allowed/**'] }),
     ];

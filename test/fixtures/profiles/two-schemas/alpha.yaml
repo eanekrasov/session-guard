@@ -16,8 +16,3 @@ transitions:
     to: done
     guard: 'FROM_ALPHA'
 editingAgents: [alphaAgent]
-stageAssignments:
-  - id: execution
-    priority: 1
-    condition: 'true'
-    result: execution

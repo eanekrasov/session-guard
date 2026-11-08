@@ -236,7 +236,6 @@ export class SchemaLoader {
       transitions: mergeTransitions(base.transitions, extension.transitions),
       editingAgents: extension.editingAgents ?? base.editingAgents,
       taskControlAgents: extension.taskControlAgents ?? base.taskControlAgents,
-      stageAssignments: extension.stageAssignments ?? base.stageAssignments,
     };
 
     // Strip undefined fields

@@ -103,7 +103,7 @@ describe('a bash call that only reads', () => {
     // had no runnable task.
     const store = new WorkflowStore(storeDirectory);
     // Fresh session: no plan approval, no tasks — both refusal paths armed.
-    await store.save(createSession('read-only', 'base', 'session-guard'));
+    await store.save(createSession('read-only', 'base', 'session-guard', 'planning'));
     const hooks = await createRuntime(pluginInput());
 
     for (const command of ['git status --short', 'ls -la', 'rg -n TODO src']) {
@@ -122,7 +122,7 @@ describe('a bash call that only reads', () => {
 
   it('still refuses a write on the same session', async () => {
     const store = new WorkflowStore(storeDirectory);
-    await store.save(createSession('read-only-guard', 'base', 'session-guard'));
+    await store.save(createSession('read-only-guard', 'base', 'session-guard', 'planning'));
     const hooks = await createRuntime(pluginInput());
 
     await expect(
@@ -211,7 +211,10 @@ describe('a commit after an intermediate change was undone', () => {
     );
 
     // The permit expects what the tree actually differs by.
-    expect((await store.load('undone'))?.deliveryPermit?.expectedFiles).toEqual(['src/b.ts']);
+    expect((await store.load('undone'))?.deliveryPermit).toMatchObject({
+      callID: 'commit-call',
+      expectedFiles: ['src/b.ts'],
+    });
 
     git(repoDirectory, ['add', '-A']);
     git(repoDirectory, ['commit', '-q', '-m', 'feat: b']);
@@ -233,6 +236,6 @@ describe('a commit after an intermediate change was undone', () => {
     );
 
     expect(output.output).not.toContain('[workflow-commit-rejected]');
-    expect((await store.load('undone'))?.deliveryReceipt).toBe(head);
+    expect((await store.loadArchived('undone'))?.deliveryReceipt).toBe(head);
   });
 });

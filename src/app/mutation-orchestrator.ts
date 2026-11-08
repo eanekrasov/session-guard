@@ -59,7 +59,6 @@ export function schemaToEngineConfig(schema: ResolvedSchema): EngineConfig {
 
   return {
     stages: Object.keys(stages).length > 0 ? stages : undefined,
-    stageAssignments: [...(schema.stageAssignments ?? [])],
     transitions: [...(schema.transitions ?? [])],
     taskControlAgents: schema.taskControlAgents ? [...schema.taskControlAgents] : undefined,
     editingAgents: schema.editingAgents ? [...schema.editingAgents] : undefined,
@@ -320,7 +319,6 @@ export class MutationOrchestrator {
       source: schema.source,
       stages: engineConfig.stages,
       transitions: engineConfig.transitions,
-      stageAssignments: engineConfig.stageAssignments,
     });
     if (errors.length > 0) {
       await this.log('error', 'Profile schema failed to compile', {

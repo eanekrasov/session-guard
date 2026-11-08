@@ -59,7 +59,7 @@ describe('cancelling a task ends the work on it', () => {
     // call stayed active, so a late result from the worker found them, moved
     // the task back to `running` and carried it on to `verify`.
     const store = new WorkflowStore(storeDirectory);
-    const session = createSession('cancel', 'cycle-minimal', 'cycle', 'planning');
+    const session = createSession('cancel', 'cycle-minimal', 'cycle', 'execution');
     session.tasks.implementation = [createTask()];
     await store.save(session);
 

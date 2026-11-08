@@ -34,7 +34,6 @@ function loadEngine(): SessionGuardEngine {
     transitions: raw.transitions,
     settings: raw.settings,
     editingAgents: raw.editingAgents,
-    stageAssignments: raw.stageAssignments,
   };
 
   const config = schemaToEngineConfig(resolvedSchema);

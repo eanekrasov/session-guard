@@ -16,7 +16,6 @@ describe('compileWorkflow', () => {
         },
       },
       transitions: [{ from: 'PLANNING', to: 'DONE' }],
-      stageAssignments: [{ id: 'main', priority: 1, condition: 'true', result: 'PLANNING' }],
     };
 
     const { workflow, errors } = compileWorkflow(schema);
@@ -42,7 +41,6 @@ describe('compileWorkflow', () => {
         },
       },
       transitions: [],
-      stageAssignments: [{ id: 'main', priority: 1, condition: 'true', result: 'WORK' }],
     };
 
     const { workflow, errors } = compileWorkflow(schema);
@@ -61,7 +59,6 @@ describe('compileWorkflow', () => {
       source: 'test/cycle.yaml',
       stages: { A: {} },
       transitions: [{ from: 'UNKNOWN', to: 'A' }],
-      stageAssignments: [],
     };
 
     const { errors } = compileWorkflow(schema);
@@ -75,7 +72,6 @@ describe('compileWorkflow', () => {
       source: 'test/cycle.yaml',
       stages: { A: {} },
       transitions: [{ from: 'A', to: 'UNKNOWN' }],
-      stageAssignments: [],
     };
 
     const { errors } = compileWorkflow(schema);
@@ -88,7 +84,6 @@ describe('compileWorkflow', () => {
       source: 'test/cycle.yaml',
       stages: { START: {}, FINISH: {} },
       transitions: [{ from: 'START', to: 'FINISH' }],
-      stageAssignments: [{ id: 'main', priority: 1, condition: 'true', result: 'START' }],
     };
 
     const { workflow, errors } = compileWorkflow(schema);
@@ -106,7 +101,6 @@ describe('compileWorkflow', () => {
         },
       },
       transitions: [],
-      stageAssignments: [{ id: 'main', priority: 1, condition: 'true', result: 'EXEC' }],
     };
 
     const { workflow, errors } = compileWorkflow(schema);
@@ -125,7 +119,6 @@ describe('compileWorkflow', () => {
     expect(errors).toHaveLength(0);
     expect(workflow.stages).toEqual({});
     expect(workflow.transitions).toEqual([]);
-    expect(workflow.stageAssignments).toEqual([]);
     expect(workflow.initialStage).toBe('');
   });
 
@@ -135,7 +128,6 @@ describe('compileWorkflow', () => {
       source: 'test/cycle.yaml',
       stages: { PLANNING: {}, DONE: {} },
       transitions: [{ from: 'PLANNING', to: 'DONE' }],
-      stageAssignments: [{ id: 'main', priority: 1, condition: 'true', result: 'PLANNING' }],
     };
 
     const { workflow, errors } = compileWorkflow(schema);
@@ -149,7 +141,6 @@ describe('compileWorkflow', () => {
       source: 'test/custom.yaml',
       stages: { MAIN: { stages: { step: {} } } },
       transitions: [],
-      stageAssignments: [{ id: 'main', priority: 1, condition: 'true', result: 'MAIN' }],
     };
 
     const { workflow, errors } = compileWorkflow(schema);

@@ -11,8 +11,3 @@ stages:
       verify:
         allowedAgents: ['reviewer', 'tester']
         gates: [review, qa]
-stageAssignments:
-  - id: execution
-    priority: 1
-    condition: 'true'
-    result: execution

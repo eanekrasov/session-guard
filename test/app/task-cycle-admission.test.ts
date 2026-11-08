@@ -57,7 +57,7 @@ async function createWorkflowSession(
   ]
 ): Promise<WorkflowStore> {
   const store = new WorkflowStore(storeDirectory);
-  const session = createSession('s1', taskAdmissionProfileId, 'cycle');
+  const session = createSession('s1', taskAdmissionProfileId, 'cycle', 'execution');
   session.tasks.implementation = tasks.map((task) => ({
     id: task.id,
     path: `src/${task.id}.ts`,
