@@ -35,26 +35,6 @@ export interface LegacyTransportOptions {
   agent?: string;
 }
 
-const WORKFLOW_RESULT_MARKER_RE = /<workflow-result>([\s\S]*?)<\/workflow-result>/gu;
-
-export function workflowResultMarkers(text: string): { count: number; gates: string[] } {
-  let count = 0;
-  const gates: string[] = [];
-  const regex = new RegExp(WORKFLOW_RESULT_MARKER_RE.source, WORKFLOW_RESULT_MARKER_RE.flags);
-  let match: RegExpExecArray | null;
-  while ((match = regex.exec(text)) !== null) {
-    count += 1;
-    try {
-      const value: unknown = JSON.parse(match[1]);
-      if (typeof value === 'object' && value !== null && 'gate' in value) {
-        const gate = (value as { gate?: unknown }).gate;
-        if (typeof gate === 'string') gates.push(gate);
-      }
-    } catch {}
-  }
-  return { count, gates };
-}
-
 /** The legacy message response, read field by field. */
 interface LegacyMessage {
   info?: { error?: { data?: { message?: string } } };
@@ -92,7 +72,6 @@ async function logChildSessionResponse(
         childSessionID,
         messageCount: Array.isArray(listed) ? listed.length : 0,
         roles: Array.isArray(listed) ? listed.map((message) => message.info?.role) : [],
-        hasWorkflowResult: diagnostics.hasWorkflowResult,
         hasDsmlToolResult: diagnostics.hasDsmlToolResult,
         responseLength: diagnostics.text.length,
       },
@@ -276,7 +255,6 @@ export function createLegacyHttpTransport(
           httpError: error || undefined,
           rawPartCount: rawParts.length,
           responseLength: responseText.length,
-          responseHasWorkflowResult: responseDiagnostics.hasWorkflowResult,
           responseHasDsmlToolResult: responseDiagnostics.hasDsmlToolResult,
           taskChildSessionID,
           durationMs: performance.now() - startedAt,
@@ -284,20 +262,6 @@ export function createLegacyHttpTransport(
       });
 
       await logChildSessionResponse(host, session.id, responseText);
-      const markerDiagnostics = workflowResultMarkers(responseText);
-      log('debug', 'V1 workflow-result normalization checkpoint', {
-        sourceId: 'v1-transport.workflow-normalization',
-        sink: 'host-v1',
-        type: 'workflow-result.normalization',
-        fields: {
-          markerDetected: markerDiagnostics.count > 0,
-          markerCount: markerDiagnostics.count,
-          markerGates: markerDiagnostics.gates,
-          rawPartCount: rawParts.length,
-          responseLength: responseText.length,
-        },
-      });
-
       const parts = compactParts(rawParts.map((part) => normalizeLegacyPart(part)));
       const result = buildPromptResult(
         {

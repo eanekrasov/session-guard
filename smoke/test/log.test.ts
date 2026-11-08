@@ -45,7 +45,7 @@ test('routes complete JSONL records independently of human filtering', () => {
   }
 });
 
-test('V1 exchange shows full human output only at debug and keeps JSONL concise', () => {
+test('V1 exchange shows full human output only at debug and records the full prompt in JSONL', () => {
   const directory = mkdtempSync(join(tmpdir(), 'smoke-exchange-test-'));
   try {
     const exchange = new URL('../src/host/v1-exchange.ts', import.meta.url).pathname;
@@ -82,12 +82,13 @@ test('V1 exchange shows full human output only at debug and keeps JSONL concise'
           sourceId: 'v1-exchange.summary',
           level: 'debug',
           agent: 'agent',
+          instruction: prompt,
           instructionLength: prompt.length,
           partCount: 1,
-          message: `USER: ${prompt.length} characters; MODEL: 1 parts`,
+          message: `USER: ${prompt}; MODEL: 1 parts`,
         },
       ]);
-      for (const text of [prompt, response, error]) expect(jsonl).not.toContain(text);
+      for (const text of [response, error]) expect(jsonl).not.toContain(text);
       for (const sink of ['suite', 'host-v1', 'host-v2']) {
         rmSync(join(directory, `${sink}.jsonl`));
       }

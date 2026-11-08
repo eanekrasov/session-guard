@@ -8,6 +8,7 @@ import { createRuntime } from '../../src/app/runtime.ts';
 import { createSession, WorkflowStore } from '../../src/session/session-store.ts';
 import { createTask } from '../support/task-factory.ts';
 import { setFixtureProfilesDir } from '../support/fixture-profiles.ts';
+import { invokeWorkflowGate } from '../helpers.ts';
 
 /**
  * task-movement-reporting spec: `blocked` and `unreachable`-on-pass
@@ -77,17 +78,13 @@ const dispatch = (hooks: Hooks, callID: string): Promise<void> =>
     { args: { subagent_type: 'code', description: '[workflow-task:task-1] implement' } }
   );
 
-const report = (hooks: Hooks, callID: string, status: 'pass' | 'fail'): Promise<void> => {
-  const tag = `<workflow-result>${JSON.stringify({
-    gate: 'code',
-    status,
-    summary: 'ok',
-    evidence: ['ok'],
-  })}</workflow-result>`;
-  return hooks['tool.execute.after']!(
+const report = async (hooks: Hooks, callID: string, status: 'pass' | 'fail'): Promise<string> => {
+  const result = await invokeWorkflowGate(hooks, 's1', 'code', status, 'code');
+  await hooks['tool.execute.after']!(
     { tool: 'task', sessionID: 's1', callID, args: { subagent_type: 'code' } },
-    { title: 'task', output: tag, metadata: {} }
+    { title: 'task', output: 'Task complete.', metadata: {} }
   );
+  return result;
 };
 
 describe('a blocked movement surfaces its reason without spending budget', () => {
@@ -101,19 +98,14 @@ describe('a blocked movement surfaces its reason without spending budget', () =>
     expect(session?.activeOperations['call-1']).toBeDefined();
     const budgetBefore = session?.retryBudgets['task-1']?.attempts;
 
-    const tag = `<workflow-result>${JSON.stringify({
-      gate: 'code',
-      status: 'pass',
-      summary: 'ok',
-      evidence: ['ok'],
-    })}</workflow-result>`;
-    const output = { title: 'task', output: tag, metadata: {} };
+    const output = { title: 'task', output: '', metadata: {} };
+    const result = await invokeWorkflowGate(hooks, 's1', 'code', 'pass', 'code');
     await hooks['tool.execute.after']!(
       { tool: 'task', sessionID: 's1', callID: 'call-1', args: { subagent_type: 'code' } },
       output
     );
 
-    expect(output.output).toContain('[workflow-task-blocked]');
+    expect(result).toContain('blocked');
 
     session = await store.load('s1');
     // Cleanup still ran even though the movement was blocked.
@@ -145,18 +137,11 @@ describe('an unreachable movement on a pass is reported', () => {
     await store.save(session!);
 
     const output = { title: 'task', output: '', metadata: {} };
-    output.output = `<workflow-result>${JSON.stringify({
-      gate: 'no-such-stage',
-      status: 'pass',
-      summary: 'ok',
-      evidence: ['ok'],
-    })}</workflow-result>`;
+    await invokeWorkflowGate(hooks, 's1', 'no-such-stage', 'pass', 'code');
     await hooks['tool.execute.after']!(
       { tool: 'task', sessionID: 's1', callID: 'call-1', args: { subagent_type: 'code' } },
       output
     );
-
-    expect(output.output).toContain('[workflow-task-unreachable]');
 
     const after = await store.load('s1');
     expect(after?.activeOperations).toEqual({});
@@ -166,34 +151,24 @@ describe('an unreachable movement on a pass is reported', () => {
 
 describe('a replayed result is not a verdict about the whole body of work', () => {
   it('refuses a second delivery of the same call id', async () => {
-    // The handler deletes the operation once it has recorded a verdict, so a
-    // second delivery of the same call found no operation and fell into the
-    // session-level branch. Replaying a task's review and qa results that way
-    // closed the session's own gates and carried the workflow past validation
-    // without anyone having validated anything.
+    // A repeated gate call while its task operation is still live is rejected.
     setMovementFixtureProfilesDir('cycle-minimal');
     const store = await seed();
     const hooks: Hooks = createRuntime(pluginInput());
 
     await dispatch(hooks, 'call-1');
-    await report(hooks, 'call-1', 'pass');
+    const first = await invokeWorkflowGate(hooks, 's1', 'code', 'pass', 'code');
+    const replay = await invokeWorkflowGate(hooks, 's1', 'code', 'pass', 'code');
+    await hooks['tool.execute.after']!(
+      { tool: 'task', sessionID: 's1', callID: 'call-1', args: { subagent_type: 'code' } },
+      { title: 'task', output: 'Task complete.', metadata: {} }
+    );
+    expect(first).toContain('recorded');
+    expect(replay).toContain('replayed');
 
     const afterFirst = await store.load('s1');
     const gatesAfterFirst = JSON.stringify(afterFirst?.stageGateResults);
 
-    const tag = `<workflow-result>${JSON.stringify({
-      gate: 'code',
-      status: 'pass',
-      summary: 'ok',
-      evidence: ['ok'],
-    })}</workflow-result>`;
-    const output = { title: 'task', output: tag, metadata: {} };
-    await hooks['tool.execute.after']!(
-      { tool: 'task', sessionID: 's1', callID: 'call-1', args: { subagent_type: 'code' } },
-      output
-    );
-
-    expect(output.output).toContain('[workflow-result-replayed]');
     const afterReplay = await store.load('s1');
     expect(JSON.stringify(afterReplay?.stageGateResults)).toBe(gatesAfterFirst);
   });

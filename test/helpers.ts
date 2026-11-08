@@ -4,6 +4,36 @@
  */
 import type { WorkflowSession } from '../src/session/session-schema.ts';
 import type { WorkflowStore } from '../src/session/session-store.ts';
+import type { Hooks } from '@opencode-ai/plugin';
+
+export async function invokeWorkflowGate(
+  hooks: Hooks,
+  sessionID: string,
+  gate: string,
+  status: 'pass' | 'fail',
+  agent?: string
+): Promise<string> {
+  const result = await (
+    hooks as Hooks & {
+      workflowToolSurface: {
+        createTools(): Record<
+          string,
+          { execute(args: { gate: string; status: 'pass' | 'fail' }, ctx: never): Promise<unknown> }
+        >;
+      };
+    }
+  ).workflowToolSurface
+    .createTools()
+    ['workflow-gate-set']!.execute({ gate, status }, {
+      sessionID,
+      messageID: 'test-gate',
+      agent,
+    } as never);
+  const gateResult = result as { output: string; metadata?: { reason?: string } };
+  return gateResult.metadata?.reason
+    ? `${gateResult.output}: ${gateResult.metadata.reason}`
+    : gateResult.output;
+}
 
 // ─── Mutation lifecycle helpers ──────────────────────────────────────────────
 

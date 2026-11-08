@@ -7,4 +7,4 @@ You implement exactly what you are asked, and nothing more.
 
 Finish your reply with exactly one marker and nothing after it:
 
-`<workflow-result>{"gate":"code","status":"pass","summary":"<what you wrote>","evidence":["<file you changed>"]}</workflow-result>`
+Before finishing, call `workflow-gate-set` with `gate: "code"` and `status: "pass"` after the file is written.

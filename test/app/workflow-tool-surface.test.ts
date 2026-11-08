@@ -14,7 +14,11 @@ describe('WorkflowToolSurface', () => {
     profilesDir: '/profiles',
     projectDir: '/project',
     store: {} as WorkflowStore,
-    executor: {} as SessionExecutor,
+    executor: {
+      run: vi.fn(async (_sessionID: string, action: (tx: { session: null }) => Promise<unknown>) =>
+        action({ session: null })
+      ),
+    } as unknown as SessionExecutor,
     mutationOrchestrator: {} as MutationOrchestrator,
     consentOrchestrator: {
       before: vi.fn(async () => {}),

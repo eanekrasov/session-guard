@@ -69,4 +69,6 @@ permission:
 
 Последним блоком ответа выведи ровно один маркер без текста после него:
 
-`<workflow-result>{"gate":"qa","status":"pass|fail","applicability":"verified|not_applicable","summary":"непустой итог","evidence":["минимум одно доказательство или причина N/A"]}</workflow-result>`
+Перед завершением вызови `workflow-gate-set` с `gate: "qa"` и `status: "pass"` или
+`"fail"` согласно результатам проверки. Если проверка неприменима, укажи причину в
+финальном ответе, но не меняй вердикт на pass без доказательств.

@@ -40,6 +40,7 @@ export interface GateVerdictDetail {
   status: 'passed' | 'failed';
   stage: string;
   moved?: { to: string; passed: boolean; failed: boolean };
+  movement?: { kind: 'blocked' | 'unreachable'; reason: string };
 }
 
 // ─── Internal types ───────────────────────────────────────────────────────
@@ -191,7 +192,8 @@ export class WorkflowGateService {
 
       if (mayMove && (failed || passed)) {
         const moved = await this.moveTask(session, run, task, loopStage, passed, failed);
-        if (moved) detail.moved = moved;
+        if (moved?.kind === 'move') detail.moved = moved;
+        else if (moved) detail.movement = moved;
       }
 
       return { kind: 'recorded', verdict: detail };
@@ -219,7 +221,8 @@ export class WorkflowGateService {
           status === 'pass',
           status === 'fail'
         );
-        if (moved) detail.moved = moved;
+        if (moved?.kind === 'move') detail.moved = moved;
+        else if (moved) detail.movement = moved;
       }
 
       return { kind: 'recorded', verdict: detail };
@@ -285,7 +288,11 @@ export class WorkflowGateService {
     loopStage: StageDef,
     passed: boolean,
     failed: boolean
-  ): Promise<{ to: string; passed: boolean; failed: boolean } | undefined> {
+  ): Promise<
+    | { kind: 'move'; to: string; passed: boolean; failed: boolean }
+    | { kind: 'blocked' | 'unreachable'; reason: string }
+    | undefined
+  > {
     const engine = await this.resolveEngine(session.profileId, session.schemaId);
     const movement = nextTaskStage(
       loopStage,
@@ -312,7 +319,7 @@ export class WorkflowGateService {
       run.status = 'completed';
       task.status = 'completed';
       removeActiveTaskContext(session, run.id);
-      return { to: TASK_DONE, passed, failed };
+      return { kind: 'move', to: TASK_DONE, passed, failed };
     }
     if (movement.kind === 'move') {
       const spendsBudget =
@@ -333,10 +340,11 @@ export class WorkflowGateService {
         run.status = 'running';
         this.upsertActiveTaskContextFromSession(session, run.id, 'running');
       }
-      return { to: movement.to, passed, failed };
+      return { kind: 'move', to: movement.to, passed, failed };
     }
     if (failed && movement.kind === 'unreachable')
       this.recordTaskRetryFailure(session, run, task, loopStage);
+    if (movement.kind === 'blocked' || movement.kind === 'unreachable') return movement;
     return undefined;
   }
 

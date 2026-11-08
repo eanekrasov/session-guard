@@ -81,7 +81,7 @@ export const ActiveOperationSchema = z.object({
    * Вердикт ядра об этом ходе: прошли ли проверки над ним.
    *
    * Сворачивается в `run.checks`, когда ход закрывается. Не гейт намеренно:
-   * гейт пишет агент через `<workflow-result>`, и любой гейт, объявленный
+   * гейт записывает агент через `workflow-gate-set`, и любой гейт, объявленный
    * стадией, он может выставить сам. Этот вердикт движок выносит, посмотрев
    * на диск, и его ценность как раз в независимости от того, что агент про
    * себя рассказал.
@@ -377,7 +377,7 @@ export const WorkflowSessionSchema = z
     tasks: TasksSchema.default({}),
     activeOperations: ActiveOperationsSchema.default({}),
     /**
-     * Freshness stamps for `<workflow-result>` verdicts, keyed by call id.
+     * Freshness stamps for gate verdicts, keyed by call id.
      *
      * Written where an operation is written, but owned by the gate mechanism:
      * unlike `activeOperations`, it is not deleted by the mutation lifecycle.
@@ -398,7 +398,7 @@ export const WorkflowSessionSchema = z
      * Вердикт ядра о последнем ходе на текущей стадии — вне цикла задач.
      *
      * Ровно то же, что `run.checks` внутри цикла, и по той же причине не
-     * гейт: гейты пишет агент через `<workflow-result>` и любой объявленный
+     * гейт: гейты агент записывает через `workflow-gate-set`, и любой объявленный
      * стадией гейт может выставить себе сам, а этот вердикт ядро выносит,
      * посмотрев на диск. Внутри цикла ему есть куда лечь — на прогон задачи;
      * снаружи домом стала сессия.
@@ -413,7 +413,7 @@ export const WorkflowSessionSchema = z
     invariantViolations: z.array(InvariantViolationRecordSchema).default([]),
     consentedCallIDs: z.array(z.string()).default([]),
     /**
-     * Call ids whose `<workflow-result>` has already been acted on.
+     * Call ids whose gate verdict has already been acted on.
      *
      * The result handler deletes the operation once it has recorded the
      * verdict, so a second delivery of the same call found no operation and

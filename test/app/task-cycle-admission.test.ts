@@ -7,6 +7,7 @@ import type { Hooks, PluginInput } from '@opencode-ai/plugin';
 import { createRuntime } from '../../src/app/runtime.ts';
 import { createSession, WorkflowStore } from '../../src/session/session-store.ts';
 import type { WorkflowSession } from '../../src/session/session-schema.ts';
+import { invokeWorkflowGate } from '../helpers.ts';
 
 type DispatchStrategy = 'serial' | 'parallel' | 'serial_with_overlap';
 
@@ -94,21 +95,21 @@ async function beforeTask(
   return { args: output.args, nativeArgs, blockedReason };
 }
 
-async function afterTask(hooks: Hooks, callID: string, outputText: string): Promise<void> {
+async function afterTask(
+  hooks: Hooks,
+  callID: string,
+  outputText: string,
+  verdict?: { gate: 'review' | 'qa'; status: 'pass' | 'fail' },
+  reportingAgent = 'code'
+): Promise<void> {
+  if (verdict) await invokeWorkflowGate(hooks, 's1', verdict.gate, verdict.status, reportingAgent);
   await hooks['tool.execute.after']!(
     { tool: 'task', sessionID: 's1', callID, args: {} },
     { title: 'workflow task', output: outputText, metadata: {} }
   );
 }
 
-function workflowResult(gate: 'review' | 'qa', status: 'pass' | 'fail'): string {
-  return `<workflow-result>${JSON.stringify({
-    gate,
-    status,
-    summary: `${gate} ${status}`,
-    evidence: [`${gate}-evidence`],
-  })}</workflow-result>`;
-}
+const workflowResult = (gate: 'review' | 'qa', status: 'pass' | 'fail') => ({ gate, status });
 
 async function load(store: WorkflowStore): Promise<WorkflowSession> {
   const session = await store.load('s1');
@@ -249,7 +250,7 @@ describe('task-cycle admission', () => {
     const hooks = createRuntime(pluginInput());
 
     await beforeTask(hooks, 'call-1', '[workflow-task:task-1] First');
-    await afterTask(hooks, 'call-1', workflowResult('review', 'pass'));
+    await afterTask(hooks, 'call-1', 'Task complete.', workflowResult('review', 'pass'));
 
     const rejected = await beforeTask(hooks, 'call-2', '[workflow-task:task-2] Second');
 
@@ -263,19 +264,25 @@ describe('task-cycle admission', () => {
     const hooks = createRuntime(pluginInput());
 
     await beforeTask(hooks, 'call-dev', '[workflow-task:task-1] Develop');
-    await afterTask(hooks, 'call-dev', workflowResult('review', 'pass'));
+    await afterTask(hooks, 'call-dev', 'Task complete.', workflowResult('review', 'pass'));
     let session = await load(store);
     expect(session.activeOperations).toEqual({});
     expect(session.loopRuns['run-1'].stage).toBe('review');
     expect(session.loopRuns['run-1'].status).toBe('running');
 
     await beforeTask(hooks, 'call-review', '[workflow-task:task-1] Review', 'review');
-    await afterTask(hooks, 'call-review', workflowResult('review', 'pass'));
+    await afterTask(
+      hooks,
+      'call-review',
+      'Task complete.',
+      workflowResult('review', 'pass'),
+      'review'
+    );
     session = await load(store);
     expect(session.loopRuns['run-1'].stage).toBe('qa');
 
     await beforeTask(hooks, 'call-qa', '[workflow-task:task-1] QA', 'qa');
-    await afterTask(hooks, 'call-qa', workflowResult('qa', 'pass'));
+    await afterTask(hooks, 'call-qa', 'Task complete.', workflowResult('qa', 'pass'), 'qa');
     session = await load(store);
     expect(session.activeOperations).toEqual({});
     expect(session.loopRuns['run-1'].status).toBe('completed');
@@ -294,7 +301,7 @@ describe('task-cycle admission', () => {
     const hooks = createRuntime(pluginInput());
 
     await beforeTask(hooks, 'call-dev', '[workflow-task:task-1] Develop');
-    await afterTask(hooks, 'call-dev', workflowResult('review', 'pass'));
+    await afterTask(hooks, 'call-dev', 'Task complete.', workflowResult('review', 'pass'));
 
     const review = await beforeTask(
       hooks,
@@ -312,18 +319,14 @@ describe('task-cycle admission', () => {
     const hooks = createRuntime(pluginInput());
 
     await beforeTask(hooks, 'call-no-result', '[workflow-task:task-1] Develop');
-    await afterTask(hooks, 'call-no-result', 'Implementation finished without a result');
+    await afterTask(hooks, 'call-no-result', 'Implementation finished without a gate call');
     let session = await load(store);
     expect(session.activeOperations).toEqual({});
     expect(session.loopRuns['run-1']).toMatchObject({ stage: 'dev', status: 'running' });
     expect(session.tasks.implementation[0].status).toBe('running');
 
     await beforeTask(hooks, 'call-malformed', '[workflow-task:task-1] Develop again');
-    await afterTask(
-      hooks,
-      'call-malformed',
-      '<workflow-result>{"gate":"review","status":"pass","summary":"ok","evidence":[]}</workflow-result>'
-    );
+    await afterTask(hooks, 'call-malformed', 'No gate tool call was made.');
     session = await load(store);
     expect(session.activeOperations).toEqual({});
     expect(session.loopRuns['run-1']).toMatchObject({ stage: 'dev', status: 'running' });
@@ -336,7 +339,7 @@ describe('task-cycle admission', () => {
     const hooks = createRuntime(pluginInput());
 
     await beforeTask(hooks, 'call-fail', '[workflow-task:task-1] Develop');
-    await afterTask(hooks, 'call-fail', workflowResult('review', 'fail'));
+    await afterTask(hooks, 'call-fail', 'Task complete.', workflowResult('review', 'fail'));
     let session = await load(store);
     expect(session.activeOperations).toEqual({});
     expect(session.loopRuns['run-1']).toMatchObject({ stage: 'dev', status: 'running' });
@@ -380,7 +383,7 @@ describe('task-cycle admission', () => {
 
     await beforeTask(hooks, 'call-1', '[workflow-task:task-1] First');
     const tooEarly = await beforeTask(hooks, 'call-2-early', '[workflow-task:task-2] Second');
-    await afterTask(hooks, 'call-1', workflowResult('review', 'pass'));
+    await afterTask(hooks, 'call-1', 'Task complete.', workflowResult('review', 'pass'));
 
     const admitted = await beforeTask(hooks, 'call-2', '[workflow-task:task-2] Second');
     const loaded = await load(store);

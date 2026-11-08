@@ -185,134 +185,25 @@ function setExecutableProfilesDir(): void {
   process.env.SESSION_GUARD_PROFILES_DIR = resolve(import.meta.dir, '../../test/fixtures/profiles');
 }
 
-// ─── handleWorkflowResult ────────────────────────────────────────────────────
+// ─── Task completion without text-based verdicts ──────────────────────────────
 
-describe('handleWorkflowResult (via handleToolAfter)', () => {
-  test('a read whose content holds the marker verifies nothing', async () => {
-    // The marker is plain text. It appears in the documentation that defines
-    // it, in a grep hit, in a log. Reading such a file must not close a gate —
-    // a verdict counts only when a dispatched verifier returns it.
-    const hooks = await createRuntime();
-    const sessionId = 'wf-result-1';
-    await createTestSession(sessionId);
-
-    const output = {
-      title: 'test',
-      output: [
-        'Some text before',
-        '<workflow-result>{"gate":"review","status":"pass","summary":"All checks passed","evidence":["check-1","check-2"]}</workflow-result>',
-        'Some text after',
-      ].join('\n'),
-      metadata: {},
-    };
-
-    await hooks['tool.execute.after']!(
-      { tool: 'Read', sessionID: sessionId, callID: 'call-wf-1', args: {} },
-      output
-    );
-
-    const session = await loadSession(sessionId);
-    expect(session).not.toBeNull();
-    expect(session!.verifications.length, 'a file read was counted as a verification').toBe(0);
-  });
-
-  test('a dispatched verifier’s result is recorded', async () => {
-    const hooks = await createRuntime();
-    const sessionId = 'wf-result-1b';
-    setExecutableProfilesDir();
-    await createTestSession(sessionId, 'test-profile', activeOperation('call-wf-1b'));
-
-    const output = {
-      title: 'test',
-      output:
-        '<workflow-result>{"gate":"review","status":"pass","summary":"All checks passed","evidence":["check-1"]}</workflow-result>',
-      metadata: {},
-    };
-
-    await hooks['tool.execute.after']!(
-      {
-        tool: 'task',
-        sessionID: sessionId,
-        callID: 'call-wf-1b',
-        args: { subagent_type: 'review' },
-      },
-      output
-    );
-
-    const session = await loadSession(sessionId);
-    expect(session!.verifications.length).toBe(1);
-    expect(session!.verifications[0].gate).toBe('review');
-    expect(session!.verifications[0].status).toBe('confirmed');
-  });
-
-  test('does nothing when output has no <workflow-result> tag', async () => {
-    const hooks = await createRuntime();
-    const sessionId = 'wf-result-2';
-    await createTestSession(sessionId);
-
-    const output = {
-      title: 'test',
-      output: 'Just a normal output without workflow result tag',
-      metadata: {},
-    };
-
-    await hooks['tool.execute.after']!(
-      { tool: 'Read', sessionID: sessionId, callID: 'call-wf-2', args: {} },
-      output
-    );
-
-    const session = await loadSession(sessionId);
-    expect(session).not.toBeNull();
-    expect(session!.verifications.length).toBe(0);
-  });
-
-  test('clears activeOperation when id matches callID', async () => {
+describe('task completion without a marker', () => {
+  test('does not warn or block task completion when the task response is ordinary text', async () => {
     setExecutableProfilesDir();
     const hooks = await createRuntime();
     const sessionId = 'wf-result-clear';
-    await createTestSession(sessionId, 'test-profile', {
-      ...activeOperation('call-wf-clear'),
-    });
+    await createTestSession(sessionId, 'test-profile', activeOperation('call-wf-clear'));
 
-    const output = {
-      title: 'test',
-      output:
-        '<workflow-result>{"gate":"qa","status":"pass","summary":"QA passed","evidence":["e1"]}</workflow-result>',
-      metadata: {},
-    };
-
+    const output = { title: 'task', output: 'Review complete.', metadata: {} };
     await hooks['tool.execute.after']!(
       { tool: 'task', sessionID: sessionId, callID: 'call-wf-clear', args: {} },
       output
     );
 
     const session = await loadSession(sessionId);
-    expect(session).not.toBeNull();
-    expect(session!.activeOperations['call-wf-clear']).toBeUndefined();
-  });
-
-  test('does not clear a different active operation when callID does not match', async () => {
-    const hooks = await createRuntime();
-    const sessionId = 'wf-result-no-clear';
-    await createTestSession(sessionId, 'test-profile', {
-      ...activeOperation('other-call'),
-    });
-
-    const output = {
-      title: 'test',
-      output:
-        '<workflow-result>{"gate":"review","status":"fail","summary":"Failed","evidence":["e1"]}</workflow-result>',
-      metadata: {},
-    };
-
-    await hooks['tool.execute.after']!(
-      { tool: 'task', sessionID: sessionId, callID: 'different-call', args: {} },
-      output
-    );
-
-    const session = await loadSession(sessionId);
-    expect(session).not.toBeNull();
-    expect(session!.activeOperations['other-call']).toMatchObject({ callId: 'other-call' });
+    expect(session?.activeOperations['call-wf-clear']).toBeUndefined();
+    expect(session?.verifications).toHaveLength(0);
+    expect(output.output).not.toContain('workflow-result-missing');
   });
 });
 

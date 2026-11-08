@@ -5,12 +5,12 @@ import type {
   LoopRun,
 } from '../../src/session/session-schema.ts';
 import {
+  MUTATION_TTL_MS,
   beginMutation,
   finishMutation,
   isExpiredMutation,
   clearActiveMutation,
 } from '../../src/domain/operation-lifecycle.ts';
-import { MUTATION_TTL_MS } from '../../src/domain/evidence.ts';
 
 function createTestSession(overrides: Partial<WorkflowSession> = {}): WorkflowSession {
   const base: WorkflowSession = {

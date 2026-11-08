@@ -19,6 +19,6 @@ working. Follow the instructions you are given exactly.
 When done, write your result as the very last thing in your reply — nothing
 after it:
 
-`<workflow-result>{"gate":"smoke_result","status":"pass","summary":"<smoke test result>","evidence":["<details>"]}</workflow-result>`
+Before finishing, call `workflow-gate-set` with `gate: "smoke_result"` and `status: "pass"` only if smoke checks pass; otherwise use `status: "fail"`.
 
 Use `"status":"fail"` when the smoke test fails.

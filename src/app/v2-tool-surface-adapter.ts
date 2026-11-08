@@ -17,6 +17,7 @@ const descriptions: Record<string, string> = {
   'workflow-tasks-get': 'Read one named workflow task list',
   'workflow-tasks-set-status': 'Set a workflow task status by global task ID',
   'workflow-tasks-resolve-decision': 'Resolve a pending workflow task retry decision.',
+  'workflow-gate-set': 'Set the result of a declared workflow gate and evaluate the transition.',
 };
 
 const inputs: Record<string, Record<string, unknown>> = {
@@ -72,6 +73,15 @@ const inputs: Record<string, Record<string, unknown>> = {
     },
     additionalProperties: false,
   },
+  'workflow-gate-set': {
+    type: 'object',
+    properties: {
+      gate: { type: 'string', minLength: 1 },
+      status: { type: 'string', enum: ['pass', 'fail'] },
+    },
+    required: ['gate', 'status'],
+    additionalProperties: false,
+  },
 };
 
 const toolOrder = [
@@ -82,6 +92,7 @@ const toolOrder = [
   'workflow-tasks-get',
   'workflow-tasks-set-status',
   'workflow-tasks-resolve-decision',
+  'workflow-gate-set',
 ] as const;
 
 /**

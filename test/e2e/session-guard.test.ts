@@ -19,7 +19,6 @@ import {
   getExecutionProgress,
   canExitExecution,
 } from '../../test/helpers.ts';
-import { parseWorkflowResult } from '../../src/domain/evidence.ts';
 import type { EngineConfig } from '../../src/domain/engine.ts';
 import type { WorkflowSession } from '../../src/session/session-schema.ts';
 import { createTask } from '../support/task-factory.ts';
@@ -641,30 +640,6 @@ describe('E2E: Full state machine flow', () => {
     session = await persistAndReload(session);
 
     expect(session.changedFiles).toEqual([]);
-  });
-
-  // ─── TC27: parseWorkflowResult — last valid tag wins ──────────────────────
-
-  test('TC27: parseWorkflowResult finds last valid workflow result', () => {
-    store = makeStore();
-    const output = [
-      'irrelevant text',
-      '<workflow-result>{"gate":"first","status":"pass","summary":"early","evidence":["e1"]}</workflow-result>',
-      '<workflow-result>invalid json}</workflow-result>',
-      '<workflow-result>{"gate":"second","status":"fail","summary":"late","evidence":["e3"]}</workflow-result>',
-    ].join('\n');
-
-    const result = parseWorkflowResult(output);
-    expect(result).not.toBeNull();
-    expect(result!.gate).toBe('second');
-    expect(result!.status).toBe('fail');
-  });
-
-  // ─── TC28: parseWorkflowResult — no tags returns null ─────────────────────
-
-  test('TC28: parseWorkflowResult returns null when no tags', () => {
-    store = makeStore();
-    expect(parseWorkflowResult('just some text')).toBeNull();
   });
 
   // ─── TC29: hasLiveVerifier — active mutation ─────────────────────────────

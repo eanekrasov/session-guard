@@ -96,8 +96,9 @@ workflow-сессий: стадии, переходы, консент (одоб�
 
 До вызова инструмента runtime последовательно применяет guardrails, consent,
 допуск действий стадии и, для мутаций, lifecycle операции. После вызова он
-санитизирует результат, обрабатывает `<workflow-result>`, проверяет изменения и
-инварианты, закрывает операцию и пытается применить переходы. Отдельный
+санитизирует результат, проверяет изменения и инварианты, закрывает операцию и
+пытается применить переходы. Гейты записываются явным вызовом `workflow-gate-set`;
+текст ответа субагента не является verdict. Отдельный
 `tool.execute.after` повторно не является «главным» источником перехода: итоговая
 сессия сохраняется через executor, после чего transition engine работает над
 актуальным состоянием.
@@ -526,19 +527,10 @@ interface OpenCodeSessionClient {
 1. Guardrails (guardrailAfter)
    └── sanitizeToolOutput() — замена block-паттернов на [BLOCKED:RULE]
 
-2. Workflow result (handleWorkflowResult)
-   └── parseWorkflowResult(output):
-   │   └── Ищет последний <workflow-result>{JSON}</workflow-result>
-   │   └── Поле `gate` называет ГЕЙТ, а не стадию; допускается только действительный результат
-   └── Свежесть — по provenance вердикта (fallback: операция). Раунд сменился или прогон закрыт
-   │   └── [workflow-result-stale], не записывается ничего
-   └── Адресат — по ОБЪЯВЛЕНИЮ гейта, а не по активной операции:
-   │   └── гейт объявлен вложенной стадией живого прогона → run.gates[gate] + движение задачи
-   │   └── гейт объявлен текущей внешней стадией → session.stageGateResults (setGateStatus)
-   │   └── гейт не объявлен ни одной стадией в области видимости → [workflow-result-rejected]
-   └── Проверки допуска: mayVerify() по ростеру владеющей стадии, свежесть, replay-guard
-   └── session.verifications.push({ gate, status, recordedAt })
-   └── releaseVerdict() — снять activeOperations[callID] и verdictProvenance[callID]
+2. Workflow gate (workflow-gate-set)
+   └── Проверяется, что вызывающий агент допущен и гейт объявлен текущей стадией
+   └── Записывается verdict; переход задачи применяется, только когда выполнены все гейты
+   └── После возврата `task` runtime очищает только соответствующую active operation
 
 3. File tool invariants (handleFileToolAfter)
    └── Tool ∈ {edit, write, apply_patch}

@@ -9,6 +9,7 @@ import { createSession, WorkflowStore } from '../../src/session/session-store.ts
 import type { WorkflowSession, MutationTask } from '../../src/session/session-schema.ts';
 import { createTask } from '../support/task-factory.ts';
 import { setFixtureProfilesDir } from '../support/fixture-profiles.ts';
+import { invokeWorkflowGate } from '../helpers.ts';
 
 /**
  * task-scope spec, CRITICAL-2 remediation: the non-overlap check MUST apply
@@ -77,21 +78,19 @@ async function beforeTask(
   return { blockedReason };
 }
 
-async function afterTask(hooks: Hooks, callID: string, outputText: string): Promise<void> {
+async function afterTask(
+  hooks: Hooks,
+  callID: string,
+  verdict: { gate: 'review' | 'qa'; status: 'pass' | 'fail' }
+): Promise<void> {
+  await invokeWorkflowGate(hooks, 's1', verdict.gate, verdict.status, 'code');
   await hooks['tool.execute.after']!(
     { tool: 'task', sessionID: 's1', callID, args: {} },
-    { title: 'workflow task', output: outputText, metadata: {} }
+    { title: 'workflow task', output: 'Task complete.', metadata: {} }
   );
 }
 
-function workflowResult(gate: 'review' | 'qa', status: 'pass' | 'fail'): string {
-  return `<workflow-result>${JSON.stringify({
-    gate,
-    status,
-    summary: `${gate} ${status}`,
-    evidence: [`${gate}-evidence`],
-  })}</workflow-result>`;
-}
+const workflowResult = (gate: 'review' | 'qa', status: 'pass' | 'fail') => ({ gate, status });
 
 async function load(store: WorkflowStore): Promise<WorkflowSession> {
   const session = await store.load('s1');

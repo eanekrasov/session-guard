@@ -1,6 +1,5 @@
 import { isOpenLoopRun, nextLoopRunId, findTask } from '../session/helpers.ts';
 import type { WorkflowSession, ActiveOperation, LoopRun } from '../session/session-schema.ts';
-import { MUTATION_TTL_MS } from './evidence.ts';
 
 function getActiveOperations(session: WorkflowSession): ActiveOperation[] {
   return Object.values(session.activeOperations ?? {});
@@ -179,7 +178,7 @@ export function beginMutation(
  * `passed` считает вызывающий (`processScopeAndInvariants`) — он складывает
  * четыре причины: упавший инструмент, запись вне `writeScope`, несчитанный
  * дифф и нарушенные инварианты. Вердикт кладётся на прогон задачи, а не в
- * гейт: гейты пишет агент через `<workflow-result>`, и любой объявленный
+ * гейт: гейты агент записывает через `workflow-gate-set`, и любой объявленный
  * стадией гейт он может выставить себе сам. Этот вердикт движок выносит,
  * посмотрев на диск, и потому он ценен независимостью от рассказа агента.
  *
@@ -206,6 +205,8 @@ export function finishMutation(session: WorkflowSession, passed: boolean, callId
  * caller that injects time for the start also gets a TTL decision measured
  * against that time rather than the wall clock.
  */
+export const MUTATION_TTL_MS = 30 * 60 * 1000; // 30 minutes
+
 export function isExpiredMutation(
   session: WorkflowSession,
   callId?: string,

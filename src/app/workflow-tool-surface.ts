@@ -64,6 +64,7 @@ export interface WorkflowToolSurfacePorts {
   };
   taskApi: TaskApi;
   sessionContext: { load: (sessionID: string) => Promise<WorkflowSession | null> };
+  prepareTaskVerdict?: (session: WorkflowSession, operation: ActiveOperation) => Promise<void>;
   log: LogFn;
   report: Reporter;
 }
@@ -118,7 +119,7 @@ class WorkflowToolSurfaceImpl implements WorkflowToolSurface {
         },
         execute: async (
           args: {
-            files: string[];
+            files: string[] | string;
             summary: string;
             type?: string;
             grant?: string;
@@ -282,7 +283,7 @@ class WorkflowToolSurfaceImpl implements WorkflowToolSurface {
 
   private async handleWorkflowConsent(
     args: {
-      files: string[];
+      files: string[] | string;
       summary: string;
       type?: string;
       grant?: string;
@@ -325,7 +326,7 @@ class WorkflowToolSurfaceImpl implements WorkflowToolSurface {
       schema: 'harness.consent.evidence/v1' as const,
       revision,
       summary: args.summary,
-      files: args.files,
+      files,
       ...(args.type ? { type: args.type } : {}),
     };
     const manifestEvidence = evidenceOf(manifest);
@@ -559,45 +560,58 @@ class WorkflowToolSurfaceImpl implements WorkflowToolSurface {
     args: { gate: string; status: 'pass' | 'fail' },
     ctx: { sessionID: string; agent?: string }
   ): Promise<ToolResult> {
-    const session = await this.ports.sessionContext.load(ctx.sessionID);
-    if (!session) {
-      return { output: 'No workflow session found. Call workflow-create first.' };
-    }
+    return this.ports.executor.run(ctx.sessionID, async (tx) => {
+      const session = tx.session;
+      if (!session) {
+        return { output: 'No workflow session found. Call workflow-create first.' };
+      }
 
-    const gateService = new WorkflowGateService({
-      resolveEngine: async (profileId: string, schemaId: string) =>
-        this.ports.mutationOrchestrator.resolveEngine(profileId, schemaId),
-      log: this.ports.log,
-    });
+      const gateService = new WorkflowGateService({
+        resolveEngine: async (profileId: string, schemaId: string) =>
+          this.ports.mutationOrchestrator.resolveEngine(profileId, schemaId),
+        log: this.ports.log,
+      });
 
-    const operation = session.activeOperations[Object.keys(session.activeOperations ?? {})[0]];
-    const callID = operation?.callId;
+      const operations = Object.values(session.activeOperations ?? {}).filter(
+        (candidate) => candidate.status === 'running' && candidate.agent === ctx.agent
+      );
+      const operation = operations.length === 1 ? operations[0] : undefined;
+      const callID = operation?.callId;
 
-    const result = await gateService.applyGate({
-      session,
-      gate: args.gate,
-      status: args.status,
-      reportingAgent: ctx.agent,
-      callID,
-      operation,
-    });
+      if (operation) await this.ports.prepareTaskVerdict?.(session, operation);
 
-    return {
-      output: `Gate '${args.gate}' — ${result.kind}`,
-      metadata: {
-        sessionId: session.sessionId,
+      const result = await gateService.applyGate({
+        session,
         gate: args.gate,
         status: args.status,
-        kind: result.kind,
-        ...(result.kind === 'recorded'
-          ? {
-              verdict: result.verdict,
-            }
-          : result.kind === 'rejected'
-            ? { reason: result.reason }
-            : {}),
-      },
-    };
+        reportingAgent: ctx.agent,
+        callID,
+        operation,
+      });
+
+      if (operation && result.kind === 'recorded') operation.result = 'output_ready';
+
+      return {
+        output:
+          `Gate '${args.gate}' — ${result.kind}` +
+          (result.kind === 'recorded' && result.verdict.movement?.kind
+            ? `: ${result.verdict.movement.kind} — ${result.verdict.movement.reason}`
+            : ''),
+        metadata: {
+          sessionId: session.sessionId,
+          gate: args.gate,
+          status: args.status,
+          kind: result.kind,
+          ...(result.kind === 'recorded'
+            ? {
+                verdict: result.verdict,
+              }
+            : result.kind === 'rejected'
+              ? { reason: result.reason }
+              : {}),
+        },
+      };
+    });
   }
 
   private async refuseUnlessTaskController(

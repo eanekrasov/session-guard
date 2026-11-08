@@ -8,10 +8,11 @@ import { createRuntime } from '../../src/app/runtime.ts';
 import { createSession, WorkflowStore } from '../../src/session/session-store.ts';
 import type { LoopRun, WorkflowSession } from '../../src/session/session-schema.ts';
 import { createTask } from '../support/task-factory.ts';
+import { invokeWorkflowGate } from '../helpers.ts';
 import { fixtureProfilesDir } from '../support/fixture-profiles.ts';
 
 /**
- * Where a `<workflow-result>` lands.
+ * Where direct workflow-gate-set calls are recorded.
  *
  * The tag names a gate. Which stage owns that gate — and therefore where the
  * verdict is recorded — must follow the gate's declaration, never the
@@ -82,7 +83,7 @@ async function seed(build: (session: WorkflowSession) => void, id = 's1'): Promi
   return store;
 }
 
-/** Report a verdict through the after-hook and return what the agent was told. */
+/** Report a verdict through the public workflow tool, then finish the task call. */
 async function report(
   hooks: Hooks,
   sessionId: string,
@@ -91,18 +92,13 @@ async function report(
   status: 'pass' | 'fail',
   agent: string | undefined
 ): Promise<string> {
-  const tag = `<workflow-result>${JSON.stringify({
-    gate,
-    status,
-    summary: `${gate} ${status}`,
-    evidence: [`${gate}-evidence`],
-  })}</workflow-result>`;
-  const output = { title: 'task', output: tag, metadata: {} };
+  const told = await invokeWorkflowGate(hooks, sessionId, gate, status, agent);
+  const output = { title: 'task', output: 'Task complete.', metadata: {} };
   await hooks['tool.execute.after']!(
     { tool: 'task', sessionID: sessionId, callID, args: agent ? { subagent_type: agent } : {} },
     output
   );
-  return output.output;
+  return told;
 }
 
 async function load(store: WorkflowStore, id = 's1'): Promise<WorkflowSession | null> {
@@ -123,17 +119,25 @@ describe('a verdict is addressed by the gate it names', () => {
     const hooks = createRuntime(pluginInput()) as Hooks;
     const told = await report(hooks, 'outer', 'call-outer', 'review', 'pass', 'reviewer');
 
+    expect(told).toContain('recorded');
     const after = await load(store, 'outer');
     expect(after?.stageGateResults.find((gate) => gate.id === 'review')?.status).toBe('passed');
-    expect(told).not.toContain('[workflow-result-rejected]');
   });
 
-  test('records a nested gate on the run its provenance names, with no operation', async () => {
-    // The operation is deleted by the mutation lifecycle; the verdict's own
-    // provenance is not. Addressing must survive that.
+  test('records a nested gate on the run owned by the active task', async () => {
     const store = await seed((session) => {
       session.loopRuns['run-1'] = loopRun();
       session.verdictProvenance['call-nested'] = { runId: 'run-1', round: 0 };
+      session.activeOperations['call-nested'] = {
+        callId: 'call-nested',
+        runId: 'run-1',
+        taskId: 'task-1',
+        agent: 'reviewer',
+        status: 'running',
+        startedAt: new Date().toISOString(),
+        round: 0,
+        kind: 'task',
+      };
     });
 
     const hooks = createRuntime(pluginInput()) as Hooks;
@@ -178,13 +182,23 @@ describe('a verdict is addressed by the gate it names', () => {
     const store = await seed((session) => {
       session.loopRuns['run-1'] = loopRun({ round: 2 });
       session.verdictProvenance['call-late'] = { runId: 'run-1', round: 1 };
+      session.activeOperations['call-late'] = {
+        callId: 'call-late',
+        runId: 'run-1',
+        taskId: 'task-1',
+        agent: 'reviewer',
+        status: 'running',
+        startedAt: new Date().toISOString(),
+        round: 1,
+        kind: 'task',
+      };
     });
 
     const hooks = createRuntime(pluginInput()) as Hooks;
     const told = await report(hooks, 's1', 'call-late', 'review', 'pass', 'reviewer');
 
     const after = await load(store);
-    expect(told).toContain('[workflow-result-stale]');
+    expect(told).toContain('stale');
     expect(record(after!, 'run-1').gates).toEqual({});
     expect(after?.verifications).toEqual([]);
   });
@@ -211,7 +225,7 @@ describe('the verdict’s admission checks still hold', () => {
     const told = await report(hooks, 's1', 'call-agent', 'review', 'pass', 'code');
 
     const after = await load(store);
-    expect(told).toContain('[workflow-result-rejected]');
+    expect(told).toContain('rejected');
     expect(record(after!, 'run-1').gates).toEqual({});
     expect(after?.verifications).toEqual([]);
   });
@@ -236,7 +250,7 @@ describe('the verdict’s admission checks still hold', () => {
     const told = await report(hooks, 's1', 'call-undeclared', 'security', 'pass', 'reviewer');
 
     const after = await load(store);
-    expect(told).toContain('[workflow-result-rejected]');
+    expect(told).toContain('rejected');
     expect(record(after!, 'run-1').gates).toEqual({});
   });
 
@@ -257,11 +271,16 @@ describe('the verdict’s admission checks still hold', () => {
     });
 
     const hooks = createRuntime(pluginInput()) as Hooks;
-    await report(hooks, 's1', 'call-replay', 'review', 'pass', 'reviewer');
-    const told = await report(hooks, 's1', 'call-replay', 'review', 'pass', 'reviewer');
+    const told = await invokeWorkflowGate(hooks, 's1', 'review', 'pass', 'reviewer');
+    const replay = await invokeWorkflowGate(hooks, 's1', 'review', 'pass', 'reviewer');
+    await hooks['tool.execute.after']!(
+      { tool: 'task', sessionID: 's1', callID: 'call-replay', args: { subagent_type: 'reviewer' } },
+      { title: 'task', output: 'Task complete.', metadata: {} }
+    );
 
     const after = await load(store);
-    expect(told).toContain('[workflow-result-replayed]');
+    expect(told).toContain('recorded');
+    expect(replay).toContain('replayed');
     expect(record(after!, 'run-1').gates).toEqual({ review: 'passed' });
     expect(after?.verifications).toHaveLength(1);
   });

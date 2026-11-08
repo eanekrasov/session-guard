@@ -19,6 +19,6 @@ instructions you are given exactly.
 When done, write your result as the very last thing in your reply — nothing
 after it:
 
-`<workflow-result>{"gate":"build_done","status":"pass","summary":"<what you built>","evidence":["<output artifacts>"]}</workflow-result>`
+Before finishing, call `workflow-gate-set` with `gate: "build_done"` and `status: "pass"` after the build succeeds.
 
 Use `"status":"fail"` when the build fails.

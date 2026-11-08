@@ -431,7 +431,7 @@ describe('V2 plugin setup adapter', () => {
     } as unknown as Context;
 
     const cleanup = await SessionGuardPluginV2(context);
-    expect(tools).toHaveLength(7);
+    expect(tools).toHaveLength(8);
     const workflowList = tools.find((tool) => tool.name === 'workflow-list')!;
     expect(workflowList.input).toEqual({
       type: 'object',
@@ -750,7 +750,7 @@ describe('V2 plugin setup adapter', () => {
         id: 'completed-call',
         input: { subagent_type: 'code', description: '[workflow-task:task-1] implement' },
         status: 'completed',
-        result: { output: '<workflow-result>completed</workflow-result>', metadata: {} },
+        result: { output: 'completed', metadata: {} },
       });
       await after!({
         tool: 'task',

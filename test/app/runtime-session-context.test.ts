@@ -90,7 +90,7 @@ describe('RuntimeSessionContext', () => {
    * Хосты называют одну и ту же возможность по-разному: V2 присылает субагентский диспатч как
    * `subagent`, а команду оболочки как `shell`. Workflow узнаёт эти возможности под именами V1,
    * поэтому без нормализации на V2 не работают ни инварианты субагента (`changedFiles`), ни
-   * разбор `<workflow-result>`, ни правила для команды оболочки.
+   * запись вердикта через `workflow-gate-set`, ни правила для команды оболочки.
    */
   it('maps the host-specific capability names onto the ones the workflow knows', () => {
     const context = new RuntimeSessionContextImpl(store, new SessionExecutor(store));

@@ -19,6 +19,6 @@ are given exactly.
 When done, write your result as the very last thing in your reply — nothing
 after it:
 
-`<workflow-result>{"gate":"unit","status":"pass","summary":"<tests run>","evidence":["<test output>"]}</workflow-result>`
+Before finishing, call `workflow-gate-set` with `gate: "unit"` and `status: "pass"` only if the tests pass; otherwise use `status: "fail"`.
 
 Use `"stage":"integration"` and `"status":"fail"` when tests fail.

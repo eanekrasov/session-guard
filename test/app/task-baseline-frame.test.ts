@@ -9,6 +9,7 @@ import type { Hooks, PluginInput } from '@opencode-ai/plugin';
 import { createRuntime } from '../../src/app/runtime.ts';
 import { createSession, WorkflowStore } from '../../src/session/session-store.ts';
 import { createTask, createTasks } from '../support/task-factory.ts';
+import { invokeWorkflowGate } from '../helpers.ts';
 
 /**
  * Regression guard for design.md D3 (move-invariants) and the two orderings
@@ -116,8 +117,7 @@ describe('a missing baseline frame leaves no gate (D5)', () => {
       await store.save(before);
     }
 
-    const tag = `<workflow-result>${JSON.stringify({ gate: 'code', status: 'pass', summary: 'ok', evidence: ['ok'] })}</workflow-result>`;
-    const output = { title: 'task', output: tag, metadata: {} };
+    const output = { title: 'task', output: 'Task complete.', metadata: {} };
     await hooks['tool.execute.after']!(
       { tool: 'task', sessionID: 's1', callID: 'call-1', args: { subagent_type: 'coder' } },
       output
@@ -125,8 +125,7 @@ describe('a missing baseline frame leaves no gate (D5)', () => {
 
     const session = await store.load('s1');
     expect(session?.activeOperations).toEqual({});
-    // No frame means no gate was ever written, so the guard on
-    // task.gates.invariants never holds and the task cannot reach done.
+    // No frame means invariants cannot be proven; the task remains incomplete.
     const task = session?.tasks.implementation?.[0];
     expect(task?.status).not.toBe('completed');
   });
@@ -154,15 +153,6 @@ async function seedTwoTasks(): Promise<WorkflowStore> {
   return store;
 }
 
-function passResult(): string {
-  return `<workflow-result>${JSON.stringify({
-    stage: 'code',
-    status: 'pass',
-    summary: 'ok',
-    evidence: ['ok'],
-  })}</workflow-result>`;
-}
-
 describe('the core’s verdict about a task move reaches the run', () => {
   async function runTaskMove(dirty: string): Promise<WorkflowStore> {
     setFixtureProfilesDir();
@@ -183,10 +173,10 @@ describe('the core’s verdict about a task move reaches the run', () => {
     // Ход субагента: файл появляется между baseline и after-хуком.
     writeFileSync(join(gitDir, 'touched.ts'), dirty, 'utf-8');
 
-    const tag = `<workflow-result>${JSON.stringify({ gate: 'code', status: 'pass', summary: 'ok', evidence: ['ok'] })}</workflow-result>`;
+    await invokeWorkflowGate(hooks, 's1', 'code', 'pass', 'coder');
     await hooks['tool.execute.after']!(
       { tool: 'task', sessionID: 's1', callID: 'call-1', args: { subagent_type: 'coder' } },
-      { title: 'task', output: tag, metadata: {} }
+      { title: 'task', output: 'Task complete.', metadata: {} }
     );
     return store;
   }

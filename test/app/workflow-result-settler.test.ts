@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 
 import { createSession } from '../../src/session/session-store.ts';
-import type { WorkflowSession, ActiveOperation } from '../../src/session/session-schema.ts';
+import type { ActiveOperation } from '../../src/session/session-schema.ts';
 import { WorkflowResultSettlerImpl } from '../../src/app/workflow-result-settler.ts';
 import { createTask } from '../support/task-factory.ts';
 
-function sessionWithRun(): WorkflowSession {
+function sessionWithRun() {
   const session = createSession('settler', 'profile', 'schema', 'execution');
   session.tasks.implementation = [createTask({ id: 'task-1', status: 'running' })];
   session.loopRuns['run-1'] = {
@@ -32,65 +32,12 @@ function sessionWithRun(): WorkflowSession {
   return session;
 }
 
-const engine = {
-  getLoopStage: () => ({ stages: { verify: { gates: ['review'] } } }),
-  getStages: () => ({}),
-  evaluateGuard: () => true,
-} as never;
-
 describe('WorkflowResultSettler', () => {
-  test('logs marker delivery at the plugin hook boundary', async () => {
+  test('finishes a task call without parsing text as a gate verdict', async () => {
     const session = sessionWithRun();
-    const entries: Array<{ message: string; extra?: Record<string, unknown> }> = [];
-    const settler = new WorkflowResultSettlerImpl(
-      {
-        resolveEngine: async () => engine,
-        log: async () => undefined,
-      },
-      async (_level, message, extra) => {
-        entries.push({ message, extra });
-      }
-    );
-
-    await settler.settle({
-      tool: 'task',
-      session,
-      callID: 'call-1',
-      args: { subagent_type: 'reviewer' },
-      output: {
-        output:
-          '<workflow-result>{"gate":"review","status":"pass","summary":"ok","evidence":["ok"]}</workflow-result>',
-      },
-      projectDir: '/tmp/test-project',
-      profilesDir: '/tmp/test-profiles',
-      operation: session.activeOperations['call-1'] as ActiveOperation,
-    });
-
-    const hookEntry = entries.find(
-      (entry) => entry.message === 'Plugin workflow-result hook input'
-    );
-    expect(hookEntry?.extra).toMatchObject({
-      markerDetected: true,
-      markerCount: 1,
-      parsedGate: 'review',
-      parsedStatus: 'pass',
-    });
-  });
-
-  test('settles a supplied session without loading or saving it', async () => {
-    const session = sessionWithRun();
-    let loads = 0;
-    let saves = 0;
-    const settler = new WorkflowResultSettlerImpl({
-      resolveEngine: async () => engine,
-      log: async () => undefined,
-      load: async () => {
-        loads += 1;
-        return null;
-      },
-      save: async () => {
-        saves += 1;
-      },
+    const entries: string[] = [];
+    const settler = new WorkflowResultSettlerImpl(async (_level, message) => {
+      entries.push(message);
     });
 
     await settler.settle({
@@ -98,137 +45,15 @@ describe('WorkflowResultSettler', () => {
       session,
       callID: 'call-1',
       args: { subagent_type: 'reviewer' },
-      output: {
-        output:
-          '<workflow-result>{"gate":"review","status":"pass","summary":"ok","evidence":["ok"]}</workflow-result>',
-      },
-      projectDir: '/tmp/test-project',
-      profilesDir: '/tmp/test-profiles',
+      output: { output: 'Review complete; no marker required.' },
+      projectDir: '',
+      profilesDir: '',
       operation: session.activeOperations['call-1'] as ActiveOperation,
     });
 
-    expect(session.loopRuns['run-1']?.gates).toEqual({ review: 'passed' });
-    expect(session.tasks.implementation?.[0]?.status).toBe('completed');
-    expect(loads).toBe(0);
-    expect(saves).toBe(0);
-  });
-
-  test('replay and malformed markers do not mutate settlement state', async () => {
-    const session = sessionWithRun();
-    const settler = new WorkflowResultSettlerImpl({
-      resolveEngine: async () => engine,
-      log: async () => undefined,
-      load: async () => null,
-      save: async () => undefined,
-    });
-    const input = {
-      tool: 'task',
-      session,
-      callID: 'call-1',
-      args: { subagent_type: 'reviewer' },
-      output: { output: 'not a workflow result' },
-      projectDir: '/tmp/test-project',
-      profilesDir: '/tmp/test-profiles',
-      operation: session.activeOperations['call-1'] as ActiveOperation,
-    };
-
-    await settler.settle(input);
     expect(session.loopRuns['run-1']?.gates).toEqual({});
-    expect(session.activeOperations['call-1']).toBeUndefined();
-
-    input.output.output =
-      '<workflow-result>{"gate":"review","status":"pass","summary":"ok","evidence":["ok"]}</workflow-result>';
-    await settler.settle(input);
-    expect(session.loopRuns['run-1']?.gates).toEqual({});
-  });
-
-  test('rejects a verdict from a completed round without recording it', async () => {
-    const session = sessionWithRun();
-    session.loopRuns['run-1']!.round = 1;
-    const settler = new WorkflowResultSettlerImpl({
-      resolveEngine: async () => engine,
-      log: async () => undefined,
-    });
-
-    const output = {
-      output:
-        '<workflow-result>{"gate":"review","status":"pass","summary":"late","evidence":["late"]}</workflow-result>',
-    };
-    await settler.settle({
-      tool: 'task',
-      session,
-      callID: 'call-1',
-      args: { subagent_type: 'reviewer' },
-      output,
-      projectDir: '/tmp/test-project',
-      profilesDir: '/tmp/test-profiles',
-      operation: session.activeOperations['call-1'] as ActiveOperation,
-    });
-
-    expect(output.output).toContain('[workflow-result-stale]');
-    expect(session.loopRuns['run-1']?.gates).toEqual({});
-    expect(session.verifications).toHaveLength(0);
-  });
-
-  test('records a verdict owned by the current outer stage', async () => {
-    const session = createSession('settler-stage', 'profile', 'schema', 'review');
-    const stageEngine = {
-      getLoopStage: () => undefined,
-      getStages: () => ({
-        review: { allowedAgents: ['reviewer'], gates: ['review'] },
-      }),
-    } as never;
-    const settler = new WorkflowResultSettlerImpl({
-      resolveEngine: async () => stageEngine,
-      log: async () => undefined,
-    });
-
-    await settler.settle({
-      tool: 'task',
-      session,
-      callID: 'call-stage',
-      args: { subagent_type: 'reviewer' },
-      output: {
-        output:
-          '<workflow-result>{"gate":"review","status":"pass","summary":"ok","evidence":["ok"]}</workflow-result>',
-      },
-      projectDir: '/tmp/test-project',
-      profilesDir: '/tmp/test-profiles',
-    });
-
-    expect(session.stageGateResults).toEqual([
-      expect.objectContaining({ stage: 'review', id: 'review', status: 'passed' }),
-    ]);
-  });
-  test('rejects a gate not declared by the current loop stage', async () => {
-    const session = sessionWithRun();
-    const gateCheckEngine = {
-      getLoopStage: () => ({ stages: { verify: { gates: ['review'] } } }),
-      getStages: () => ({}),
-      evaluateGuard: () => true,
-    } as never;
-
-    const settler = new WorkflowResultSettlerImpl({
-      resolveEngine: async () => gateCheckEngine,
-      log: async () => undefined,
-    });
-
-    const output = {
-      output: '<workflow-result>{"gate":"qa","status":"pass"}</workflow-result>',
-    };
-    await settler.settle({
-      tool: 'task',
-      session,
-      callID: 'call-1',
-      args: { subagent_type: 'reviewer' },
-      output,
-      projectDir: '/tmp/test-project',
-      profilesDir: '/tmp/test-profiles',
-      operation: session.activeOperations['call-1'] as ActiveOperation,
-    });
-
-    // Gate 'qa' is not in ['review'], so nothing should be recorded
-    expect(session.loopRuns['run-1']?.gates).toEqual({});
-    expect(output.output).not.toContain('[workflow-result-replayed]');
+    expect(session.activeOperations).toEqual({});
+    expect(session.verdictProvenance).toEqual({});
+    expect(entries.some((message) => message.includes('workflow-result.missing'))).toBe(false);
   });
 });

@@ -1,15 +1,11 @@
-import { parseWorkflowResult } from '../domain/evidence.ts';
 import type { LogFn } from './logger.ts';
-import type { MutationOrchestrator } from './mutation-orchestrator.ts';
 import { computeChangeScope, changedAgainstHead } from './change-scope.ts';
 import { validateFilesForProfile, SUPPORTED_EXTENSIONS } from './invariants.ts';
 import { findTask, isOpenLoopRun } from '../session/helpers.ts';
 import type { ActiveOperation, WorkflowSession } from '../session/session-schema.ts';
 import { matchesScope } from './scope-match.ts';
 import { resolve, relative, isAbsolute } from 'node:path';
-import type { TaskToolArgs } from './tool-args.ts';
 import { existsSync } from 'node:fs';
-import { WorkflowGateService, type GateServiceDependencies } from './workflow-gate-service.ts';
 
 export interface WorkflowResultSettlerInput {
   tool: string;
@@ -27,28 +23,26 @@ export interface WorkflowResultSettler {
   settle(input: WorkflowResultSettlerInput): Promise<void>;
 }
 
-type SettlerDependencies = GateServiceDependencies & {
-  load?: (sessionId: string) => Promise<WorkflowSession | null>;
-  save?: (session: WorkflowSession) => Promise<void>;
-};
-
 export class WorkflowResultSettlerImpl implements WorkflowResultSettler {
-  private readonly resolveEngine: SettlerDependencies['resolveEngine'];
   private readonly log: LogFn;
-  private readonly gateService: WorkflowGateService;
+  private readonly projectDir: string;
+  private readonly profilesDir: string;
 
-  constructor(dependencies: SettlerDependencies | MutationOrchestrator, log?: LogFn) {
-    if ('resolveEngine' in dependencies && log === undefined) {
-      this.resolveEngine = dependencies.resolveEngine.bind(dependencies);
-      this.log = async () => undefined;
-    } else {
-      this.resolveEngine = (dependencies as MutationOrchestrator).resolveEngine.bind(dependencies);
-      this.log = log ?? (async () => undefined);
-    }
-    this.gateService = new WorkflowGateService({
-      resolveEngine: this.resolveEngine,
-      log: this.log,
-    });
+  constructor(log: LogFn, projectDir = '', profilesDir = '') {
+    this.log = log;
+    this.projectDir = projectDir;
+    this.profilesDir = profilesDir;
+  }
+
+  async prepareTaskVerdict(session: WorkflowSession, operation: ActiveOperation): Promise<void> {
+    if (operation.result === 'output_ready') return;
+    await this.runTaskInvariants(
+      session,
+      operation.callId,
+      this.projectDir,
+      this.profilesDir,
+      operation
+    );
   }
 
   async settle(input: WorkflowResultSettlerInput): Promise<void> {
@@ -64,14 +58,13 @@ export class WorkflowResultSettlerImpl implements WorkflowResultSettler {
       fileToolArgs,
     } = input;
 
-    // 1a. Invariants for a `task` move — runs before workflow result processing
+    // The gate tool runs invariants before applying its verdict. Calls without a
+    // gate still settle here, so task completion never depends on response text.
     if (tool === 'task') {
-      await this.runTaskInvariants(session, callID, projectDir, profilesDir, operation);
-    }
-
-    // 1b. Workflow result — the runtime normalizes V1/V2 delegated tools to `task`.
-    if (tool === 'task') {
-      await this.processWorkflowResult(session, callID, args, output);
+      if (operation?.result !== 'output_ready')
+        await this.runTaskInvariants(session, callID, projectDir, profilesDir, operation);
+      delete session.activeOperations[callID];
+      if (session.verdictProvenance) delete session.verdictProvenance[callID];
     }
 
     // 1d. File tool — run invariants on written/edited files
@@ -192,141 +185,5 @@ export class WorkflowResultSettlerImpl implements WorkflowResultSettler {
         error: message,
       });
     }
-  }
-
-  private async processWorkflowResult(
-    session: WorkflowSession,
-    callID: string,
-    args: unknown,
-    output: { output: string }
-  ): Promise<void> {
-    const parsed = parseWorkflowResult(output.output);
-    const markerCount = [
-      ...output.output.matchAll(/<workflow-result>[\s\S]*?<\/workflow-result>/gu),
-    ].length;
-    const reportingAgent = this.dispatchedAgent(args);
-    const operation = session.activeOperations[callID];
-
-    void this.log('debug', 'workflow-result.settlement.started', {
-      sessionID: session.sessionId,
-      callID,
-      currentStage: session.currentStage,
-      revision: session.revision,
-      operation: operation
-        ? { taskId: operation.taskId, runId: operation.runId, status: operation.status }
-        : null,
-      reportingAgent,
-    });
-    void this.log('debug', 'Plugin workflow-result hook input', {
-      sessionID: session.sessionId,
-      callID,
-      markerCount,
-      markerDetected: markerCount > 0,
-      parsedGate: parsed?.gate,
-      parsedStatus: parsed?.status,
-      outputLength: output.output.length,
-      outputHasWorkflowResult: output.output.includes('<workflow-result>'),
-      outputHasDsmlToolResult: output.output.includes('<｜DSML｜tool-result>'),
-      currentStage: session.currentStage,
-      tool: 'task',
-    });
-
-    if (!parsed) {
-      void this.log('debug', 'workflow-result.settlement.missing', {
-        sessionID: session.sessionId,
-        callID,
-        currentStage: session.currentStage,
-        operation: operation?.taskId ?? null,
-      });
-      const silent = this.runForCall(session, operation);
-      if (silent) {
-        output.output +=
-          `\n\n[workflow-result-missing]\n` +
-          `Stage ${silent.stage} of ${silent.taskId} ended without a ` +
-          `<workflow-result> marker, so nothing was recorded and the task did not move.`;
-      }
-      this.releaseVerdict(session, callID);
-      return;
-    }
-
-    // Delegate to the shared gate service (same logic used by workflow-gate-set tool)
-    const result = await this.gateService.applyGate({
-      session,
-      gate: parsed.gate,
-      status: parsed.status,
-      reportingAgent,
-      callID,
-      operation,
-    });
-
-    void this.log('debug', 'workflow-result.settlement.completed', {
-      sessionID: session.sessionId,
-      callID,
-      gate: parsed.gate,
-      status: parsed.status,
-      currentStage: session.currentStage,
-      kind: result.kind,
-      revision: session.revision,
-    });
-
-    switch (result.kind) {
-      case 'replayed':
-        output.output += `\n\n[workflow-result-replayed]\n${result.reason}`;
-        void this.log('warn', 'Workflow result detected replayed', {
-          sessionID: session.sessionId,
-          callID,
-        });
-        break;
-      case 'stale':
-        output.output += `\n\n[workflow-result-stale]\n${result.reason}`;
-        void this.log('warn', 'Workflow result from a finished round', {
-          sessionID: session.sessionId,
-          callID,
-        });
-        break;
-      case 'rejected':
-        output.output += `\n\n[workflow-result-rejected]\n${result.reason}`;
-        void this.log('warn', 'Workflow result rejected', {
-          sessionID: session.sessionId,
-          callID,
-          reason: result.reason,
-        });
-        break;
-      case 'recorded':
-        workflow_result_recorded: {
-          const { verdict } = result;
-          void this.log('debug', 'workflow-result.settlement.recorded', {
-            sessionID: session.sessionId,
-            callID,
-            gate: verdict.gate,
-            status: verdict.status,
-            stage: verdict.stage,
-            moved: verdict.moved,
-          });
-        }
-        break;
-    }
-
-    this.releaseVerdict(session, callID);
-  }
-
-  private releaseVerdict(session: WorkflowSession, callID: string): void {
-    delete session.activeOperations[callID];
-    if (session.verdictProvenance) delete session.verdictProvenance[callID];
-  }
-
-  private runForCall(
-    session: WorkflowSession,
-    operation: ActiveOperation | undefined
-  ): { stage: string; taskId: string } | undefined {
-    const run = session.loopRuns[operation?.runId ?? ''];
-    if (run && isOpenLoopRun(run)) return { stage: run.stage, taskId: run.taskId };
-    return undefined;
-  }
-
-  private dispatchedAgent(args: unknown): string | undefined {
-    if (!args || typeof args !== 'object') return undefined;
-    const taskArgs = args as TaskToolArgs;
-    return taskArgs.subagent_type ?? taskArgs.agent ?? taskArgs.type;
   }
 }

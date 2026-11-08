@@ -9,10 +9,11 @@ import { createSession, WorkflowStore } from '../../src/session/session-store.ts
 import type { WorkflowSession } from '../../src/session/session-schema.ts';
 import { setGateStatus } from '../../src/session/helpers.ts';
 import { createTask } from '../support/task-factory.ts';
+import { invokeWorkflowGate } from '../helpers.ts';
 
 /**
  * A stage may run several agents at once — review and qa in parallel — so a
- * `<workflow-result>` names the gate it closes, never the stage it ran in.
+ * `workflow-gate-set` names the gate it closes, never the stage it ran in.
  * The stage is passed when every gate it declares is passed, and failed as
  * soon as one fails. See docs/stage-model-plan.md.
  */
@@ -87,20 +88,15 @@ async function report(
   status: 'pass' | 'fail',
   agent = gate === 'code' ? 'code' : gate === 'review' ? 'reviewer' : 'tester'
 ): Promise<string> {
-  const tag = `<workflow-result>${JSON.stringify({
-    gate,
-    status,
-    summary: `${gate} ${status}`,
-    evidence: [`${gate}-evidence`],
-  })}</workflow-result>`;
-  const output = { title: 'workflow task', output: tag, metadata: {} };
+  const told = await invokeWorkflowGate(hooks, 's1', gate, status, agent);
+  const output = { title: 'workflow task', output: 'Task complete.', metadata: {} };
   // The host reports which subagent produced the result; a verdict from an
   // unnamed caller is not a verdict.
   await hooks['tool.execute.after']!(
     { tool: 'task', sessionID: 's1', callID, args: { subagent_type: agent } },
     output
   );
-  return output.output;
+  return told;
 }
 
 async function load(store: WorkflowStore): Promise<WorkflowSession> {
@@ -222,10 +218,10 @@ describe('a result naming a gate the stage did not declare', () => {
     await report(hooks, 'call-code', 'code', 'pass');
 
     await dispatch(hooks, 'call-review', 'reviewer');
-    const told = await report(hooks, 'call-review', 'security', 'pass');
+    const told = await report(hooks, 'call-review', 'security', 'pass', 'reviewer');
 
     const session = await load(store);
-    expect(told).toContain('[workflow-result-rejected]');
+    expect(told).toContain('rejected');
     expect(told).toContain('review, qa');
     expect(run(session).gates, 'an undeclared gate was recorded').toEqual({});
     expect(run(session).stage).toBe('verify');
@@ -445,7 +441,7 @@ describe('a verdict from a round that is over', () => {
     const told = await report(hooks, 'call-qa', 'qa', 'fail');
 
     const afterQa = await load(store);
-    expect(told).toContain('[workflow-result-stale]');
+    expect(told).toContain('stale');
     expect(
       afterQa.retryBudgets['task-1']?.attempts,
       'one round of review spent the budget twice'
@@ -467,7 +463,7 @@ describe('a verdict from a round that is over', () => {
   });
 
   it('leaves no gate behind for the round that replaced it', async () => {
-    // Saying `[workflow-result-stale]` and writing the gate anyway is worse
+    // Accepting a stale gate call after the round changes is worse
     // than not checking at all: the straggler's `qa: passed` survives into
     // the fresh round, and the next review closes the stage on its own.
     setVerifyFixtureProfilesDir(false, false, false, true);
@@ -483,7 +479,7 @@ describe('a verdict from a round that is over', () => {
     const told = await report(hooks, 'call-qa', 'qa', 'pass');
 
     const session = await load(store);
-    expect(told).toContain('[workflow-result-stale]');
+    expect(told).toContain('stale');
     expect(
       run(session).gates,
       'a verdict from a finished round was recorded against the new one'

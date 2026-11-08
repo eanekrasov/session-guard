@@ -8,6 +8,7 @@ import { createRuntime } from '../../src/app/runtime.ts';
 import { createSession, WorkflowStore } from '../../src/session/session-store.ts';
 import { createTask } from '../support/task-factory.ts';
 import { fixtureProfilesDir, setFixtureProfilesDir } from '../support/fixture-profiles.ts';
+import { invokeWorkflowGate } from '../helpers.ts';
 
 let storeDirectory: string;
 let previousStore: string | undefined;
@@ -84,8 +85,7 @@ describe('cancelling a task ends the work on it', () => {
       { tool: 'task', sessionID: 'cancel', callID: 'call-1', args: { subagent_type: 'code' } },
       {
         title: 'task',
-        output:
-          '<workflow-result>{"gate":"dev","status":"pass","summary":"ok","evidence":["ok"]}</workflow-result>',
+        output: 'Late task response.',
         metadata: {},
       }
     );
@@ -248,10 +248,10 @@ describe('a nested task finishes, not only starts', () => {
 
     const output = {
       title: 'task',
-      output:
-        '<workflow-result>{"gate":"child","status":"pass","summary":"ok","evidence":["ok"]}</workflow-result>',
+      output: 'Child work complete.',
       metadata: {},
     };
+    await invokeWorkflowGate(hooks, 'finish', 'child', 'pass', 'code');
     await hooks['tool.execute.after']!(
       { tool: 'task', sessionID: 'finish', callID: 'call-child', args: { subagent_type: 'code' } },
       output

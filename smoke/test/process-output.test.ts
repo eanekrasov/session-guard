@@ -73,7 +73,9 @@ test('parses process logfmt without overwriting the JSONL envelope', async () =>
     const records = readFileSync(join(directory, 'host-v1.jsonl'), 'utf8')
       .split('\n')
       .filter(Boolean)
-      .map((line) => JSON.parse(line));
+      .map((line) => JSON.parse(line))
+      .filter((record) => record.sourceId === 'harness.child.output');
+    expect(records).toHaveLength(2);
     expect(records[0]).toMatchObject({
       level: 'debug',
       type: 'process.stderr',

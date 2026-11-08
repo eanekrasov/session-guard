@@ -109,7 +109,8 @@ class SessionGuardRuntime {
     this.store = new WorkflowStore(storeDir, this.log);
     const resolveV1HostParent = async (sessionID: string): Promise<string | null> => {
       try {
-        const result = await client.session?.get({ path: { id: sessionID } });
+        const getSession = context.host?.session.get ?? client.session?.get;
+        const result = await getSession?.({ path: { id: sessionID } });
         if (!result) return null;
         const session = result.data;
         const parent = session?.parentID;
@@ -150,7 +151,11 @@ class SessionGuardRuntime {
       log: this.log,
       projectDir: this.projectDir,
     });
-    this.workflowResultSettler = new WorkflowResultSettlerImpl(this.mutationOrchestrator, this.log);
+    this.workflowResultSettler = new WorkflowResultSettlerImpl(
+      this.log,
+      this.projectDir,
+      this.profilesDir
+    );
     this.consentOrchestrator = new ConsentOrchestrator(
       this.store,
       this.executor,
@@ -267,6 +272,8 @@ class SessionGuardRuntime {
       consentOrchestrator: this.consentOrchestrator,
       taskApi: this.taskApi,
       sessionContext: this.sessionContext,
+      prepareTaskVerdict: (session, operation) =>
+        this.workflowResultSettler.prepareTaskVerdict(session, operation),
       log: this.log,
       report: this.report,
     });
@@ -380,7 +387,6 @@ class SessionGuardRuntime {
       callID: input.callID,
       outputTitle: output.title,
       outputLength: output.output.length,
-      outputHasWorkflowResult: output.output.includes('<workflow-result>'),
       outputHasDsmlToolResult: output.output.includes('<｜DSML｜tool-result>'),
       argsType: input.args === null ? 'null' : typeof input.args,
       argsKeys:
@@ -491,7 +497,6 @@ class SessionGuardRuntime {
           sessionID: input.sessionID,
           callID: input.callID,
           outputLength: output.output.length,
-          outputHasWorkflowResult: output.output.includes('<workflow-result>'),
           outputHasDsmlToolResult: output.output.includes('<｜DSML｜tool-result>'),
           revision: tx.session.revision,
           currentStage: tx.session.currentStage,

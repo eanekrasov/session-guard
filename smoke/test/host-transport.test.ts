@@ -34,7 +34,6 @@ import {
   rawV1ResponseDiagnostics,
   subscribeToV1Events,
 } from '../src/host/v1-exchange.ts';
-import { workflowResultMarkers } from '../src/host/v1-transport.ts';
 import type { V2SmokeClient } from '../src/v2-client.ts';
 import type { ScenarioDefinition } from '../src/host/types.ts';
 import { closeJsonlSinks, initializeJsonlSinks } from '../src/log.ts';
@@ -48,17 +47,7 @@ describe('V1 raw response diagnostics', () => {
     ).toBe('child-123');
   });
 
-  test('recognizes the canonical workflow-result marker', () => {
-    const diagnostics = rawV1ResponseDiagnostics(
-      [{ type: 'text', text: '<workflow-result>{"gate":"deploy_done"}</workflow-result>' }],
-      ''
-    );
-
-    expect(diagnostics.hasWorkflowResult).toBe(true);
-    expect(diagnostics.hasDsmlToolResult).toBe(false);
-  });
-
-  test('flags a DSML-wrapped task result as missing the canonical marker', () => {
+  test('recognizes a DSML-wrapped task result as transport output', () => {
     const diagnostics = rawV1ResponseDiagnostics(
       [
         {
@@ -73,7 +62,6 @@ describe('V1 raw response diagnostics', () => {
       ''
     );
 
-    expect(diagnostics.hasWorkflowResult).toBe(false);
     expect(diagnostics.hasDsmlToolResult).toBe(true);
   });
 });
@@ -431,15 +419,6 @@ describe('normalizing a host payload into the shared smoke model', () => {
 });
 
 describe('the V1 transport strategy', () => {
-  test('classifies workflow-result markers in the V1 normalized response', () => {
-    expect(
-      workflowResultMarkers(
-        'before <workflow-result>{"gate":"checkout_done","status":"pass"}</workflow-result>'
-      )
-    ).toEqual({ count: 1, gates: ['checkout_done'] });
-    expect(workflowResultMarkers('no marker')).toEqual({ count: 0, gates: [] });
-  });
-
   test('logs every parsed SSE record like the V2 transport', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'v1-sse-log-'));
     initializeJsonlSinks(directory);

@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import type { WorkflowSession } from '../../src/session/session-schema.ts';
 import { baseGates } from '../support/task-factory.ts';
 import {
+  MUTATION_TTL_MS,
   beginMutation,
   finishMutation,
   isExpiredMutation,
@@ -9,7 +10,6 @@ import {
 import { hasLiveVerifier } from '../../test/helpers.ts';
 import { approve, decline } from '../../src/domain/approvals.ts';
 import { confirm, rejectVerification as reject } from '../../test/helpers.ts';
-import { parseWorkflowResult, MUTATION_TTL_MS } from '../../src/domain/evidence.ts';
 import { createTask } from '../support/task-factory.ts';
 
 function makeSession(overrides: Partial<WorkflowSession> = {}): WorkflowSession {
@@ -328,70 +328,6 @@ describe('finishMutation', () => {
     // An attempt belongs to the move that takes it, not to the verdict.
     expect(session.retryBudgets['task-1'].attempts).toBe(0);
     expect(session.activeOperations).toEqual({});
-  });
-});
-
-// ─── R6.7: parseWorkflowResult ────────────────────────────────────────────────
-
-describe('parseWorkflowResult', () => {
-  it('parses a valid workflow-result tag', () => {
-    const output =
-      'Some text <workflow-result>{"gate":"review","status":"pass","summary":"LGTM","evidence":["log-1"]}</workflow-result> more text';
-
-    const result = parseWorkflowResult(output);
-
-    expect(result).toEqual({
-      gate: 'review',
-      status: 'pass',
-      summary: 'LGTM',
-      evidence: ['log-1'],
-    });
-  });
-
-  it('returns null when no tags are present', () => {
-    const output = 'Just some text';
-
-    const result = parseWorkflowResult(output);
-
-    expect(result).toBeNull();
-  });
-
-  it('picks the last valid tag when multiple tags exist', () => {
-    const output =
-      '<workflow-result>{"gate":"review","status":"pass","summary":"First","evidence":["e1"]}</workflow-result>' +
-      ' <workflow-result>{"gate":"qa","status":"fail","summary":"Second","evidence":["e2"]}</workflow-result>';
-
-    const result = parseWorkflowResult(output);
-
-    expect(result).toEqual({
-      gate: 'qa',
-      status: 'fail',
-      summary: 'Second',
-      evidence: ['e2'],
-    });
-  });
-
-  it('skips malformed JSON and returns null when no valid tags', () => {
-    const output = '<workflow-result>{invalid json}</workflow-result>';
-
-    const result = parseWorkflowResult(output);
-
-    expect(result).toBeNull();
-  });
-
-  it('skips malformed JSON and picks next valid tag', () => {
-    const output =
-      '<workflow-result>{invalid}</workflow-result>' +
-      ' <workflow-result>{"gate":"qa","status":"pass","summary":"Fixed","evidence":["e1"]}</workflow-result>';
-
-    const result = parseWorkflowResult(output);
-
-    expect(result).toEqual({
-      gate: 'qa',
-      status: 'pass',
-      summary: 'Fixed',
-      evidence: ['e1'],
-    });
   });
 });
 

@@ -91,7 +91,7 @@ async function runTool(
 
 describe('V2ToolSurfaceAdapter', () => {
   describe('public surface', () => {
-    it('registers the complete stable public tool surface (7 tools)', () => {
+    it('registers the complete stable public tool surface (8 tools)', () => {
       const ports = createMockPorts();
       const { editor, tools } = fakeEditor();
 
@@ -105,6 +105,7 @@ describe('V2ToolSurfaceAdapter', () => {
         'workflow-tasks-get',
         'workflow-tasks-set-status',
         'workflow-tasks-resolve-decision',
+        'workflow-gate-set',
       ]);
     });
 

@@ -225,7 +225,7 @@ const taskWorkerStep: ScenarioStep = {
 
 /**
  * A subagent step: the orchestrator dispatches it with the task tool, the subagent does the
- * work, and the verdict it reports is what moves the loop. Its outcome is durable state, so
+ * work, and the direct workflow-gate-set call is what moves the loop. Its outcome is durable state, so
  * `poll-state` waits for it — a subagent's turn easily outlives the prompt budget, and the
  * instruction is never repeated because the work it starts is a mutation.
  */
@@ -244,8 +244,8 @@ function subagentStep(options: {
   const verdict =
     options.verdict === undefined
       ? ' After the subagent returns, report its result and finish this turn. Do not dispatch another task or start the next workflow step.'
-      : ` Tell the subagent to finish its own final response by emitting exactly this workflow-result, ` +
-        `with no surrounding commentary: ${options.verdict}. After the subagent returns, report its ` +
+      : ` Tell the subagent to call workflow-gate-set with these arguments before its final response: ${options.verdict}. ` +
+        `Do not report a verdict in prose instead. After the subagent returns, report its ` +
         'result and finish this turn. Do not dispatch another task, start the next workflow step, ' +
         'or change any workflow status directly.';
   return {
@@ -267,8 +267,8 @@ const VERIFY_FILE = 'src/smoke-1.ts';
 const coderStep = subagentStep({
   type: 'coder',
   description: '[workflow-task:task-0] write the file',
-  task: `telling it to create ${VERIFY_FILE} containing \`export const smoke = 1;\``,
-  verdict: `<workflow-result>{"gate":"code","status":"pass","summary":"wrote the file","evidence":["${VERIFY_FILE}"]}</workflow-result>`,
+  task: `telling it to create only ${VERIFY_FILE} containing \`export const smoke = 1;\`; do no other work`,
+  verdict: `gate="code", status="pass"`,
   expect: (state) => {
     // The core's own record of what landed on disk, not the subagent's report about it.
     const changed = state?.changedFiles ?? [];
@@ -283,11 +283,9 @@ const coderStep = subagentStep({
 const reviewerStep = subagentStep({
   type: 'reviewer',
   description: '[workflow-task:task-0] review the file',
-  task: `telling it to review ${VERIFY_FILE}`,
-  // The verdict is named, as it is for the coder: the loop is driven by the `<workflow-result>`
-  // a subagent reports, and leaving it to the agent's own profile made the step depend on how
-  // that profile happens to end its turn.
-  verdict: `<workflow-result>{"gate":"review","status":"pass","summary":"reviewed","evidence":["${VERIFY_FILE}"]}</workflow-result>`,
+  task: 'telling it this is a workflow protocol probe; do not review or inspect anything',
+  // Name the gate explicitly so the subagent makes the direct tool call.
+  verdict: `gate="review", status="pass"`,
   expect: (state) => {
     const run = state?.runs?.[0];
     const review = run?.gates?.review;
@@ -300,8 +298,8 @@ const reviewerStep = subagentStep({
 const testerStep = subagentStep({
   type: 'tester',
   description: '[workflow-task:task-0] verify the file',
-  task: `telling it to verify ${VERIFY_FILE}`,
-  verdict: `<workflow-result>{"gate":"qa","status":"pass","summary":"verified","evidence":["${VERIFY_FILE}"]}</workflow-result>`,
+  task: 'telling it this is a workflow protocol probe; do not test or inspect anything',
+  verdict: `gate="qa", status="pass"`,
   expect: (state) => {
     const status = state?.tasks?.implementation?.[0]?.status;
     return status === 'completed' || `статус задачи — ${status ?? '(отсутствует)'}`;
@@ -520,8 +518,8 @@ const commitTaskDoneStep: ScenarioStep = {
 const commitReviewStep = subagentStep({
   type: 'reviewer',
   description: 'review the work',
-  task: `telling it to review ${COMMIT_FILE}`,
-  verdict: `<workflow-result>{"gate":"review","status":"pass","summary":"reviewed","evidence":["${COMMIT_FILE}"]}</workflow-result>`,
+  task: 'telling it this is a workflow protocol probe; do not review or inspect anything',
+  verdict: `gate="review", status="pass"`,
   expect: (state) => {
     const gate = state?.stageGates?.review;
     return gate === 'passed' || `гейт review стадии имеет статус ${gate ?? '(не задан)'}`;
@@ -532,8 +530,8 @@ const commitReviewStep = subagentStep({
 const commitVerifyStep = subagentStep({
   type: 'tester',
   description: 'verify the work',
-  task: `telling it to verify ${COMMIT_FILE}`,
-  verdict: `<workflow-result>{"gate":"qa","status":"pass","summary":"verified","evidence":["${COMMIT_FILE}"]}</workflow-result>`,
+  task: 'telling it this is a workflow protocol probe; do not test or inspect anything',
+  verdict: `gate="qa", status="pass"`,
   expect: (state) => {
     const stage = state?.currentStage ?? '(не задана)';
     return stage === 'commit' || `стадия — ${stage}, ожидалась commit после обоих вердиктов`;
@@ -696,8 +694,8 @@ const cicdPlanConsentStep: ScenarioStep = {
 const cicdSetupStep = subagentStep({
   type: 'setup',
   description: '[workflow-task:checkout] prepare the project',
-  task: `telling it to create ${PIPELINE_FILE} containing \`export const appVersion = "1.0.0";\``,
-  verdict: `<workflow-result>{"gate":"checkout_done","status":"pass","summary":"created source file","evidence":["${PIPELINE_FILE}"]}</workflow-result>`,
+  task: `telling it to create only ${PIPELINE_FILE} containing \`export const appVersion = "1.0.0";\`; do no other work`,
+  verdict: `gate="checkout_done", status="pass"`,
   ...pipelineBudgets,
   expect: (state, workspace) => {
     // Файл проверяется на диске, а не по `changedFiles`: диспатчи pipeline описываются как
@@ -715,8 +713,8 @@ const cicdSetupStep = subagentStep({
 const cicdBuildStep = subagentStep({
   type: 'builder',
   description: '[workflow-task:build] build the project',
-  task: `telling it to verify ${PIPELINE_FILE} compiles correctly`,
-  verdict: `<workflow-result>{"gate":"build_done","status":"pass","summary":"build successful","evidence":["${PIPELINE_FILE}"]}</workflow-result>`,
+  task: 'telling it this is a workflow protocol probe; do not build or inspect anything',
+  verdict: `gate="build_done", status="pass"`,
   ...pipelineBudgets,
   expect: (state) => {
     const stage = state?.currentStage ?? '(не задана)';
@@ -748,8 +746,8 @@ const cicdTestSuiteStep: ScenarioStep = {
 const cicdUnitStep = subagentStep({
   type: 'tester',
   description: '[workflow-task:task-0] unit test',
-  task: `telling it to run unit tests on ${PIPELINE_FILE}`,
-  verdict: `<workflow-result>{"gate":"unit","status":"pass","summary":"unit tests passed","evidence":["${PIPELINE_FILE}"]}</workflow-result>`,
+  task: 'telling it this is a workflow protocol probe; do not run tests or inspect anything',
+  verdict: `gate="unit", status="pass"`,
   ...pipelineBudgets,
   expect: (state) => {
     const stage = state?.runs?.[0]?.stage ?? '(нет запуска)';
@@ -760,8 +758,8 @@ const cicdUnitStep = subagentStep({
 const cicdIntegrationStep = subagentStep({
   type: 'tester',
   description: '[workflow-task:task-0] integration test',
-  task: `telling it to verify ${PIPELINE_FILE} works with the environment`,
-  verdict: `<workflow-result>{"gate":"integration","status":"pass","summary":"integration tests passed","evidence":["${PIPELINE_FILE}"]}</workflow-result>`,
+  task: 'telling it this is a workflow protocol probe; do not run tests or inspect anything',
+  verdict: `gate="integration", status="pass"`,
   ...pipelineBudgets,
   expect: (state) => {
     const status = state?.tasks?.test_suite?.[0]?.status;
@@ -772,9 +770,8 @@ const cicdIntegrationStep = subagentStep({
 const cicdDeployStep = subagentStep({
   type: 'deployer',
   description: '[workflow-task:deploy] deploy the build',
-  task: 'telling it to register the deployment of version 1.0.0',
-  verdict:
-    '<workflow-result>{"gate":"deploy_done","status":"pass","summary":"deploy successful","evidence":["version=1.0.0"]}</workflow-result>',
+  task: 'telling it this is a workflow protocol probe; do not deploy or inspect anything',
+  verdict: 'gate="deploy_done", status="pass"',
   ...pipelineBudgets,
   expect: (state) => {
     const gate = state?.stageGates?.deploy_done;
@@ -811,9 +808,8 @@ const cicdDeployConsentStep: ScenarioStep = {
 const cicdSmokeStep = subagentStep({
   type: 'smoke',
   description: '[workflow-task:smoke] smoke test deployment',
-  task: 'telling it to verify the deployment',
-  verdict:
-    '<workflow-result>{"gate":"smoke_result","status":"pass","summary":"smoke tests passed","evidence":["deployment-ok"]}</workflow-result>',
+  task: 'telling it this is a workflow protocol probe; do not test or inspect anything',
+  verdict: 'gate="smoke_result", status="pass"',
   ...pipelineBudgets,
   expect: (state) => {
     const stage = state?.currentStage ?? '(не задана)';
@@ -835,9 +831,7 @@ const verdictProbeStep = subagentStep({
     'Use the host subagent-dispatch tool exactly once: its V2 name is `subagent` and its V1 name is `task`. ' +
     'Do not call `workflow-tasks-set`, `workflow-tasks-set-status`, `workflow-create`, or `execute`; ' +
     'this schema has no task list.',
-  verdict:
-    '<workflow-result>{"gate":"review","status":"pass","summary":"verdict reached the gate",' +
-    '"evidence":["verdict-probe"]}</workflow-result>',
+  verdict: 'gate="review", status="pass"',
   // Ход с диспатчем вердикта — работа субагента: на V2 он не укладывается в общий предел, а
   // подтвердить исход из состояния нельзя, пока гейт не записан. Поэтому предел свой.
   turnBudgetMs: VERDICT_PROBE_TURN_BUDGET_MS,

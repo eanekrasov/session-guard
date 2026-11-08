@@ -895,11 +895,11 @@ describe('the cicd-full-cycle canonical scenario', () => {
     }
   });
 
-  test('asks the subagent to return the workflow result in its own final response', () => {
+  test('asks the subagent to set the workflow gate directly', () => {
     const build = pipeline.steps.find((step) => step.instruction.includes('build the project'));
 
     expect(build).toBeDefined();
-    expect(build?.instruction).toContain('subagent to finish its own final response');
+    expect(build?.instruction).toContain('subagent to call workflow-gate-set');
     expect(build?.instruction).not.toContain(
       'Finish this turn by emitting exactly this workflow-result'
     );

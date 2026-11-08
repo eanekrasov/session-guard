@@ -10,6 +10,7 @@ import { createSession, WorkflowStore } from '../../src/session/session-store.ts
 import type { WorkflowSession } from '../../src/session/session-schema.ts';
 import { toolOutput } from '../support/tool-result.ts';
 import { hostPayload } from '../support/host-payload.ts';
+import { invokeWorkflowGate } from '../helpers.ts';
 
 type DispatchStrategy = 'serial' | 'parallel' | 'serial_with_overlap';
 type TaskFixture = {
@@ -128,16 +129,14 @@ async function afterTask(
   gate: 'review' | 'qa',
   status: 'pass' | 'fail'
 ): Promise<void> {
+  // The verdict's gate name is not the worker identity; report as the agent
+  // dispatched by beforeTask so the gate call binds to its active operation.
+  await invokeWorkflowGate(hooks, 's1', gate, status, 'code');
   await hooks['tool.execute.after']!(
     { tool: 'task', sessionID: 's1', callID, args: {} },
     {
       title: 'workflow task',
-      output: `<workflow-result>${JSON.stringify({
-        gate,
-        status,
-        summary: `${gate} ${status}`,
-        evidence: [`${gate}-evidence`],
-      })}</workflow-result>`,
+      output: 'Task complete.',
       metadata: {},
     }
   );

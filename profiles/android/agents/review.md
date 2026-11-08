@@ -53,4 +53,5 @@ permission:
 
 Последним блоком ответа выведи ровно один маркер без текста после него:
 
-`<workflow-result>{"gate":"review","status":"pass|fail","summary":"непустой итог","evidence":["минимум один файл:строка или проверка"]}</workflow-result>`
+Перед завершением вызови `workflow-gate-set` с `gate: "review"` и `status: "pass"` или
+`"fail"` согласно итогам ревью; затем кратко сообщи summary и evidence.

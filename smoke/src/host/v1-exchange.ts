@@ -21,7 +21,6 @@ export interface Part {
 
 export interface RawV1ResponseDiagnostics {
   text: string;
-  hasWorkflowResult: boolean;
   hasDsmlToolResult: boolean;
 }
 
@@ -39,7 +38,6 @@ export function rawV1ResponseDiagnostics(parts: Part[], error: string): RawV1Res
   const text = modelResponseText(parts, error);
   return {
     text,
-    hasWorkflowResult: text.includes('<workflow-result>'),
     hasDsmlToolResult: text.includes('<｜DSML｜tool-result>'),
   };
 }
