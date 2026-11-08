@@ -18,7 +18,9 @@ const CLI = path.resolve(import.meta.dir, '..', 'src', 'cli.ts');
  * A project laid out the way a real one is: profiles under `.opencode`, which
  * is also the directory the synced agents land in.
  */
-async function createProject(options: { profileJson?: string } = {}): Promise<string> {
+async function createProject(
+  options: { profileJson?: string; schema?: string } = {}
+): Promise<string> {
   const root = await mkdtemp(path.join(tmpdir(), 'session-guard-cli-'));
   temporaryDirectories.push(root);
 
@@ -29,6 +31,9 @@ async function createProject(options: { profileJson?: string } = {}): Promise<st
     options.profileJson ?? JSON.stringify({ id: 'demo' })
   );
   await writeFile(path.join(profileDir, 'agents', 'code.md'), '# Code agent\n', 'utf-8');
+  if (options.schema !== undefined) {
+    await writeFile(path.join(profileDir, 'demo.yaml'), options.schema, 'utf-8');
+  }
 
   return root;
 }
@@ -113,5 +118,33 @@ describe('session-guard sync-agents', () => {
 
     expect(result.exitCode).toBe(0);
     expect(existsSync(path.join(root, '.opencode', 'agents', 'demo_code.md'))).toBe(true);
+  });
+});
+
+describe('session-guard validate-schemas', () => {
+  it('validates a declared schema and exits 0', async () => {
+    const root = await createProject({
+      profileJson: JSON.stringify({ id: 'demo', schemas: ['demo.yaml'] }),
+      schema: 'stages:\n  done: {}\n',
+    });
+
+    const result = await runCli(['validate-schemas', '--cwd', root]);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('demo/demo: valid');
+    expect(result.stdout).toContain('all schemas valid');
+  });
+
+  it('reports an invalid schema and exits 1', async () => {
+    const root = await createProject({
+      profileJson: JSON.stringify({ id: 'demo', schemas: ['demo.yaml'] }),
+      schema: 'stages: []\n',
+    });
+
+    const result = await runCli(['validate-schemas', '--cwd', root]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('demo:');
+    expect(result.stdout).toContain('error(s)');
   });
 });

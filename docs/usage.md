@@ -81,13 +81,13 @@ mise run build
 
 Собираются три точки входа и две JSON Schema:
 
-| Файл                              | Что это                              |
-| --------------------------------- | ------------------------------------ |
-| `dist/index.js`                   | плагин и публичное API библиотеки    |
-| `dist/cli.js`                     | команда `session-guard sync-agents`  |
-| `dist/tui.js`                     | TUI-модуль: боковая панель состояния |
-| `dist/profile.schema.json`        | JSON Schema для `profile.json`       |
-| `dist/profile-schema.schema.json` | JSON Schema для YAML-схемы workflow  |
+| Файл                              | Что это                                    |
+| --------------------------------- | ------------------------------------------ |
+| `dist/index.js`                   | плагин и публичное API библиотеки          |
+| `dist/cli.js`                     | команды `sync-agents` и `validate-schemas` |
+| `dist/tui.js`                     | TUI-модуль: боковая панель состояния       |
+| `dist/profile.schema.json`        | JSON Schema для `profile.json`             |
+| `dist/profile-schema.schema.json` | JSON Schema для YAML-схемы workflow        |
 
 Последним шагом `mise run build` запускается `scripts/verify-build.ts`: он
 проверяет наличие этих артефактов и то, что точки входа не перезаписали друг
@@ -96,6 +96,13 @@ mise run build
 В `package.json` точки входа разведены: по экспортам `.` → `dist/index.js` и
 `./tui` → `dist/tui.js`, а `bin` публикует `dist/cli.js` под именем
 `session-guard`.
+
+CLI поддерживает `session-guard validate-schemas [--cwd <dir>]`: он разрешает
+схемы всех профилей каталога профилей и запускает workflow compiler. По умолчанию
+`--cwd` — текущий каталог; пути `OPENCODE_HARNESS_DIR` и
+`SESSION_GUARD_PROFILES_DIR` учитываются так же, как при синхронизации агентов.
+Код выхода `0` означает, что ошибки не найдены, `1` — ошибки схем, `2` — неверные
+аргументы. Без команды сохраняется прежний запуск `sync-agents`.
 
 ---
 

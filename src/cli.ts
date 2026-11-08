@@ -13,9 +13,17 @@
  * the plugin's startup path, so there is one implementation of it and not two.
  */
 import { resolve } from 'node:path';
+import { ProfileResolver } from './app/profile-resolver.ts';
+import { profilesDir } from './app/paths.ts';
 import { syncAllProfileAgents } from './app/profile-agent-sync.ts';
+import { compileWorkflow } from './schema/compile-workflow.ts';
 
 const USAGE = `Usage: session-guard sync-agents [--cwd <dir>]
+       session-guard validate-schemas [--cwd <dir>]
+
+Commands:
+  sync-agents       Synchronize profile agents into the harness
+  validate-schemas  Validate all profile workflow schemas
 
 Writes every profile's agents into <dir>/.opencode/agents, derived from the
 profiles under <dir>/.opencode/profiles. A file this tool did not write is
@@ -35,12 +43,29 @@ Exit codes:
   2  the arguments were not understood`;
 
 type ParsedArguments =
-  { kind: 'run'; cwd: string } | { kind: 'help' } | { kind: 'usage-error'; message: string };
+  | { kind: 'run'; command: 'sync-agents' | 'validate-schemas'; cwd: string }
+  | { kind: 'help' }
+  | { kind: 'usage-error'; message: string };
 
 function parseArguments(argv: string[]): ParsedArguments {
+  if (argv[0] === '-h' || argv[0] === '--help') return { kind: 'help' };
+  const hasCommand = argv[0] === 'sync-agents' || argv[0] === 'validate-schemas';
+  if (!hasCommand && argv[0] !== undefined && !argv[0].startsWith('--cwd')) {
+    return {
+      kind: 'usage-error',
+      message: argv[0].startsWith('-')
+        ? `unknown argument: ${argv[0]}`
+        : `unknown command: ${argv[0]}`,
+    };
+  }
+  const command = hasCommand ? argv[0] : 'sync-agents';
+  if (command !== 'sync-agents' && command !== 'validate-schemas') {
+    return { kind: 'usage-error', message: `unknown command: ${command}` };
+  }
+
   let cwd: string | undefined;
 
-  for (let index = 0; index < argv.length; index += 1) {
+  for (let index = hasCommand ? 1 : 0; index < argv.length; index += 1) {
     const argument = argv[index];
 
     if (argument === '-h' || argument === '--help') return { kind: 'help' };
@@ -63,7 +88,7 @@ function parseArguments(argv: string[]): ParsedArguments {
     return { kind: 'usage-error', message: `unknown argument: ${argument}` };
   }
 
-  return { kind: 'run', cwd: resolve(cwd ?? process.cwd()) };
+  return { kind: 'run', command, cwd: resolve(cwd ?? process.cwd()) };
 }
 
 /** Written to stdout, which is what the sync uses for its own log sink. */
@@ -95,6 +120,38 @@ async function main(): Promise<number> {
     stderr('');
     stderr(USAGE);
     return 2;
+  }
+
+  if (parsed.command === 'validate-schemas') {
+    const resolver = new ProfileResolver(profilesDir(parsed.cwd));
+    let failures = 0;
+    const profiles = await resolver.listProfiles();
+    if (profiles.length === 0) {
+      stderr('No profiles found.');
+      return 1;
+    }
+    for (const profile of profiles) {
+      try {
+        const resolved = await resolver.resolve(profile.id);
+        for (const schema of resolved.schemas) {
+          const errors = compileWorkflow(schema).errors.filter(
+            (error) => error.severity === 'error'
+          );
+          if (errors.length > 0) {
+            failures += errors.length;
+            for (const error of errors)
+              stderr(`${profile.id}/${schema.id}: ${error.path}: ${error.message}`);
+          } else {
+            stdout(`${profile.id}/${schema.id}: valid`);
+          }
+        }
+      } catch (error) {
+        failures += 1;
+        stderr(`${profile.id}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    stdout(`Validation: ${failures === 0 ? 'all schemas valid' : `${failures} error(s)`}`);
+    return failures > 0 ? 1 : 0;
   }
 
   const report = await syncAllProfileAgents(parsed.cwd, stdout);
