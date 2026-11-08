@@ -26,6 +26,6 @@
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": false
   },
-  "include": ["src/index.ts", "src/tui.ts"],
-  "exclude": ["**/*.test.ts", "**/*.test.tsx"]
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "exclude": ["test/**/*.ts", "test/**/*.tsx"]
 }

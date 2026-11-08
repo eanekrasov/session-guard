@@ -851,7 +851,7 @@ export function WorkflowSidebarContent(props: {
   );
 }
 
-function HomeProfiles(props: {
+export function HomeProfiles(props: {
   api: TuiPluginApi;
   section: ReturnType<typeof createStateSection>;
   snapshot: () => SessionGuardSnapshot;

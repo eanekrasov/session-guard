@@ -11,7 +11,7 @@ set -euo pipefail
 # adds files, it never removes the ones whose source is gone.
 rm -rf dist
 
-bun build ./src/index.ts ./src/cli.ts --outdir dist --target bun
+bun build ./src/index.ts ./src/plugin.ts ./src/v2/plugin.ts ./src/cli.ts --outdir dist --target bun
 bun scripts/build-tui.ts
 bun scripts/build-schema.ts
 tsc -p tsconfig.decl.json

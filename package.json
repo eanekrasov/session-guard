@@ -1,6 +1,6 @@
 {
   "name": "@eanekrasov/session-guard",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Session guard for OpenCode — gives schema-based workflow with strict validation between steps",
   "keywords": [
     "opencode",
@@ -23,12 +23,20 @@
   },
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "import": "./dist/plugin.js",
+      "types": "./dist/plugin.d.ts"
+    },
+    "./server": {
+      "import": "./dist/plugin.js",
+      "types": "./dist/plugin.d.ts"
+    },
+    "./v2": {
+      "import": "./dist/v2/plugin.js",
+      "types": "./dist/v2/plugin.d.ts"
     },
     "./tui": {
-      "types": "./dist/tui.d.ts",
-      "import": "./dist/tui.js"
+      "import": "./dist/tui.js",
+      "types": "./dist/tui.d.ts"
     }
   },
   "repository": {
@@ -46,10 +54,19 @@
     "access": "public",
     "registry": "https://registry.npmjs.org"
   },
+  "opencode": {
+    "type": "plugin",
+    "hooks": [
+      "chat.message",
+      "chat.params",
+      "event"
+    ]
+  },
   "files": [
     "dist",
     "README.md",
-    "docs"
+    "docs",
+    "package.json"
   ],
   "dependencies": {
     "@opencode-ai/plugin": "^1.18.34",

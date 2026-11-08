@@ -11,6 +11,7 @@ import {
   createStateSection,
   createSessionGuardCoordinator,
   WorkflowSidebarContent,
+  HomeProfiles,
   RulesSidebarContent,
   readActiveStage,
   DETAILS_TITLE,
@@ -85,7 +86,7 @@ function diagFailure(slot: string, error: unknown): void {
 
 export const SessionGuardTuiV2 = (ctx: PluginV2.Context): (() => void) => {
   diag(`setup: app=${ctx.app?.version ?? '?'}; location=${ctx.location?.directory ?? '?'}`);
-  const baseDir = ctx.location?.directory ?? process.cwd();
+  const baseDir = (ctx.location ?? ctx.data.location.default())?.directory ?? process.cwd();
   const disposers: Array<() => void> = [];
 
   const [kvStore, setKvStore] = ctx.storage.memory('session-guard-tui-kv', {
@@ -178,7 +179,20 @@ export const SessionGuardTuiV2 = (ctx: PluginV2.Context): (() => void) => {
       },
     },
     renderer: { requestRender: () => {} },
-    theme: { current: ctx.theme as unknown as Record<string, unknown> },
+    theme: {
+      current: {
+        text: ctx.theme.text.base,
+        textMuted: ctx.theme.text.muted,
+        primary: ctx.theme.text.action.primary.base,
+        secondary: ctx.theme.text.muted,
+        accent: ctx.theme.text.action.primary.base,
+        success: ctx.theme.text.feedback.success.base,
+        warning: ctx.theme.text.feedback.warning.base,
+        error: ctx.theme.text.feedback.error.base,
+        info: ctx.theme.text.feedback.info.base,
+        border: ctx.theme.border.base,
+      },
+    },
   } as unknown as SectionApi;
 
   const section = createStateSection(adapter, baseDir);
@@ -194,6 +208,17 @@ export const SessionGuardTuiV2 = (ctx: PluginV2.Context): (() => void) => {
     onUpdate: setSnapshot,
   });
   disposers.push(() => coordinator.dispose());
+
+  ctx.ui.slot({
+    append: 'home.footer',
+    render: () => (
+      <HomeProfiles
+        api={adapter as unknown as TuiPluginApi}
+        section={section}
+        snapshot={snapshot}
+      />
+    ),
+  });
 
   const renderBadge = (input: { sessionID?: string }): JSX.Element | null => {
     const slot = 'prompt.footer.status';

@@ -177,7 +177,7 @@ export function createCliProvider(opts?: CliProviderOptions): TaskProvider {
       if (cached) return cached;
 
       const result = await exec.run(['show', id, '--json']);
-      if (!result.ok) throw new Error(result.error);
+      if (result.ok === false) throw new Error(result.error);
 
       const parsed = JSON.parse(result.stdout);
       const task = parseTask(parsed as Record<string, unknown>);
@@ -191,7 +191,7 @@ export function createCliProvider(opts?: CliProviderOptions): TaskProvider {
       if (cached) return cached;
 
       const result = await exec.run(['ready', '--json']);
-      if (!result.ok) throw new Error(result.error);
+      if (result.ok === false) throw new Error(result.error);
 
       const raw = JSON.parse(result.stdout);
       const tasks: Task[] = (Array.isArray(raw) ? raw : []).map((item: unknown) =>

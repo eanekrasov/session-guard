@@ -6,6 +6,7 @@ import pluginModule, {
   __sectionForTests,
   createSessionGuardCoordinator,
   createStateSection,
+  SessionGuardTuiV2,
   type SectionApi,
 } from '../../src/tui/index.tsx';
 
@@ -120,6 +121,36 @@ async function until(probe: () => boolean, timeoutMs = 1000): Promise<number> {
 afterEach(() => exitProject());
 
 describe('sidebar-state: проводка плагина', () => {
+  test('V2 регистрирует панель профилей и боковую панель', () => {
+    const slots: string[] = [];
+    const color = '#fff';
+    const ctx = {
+      app: { version: 'test' },
+      location: { directory: tmpdir() },
+      storage: { memory: () => [{}, () => {}] },
+      theme: {
+        text: {
+          base: color,
+          muted: color,
+          action: { primary: { base: color } },
+          feedback: {
+            success: { base: color },
+            warning: { base: color },
+            error: { base: color },
+            info: { base: color },
+          },
+        },
+        border: { base: color },
+      },
+      data: { on: () => () => {} },
+      ui: { slot: ({ append }: { append: string }) => slots.push(append) },
+    } as unknown as Parameters<typeof SessionGuardTuiV2>[0];
+    const dispose = SessionGuardTuiV2(ctx);
+    expect(slots).toContain('home.footer');
+    expect(slots).toContain('sidebar.content');
+    dispose();
+  });
+
   test('tui регистрирует слот sidebar_content с order 600 и корректным id', () => {
     let registered: unknown;
     const api: SectionApi = {
