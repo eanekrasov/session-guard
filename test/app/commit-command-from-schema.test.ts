@@ -92,7 +92,7 @@ describe('the schema, not the core, says which command delivers a commit', () =>
 
     // A command is not delivery merely because another profile uses it; the
     // active schema must declare its matching pattern.
-    await expect(runBash(hooks, 'bun run commit-task.ts --Message m')).rejects.toThrow(
+    await expect(runBash(hooks, 'git commit -m m')).rejects.toThrow(
       /Refused: 'bash' is declared on this stage, but no entry covers/
     );
     expect((await store.load('s1'))?.deliveryPermit ?? null).toBeNull();

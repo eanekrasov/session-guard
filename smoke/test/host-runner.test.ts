@@ -1045,9 +1045,9 @@ describe('the commit/mutation canonical scenarios', () => {
     command,
     ...(refused ? { refused: true } : {}),
   });
-  const earlyCommand = 'bun run commit-task.ts -m "smoke: too early"';
-  const deliverCommand = 'bun run commit-task.ts -m "smoke: deliver"';
-  const mismatchCommand = 'bun run commit-task.ts -m "smoke: sweep"';
+  const earlyCommand = 'git commit -m "smoke: too early"';
+  const deliverCommand = 'git commit -m "smoke: deliver"';
+  const mismatchCommand = 'git commit -m "smoke: sweep"';
   const prepTurns = (): Array<() => PromptResult> => [
     planningTurn,
     consentTurn,

@@ -82,7 +82,7 @@ describe('the commit step on a session whose work is finished', () => {
     await expect(
       hooks['tool.execute.before']!(
         { tool: 'bash', sessionID: 'commit-done', callID: 'commit-call' },
-        { args: { command: 'bun run commit-task.ts -m "feat: x"' } }
+        { args: { command: 'git commit -m "feat: x"' } }
       )
     ).resolves.toBeUndefined();
 
@@ -207,7 +207,7 @@ describe('a commit after an intermediate change was undone', () => {
     const hooks = await createRuntime(pluginInput());
     await hooks['tool.execute.before']!(
       { tool: 'bash', sessionID: 'undone', callID: 'commit-call' },
-      { args: { command: 'bun run commit-task.ts -m "feat: b"' } }
+      { args: { command: 'git commit -m "feat: b"' } }
     );
 
     // The permit expects what the tree actually differs by.
@@ -230,7 +230,7 @@ describe('a commit after an intermediate change was undone', () => {
         tool: 'bash',
         sessionID: 'undone',
         callID: 'commit-call',
-        args: { command: 'bun run commit-task.ts -m "feat: b"' },
+        args: { command: 'git commit -m "feat: b"' },
       },
       output
     );

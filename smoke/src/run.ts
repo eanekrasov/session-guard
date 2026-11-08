@@ -89,7 +89,7 @@ function messageOf(error: unknown): string {
 /** The project inputs every canonical scenario receives, on both host kinds alike. */
 async function commonSmokeFiles(): Promise<Record<string, string>> {
   return {
-    'commit-task.ts': await Bun.file(join(REPO_ROOT, 'scripts/commit-task.ts')).text(),
+    // 'build-schema.ts': await Bun.file(join(REPO_ROOT, 'scripts/build-schema.ts')).text(),
     'plan.md': '# Smoke plan\n\nAdd one file under src/.\n',
   };
 }

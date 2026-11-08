@@ -130,7 +130,7 @@ stages:
       # перестанет держать, как только появится второй вход в стадию, а право
       # на коммит выдаёт действие.
       - action: bash
-        commands: ['bun run .*commit-task\.ts.*']
+        commands: ['git commit.*']
         delivers: true
         guard: "allTasksCompleted('implementation') && session.gates.review == 'passed' && session.gates.qa == 'passed'"
 

@@ -514,8 +514,7 @@ describe('the synced directory is marked as generated', () => {
 
   it('keeps git from staging them, so a commit carries only the work', async () => {
     // These files are copies of profiles/<id>/agents/*.md, which is what is
-    // actually committed. Left untracked they were swept up by commit-task.ts,
-    // which stages everything when given no paths, and the commit then carried
+    // actually committed. Left untracked so the commit then carried
     // files no task had touched — the delivery permit expected none of them,
     // so the receipt was refused and the workflow stopped in `commit`.
     const { spawnSync } = await import('node:child_process');

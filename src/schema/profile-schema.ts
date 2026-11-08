@@ -70,8 +70,6 @@ const ActionEntrySchema = z.object({
    *
    * Ядро по этому признаку не входит в жизненный цикл мутации, выдаёт
    * `deliveryPermit` до вызова и сверяет HEAD с закоммиченными файлами после.
-   * Раньше «этот bash есть коммит» решала зашитая проверка на имя
-   * `commit-task.ts`; теперь это строчка в схеме.
    */
   delivers: z.boolean().optional(),
   guard: z.string().optional(),

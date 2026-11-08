@@ -7,9 +7,6 @@ permission:
   edit: deny
   glob: deny
   grep: deny
-  bash:
-    'bun run .opencode/scripts/commit-task.ts *': allow
-    '*': deny
   question: allow
   todowrite: allow
   webfetch: deny
@@ -179,7 +176,7 @@ Code-агент имеет `bash: allow` и не проходит через Mob
 2. **Делегируй код** — вызови `task(subagent_type: "code", ...)` с описанием задачи, критериями приёмки, fileKey и nodeId для Figma.
 3. **Прими результат** — проверь отчёт code-агента: какие файлы изменены, прошел ли `ide_diagnostics`.
    3.5. **Проверь** — запусти `review` и `qa`. Оба агента обязаны вернуть формальный `workflow-result`.
-4. **Commit** — после двух `pass` выполни разрешённый `commit-task.ts` с обязательным `--Files`. Формат: `TMR-<id> - <глагол> (<название подзадачи>)`
+4. **Commit** — после двух `pass` выполни разрешённый `git commit`.
 
 Если ветка уже существует — не создавай заново, переключись на неё.
 **Не пуши** — все ветки и коммиты только локально.
@@ -322,10 +319,10 @@ task(
 
 #### 4.5 Commit
 
-Запусти `bun run .opencode/scripts/commit-task.ts`:
+Запусти `git commit`:
 
-- Message "TMR-<id> - <глагол в прош.вр.> (<описание>)"
-- Files @(<из 4.1>, <из 4.2>, <из 4.4 если был fail>)
+- Message: "TMR-<id> - <глагол в прош.вр.> (<описание>)"
+- Files: @(<из 4.1>, <из 4.2>, <из 4.4 если был fail>)
 
 Не пушить.
 

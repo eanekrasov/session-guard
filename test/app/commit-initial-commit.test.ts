@@ -90,7 +90,7 @@ describe("the repository's very first commit", () => {
         tool: 'bash',
         sessionID: 'first-commit',
         callID: 'commit-call',
-        args: { command: 'bun run commit-task.ts -m "feat: the first commit"' },
+        args: { command: 'git commit -m "feat: the first commit"' },
       },
       output
     );
@@ -124,7 +124,7 @@ describe("the repository's very first commit", () => {
         tool: 'bash',
         sessionID: 'first-commit-extra',
         callID: 'commit-call',
-        args: { command: 'bun run commit-task.ts -m x' },
+        args: { command: 'git commit -m x' },
       },
       output
     );

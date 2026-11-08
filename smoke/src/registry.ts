@@ -546,7 +546,7 @@ const commitVerifyStep = subagentStep({
  */
 const earlyCommitStep: ScenarioStep = {
   instruction:
-    'Use the bash tool exactly once to run this command: bun run commit-task.ts -m "smoke: too early". ' +
+    'Use the bash tool exactly once to run this command: git commit -m "smoke: too early". ' +
     'Do not modify or retry it, and do not call any other tool. ' +
     'If it is refused, report the refusal exactly as returned and finish the turn.',
   mutation: 'mutating',
@@ -565,7 +565,7 @@ const earlyCommitStep: ScenarioStep = {
       return `отказ не подтверждён: HEAD переместился с ${headNote(before)} на ${headNote(after)}`;
     }
     return shellCommandOutcome(result, {
-      command: /bun\s+run\s+commit-task/u,
+      command: /git\s+commit/u,
       refusal: COMMIT_REFUSAL_SENTENCE,
       what: 'ранняя поставка',
     });
@@ -575,7 +575,7 @@ const earlyCommitStep: ScenarioStep = {
 /** Легитимная поставка: HEAD перемещается, квитанция фиксирует новый коммит. */
 const deliverCommitStep: ScenarioStep = {
   instruction:
-    'Use the bash tool exactly once to run this command: bun run commit-task.ts -m "smoke: deliver". ' +
+    'Use the bash tool exactly once to run this command: git commit -m "smoke: deliver". ' +
     'Do not modify or retry it, and do not call any other tool. ' +
     'Report the output verbatim, then finish the turn.',
   mutation: 'mutating',
@@ -604,7 +604,7 @@ const deliverCommitStep: ScenarioStep = {
  */
 const mismatchCommitStep: ScenarioStep = {
   instruction:
-    'Use the bash tool exactly once to run this command: bun run commit-task.ts -m "smoke: sweep". ' +
+    'Use the bash tool exactly once to run this command: git commit -m "smoke: sweep". ' +
     'Do not modify or retry it, and do not call any other tool. ' +
     'Report the output verbatim, then finish the turn.',
   mutation: 'mutating',

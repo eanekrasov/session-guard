@@ -45,7 +45,7 @@ stages:
   commit:
     actions:
       - action: bash
-        commands: ['bun run .*commit-task\.ts.*']
+        commands: ['git commit.*']
         delivers: true
   done: {}
 transitions:

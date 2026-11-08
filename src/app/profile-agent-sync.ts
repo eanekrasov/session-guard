@@ -372,11 +372,9 @@ export async function syncAllProfileAgents(
  *
  * These files are copies of `profiles/<id>/agents/*.md`, which is what is
  * actually committed — they are derived, and they carry an ownership marker
- * saying so. Left untracked they are swept up by `commit-task.ts`, which
- * stages everything when it is given no paths, and the commit then carries
- * files no task ever touched. The delivery permit expected none of them, so
- * the receipt was refused and the workflow stopped in `commit` — with the
- * agent seeing only 'nothing staged to commit' from the retry that followed.
+ * saying so. The delivery permit expected none of them, so the receipt was
+ * refused and the workflow stopped in `commit` — with the agent seeing only
+ * 'nothing staged to commit' from the retry that followed.
  *
  * The directory is flat and shared, so the ignore file names the managed files
  * one by one instead of ignoring everything in it. A blanket `*` here would

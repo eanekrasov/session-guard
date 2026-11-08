@@ -338,15 +338,6 @@ describe('a stage declares what it can do, and the compiler checks it can', () =
     expect(reported(input)).toContain("'delivers' needs 'commands'");
   });
 
-  it('accepts a delivery declared as the bash call it actually is', () => {
-    const input = schema({
-      commit: {
-        actions: [{ action: 'bash', commands: ['bun run .*commit-task\\.ts.*'], delivers: true }],
-      },
-    });
-    expect(messages(input)).toEqual([]);
-  });
-
   it('refuses a directory mask that covers nothing inside it', () => {
     // minimatch якорит и путь, и маску: `src/auth` не совпадёт с
     // `src/auth/login.ts`.

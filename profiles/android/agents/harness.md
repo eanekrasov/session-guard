@@ -25,7 +25,7 @@ permission:
 
 - `.opencode/session-guard/` — ядро: переходы (`state.ts`, `workflow.ts`), инварианты (`invariants.ts`), guard-правила (`guardrails.ts`), хранилище (`store.ts`), runtime (`runtime.ts`) и тесты (`*.test.ts`)
 - `.opencode/plugins/` — runtime-плагины (например, `session-guard.js`)
-- `.opencode/scripts/` — скрипты (например, `commit-task.ts`)
+- `.opencode/scripts/` — скрипты (например, `build-schema.ts`)
 - `.opencode/agent/` — промпты агентов (`*.md`)
 - `.opencode/skills/` — скиллы (`<name>/SKILL.md`)
 - `.opencode/rules/` — правила (`*.md`)

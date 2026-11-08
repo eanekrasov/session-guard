@@ -71,7 +71,7 @@ function commit(files: Record<string, string>, message: string): string {
 async function afterBash(hooks: Hooks, callID = 'commit-call'): Promise<string> {
   const output = { title: 'commit-task', output: 'commit-task: committed', metadata: {} };
   await hooks['tool.execute.after']!(
-    { tool: 'bash', sessionID: 's1', callID, args: { command: 'bun run commit-task.ts -m "x"' } },
+    { tool: 'bash', sessionID: 's1', callID, args: { command: 'git commit -m "x"' } },
     output
   );
   return output.output;

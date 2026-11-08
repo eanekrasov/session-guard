@@ -48,7 +48,6 @@
   },
   "files": [
     "dist",
-    "scripts/commit-task.ts",
     "README.md",
     "docs"
   ],

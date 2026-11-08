@@ -150,8 +150,7 @@ describe('shipped profiles', () => {
   });
 });
 
-/** Ровно тот вызов, который скиллы диктовали агенту в старом харнессе. */
-const COMMIT_CALL = 'bun run .opencode/scripts/commit-task.ts --Message m --Files a.kt';
+const COMMIT_CALL = 'git commit -m message';
 
 describe('base carries the former canCommit on the delivering bash entry', () => {
   function sessionInValidation(taskStatus: 'running' | 'completed', profile = 'base') {
@@ -218,7 +217,7 @@ describe('base carries the former canCommit on the delivering bash entry', () =>
     // Стадии сливаются по записям: профиль, не переобъявивший `commit`,
     // получает доставку родителя целиком.
     const delivery = await deliveryEntry(id);
-    expect(delivery?.commands?.[0]).toContain('commit-task');
+    expect(delivery?.commands?.[0]).toMatch(/^git commit/);
     expect(delivery?.guard).toContain("allTasksCompleted('implementation')");
 
     const { config } = await engineConfigFor(id);
@@ -263,7 +262,7 @@ describe('base carries the former canCommit on the delivering bash entry', () =>
     expect(commandMatches(COMMIT_CALL, patterns)).toBe(true);
 
     // A different command is not delivery unless the schema declares it too.
-    const direct = './scripts/commit-task.ts --Message m';
+    const direct = 'git status --short';
     expect(commandMatches(direct, patterns)).toBe(false);
   });
   it.each(['base', 'harness', 'android'])(
