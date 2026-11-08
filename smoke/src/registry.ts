@@ -638,7 +638,7 @@ const mismatchCommitStep: ScenarioStep = {
  * читается из состояния до бюджета, а недоказуемая мутация становится `blocked`.
  */
 const PIPELINE_TURN_BUDGET_MS = 240_000;
-const PIPELINE_STATE_BUDGET_MS = 180_000;
+const PIPELINE_STATE_BUDGET_MS = 30_000;
 
 /**
  * Шагам, чей результат — переход состояния (создание сессии, согласие), длинный ход не нужен:

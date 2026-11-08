@@ -3,6 +3,81 @@ import { describe, it, expect } from 'vitest';
 import { GuardEvaluator } from '../../src/schema/guard-evaluator.ts';
 
 describe('GuardEvaluator', () => {
+  describe('task status guards', () => {
+    for (const [name, status] of [
+      ['hasFailedTasks', 'failed'],
+      ['hasCancelledTasks', 'cancelled'],
+      ['hasPendingTasks', 'pending'],
+      ['hasRunningTasks', 'running'],
+      ['hasCompletedTasks', 'completed'],
+    ] as const) {
+      it(`${name} matches only its status in the named list`, () => {
+        const evaluate = (tasks: Record<string, Array<{ id: string; status: string }>>) =>
+          new GuardEvaluator({ tasks }).evaluate(`${name}('suite')`);
+        expect(evaluate({})).toBe(false);
+        expect(evaluate({ suite: [] })).toBe(false);
+        expect(
+          evaluate({ suite: [{ id: 'a', status: status === 'running' ? 'failed' : 'running' }] })
+        ).toBe(false);
+        expect(evaluate({ other: [{ id: 'a', status }] })).toBe(false);
+        expect(evaluate({ suite: [{ id: 'a', status }] })).toBe(true);
+        const unscoped = new GuardEvaluator({ tasks: { other: [{ id: 'a', status }] } });
+        expect(unscoped.evaluate(`${name}()`)).toBe(true);
+      });
+    }
+    for (const [name, status] of [
+      ['allTasksPending', 'pending'],
+      ['allTasksRunning', 'running'],
+      ['allTasksCompleted', 'completed'],
+      ['allTasksFailed', 'failed'],
+      ['allTasksCancelled', 'cancelled'],
+    ] as const) {
+      it(`${name} requires a nonempty list with all matching statuses`, () => {
+        const evaluate = (tasks: Record<string, Array<{ id: string; status: string }>>) =>
+          new GuardEvaluator({ tasks }).evaluate(`${name}('suite')`);
+        expect(evaluate({})).toBe(false);
+        expect(evaluate({ suite: [] })).toBe(false);
+        const session = {
+          tasks: { suite: [{ id: 'a', status }], other: [{ id: 'b', status: 'other' }] },
+        };
+        expect(new GuardEvaluator(session).evaluate(`${name}()`)).toBe(false);
+        expect(
+          new GuardEvaluator(session, undefined, { currentLoopListKey: 'suite' }).evaluate(
+            `${name}()`
+          )
+        ).toBe(true);
+        expect(
+          evaluate({
+            suite: [
+              { id: 'a', status },
+              { id: 'b', status: 'other' },
+            ],
+          })
+        ).toBe(false);
+        expect(
+          evaluate({
+            suite: [
+              { id: 'a', status },
+              { id: 'b', status },
+            ],
+          })
+        ).toBe(true);
+      });
+    }
+    it('preserves legacy hasPendingTasks without an argument', () => {
+      expect(
+        new GuardEvaluator({ tasks: { suite: [{ id: 'a', status: 'running' }] } }).evaluate(
+          'hasPendingTasks()'
+        )
+      ).toBe(true);
+      expect(
+        new GuardEvaluator({ tasks: { suite: [{ id: 'a', status: 'running' }] } }).evaluate(
+          "hasPendingTasks('suite')"
+        )
+      ).toBe(false);
+    });
+  });
+
   describe('custom function from guards', () => {
     it('evaluates guard expression calling a custom function', () => {
       const session = {

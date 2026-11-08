@@ -59,7 +59,7 @@ export class GuardEvaluator {
       }
       return false;
     };
-    const allTasksCompletedFn = (explicitListKey?: string): boolean => {
+    const allTasksStatusFn = (status: TaskStatus, explicitListKey?: string): boolean => {
       const taskLists = sessionFacts.tasks;
       if (!taskLists || typeof taskLists !== 'object') return false;
 
@@ -94,9 +94,24 @@ export class GuardEvaluator {
         : (taskLists as Record<string, readonly { id: string; status: TaskStatus }[]>)[listKey];
       if (!Array.isArray(taskArray) || taskArray.length === 0) return false;
       return taskArray.every(
-        (task) =>
-          task && typeof task === 'object' && 'status' in task && task.status === 'completed'
+        (task) => task && typeof task === 'object' && 'status' in task && task.status === status
       );
+    };
+
+    const allTasksCompletedFn = (listKey?: string): boolean =>
+      allTasksStatusFn('completed', listKey);
+    const taskStatus = (listKey: unknown, status: TaskStatus): boolean => {
+      const tasks = sessionFacts.tasks;
+      if (!tasks) return false;
+      if (listKey === undefined) {
+        const lists = Array.isArray(tasks) ? [tasks] : Object.values(tasks);
+        return lists.some(
+          (list) => Array.isArray(list) && list.some((task) => task.status === status)
+        );
+      }
+      if (typeof listKey !== 'string' || Array.isArray(tasks)) return false;
+      const list = (tasks as Record<string, readonly { status?: string }[]>)[listKey];
+      return Array.isArray(list) && list.some((task) => task.status === status);
     };
 
     // Build the session with approved and allTasksCompleted attached so
@@ -110,7 +125,20 @@ export class GuardEvaluator {
     this.builtins = {
       approved: (...args: unknown[]) => approvedFn(String(args[0])),
       isExhausted: (...args: unknown[]) => isExhaustedFn(String(args[0])),
-      hasPendingTasks: () => hasPendingTasksFn(),
+      hasPendingTasks: (listKey: unknown) =>
+        listKey === undefined ? hasPendingTasksFn() : taskStatus(listKey, 'pending'),
+      hasRunningTasks: (listKey: unknown) => taskStatus(listKey, 'running'),
+      hasCompletedTasks: (listKey: unknown) => taskStatus(listKey, 'completed'),
+      hasFailedTasks: (listKey: unknown) => taskStatus(listKey, 'failed'),
+      hasCancelledTasks: (listKey: unknown) => taskStatus(listKey, 'cancelled'),
+      allTasksPending: (listKey: unknown) =>
+        allTasksStatusFn('pending', typeof listKey === 'string' ? listKey : undefined),
+      allTasksRunning: (listKey: unknown) =>
+        allTasksStatusFn('running', typeof listKey === 'string' ? listKey : undefined),
+      allTasksFailed: (listKey: unknown) =>
+        allTasksStatusFn('failed', typeof listKey === 'string' ? listKey : undefined),
+      allTasksCancelled: (listKey: unknown) =>
+        allTasksStatusFn('cancelled', typeof listKey === 'string' ? listKey : undefined),
       allTasksCompleted: (...args: unknown[]) =>
         allTasksCompletedFn(typeof args[0] === 'string' ? args[0] : undefined),
     };
