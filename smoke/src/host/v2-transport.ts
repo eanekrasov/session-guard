@@ -6,7 +6,8 @@
  * runner see the shared normalized result instead.
  */
 
-import { log as harnessLog, type Host } from '../harness.ts';
+import { type Host } from '../harness.ts';
+import { log } from '../log.ts';
 import { createV2SmokeClient, type V2SmokeClient } from '../v2-client.ts';
 import {
   buildPromptResult,
@@ -100,10 +101,18 @@ export function createSessionClientTransport(
         }
       }
 
-      harnessLog(
-        'debug',
-        `say request: session=${session.id} instruction.length=${input.text.length}`
-      );
+      log('debug', `say request: session=${session.id} instruction=${input.text}`, {
+        sourceId: 'v2.transport.prompt',
+        sink: 'host-v2',
+        humanMessage: `USER:\n${input.text}`,
+        fields: {
+          sessionId: session.id,
+          instruction: input.text,
+          instructionLength: input.text.length,
+          agent: input.agent,
+          decision: input.decision,
+        },
+      });
       await client.prompt(session.id, input.text, input.decision ?? 'grant');
 
       let parts: NormalizedPart[] = [];
@@ -116,6 +125,23 @@ export function createSessionClientTransport(
         const reason = caught instanceof Error ? caught.message : String(caught);
         notes.push(`не удалось прочитать сообщения сессии: ${reason}`);
       }
+
+      const executionError = client.lastExecution()?.error?.message;
+      log('debug', 'V2 model response', {
+        sourceId: 'v2.transport.response',
+        sink: 'host-v2',
+        humanMessage: `MODEL:\n${
+          parts
+            .map((part) => {
+              if (part.kind === 'text' || part.kind === 'unknown') return part.text ?? '';
+              if (part.kind === 'error') return part.error;
+              return [part.output, part.error].filter(Boolean).join('\n');
+            })
+            .filter(Boolean)
+            .join('\n') || '(пустой ответ)'
+        }${executionError ? `\nERROR:\n${executionError}` : ''}${notes.length ? `\nERROR:\n${notes.join('\n')}` : ''}`,
+        fields: { sessionId: session.id, responseLength: parts.length },
+      });
 
       const result = buildPromptResult(
         {
@@ -135,13 +161,26 @@ export function createSessionClientTransport(
         // This strategy holds a live `Host`, so the evidence really comes from one.
         'real-host'
       );
-      harnessLog('debug', `tool.execute.after: ${formatToolTrace(result.turn.toolCalls)}`);
-      harnessLog(
+      log('debug', `tool.execute.after: ${formatToolTrace(result.turn.toolCalls)}`, {
+        sourceId: 'v2.transport.tools',
+        sink: 'host-v2',
+        fields: {
+          sessionId: session.id,
+          toolCalls: result.turn.toolCalls,
+          parts,
+        },
+      });
+      log(
         'debug',
         `workflow checkpoint: ${summarizeWorkflowCheckpoint(
           result.workflowState,
           result.workflowState?.revision
-        )}`
+        )}`,
+        {
+          sourceId: 'v2.transport.checkpoint',
+          sink: 'host-v2',
+          fields: { sessionId: session.id, workflowState: result.workflowState },
+        }
       );
       return result;
     },

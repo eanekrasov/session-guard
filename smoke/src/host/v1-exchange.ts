@@ -7,10 +7,7 @@
  * увидеть, чем именно ответил хост.
  */
 
-import { appendFile } from 'node:fs/promises';
-import { join } from 'node:path';
-
-import { REPO_ROOT, api, isTraceEnabled, sanitizeTracePayload, type Host } from '../harness.ts';
+import { api, type Host } from '../harness.ts';
 import { log } from '../log.ts';
 import { chooseLabel } from '../operator.ts';
 import { createSessionEventStream, type SessionEventStream } from './session-events.ts';
@@ -149,31 +146,29 @@ export function subscribeToV1Events(
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
+      const dispatch = async (record: string): Promise<void> => {
+        if (!record) return;
+        log('trace', 'V1 SSE record', {
+          sourceId: 'v1-exchange.sse-record',
+          sink: 'host-v1',
+          human: false,
+          type: 'sse.event',
+          fields: { record },
+        });
+        const event = parseV1SseEvent(record);
+        if (event) await onEvent(event);
+      };
       while (!stopped) {
         const next = await reader.read();
         buffer += decoder.decode(next.value ?? new Uint8Array(), { stream: !next.done });
         const records = buffer.split(/\r?\n\r?\n/gu);
         buffer = records.pop() ?? '';
         for (const record of records) {
-          const event = parseV1SseEvent(record);
-          if (event) {
-            log('trace', `V1 SSE event: ${JSON.stringify(event)}`, {
-              type: 'sse.event',
-              fields: { event },
-            });
-            await onEvent(event);
-          }
+          await dispatch(record);
         }
         if (next.done) break;
       }
-      const event = parseV1SseEvent(buffer);
-      if (event) {
-        log('trace', `V1 SSE event: ${JSON.stringify(event)}`, {
-          type: 'sse.event',
-          fields: { event },
-        });
-        await onEvent(event);
-      }
+      await dispatch(buffer);
       await reader.cancel().catch(() => undefined);
       return undefined;
     } catch (error) {
@@ -205,6 +200,8 @@ export function createV1SessionEvents(host: Host, sessionId: string): V1SessionE
 
   const logSessionTree = (message: string): void => {
     log('debug', message, {
+      sourceId: 'v1-exchange.session-tree',
+      sink: 'host-v1',
       type: 'sse.session-tree',
       fields: { rootSessionID: sessionId, trackedSessionIDs: [...trackedSessions] },
     });
@@ -295,6 +292,8 @@ export function createV1SessionEvents(host: Host, sessionId: string): V1SessionE
     if (subscription !== undefined || stopped || trackedSessions.size === 0) return;
     connectionAttempts += 1;
     log('debug', 'V1 SSE connecting', {
+      sourceId: 'v1-exchange.sse-connect',
+      sink: 'host-v1',
       type: 'sse.connect',
       fields: {
         endpoint: `${host.url}/event`,
@@ -317,6 +316,8 @@ export function createV1SessionEvents(host: Host, sessionId: string): V1SessionE
       const reason = error?.message ?? 'stream ended';
       if (connectionAttempts >= MAX_V1_SSE_CONNECTION_ATTEMPTS) {
         log('error', 'V1 SSE reconnect limit reached', {
+          sourceId: 'v1-exchange.sse-reconnect-exhausted',
+          sink: 'host-v1',
           type: 'sse.reconnect.exhausted',
           fields: {
             endpoint: `${host.url}/event`,
@@ -331,6 +332,8 @@ export function createV1SessionEvents(host: Host, sessionId: string): V1SessionE
       }
       const delay = V1_SSE_RECONNECT_DELAYS_MS[connectionAttempts - 1] ?? 100;
       log('warn', 'V1 SSE reconnect scheduled', {
+        sourceId: 'v1-exchange.sse-reconnect',
+        sink: 'host-v1',
         type: 'sse.reconnect',
         fields: {
           endpoint: `${host.url}/event`,
@@ -477,6 +480,9 @@ export function answerQuestions(
     });
     for (const entry of answered.filter((item) => item.id === request.id)) {
       log('debug', `operator answered: ${entry.label}`, {
+        sourceId: 'v1-exchange.interaction-answer',
+        sink: 'host-v1',
+        human: false,
         type: 'interaction.answer',
         fields: {
           kind: entry.kind,
@@ -519,8 +525,6 @@ export interface AnsweredQuestion {
   consent: boolean;
 }
 
-export const SESSION_LOG = join(REPO_ROOT, '.memory/session.log');
-
 export function modelResponseText(parts: Part[], error: string): string {
   const response = parts
     .map((part) =>
@@ -538,22 +542,22 @@ export function modelResponseText(parts: Part[], error: string): string {
   return [error, response].filter(Boolean).join('\n') || '(пустой ответ)';
 }
 
-/** Сохранять ограниченный санитизированный обмен `say` только в явном trace-режиме. */
-export async function logExchange(
+/** Emit a concise structured summary and a readable exchange for debug output. */
+export function logExchange(
   instruction: string,
   agent: string | undefined,
-  error: string,
-  parts: Part[]
-): Promise<void> {
-  if (!isTraceEnabled()) return;
-
-  const response = modelResponseText(parts, error);
-  const lines = [
-    '',
-    `─── ${new Date().toISOString()} ───`,
-    `→ agent: ${agent ?? '(default)'}`,
-    `USER:\n${sanitizeTracePayload(instruction)}`,
-    `MODEL:\n${sanitizeTracePayload(response)}`,
-  ];
-  await appendFile(SESSION_LOG, lines.join('\n'), 'utf-8').catch(() => {});
+  parts: Part[],
+  error: string
+): void {
+  log('debug', `USER: ${instruction}; MODEL: ${parts.length} parts`, {
+    sourceId: 'v1-exchange.summary',
+    sink: 'host-v1',
+    fields: {
+      agent,
+      instruction,
+      instructionLength: instruction.length,
+      partCount: parts.length,
+    },
+    humanMessage: `USER:\n${instruction}\nMODEL:\n${modelResponseText(parts, error)}`,
+  });
 }

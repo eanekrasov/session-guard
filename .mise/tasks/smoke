@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
 #MISE description="Run the host smoke suite against a live opencode"
 
-bun run smoke/src/run.ts "$@"
+task_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd -- "$task_dir/../.." && pwd)"
+cd "$repo_root" || exit
+exec bun run smoke/src/run.ts "$@"

@@ -54,43 +54,6 @@ export interface V2SmokeClient {
   lastStepEvents(): StepEvent[];
 }
 
-export type V2SmokeTransport = typeof fetch;
-
-/**
- * Хост V2 игнорирует унаследованный `OPENCODE_SERVER_PASSWORD`: он генерирует
- * собственные учётные данные и требует их при каждом вызове `/api`. Без этого
- * заголовка сервер отвечает 401 с пустым телом, и сгенерированный клиент
- * сообщает об этом как `UnsupportedContentType` — ошибка авторизации
- * в костюме content-type.
- */
-export function createV2SmokeTransport(authHeader?: string): V2SmokeTransport {
-  const transport = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const headers = new Headers(
-      init?.headers ?? (input instanceof Request ? input.headers : undefined)
-    );
-    if (authHeader && !headers.has('authorization')) headers.set('authorization', authHeader);
-    const response = await fetch(input, { ...init, headers });
-    if (response.headers.get('content-type')) return response;
-
-    const body = await response.arrayBuffer();
-    try {
-      JSON.parse(new TextDecoder().decode(body));
-    } catch {
-      return new Response(body, response);
-    }
-
-    const responseHeaders = new Headers(response.headers);
-    responseHeaders.set('content-type', 'application/json');
-    return new Response(body, {
-      headers: responseHeaders,
-      status: response.status,
-      statusText: response.statusText,
-    });
-  }) as typeof fetch;
-  transport.preconnect = fetch.preconnect;
-  return transport;
-}
-
 /** Всё, что содержит форма, чтобы тег consent можно было найти, где бы он ни оказался. */
 function formText(form: Pick<FormInfo, 'title' | 'fields'>): string {
   return [form.title, ...form.fields.flatMap((field) => [field.title, field.description])]
@@ -190,8 +153,10 @@ export interface AnsweredForm {
 }
 
 export function createV2SmokeClient(host: Host, options: V2SmokeClientOptions = {}): V2SmokeClient {
-  const transport = createV2SmokeTransport(host.authHeader);
-  const client = OpenCode.make({ baseUrl: host.url, fetch: transport });
+  const client = OpenCode.make({
+    baseUrl: host.url,
+    ...(host.authHeader ? { headers: { Authorization: host.authHeader } } : {}),
+  });
   // Один клиент управляет одной сессией сценария, поэтому запись о том, что уже
   // было отвечено, переживает один промпт: форма, отвеченная в раннем промпте,
   // никогда не отвечается дважды.
@@ -238,6 +203,8 @@ export function createV2SmokeClient(host: Host, options: V2SmokeClientOptions = 
       }
       for (const choice of plan.choices) {
         log('debug', 'operator interaction answered', {
+          sourceId: 'v2.client.form.answer',
+          sink: 'host-v2',
           type: 'interaction.answer',
           fields: {
             kind: 'form',
@@ -279,8 +246,10 @@ export function createV2SmokeClient(host: Host, options: V2SmokeClientOptions = 
     }
     lastExecution = execution;
     log('debug', `execution event: ${type}`, {
+      sourceId: 'v2.client.execution',
+      sink: 'host-v2',
       type: 'execution.event',
-      fields: { sessionType: type, data, execution },
+      fields: { sessionType: type, execution },
     });
   }
 
@@ -313,8 +282,10 @@ export function createV2SmokeClient(host: Host, options: V2SmokeClientOptions = 
     }
     stepEvents.push(step);
     log('debug', `step event: ${type}`, {
+      sourceId: 'v2.client.step',
+      sink: 'host-v2',
       type: 'step.event',
-      fields: { sessionType: type, data, step },
+      fields: { sessionType: type, step },
     });
   }
 
@@ -330,14 +301,10 @@ export function createV2SmokeClient(host: Host, options: V2SmokeClientOptions = 
         // Keep the raw SSE stream visible before any session filtering. This is intentionally
         // broader than form handling: unrelated sessions and host lifecycle events are useful
         // when diagnosing a prompt that never reaches model execution.
-        const serialized = (() => {
-          try {
-            return JSON.stringify(event);
-          } catch {
-            return String(event);
-          }
-        })();
-        log('trace', `V2 SSE event: ${serialized}`, {
+        log('trace', 'V2 SSE event', {
+          sourceId: 'v2.client.sse',
+          sink: 'host-v2',
+          human: false,
           type: 'sse.event',
           fields: { event },
         });
@@ -472,7 +439,15 @@ export function createV2SmokeClient(host: Host, options: V2SmokeClientOptions = 
 
     async listMessages(sessionId: string): Promise<unknown[]> {
       const response = await client.message.list({ sessionID: sessionId });
-      return response?.data ?? [];
+      const messages = response?.data ?? [];
+      log('trace', 'V2 persisted session messages', {
+        sourceId: 'v2.client.messages.raw',
+        sink: 'host-v2',
+        human: false,
+        type: 'session.messages.raw',
+        fields: { sessionId, messages },
+      });
+      return messages;
     },
 
     async switchAgent(sessionId: string, agent: string): Promise<void> {

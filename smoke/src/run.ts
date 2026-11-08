@@ -16,6 +16,7 @@
  * Environment: HOST_SMOKE_MODEL, HOST_SMOKE_PLUGIN, HOST_SMOKE_ATTEMPTS,
  *      HOST_SMOKE_OPENCODE_VERSION.
  */
+import { mkdirSync, mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 
 import {
@@ -33,7 +34,7 @@ import {
   type RunningSmokeHost,
 } from './host/facade.ts';
 import type { HostKind, ParityReportEntry, ScenarioResult } from './host/types.ts';
-import { log } from './log.ts';
+import { closeJsonlSinks, initializeJsonlSinks, log } from './log.ts';
 import {
   aggregateExitCode,
   assertSingleEntryPerScenario,
@@ -70,8 +71,12 @@ function installSignalHandlers(): void {
     process.once(signal, () => {
       if (shutdownPromise) return;
       shutdownPromise = (async () => {
-        await stopAllHosts();
-        process.exit(exitCode);
+        try {
+          await stopAllHosts();
+        } finally {
+          closeJsonlSinks();
+          process.exit(exitCode);
+        }
       })();
     });
   }
@@ -97,8 +102,11 @@ function resolvePlugin(): string {
     process.env.HOST_SMOKE_PLUGIN = plugin;
     return plugin;
   } catch (error) {
-    log('error', `сборка плагина не удалась: ${messageOf(error)}`, { type: 'error' });
-    return process.exit(2);
+    log('error', `сборка плагина не удалась: ${messageOf(error)}`, {
+      sourceId: 'run.plugin.build-error',
+      type: 'error',
+    });
+    throw new RunAbortedError();
   }
 }
 
@@ -117,9 +125,9 @@ function selectScenarios(requested: string[]): CanonicalScenario[] {
       `Сценарий не найден: ${unknown.join(', ')}. Известные: ${canonicalScenarios
         .map((scenario) => scenario.id)
         .join(', ')}`,
-      { type: 'error' }
+      { sourceId: 'run.scenario.unknown', type: 'error' }
     );
-    process.exit(2);
+    throw new RunAbortedError();
   }
   return selected;
 }
@@ -168,6 +176,7 @@ async function runCanonical(
     for (const scenario of selected) {
       if (scenario.migrationState !== 'migrated') continue;
       log('info', `▶ ${scenario.id} (${kind}) …`, {
+        sourceId: 'run.scenario.start',
         type: 'scenario.start',
         color: 'cyan',
         fields: { scenario: scenario.id, hostKind: kind },
@@ -184,6 +193,7 @@ async function runCanonical(
             ? `ПРОЙДЕНО (попыток: ${result.attempts}, ${formatDuration(result.durationMs)})`
             : `${result.status === 'blocked' ? 'ЗАБЛОКИРОВАНО' : 'ОШИБКА'} (${formatDuration(result.durationMs)})`,
           {
+            sourceId: 'run.scenario.result',
             type: 'scenario.result',
             color:
               result.status === 'pass' ? 'green' : result.status === 'blocked' ? 'yellow' : 'red',
@@ -199,29 +209,20 @@ async function runCanonical(
         {
           log(
             result.status === 'pass' ? 'debug' : 'error',
-            result.evidence
-              .split('\n')
-              .map((line) => `  ${line}`)
-              .join('\n'),
-            { type: 'scenario.evidence', color: result.status === 'pass' ? 'gray' : 'red' }
-          );
-        }
-        if (result.status !== 'pass') {
-          log(
-            'error',
-            host
-              .logs()
-              .split('\n')
-              .filter((line) => /session-guard|consent|DIAG|workflow/i.test(line))
-              .slice(-25)
-              .join('\n'),
-            { type: 'scenario.host-log', color: 'red' }
+            '  Подробности сценария записаны в JSONL',
+            {
+              sourceId: 'run.scenario.evidence',
+              type: 'scenario.evidence',
+              color: result.status === 'pass' ? 'gray' : 'red',
+              fields: { evidence: result.evidence },
+            }
           );
         }
       } catch (error) {
         if (!(error instanceof LiveEnvironmentUnavailableError)) throw error;
         unavailable.set(kind, messageOf(error));
         log('error', `хост ${kind} недоступен: ${messageOf(error)}`, {
+          sourceId: 'run.host.unavailable',
           type: 'host.unavailable',
           color: 'red',
           fields: { kind },
@@ -291,7 +292,9 @@ function collectParityEntries(
   }
 }
 
-async function main(): Promise<void> {
+class RunAbortedError extends Error {}
+
+async function main(): Promise<number> {
   installSignalHandlers();
   const startedAt = Date.now();
   const requested = process.argv.slice(2);
@@ -301,11 +304,15 @@ async function main(): Promise<void> {
   if (problems.length > 0) {
     for (const problem of problems) {
       log('error', `[ERROR] ${problem.scenarioId}: ${problem.problem}`, {
+        sourceId: 'run.registry.problem',
         type: 'registry.problem',
       });
     }
-    log('error', 'canonical registry не готов к запуску', { type: 'error' });
-    process.exit(2);
+    log('error', 'canonical registry не готов к запуску', {
+      sourceId: 'run.registry.invalid',
+      type: 'error',
+    });
+    return 2;
   }
 
   const versionEnv = process.env.HOST_SMOKE_OPENCODE_VERSION?.trim();
@@ -327,6 +334,7 @@ async function main(): Promise<void> {
       if (!(error instanceof LiveEnvironmentUnavailableError)) throw error;
       unavailable.set(kind, messageOf(error));
       log('error', `хост ${kind} недоступен до запуска сценариев: ${messageOf(error)}`, {
+        sourceId: 'run.host.bootstrap-unavailable',
         type: 'host.unavailable',
         color: 'red',
         fields: { kind },
@@ -368,6 +376,7 @@ async function main(): Promise<void> {
     exitCode === 0 ? 'info' : 'error',
     `\n${passed}/${ledger.results.length} пройдено (код выхода ${exitCode}) — отчёт записан в ${REPORT_PATH}`,
     {
+      sourceId: 'run.summary',
       type: 'run.summary',
       color: exitCode === 0 ? 'green' : 'red',
       fields: {
@@ -379,13 +388,28 @@ async function main(): Promise<void> {
       },
     }
   );
-  process.exit(exitCode);
+  return exitCode;
 }
 
 try {
-  await main();
+  const root = join(REPO_ROOT, '.memory', 'host-smoke-logs');
+  mkdirSync(root, { recursive: true, mode: 0o700 });
+  const directory = mkdtempSync(join(root, 'run-'));
+  initializeJsonlSinks(directory);
+  process.once('exit', closeJsonlSinks);
+  log('info', `Host smoke logs: ${directory}`, { sourceId: 'run.log-directory', human: false });
+  process.stderr.write(`Host smoke logs: ${directory}\n`);
+  process.exitCode = await main();
 } catch (error) {
-  log('error', `фатальная ошибка запуска: ${messageOf(error)}`, { type: 'error' });
+  if (!(error instanceof RunAbortedError)) {
+    log('error', `фатальная ошибка запуска: ${messageOf(error)}`, {
+      sourceId: 'run.fatal',
+      type: 'error',
+    });
+  }
   await stopAllHosts();
-  process.exit(2);
+  process.exitCode = 2;
+} finally {
+  if (shutdownPromise) await shutdownPromise;
+  closeJsonlSinks();
 }

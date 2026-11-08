@@ -31,7 +31,7 @@ bun test smoke/                         # тесты самой suite
 | `src/run.ts`               | CLI: выбор сценариев, режим паритета, коды выхода                                                                      |
 | `src/v2-client.ts`         | клиент V2: сессии, промпты, формы, переключение агента                                                                 |
 | `src/operator.ts`          | политика оператора: как отвечать на вопросы хоста                                                                      |
-| `src/log.ts`               | вывод suite: человекочитаемо или JSONL                                                                                 |
+| `src/log.ts`               | человекочитаемый вывод suite и запись JSONL                                                                            |
 | `test/`                    | тесты suite: registry, runner, transports, parity, report                                                              |
 
 ## Архитектура
@@ -248,7 +248,7 @@ commit-mismatch stage=commit; delivery=none;  head=dd9b8ccc→a047d3d9; files=["
 commit-gate     delivery=none;               head=5ff236fb→5ff236fb; files=[]
 ```
 
-### Pipeline
+### Конвейер
 
 `cicd-full-cycle` идёт по профилю `cicd` одним сценарием: создание сессии → согласие `plan` →
 setup (`checkout_done`) → build (`build_done`) → список `test_suite` → unit → integration →
@@ -268,7 +268,7 @@ deploy (`deploy_done`) → согласие `deploy` → smoke (`smoke_result`) 
 записан гейтом. Один шаг вместо двадцати минут pipeline: так проверяется механизм, а не путь до
 стадии, и регрессия в этой связке ловится за минуту.
 
-## Retry и таймауты
+## Повторы и таймауты
 
 Стратегия повтора — решение реестра, а не runner-а, и она зафиксирована тестом:
 
@@ -338,32 +338,27 @@ deploy (`deploy_done`) → согласие `deploy` → smoke (`smoke_result`) 
 
 ## Окружение
 
-| Переменная                    | Значение                                                     |
-| ----------------------------- | ------------------------------------------------------------ |
-| `HOST_SMOKE_MODEL`            | id модели; по умолчанию `model` из вашего конфига opencode   |
-| `HOST_SMOKE_PLUGIN`           | не собирать, а загрузить этот путь вместо `dist`             |
-| `HOST_SMOKE_ATTEMPTS`         | число попыток read-only шага, по умолчанию 3                 |
-| `HOST_SMOKE_STATE_POLL_MS`    | как часто читать состояние при `poll-state`                  |
-| `HOST_SMOKE_OPENCODE_VERSION` | `v1` или `v2`: сузить прогон до одного host kind             |
-| `HOST_SMOKE_V1_BINARY`        | путь к бинарнику V1                                          |
-| `HOST_SMOKE_V2_BINARY`        | путь к бинарнику V2                                          |
-| `HOST_SMOKE_LOG_LEVEL`        | уровень логов suite                                          |
-| `HOST_SMOKE_HOST_LOG_LEVEL`   | уровень логов самого хоста; `debug` дублирует его в вывод    |
-| `HOST_SMOKE_LOG_LEVEL=debug`  | включить диагностические события, вопросы и обмен USER/MODEL |
-| `HOST_SMOKE_OUTPUT`           | `human` (по умолчанию) или `jsonl`                           |
-| `FORCE_COLOR=1`               | форсировать цвета, когда stderr не подключён к TTY           |
-| `NO_COLOR=1`                  | отключить цвета                                              |
+| Переменная                    | Значение                                                              |
+| ----------------------------- | --------------------------------------------------------------------- |
+| `HOST_SMOKE_MODEL`            | id модели; по умолчанию `model` из вашего конфига opencode            |
+| `HOST_SMOKE_PLUGIN`           | не собирать, а загрузить этот путь вместо `dist`                      |
+| `HOST_SMOKE_ATTEMPTS`         | число попыток read-only шага, по умолчанию 3                          |
+| `HOST_SMOKE_STATE_POLL_MS`    | как часто читать состояние при `poll-state`                           |
+| `HOST_SMOKE_OPENCODE_VERSION` | `v1` или `v2`: сузить прогон до одного host kind                      |
+| `HOST_SMOKE_V1_BINARY`        | путь к бинарнику V1                                                   |
+| `HOST_SMOKE_V2_BINARY`        | путь к бинарнику V2                                                   |
+| `HOST_SMOKE_LOG_LEVEL`        | уровень логов suite                                                   |
+| `HOST_SMOKE_LOG_LEVEL=debug`  | включить диагностику, вопросы и полный текст промптов и ответов V1/V2 |
+| `FORCE_COLOR=1`               | форсировать цвета, когда stderr не подключён к TTY                    |
+| `NO_COLOR=1`                  | отключить цвета                                                       |
 
-Для машинно-читаемого вывода используйте JSONL в stderr:
-
-```bash
-HOST_SMOKE_OUTPUT=jsonl HOST_SMOKE_LOG_LEVEL=debug mise run smoke 2>host-smoke.jsonl
-```
-
-Каждая строка — одно событие с `timestamp`, `type`, `message` и полями, специфичными для события,
-например `scenario`, `hostKind`, `attempts` и `durationMs`. В человекочитаемом режиме логи,
-доказательства и отчёт выводятся по-русски; при `HOST_SMOKE_OUTPUT=jsonl` переводится только
-человекочитаемый текст, а имена событий и ключи JSON остаются английскими.
+Человекочитаемая диагностика выводится в stderr. События JSONL всегда записываются в файлы
+`suite.jsonl`, `host-v1.jsonl` и `host-v2.jsonl` в каталоге журналов, который выводится при
+запуске, независимо от уровня человекочитаемого журнала. Эти файлы могут содержать
+конфиденциальные тела запросов и ответов. События V2 SSE записываются в разобранном виде;
+исходный массив сообщений V2 сохраняется в `v2.client.messages.raw` (`messages`), а
+нормализованные части — отдельно в `v2.transport.tools` (`parts`). HTTP-ответы V2 передаются
+потребителю без чтения или изменения потока и в JSONL не записываются.
 
 ## Границы импортов
 

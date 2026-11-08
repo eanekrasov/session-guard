@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -18,6 +18,7 @@ import type {
   SmokeWorkflowState,
 } from '../src/host/types.ts';
 import { runScenario, statePollBudgetMs, DEFAULT_POLL_BUDGET_MS } from '../src/runner.ts';
+import { closeJsonlSinks, initializeJsonlSinks } from '../src/log.ts';
 
 const BLOCKED_REASONS = [
   'adapter_contract_mismatch',
@@ -121,6 +122,76 @@ const readOnlyStep = (expect: ScenarioStep['expect']): ScenarioStep => ({
   mutation: 'read-only',
   retry: 'same-session',
   expect,
+});
+
+test('runner logs complete step data without exposing the instruction in human output', async () => {
+  const prompt = 'private instruction payload';
+  const originalLevel = process.env.HOST_SMOKE_LOG_LEVEL;
+  const originalWrite = process.stderr.write;
+  let output = '';
+  process.stderr.write = ((chunk: string | Uint8Array) => {
+    output += chunk.toString();
+    return true;
+  }) as typeof process.stderr.write;
+  try {
+    for (const [level, repetitions] of [
+      ['debug', 1],
+      ['debug', 100],
+      ['info', 1],
+      ['info', 100],
+    ] as const) {
+      const detail = 'private-detail-marker'.repeat(repetitions);
+      const transcript = 'private-transcript-marker'.repeat(repetitions);
+      const directory = mkdtempSync(join(tmpdir(), 'runner-log-'));
+      try {
+        process.env.HOST_SMOKE_LOG_LEVEL = level;
+        output = '';
+        initializeJsonlSinks(directory);
+        const { host } = makeHost([turn({ transcript })]);
+        const result = await runScenario(
+          host,
+          definition([{ ...readOnlyStep(() => detail), instruction: prompt }])
+        );
+        closeJsonlSinks();
+        const events = readFileSync(join(directory, 'suite.jsonl'), 'utf8')
+          .trim()
+          .split('\n')
+          .map((line) => JSON.parse(line));
+        expect(events.find((event) => event.type === 'step.start').instruction).toBe(prompt);
+        expect(events.find((event) => event.type === 'step.state').detail).toBe(detail);
+        expect(
+          events.find((event) => event.sourceId === 'runner.workflow.checkpoint').transcript
+        ).toBe(transcript);
+        const started = events.find((event) => event.type === 'session.step.started');
+        const finished = events.find((event) => event.type === 'session.step.finished');
+        expect(started).toMatchObject({
+          scenarioId: 'create',
+          sessionId: 'ses-1',
+          stepIndex: 0,
+          attempt: 1,
+        });
+        expect(finished).toMatchObject({
+          scenarioId: started.scenarioId,
+          sessionId: started.sessionId,
+          stepIndex: started.stepIndex,
+          attempt: started.attempt,
+        });
+        expect(output).not.toContain(prompt);
+        expect(output).not.toContain('private-detail-marker');
+        expect(output).not.toContain('private-transcript-marker');
+        expect(result.evidence).toContain(detail);
+        expect(result.evidence).toContain(transcript);
+        expect(output.includes('step[1]:')).toBe(level === 'debug');
+      } finally {
+        closeJsonlSinks();
+        rmSync(directory, { recursive: true, force: true });
+      }
+    }
+  } finally {
+    process.stderr.write = originalWrite;
+    if (originalLevel === undefined) delete process.env.HOST_SMOKE_LOG_LEVEL;
+    else process.env.HOST_SMOKE_LOG_LEVEL = originalLevel;
+  }
 });
 
 const mutatingStep = (

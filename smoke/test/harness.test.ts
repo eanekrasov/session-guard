@@ -2,11 +2,14 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { PassThrough } from 'node:stream';
+import { captureProcessOutput } from '../src/host/process-output.ts';
 import {
   basicAuthHeader,
   attemptsFromEnv,
   ensureOpencodeBinary,
   filterOperatorProviders,
+  hostExitLogLevel,
   hostVersionFromEnv,
   legacyApiKeyFor,
   opencodeBinary,
@@ -21,6 +24,55 @@ import {
 
 let configDirectory: string;
 let savedOperatorConfig: string | undefined;
+
+test('classifies child exit after requested stop as info, but unexpected exit as error', () => {
+  expect(hostExitLogLevel(0, null, false)).toBe('debug');
+  expect(hostExitLogLevel(0, null, true)).toBe('debug');
+  expect(hostExitLogLevel(null, 'SIGTERM', true)).toBe('info');
+  expect(hostExitLogLevel(143, null, true)).toBe('info');
+  expect(hostExitLogLevel(143, null, false)).toBe('error');
+  expect(hostExitLogLevel(null, 'SIGKILL', true)).toBe('error');
+  expect(hostExitLogLevel(1, null, true)).toBe('error');
+  expect(hostExitLogLevel(143, null, false)).toBe('error');
+});
+
+test('captures independent streams across UTF-8 chunks and final partial lines', async () => {
+  const stdout = new PassThrough();
+  const stderr = new PassThrough();
+  const records: Array<[string, string]> = [];
+  let output = '';
+  captureProcessOutput(
+    stdout,
+    (text) => {
+      output += text;
+    },
+    (text) => records.push(['stdout', text])
+  );
+  captureProcessOutput(
+    stderr,
+    () => {},
+    (text) => records.push(['stderr', text])
+  );
+  const bytes = Buffer.from('héllo\nlast');
+  stdout.write(bytes.subarray(0, 2));
+  stderr.write('error');
+  stdout.write(bytes.subarray(2, 4));
+  stdout.end(bytes.subarray(4));
+  stderr.end(' tail\npartial');
+  await Promise.all([
+    new Promise((resolve) => stdout.on('end', resolve)),
+    new Promise((resolve) => stderr.on('end', resolve)),
+  ]);
+  expect(output).toBe('héllo\nlast');
+  expect(records.filter(([stream]) => stream === 'stdout')).toEqual([
+    ['stdout', 'héllo\n'],
+    ['stdout', 'last'],
+  ]);
+  expect(records.filter(([stream]) => stream === 'stderr')).toEqual([
+    ['stderr', 'error tail\n'],
+    ['stderr', 'partial'],
+  ]);
+});
 
 beforeEach(() => {
   configDirectory = mkdtempSync(join(tmpdir(), 'host-smoke-config-'));

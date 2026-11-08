@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { createV2SmokeClient, createV2SmokeTransport, planFormAnswer } from '../src/v2-client.ts';
+import { createV2SmokeClient, planFormAnswer } from '../src/v2-client.ts';
 import type { Host } from '../src/harness.ts';
 
 /** Минимальные формы: план ответа читает только `type`, `key`, `label` и `value`. */
@@ -21,68 +21,38 @@ const GRANT_DECLINE = [
   { label: 'decline', value: 'provider-declined' },
 ];
 
-describe('V2 host smoke transport', () => {
-  test('normalizes missing JSON content type on a successful response', async () => {
-    const transport = createV2SmokeTransport();
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = Object.assign(async () => new Response('{}', { status: 200 }), {
-      preconnect: originalFetch.preconnect,
-    });
-    try {
-      const response = await transport('http://127.0.0.1:1');
-      expect(response?.headers.get('content-type')).toBe('application/json');
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-  });
-
-  test('does not relabel a non-JSON response', async () => {
-    const transport = createV2SmokeTransport();
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = Object.assign(async () => new Response('not json', { status: 200 }), {
-      preconnect: originalFetch.preconnect,
-    });
-    try {
-      const response = await transport('http://127.0.0.1:1');
-      expect(response?.headers.get('content-type')).toBeNull();
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-  });
-
-  test('sends the credential the V2 host generated for itself', async () => {
-    const transport = createV2SmokeTransport('Basic abc');
+describe('V2 client authentication', () => {
+  test('passes the host credential as a client header', async () => {
     const originalFetch = globalThis.fetch;
     let seen: Headers | undefined;
     globalThis.fetch = Object.assign(
       async (_input: RequestInfo | URL, init?: RequestInit) => {
         seen = new Headers(init?.headers);
-        return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+        return dataResponse({ id: 'ses-1' });
       },
       { preconnect: originalFetch.preconnect }
     );
     try {
-      await transport('http://127.0.0.1:1');
+      await createV2SmokeClient({ ...fakeHost(), authHeader: 'Basic abc' }).createSession('test');
       expect(seen?.get('authorization')).toBe('Basic abc');
     } finally {
       globalThis.fetch = originalFetch;
     }
   });
 
-  test('leaves a caller-supplied authorization header alone', async () => {
-    const transport = createV2SmokeTransport('Basic abc');
+  test('does not set custom client headers when the host has no credential', async () => {
     const originalFetch = globalThis.fetch;
     let seen: Headers | undefined;
     globalThis.fetch = Object.assign(
       async (_input: RequestInfo | URL, init?: RequestInit) => {
         seen = new Headers(init?.headers);
-        return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+        return dataResponse({ id: 'ses-1' });
       },
       { preconnect: originalFetch.preconnect }
     );
     try {
-      await transport('http://127.0.0.1:1', { headers: { authorization: 'Bearer own' } });
-      expect(seen?.get('authorization')).toBe('Bearer own');
+      await createV2SmokeClient(fakeHost()).createSession('test');
+      expect(seen?.has('authorization')).toBe(false);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -256,7 +226,6 @@ describe('execution and step SSE events', () => {
   test('records the execution started and succeeded events from the SSE stream', async () => {
     const originalFetch = globalThis.fetch;
     const routes: string[] = [];
-    const events: Array<{ type: string; data: Record<string, unknown> }> = [];
     globalThis.fetch = Object.assign(
       async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
@@ -265,10 +234,7 @@ describe('execution and step SSE events', () => {
           const sse = [
             { type: 'session.created', data: { sessionID: 'ses-1' } },
             { type: 'session.execution.started', data: { sessionID: 'ses-1' } },
-            {
-              type: 'session.execution.succeeded',
-              data: { sessionID: 'ses-1' },
-            },
+            { type: 'session.execution.succeeded', data: { sessionID: 'ses-1' } },
           ]
             .map((event) => `data: ${JSON.stringify(event)}\n\n`)
             .join('');
@@ -324,7 +290,7 @@ describe('execution and step SSE events', () => {
     try {
       const client = createV2SmokeClient(fakeHost());
 
-      await expect(client.prompt('ses-1', 'go')).rejects.toThrow('session execution failed');
+      expect(client.prompt('ses-1', 'go')).rejects.toThrow('session execution failed');
 
       const execution = client.lastExecution();
       expect(execution).not.toBeNull();
@@ -456,7 +422,7 @@ describe('execution and step SSE events', () => {
       const client = createV2SmokeClient(fakeHost());
 
       // Первый prompt с execution.started и step.started
-      await expect(client.prompt('ses-1', 'first')).rejects.toThrow(
+      expect(client.prompt('ses-1', 'first')).rejects.toThrow(
         'V2 SSE завершился до terminal-события'
       );
       expect(client.lastExecution()?.status).toBe('started');
@@ -465,7 +431,7 @@ describe('execution and step SSE events', () => {
 
       // Второй prompt должен сбросить события. SSE возвращает только session.created,
       // поэтому lastExecution должен быть сброшен.
-      await expect(client.prompt('ses-1', 'second')).rejects.toThrow(
+      expect(client.prompt('ses-1', 'second')).rejects.toThrow(
         'V2 SSE завершился до terminal-события'
       );
       expect(client.lastExecution()).toBeNull();
@@ -525,6 +491,7 @@ function dataResponse(data: unknown): Response {
 
 function fakeHost(): Host {
   return {
+    version: 'v2',
     url: 'http://127.0.0.1:1',
     workDir: process.cwd(),
     homeDir: process.cwd(),

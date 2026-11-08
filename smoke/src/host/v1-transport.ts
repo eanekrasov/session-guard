@@ -6,13 +6,7 @@
  * shared normalized result instead.
  */
 
-import {
-  api,
-  type Host,
-  log as harnessLog,
-  isTraceEnabled,
-  sanitizeTracePayload,
-} from '../harness.ts';
+import { api, type Host } from '../harness.ts';
 import { log } from '../log.ts';
 import {
   createV1SessionEvents,
@@ -31,7 +25,7 @@ import {
   readNormalizedWorkflowState,
   type HostTransport,
 } from './transport.ts';
-import { formatToolTrace, summarizeWorkflowCheckpoint } from '../trace.ts';
+import { summarizeWorkflowCheckpoint } from '../trace.ts';
 import type { PromptInput, PromptResult, SmokeSession, SmokeWorkflowState } from './types.ts';
 
 export interface LegacyTransportOptions {
@@ -89,11 +83,15 @@ async function logChildSessionResponse(
       .flatMap((message) => message.parts ?? []);
     const diagnostics = rawV1ResponseDiagnostics(parts, '');
     log('debug', 'V1 child session response diagnostic', {
+      sourceId: 'v1-transport.child-response',
+      sink: 'host-v1',
+      human: false,
       type: 'v1.child-response',
       fields: {
         parentSessionID,
         childSessionID,
-        response: sanitizeTracePayload(diagnostics.text),
+        messageCount: Array.isArray(listed) ? listed.length : 0,
+        roles: Array.isArray(listed) ? listed.map((message) => message.info?.role) : [],
         hasWorkflowResult: diagnostics.hasWorkflowResult,
         hasDsmlToolResult: diagnostics.hasDsmlToolResult,
         responseLength: diagnostics.text.length,
@@ -101,6 +99,8 @@ async function logChildSessionResponse(
     });
   } catch (error) {
     log('warn', 'V1 child session response diagnostic unavailable', {
+      sourceId: 'v1-transport.child-response-error',
+      sink: 'host-v1',
       type: 'v1.child-response.error',
       fields: {
         parentSessionID,
@@ -147,10 +147,15 @@ async function listedTurnParts(
             .flatMap((message) => message.parts ?? []);
     return items as Part[];
   } catch (error) {
-    harnessLog(
-      'warn',
-      `не удалось прочитать сообщения сессии: ${error instanceof Error ? error.message : String(error)}`
-    );
+    log('warn', 'Could not read V1 session messages', {
+      sourceId: 'v1-transport.list-messages-error',
+      sink: 'host-v1',
+      type: 'v1.messages.error',
+      fields: {
+        sessionID: sessionId,
+        error: error instanceof Error ? error.message : String(error),
+      },
+    });
     return undefined;
   }
 }
@@ -195,17 +200,6 @@ export function createLegacyHttpTransport(
       const agent = input.agent ?? options.agent;
       const [providerID, ...rest] = options.model.split('/');
       const startedAt = performance.now();
-      harnessLog(
-        'debug',
-        `say request: model=${options.model}${agent ? ` agent=${agent}` : ''} instruction.length=${input.text.length}`
-      );
-      if (isTraceEnabled()) {
-        harnessLog(
-          'trace',
-          `say request payload: ${sanitizeTracePayload(input.text.slice(0, 2000))}`
-        );
-      }
-
       // The host's `question` tool blocks until an operator answers, so the scenario would
       // hang without this loop. The operator policy itself is shared with V2, and the decision
       // comes from the step so a scenario can ask for a decline as well as a grant.
@@ -219,7 +213,20 @@ export function createLegacyHttpTransport(
       }
       operator.setDecision(requested);
       const terminal = operator.waitForTerminal();
-      log('debug', 'V1 message request diagnostic', {
+      log(
+        'debug',
+        `say request: model=${options.model}${agent ? ` agent=${agent}` : ''} instruction=${input.text}`,
+        {
+          sourceId: 'v1-transport.request-summary',
+          sink: 'host-v1',
+          humanMessage: `say request: model=${options.model}${agent ? ` agent=${agent}` : ''} instruction=${input.text} (${input.text.length} characters)`,
+          fields: { instruction: input.text, instructionLength: input.text.length },
+        }
+      );
+      log('trace', 'V1 message request diagnostic', {
+        sourceId: 'v1-transport.message-request',
+        sink: 'host-v1',
+        human: false,
         type: 'v1.message-request',
         fields: {
           sessionID: session.id,
@@ -227,6 +234,7 @@ export function createLegacyHttpTransport(
           agent,
           model: options.model,
           decision: requested,
+          instruction: input.text,
           instructionLength: input.text.length,
           boundary,
         },
@@ -246,9 +254,21 @@ export function createLegacyHttpTransport(
       const rawParts = (await listedTurnParts(host, session.id, boundary)) ?? reply.parts ?? [];
       const error = reply.info?.error?.data?.message ?? '';
       const responseText = modelResponseText(rawParts, error);
+      logExchange(input.text, agent, rawParts, error);
       const responseDiagnostics = rawV1ResponseDiagnostics(rawParts, error);
       const taskChildSessionID = extractTaskChildSessionId(responseText);
+      log(
+        'debug',
+        `say response: ${rawParts.length} parts duration=${(performance.now() - startedAt).toFixed(1)}ms`,
+        {
+          sourceId: 'v1-transport.response-summary',
+          sink: 'host-v1',
+        }
+      );
       log('debug', 'V1 message response diagnostic', {
+        sourceId: 'v1-transport.message-response',
+        sink: 'host-v1',
+        human: false,
         type: 'v1.message-response',
         fields: {
           sessionID: session.id,
@@ -259,34 +279,15 @@ export function createLegacyHttpTransport(
           responseHasWorkflowResult: responseDiagnostics.hasWorkflowResult,
           responseHasDsmlToolResult: responseDiagnostics.hasDsmlToolResult,
           taskChildSessionID,
+          durationMs: performance.now() - startedAt,
         },
       });
-      harnessLog(
-        'debug',
-        `say response: ${rawParts.length} parts${error ? ` error=${error.slice(0, 200)}` : ''} duration=${(performance.now() - startedAt).toFixed(1)}ms`
-      );
-      log('debug', input.text, { type: 'user', color: 'cyan', label: '  USER:' });
-      log('debug', modelResponseText(rawParts, error), {
-        type: 'model',
-        color: 'magenta',
-        label: '  MODEL:',
-      });
-      await logExchange(input.text, agent, error, rawParts);
 
       await logChildSessionResponse(host, session.id, responseText);
-      log('debug', 'V1 raw response diagnostic', {
-        type: 'v1.raw-response',
-        fields: {
-          sessionID: session.id,
-          parentSessionID: session.id,
-          response: sanitizeTracePayload(responseText),
-          hasWorkflowResult: responseDiagnostics.hasWorkflowResult,
-          hasDsmlToolResult: responseDiagnostics.hasDsmlToolResult,
-          responseLength: responseText.length,
-        },
-      });
       const markerDiagnostics = workflowResultMarkers(responseText);
-      harnessLog('debug', 'V1 workflow-result normalization checkpoint', {
+      log('debug', 'V1 workflow-result normalization checkpoint', {
+        sourceId: 'v1-transport.workflow-normalization',
+        sink: 'host-v1',
         type: 'workflow-result.normalization',
         fields: {
           markerDetected: markerDiagnostics.count > 0,
@@ -321,13 +322,24 @@ export function createLegacyHttpTransport(
         // This strategy holds a live `Host`, so the evidence really comes from one.
         'real-host'
       );
-      harnessLog('debug', `tool.execute.after: ${formatToolTrace(result.turn.toolCalls)}`);
-      harnessLog(
+      log('debug', 'V1 tool calls', {
+        sourceId: 'v1-transport.tool-calls',
+        sink: 'host-v1',
+        human: false,
+        type: 'v1.tool-calls',
+        fields: { toolCalls: result.turn.toolCalls },
+      });
+      log(
         'debug',
         `workflow checkpoint: ${summarizeWorkflowCheckpoint(
           result.workflowState,
           result.workflowState?.revision
-        )}`
+        )}`,
+        {
+          sourceId: 'v1-transport.workflow-checkpoint',
+          sink: 'host-v1',
+          type: 'v1.workflow-checkpoint',
+        }
       );
       return result;
     },

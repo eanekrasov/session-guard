@@ -419,10 +419,10 @@ describe('the machine-readable output', () => {
       return true;
     }) as typeof process.stderr.write;
     try {
-      log('info', 'white message');
+      log('info', 'white message', { sourceId: 'test.white' });
       expect(output).toContain('\u001b[37m');
       output = '';
-      log('info', 'green message', { color: 'green' });
+      log('info', 'green message', { sourceId: 'test.green', color: 'green' });
       expect(output).toContain('\u001b[32m');
     } finally {
       process.stderr.write = originalWrite;
@@ -443,8 +443,8 @@ describe('the machine-readable output', () => {
       return true;
     }) as typeof process.stderr.write;
     try {
-      log('info', 'filtered');
-      log('error', 'visible');
+      log('info', 'filtered', { sourceId: 'test.filtered' });
+      log('error', 'visible', { sourceId: 'test.visible' });
       expect(output).not.toContain('filtered');
       expect(output).toContain('visible');
     } finally {

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -37,6 +37,7 @@ import {
 import { workflowResultMarkers } from '../src/host/v1-transport.ts';
 import type { V2SmokeClient } from '../src/v2-client.ts';
 import type { ScenarioDefinition } from '../src/host/types.ts';
+import { closeJsonlSinks, initializeJsonlSinks } from '../src/log.ts';
 
 describe('V1 raw response diagnostics', () => {
   test('extracts the child session ID from a task result', () => {
@@ -79,6 +80,7 @@ describe('V1 raw response diagnostics', () => {
 
 function fakeHost(overrides: Partial<Host> = {}): Host {
   return {
+    version: 'v1',
     url: 'http://127.0.0.1:1',
     workDir: '/nowhere',
     homeDir: '/nowhere',
@@ -439,6 +441,8 @@ describe('the V1 transport strategy', () => {
   });
 
   test('logs every parsed SSE record like the V2 transport', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'v1-sse-log-'));
+    initializeJsonlSinks(directory);
     const originalWrite = process.stderr.write;
     const originalLevel = process.env.HOST_SMOKE_LOG_LEVEL;
     const lines: string[] = [];
@@ -466,12 +470,19 @@ describe('the V1 transport strategy', () => {
       await subscription.done;
       fetchStub.restore();
 
-      expect(lines).toHaveLength(2);
-      expect(lines[0]).toContain('[TRACE] V1 SSE event:');
-      expect(lines[1]).toContain('[TRACE] V1 SSE event:');
-      expect(lines[0]).toContain('session.created');
-      expect(lines[1]).toContain('session.status');
+      const records = (await readFile(join(directory, 'host-v1.jsonl'), 'utf8'))
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line));
+      expect(records).toHaveLength(2);
+      expect(records[0].record).toContain('session.created');
+      expect(records[1].record).toContain('session.status');
+      expect(records.every((record) => record.sourceId === 'v1-exchange.sse-record')).toBe(true);
+      expect(lines.join('')).not.toContain('session.created');
+      expect(lines.join('')).not.toContain('session.status');
     } finally {
+      closeJsonlSinks();
+      await rm(directory, { recursive: true, force: true });
       process.stderr.write = originalWrite;
       if (originalLevel === undefined) delete process.env.HOST_SMOKE_LOG_LEVEL;
       else process.env.HOST_SMOKE_LOG_LEVEL = originalLevel;

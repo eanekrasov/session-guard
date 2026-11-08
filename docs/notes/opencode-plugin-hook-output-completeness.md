@@ -1,4 +1,4 @@
-# OpenCode V1 plugin hook: completeness of `result.output`
+# Хук плагина OpenCode V1: полнота `result.output`
 
 > **Контекст:** разработка плагина, хост-интеграция, `tool.execute.after`.
 >
@@ -38,7 +38,7 @@ yield *
   );
 ```
 
-Between: нет yield/await между получением `result` и вызовом `plugin.trigger`.
+Между получением `result` и вызовом `plugin.trigger` нет yield/await.
 `result` уже содержит весь output task tool'а.
 
 ### 2. Task tool дожидается полного выполнения субагента
@@ -116,7 +116,7 @@ export interface ExecuteResult<M extends Metadata = Metadata> {
 }
 ```
 
-Никакого стрима, никаких partial-маркеров. Единственная строка.
+Никакого стрима и маркеров частичного результата. Единственная строка.
 
 ### 5. Что именно попадает в `result.output`
 
@@ -156,7 +156,7 @@ export interface ExecuteResult<M extends Metadata = Metadata> {
 | 2     | Проверять `operation?.status === 'completed'` перед добавлением                                                                      | Чётче: запоминаем только завершённые задачи                   | Нужно передавать/читать status            |
 | **3** | **Убрать `activeOperations` из условия, оставить только `if (parsed)`**                                                              | **Просто, минимально, без перемещения кода**                  | —                                         |
 | 4     | Не использовать `processedResultCallIDs` для replay, а проверять `session.activeOperations[callID]?.status === 'completed'` на входе | Единый источник истины                                        | Больше изменений, меняет семантику replay |
-| 5     | Два списка: `pendingCallIDs` (active) и `processedCallIDs` (done)                                                                    | Чёткое разделение                                             | Over-engineering                          |
+| 5     | Два списка: `pendingCallIDs` (активные) и `processedCallIDs` (завершённые)                                                           | Чёткое разделение                                             | Избыточная сложность                      |
 
 ### Почему выбран вариант 3
 
@@ -221,7 +221,7 @@ workflow-result.settlement.missing sessionID=ses_... callID=... currentStage=smo
 (последняя запись stage — `currentStage=smoke` на строках 4020-4026, ни одной
 `currentStage=done` в логе).
 
-Child response (строка 4096) подтверждает: `hasWorkflowResult=false, hasDsmlToolResult=true`.
+Ответ дочерней сессии (строка 4096) подтверждает: `hasWorkflowResult=false, hasDsmlToolResult=true`.
 Субагент передал `<｜DSML｜tool-result>`, но модель или не сгенерировала
 `<workflow-result>`, или он пришёл в другом чанке.
 
@@ -274,7 +274,7 @@ if (parsed) {
 
 Заметим: в строках 4020-4025 v3 лога нет ни одного признака, что output был
 обрывочным. `outputLength=703`, `outputHasWorkflowResult=false`. Реальный
-child-response (строка 4096) показывает `hasWorkflowResult=false` — модель
+ответ дочерней сессии (строка 4096) показывает `hasWorkflowResult=false` — модель
 просто не сгенерировала маркер в этом ответе. Проблема не в частичности,
 а в том, что `<workflow-result>` отсутствует по другой причине (модель
 сгенерировала `<｜DSML｜tool-result>` вместо `<workflow-result>`, либо ошибка в
@@ -283,8 +283,8 @@ child-response (строка 4096) показывает `hasWorkflowResult=false
 ### Достоверность логов
 
 Логи `host-smoke-plugin-debug-*.log` формируются функцией `log()` из
-`smoke/src/log.ts`. В JSONL-режиме (`HOST_SMOKE_OUTPUT=jsonl`) каждое событие
-пишется как `JSON.stringify(event)` — без обрезания значений.
+`smoke/src/log.ts`. На момент этого расследования вывод JSONL сериализовал каждое событие
+без обрезки значений. Текущий runner smoke записывает JSONL в отдельные файлы.
 
 Единственная точка обрезания — `sanitizeTracePayload()` в
 `smoke/src/harness.ts:253`, которая:
@@ -297,7 +297,7 @@ child-response (строка 4096) показывает `hasWorkflowResult=false
 
 - `Plugin workflow-result hook input` (строка 4021): `outputLength=703` —
   **меньше 4096**, не обрезан.
-- Child response (строка 4096): `responseLength=7658` — **больше 4096**, но
+- Ответ дочерней сессии (строка 4096): `responseLength=7658` — **больше 4096**, но
   поле `hasWorkflowResult=false` не зависит от обрезания (оно вычисляется по
   исходному тексту до `sanitizeTracePayload`, в `rawV1ResponseDiagnostics`).
 

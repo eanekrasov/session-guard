@@ -279,12 +279,15 @@ async function runStep(
   session: SmokeSession,
   definition: MigratedScenarioDefinition,
   step: ScenarioStep,
+  stepIndex: number,
   options: RunnerOptions
 ): Promise<StepOutcome> {
+  const identity = { scenarioId: definition.id, sessionId: session.id, stepIndex };
   const finishTrace = (attempt: number, status: string, verdict: string): void => {
     log('debug', 'session.step.finished', {
+      sourceId: 'runner.step.finished',
       type: 'session.step.finished',
-      fields: { attempt, status, verdict },
+      fields: { ...identity, attempt, status, verdict },
     });
   };
   const stepStartedAt = Date.now();
@@ -315,16 +318,30 @@ async function runStep(
   const unmet: string[] = [];
 
   for (let attempt = 1; attempt <= planned; attempt += 1) {
-    log('debug', `  step[${attempt}]: ${step.instruction}`, {
+    log('debug', `  step[${attempt}]: ${step.instruction.length} characters`, {
+      sourceId: 'runner.step.start',
       type: 'step.start',
       color: 'blue',
-      fields: { attempt, mutation: step.mutation, retry: step.retry },
+      fields: {
+        ...identity,
+        attempt,
+        mutation: step.mutation,
+        retry: step.retry,
+        instruction: step.instruction,
+      },
     });
     log('debug', 'session.step.started', {
+      sourceId: 'runner.session.step.started',
       type: 'session.step.started',
-      fields: { attempt, agent: step.agent ?? definition.agent, mutation: step.mutation },
+      fields: {
+        ...identity,
+        attempt,
+        agent: step.agent ?? definition.agent,
+        mutation: step.mutation,
+      },
     });
     log('debug', 'prompt started', {
+      sourceId: 'runner.prompt.started',
       type: 'prompt.started',
       fields: { attempt, hostKind: host.kind },
     });
@@ -347,6 +364,7 @@ async function runStep(
     if (last.turn.status === 'failed') failedTurn = true;
     observed.push(...last.turn.toolCalls);
     log('debug', `tool.execute.after: ${formatToolTrace(last.turn.toolCalls)}`, {
+      sourceId: 'runner.tool.execute.after',
       type: 'tool.execute.after',
       fields: { attempt, status: last.turn.status },
     });
@@ -357,8 +375,13 @@ async function runStep(
         last.workflowState?.revision
       )}`,
       {
+        sourceId: 'runner.workflow.checkpoint',
         type: 'workflow.checkpoint',
-        fields: { attempt, revision: last.workflowState?.revision },
+        fields: {
+          attempt,
+          revision: last.workflowState?.revision,
+          transcript: last.turn.transcript,
+        },
       }
     );
     const verdict = evaluateExpectation(step, last, workspace);
@@ -375,10 +398,11 @@ async function runStep(
     }
     detail = verdict;
     if (attempt < planned) unmet.push(`попытка ${attempt}: ${detail}`.slice(0, 200));
-    log('debug', `  wait: ${detail.slice(0, 180)}`, {
+    log('debug', '  wait: ожидание не выполнено', {
+      sourceId: 'runner.step.state',
       type: 'step.state',
       color: 'yellow',
-      fields: { attempt },
+      fields: { attempt, detail },
     });
     finishTrace(attempt, last.turn.status, detail);
   }
@@ -474,7 +498,7 @@ async function runStep(
     `durableMutation=${durableLabel(reading)}`,
     timedOut ? 'ход хоста не завершился за бюджет промпта' : '',
     reading.outcome === 'present' ? `state: ${JSON.stringify(reading.state).slice(0, 400)}` : '',
-    last === undefined ? '' : `транскрипт: ${last.turn.transcript.slice(0, 600)}`,
+    last === undefined ? '' : `транскрипт: ${last.turn.transcript}`,
   ]
     .filter((entry) => entry !== '')
     .join('\n');
@@ -588,9 +612,9 @@ export async function runScenario(
 
   try {
     session = await host.createSession(definition.id);
-    for (const step of definition.steps) {
+    for (const [stepIndex, step] of definition.steps.entries()) {
       const stepStartedAt = Date.now();
-      const outcome = await runStep(host, session, definition, step, options);
+      const outcome = await runStep(host, session, definition, step, stepIndex, options);
       // Длительность каждого шага — часть отчёта: без неё «долго» в pipeline не отличить от
       // «залипло», а именно этот вопрос и возникает на длинных сценариях.
       const stepSeconds = ((Date.now() - stepStartedAt) / 1000).toFixed(1);
@@ -615,6 +639,7 @@ export async function runScenario(
             ? `  BLOCKED (${stepSeconds} s)`
             : `  FAIL (${stepSeconds} s)`,
         {
+          sourceId: 'runner.step.result',
           type: 'step.result',
           color: outcome.ok ? 'green' : outcome.blockedReason ? 'yellow' : 'red',
           fields: {
@@ -680,7 +705,7 @@ export async function runScenario(
       evidence: [
         `необработанная ошибка сценария: ${messageOf(error)}`,
         `класс отказа: не обработано — поведение host/plugin или harness не подтверждено (${describeToolCalls(observed)})`,
-        last === undefined ? '' : `транскрипт: ${last.turn.transcript.slice(0, 600)}`,
+        last === undefined ? '' : `транскрипт: ${last.turn.transcript}`,
         reading === undefined
           ? ''
           : `durableMutation=${durableLabel(reading)}${

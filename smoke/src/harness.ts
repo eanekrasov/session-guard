@@ -18,6 +18,7 @@ import { closeSync, existsSync, mkdtempSync, openSync, readFileSync, rmSync } fr
 import { tmpdir, homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { jsmin } from 'jsmin';
+import { logProcessOutput } from './host/process-output.ts';
 import { configuredLogLevel, log } from './log.ts';
 export { configuredLogLevel, log, type LogLevel } from './log.ts';
 
@@ -58,7 +59,9 @@ export function attemptsFromEnv(env: Record<string, string | undefined> = proces
   if (raw === undefined) return DEFAULT_ATTEMPTS;
   const value = Number(raw);
   if (Number.isInteger(value) && value > 0) return value;
-  log('warn', `Недопустимое HOST_SMOKE_ATTEMPTS=${raw}; используется ${DEFAULT_ATTEMPTS}.`);
+  log('warn', `Недопустимое HOST_SMOKE_ATTEMPTS=${raw}; используется ${DEFAULT_ATTEMPTS}.`, {
+    sourceId: 'harness.attempts-from-env.1',
+  });
   return DEFAULT_ATTEMPTS;
 }
 
@@ -100,6 +103,16 @@ export function basicAuthHeader(password: string, user = 'opencode'): string {
   return `Basic ${Buffer.from(`${user}:${password}`).toString('base64')}`;
 }
 
+export function hostExitLogLevel(
+  code: number | null,
+  signal: NodeJS.Signals | null,
+  stopping: boolean
+): 'debug' | 'info' | 'error' {
+  if (code === 0 && signal === null) return 'debug';
+  if (stopping && (signal === 'SIGTERM' || (code === 143 && signal === null))) return 'info';
+  return 'error';
+}
+
 /** Прочитать сгенерированный пароль из лога, как только он появится, или отказаться. */
 async function waitForServerPassword(
   read: () => string,
@@ -115,6 +128,7 @@ async function waitForServerPassword(
 }
 
 export interface Host {
+  version: 'v1' | 'v2';
   /** Базовый URL запущенного сервера opencode. */
   url: string; /** Директория временного проекта, в которой был запущен opencode. */
   workDir: string;
@@ -219,41 +233,6 @@ export function isolatedEnvironment(
   return inherited;
 }
 
-/** Максимальное количество байт для одного поля trace payload до усечения. */
-const TRACE_PAYLOAD_MAX = 4096;
-
-/**
- * Замаскировать типовые шаблоны секретов (api keys, tokens, passwords) в строке.
- * Заменяет значение секрета на `<REDACTED>`, оставляя окружающую структуру
- * нетронутой, чтобы форма была по-прежнему читаема.
- */
-export function redactSecrets(text: string): string {
-  return text.replace(
-    /(api[_-]?key|token|password|secret|auth|credential)["']?\s*[=:]\s*["']?[A-Za-z0-9_\-.]{16,}/gi,
-    '$1=<REDACTED>'
-  );
-}
-
-/**
- * Усечь строку до `max` байт, добавляя маркер усечения, если строка обрезана.
- * Предпочтительно обрезать по границе слова, когда это возможно.
- */
-export function truncatePayload(text: string, max = TRACE_PAYLOAD_MAX): string {
-  if (Buffer.byteLength(text, 'utf-8') <= max) return text;
-  let truncated = text.slice(0, max);
-  // Попробовать обрезать по границе слова
-  const lastSpace = truncated.lastIndexOf(' ');
-  if (lastSpace > max * 0.75) truncated = truncated.slice(0, lastSpace);
-  return `${truncated} …[truncated ${Buffer.byteLength(text, 'utf-8') - Buffer.byteLength(truncated, 'utf-8')} bytes]`;
-}
-
-/**
- * Безопасно усечь и замаскировать поле trace payload.
- */
-export function sanitizeTracePayload(value: string): string {
-  return truncatePayload(redactSecrets(value));
-}
-
 const activeHostStops = new Set<() => Promise<void>>();
 const packDirectories = new Set<string>();
 let requestSequence = 0;
@@ -266,21 +245,25 @@ process.once('exit', () => {
 
 /** Остановить хосты, которые работают или всё ещё ждут свой listen URL. */
 export async function stopAllHosts(): Promise<void> {
-  log('debug', `останавливаются активные хосты: ${activeHostStops.size}`);
+  log('debug', `останавливаются активные хосты: ${activeHostStops.size}`, {
+    sourceId: 'harness.stop-all-hosts.1',
+  });
   await Promise.allSettled([...activeHostStops].map((stop) => stop()));
-  log('debug', 'все активные хосты остановлены');
+  log('debug', 'все активные хосты остановлены', { sourceId: 'harness.stop-all-hosts.2' });
 }
 
 function run(cmd: string, args: string[], cwd: string): string {
-  log('debug', `запуск ${cmd} ${args.join(' ')} (cwd=${cwd})`);
+  log('debug', `запуск ${cmd} ${args.join(' ')} (cwd=${cwd})`, { sourceId: 'harness.run.1' });
   const result = spawnSync(cmd, args, { cwd, encoding: 'utf-8' });
   if (result.status !== 0) {
-    log('error', `${cmd} завершился со статусом ${result.status ?? 'signal'}`);
+    log('error', `${cmd} завершился со статусом ${result.status ?? 'signal'}`, {
+      sourceId: 'harness.run.2',
+    });
     throw new Error(
       `${cmd} ${args.join(' ')} завершился с ошибкой: ${result.stderr || result.stdout}`
     );
   }
-  log('debug', `${cmd} успешно завершён`);
+  log('debug', `${cmd} успешно завершён`, { sourceId: 'harness.run.3' });
   return (result.stdout ?? '').trim();
 }
 
@@ -298,10 +281,10 @@ function run(cmd: string, args: string[], cwd: string): string {
  * сборка тогда падает заметно (нет зависимостей), а не подтягивает их молча.
  */
 export function buildPlugin(): string {
-  log('info', 'сборка плагина для host smoke');
+  log('info', 'сборка плагина для host smoke', { sourceId: 'harness.build-plugin.1' });
   run('mise', ['run', '--skip-deps', 'build'], REPO_ROOT);
   const pluginPath = join(REPO_ROOT, 'dist');
-  log('info', `собранный плагин готов: ${pluginPath}`);
+  log('info', `собранный плагин готов: ${pluginPath}`, { sourceId: 'harness.build-plugin.2' });
   return pluginPath;
 }
 
@@ -447,7 +430,9 @@ export function withProviderApiKey(providers: unknown, model: string, authFile?:
       : undefined;
   if (typeof existing === 'string' && existing !== '') return providers;
 
-  log('debug', `ключ провайдера ${providerID} настроен из базы учётных данных оператора`);
+  log('debug', `ключ провайдера ${providerID} настроен из базы учётных данных оператора`, {
+    sourceId: 'harness.with-provider-api-key.1',
+  });
   return {
     ...map,
     [providerID]: {
@@ -498,18 +483,22 @@ export async function operatorProviders(requestedModel?: string): Promise<{
 export async function defaultModel(_binary?: string): Promise<string> {
   const fromEnv = process.env.HOST_SMOKE_MODEL;
   if (fromEnv) {
-    log('debug', `модель из HOST_SMOKE_MODEL: ${fromEnv}`);
+    log('debug', `модель из HOST_SMOKE_MODEL: ${fromEnv}`, { sourceId: 'harness.default-model.1' });
     return fromEnv;
   }
   const operator = await operatorProviders();
   const model = operator.model;
   if (!model) {
-    log('error', 'разрешённая конфигурация opencode не содержит модель');
+    log('error', 'разрешённая конфигурация opencode не содержит модель', {
+      sourceId: 'harness.default-model.2',
+    });
     throw new EnvironmentUnavailableError(
       '[ERROR] Нет модели для запуска: задайте HOST_SMOKE_MODEL или объявите `model` в конфигурации opencode.'
     );
   }
-  log('info', `модель из разрешённой конфигурации opencode: ${model}`);
+  log('info', `модель из разрешённой конфигурации opencode: ${model}`, {
+    sourceId: 'harness.default-model.3',
+  });
   return model;
 }
 
@@ -521,7 +510,8 @@ export function captureResolvedConfig(binary?: string): string {
   const isV2 = bin === V2_BINARY;
   log(
     'debug',
-    `получение разрешённой конфигурации через ${bin} debug config${isV2 ? '' : ' --pure'}`
+    `получение разрешённой конфигурации через ${bin} debug config${isV2 ? '' : ' --pure'}`,
+    { sourceId: 'harness.capture-resolved-config.1' }
   );
   const captureDir = mkdtempSync(join(tmpdir(), 'host-smoke-resolved-config-'));
   const outputPath = join(captureDir, 'opencode.json');
@@ -541,7 +531,8 @@ export function captureResolvedConfig(binary?: string): string {
   if (result.status !== 0 || !resolvedConfig) {
     log(
       'error',
-      `не удалось получить разрешённую конфигурацию; статус ${result.status ?? 'signal'}`
+      `не удалось получить разрешённую конфигурацию; статус ${result.status ?? 'signal'}`,
+      { sourceId: 'harness.capture-resolved-config.2' }
     );
     throw new Error(
       `${bin} debug config завершился с ошибкой (код ${result.status ?? 'signal'}): ` +
@@ -549,7 +540,9 @@ export function captureResolvedConfig(binary?: string): string {
     );
   }
   JSON.parse(resolvedConfig);
-  log('debug', `разрешённая конфигурация получена (${resolvedConfig.length} байт)`);
+  log('debug', `разрешённая конфигурация получена (${resolvedConfig.length} байт)`, {
+    sourceId: 'harness.capture-resolved-config.3',
+  });
   return resolvedConfig;
 }
 
@@ -581,7 +574,9 @@ export async function writeSmokeConfigs(
   version: HostVersion = 'v1',
   operatorAuthFile?: string
 ): Promise<void> {
-  log('debug', `запись конфигурационных файлов smoke в ${opencodeDir}`);
+  log('debug', `запись конфигурационных файлов smoke в ${opencodeDir}`, {
+    sourceId: 'harness.write-smoke-configs.1',
+  });
   await mkdir(opencodeDir, { recursive: true });
 
   // Полная итоговая конфигурация становится базовым файлом.
@@ -622,13 +617,17 @@ export async function writeSmokeConfigs(
     'utf-8'
   );
 
-  log('debug', 'конфигурационный файл smoke записан');
+  log('debug', 'конфигурационный файл smoke записан', {
+    sourceId: 'harness.write-smoke-configs.2',
+  });
 }
 
 export async function startHost(options: HostOptions): Promise<Host> {
   const version = options.version ?? 'v1';
   const binary = ensureOpencodeBinary(version);
-  log('info', `запуск изолированного хоста (${version}) для профиля ${options.profile}`);
+  log('info', `запуск изолированного хоста (${version}) для профиля ${options.profile}`, {
+    sourceId: 'harness.start-host.1',
+  });
   const root = await mkdtemp(join(tmpdir(), 'host-smoke-'));
   const homeDir = join(root, 'home');
   const workDir = join(root, 'work');
@@ -642,22 +641,29 @@ export async function startHost(options: HostOptions): Promise<Host> {
     for (const dir of [workDir, join(configDir, 'opencode'), join(dataDir, 'opencode')]) {
       await mkdir(dir, { recursive: true });
     }
-    log('debug', `созданы каталоги изолированного хоста в ${root}`);
+    log('debug', `созданы каталоги изолированного хоста в ${root}`, {
+      sourceId: 'harness.start-host.2',
+    });
 
     // Учётные данные живут в data dir; скопируем их, чтобы модель была живой.
     const auth = join(homedir(), '.local/share/opencode/auth.json');
     if (existsSync(auth)) {
       await cp(auth, join(dataDir, 'opencode', 'auth.json'));
-      log('debug', 'база учётных данных оператора скопирована в изолированный каталог данных');
+      log('debug', 'база учётных данных оператора скопирована в изолированный каталог данных', {
+        sourceId: 'harness.start-host.3',
+      });
     } else {
       log(
         'warn',
-        'база учётных данных оператора не найдена; вызовы модели могут завершиться ошибкой'
+        'база учётных данных оператора не найдена; вызовы модели могут завершиться ошибкой',
+        { sourceId: 'harness.start-host.4' }
       );
     }
 
     const pluginSpec = process.env.HOST_SMOKE_PLUGIN ?? buildPlugin();
-    log('debug', `используется спецификация плагина: ${pluginSpec}`);
+    log('debug', `используется спецификация плагина: ${pluginSpec}`, {
+      sourceId: 'harness.start-host.5',
+    });
 
     // Получить полную итоговую конфигурацию оператора, чтобы дочерний хост унаследовал
     // определения провайдеров, реестр моделей и все остальные необходимые записи.
@@ -687,18 +693,22 @@ export async function startHost(options: HostOptions): Promise<Host> {
     const agentSource = join(profileSource, 'agents');
     if (existsSync(agentSource)) {
       await cp(agentSource, join(workDir, '.opencode', 'agent'), { recursive: true });
-      log('debug', `агенты профиля скопированы из ${agentSource}`);
+      log('debug', `агенты профиля скопированы из ${agentSource}`, {
+        sourceId: 'harness.start-host.6',
+      });
     }
 
     for (const [path, contents] of Object.entries(options.files ?? {})) {
       const target = join(workDir, path);
       await mkdir(join(target, '..'), { recursive: true });
       await writeFile(target, contents, 'utf-8');
-      log('debug', `записан файл проекта smoke ${path}`);
+      log('debug', `записан файл проекта smoke ${path}`, { sourceId: 'harness.start-host.7' });
     }
 
     if (options.git !== false) {
-      log('debug', 'инициализация репозитория git проекта smoke');
+      log('debug', 'инициализация репозитория git проекта smoke', {
+        sourceId: 'harness.start-host.8',
+      });
       run('git', ['init', '-q'], workDir);
       run('git', ['config', 'user.email', 'smoke@example.com'], workDir);
       run('git', ['config', 'user.name', 'host smoke'], workDir);
@@ -738,9 +748,6 @@ export async function startHost(options: HostOptions): Promise<Host> {
     };
 
     let buffer = '';
-    // Уровень лога хоста поднимается явно (HOST_SMOKE_HOST_LOG_LEVEL) для диагностики:
-    // на info причина ожидания на старте не видна.
-    const hostLogLevel = (process.env.HOST_SMOKE_HOST_LOG_LEVEL ?? 'info').toLowerCase();
     const port = await freePort();
     const serveArgs =
       version === 'v2'
@@ -752,7 +759,7 @@ export async function startHost(options: HostOptions): Promise<Host> {
             String(port),
             '--print-logs',
             '--log-level',
-            hostLogLevel,
+            'all',
           ]
         : [
             'serve',
@@ -762,29 +769,30 @@ export async function startHost(options: HostOptions): Promise<Host> {
             String(port),
             '--print-logs',
             '--log-level',
-            hostLogLevel.toUpperCase(),
+            'DEBUG',
           ];
-    log('debug', `запуск процесса ${binary} ${serveArgs.join(' ')}`);
+    log('debug', `запуск процесса ${binary} ${serveArgs.join(' ')}`, {
+      sourceId: 'harness.start-host.9',
+    });
     const child: ChildProcess = spawn(binary, serveArgs, {
       cwd: workDir,
       env,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
-    // Лог хоста собирается в buffer и при debug дублируется наружу: без этого причина
-    // ожидания на старте (что именно хост делает вместо ответа) не видна в отчёте.
-    const collect = (chunk: Buffer): void => {
-      buffer += chunk;
-      for (const line of chunk.toString('utf8').split('\n')) {
-        const text = line.trim();
-        if (text.length > 0) log('debug', `[host ${version}] ${text}`);
-      }
+    const collect = (input: NodeJS.ReadableStream, stream: 'stdout' | 'stderr'): void => {
+      logProcessOutput(input as import('node:stream').Readable, stream, version, (text) => {
+        buffer += text;
+      });
     };
-    child.stdout?.on('data', collect);
-    child.stderr?.on('data', collect);
+    if (child.stdout) collect(child.stdout, 'stdout');
+    if (child.stderr) collect(child.stderr, 'stderr');
+    const childClosed = new Promise<void>((resolve) => child.once('close', () => resolve()));
+    let explicitlyStopping = false;
     child.once('exit', (code, signal) => {
       log(
-        code === 0 && signal === null ? 'debug' : 'error',
-        `процесс opencode serve завершился: code=${code ?? 'null'} signal=${signal ?? 'null'}`
+        hostExitLogLevel(code, signal, explicitlyStopping),
+        `процесс opencode serve завершился: code=${code ?? 'null'} signal=${signal ?? 'null'}`,
+        { sourceId: 'harness.start-host.10' }
       );
     });
     // A process that cannot even be spawned emits `error` and never exits; without this the
@@ -793,22 +801,28 @@ export async function startHost(options: HostOptions): Promise<Host> {
     child.once('error', (error) => {
       spawnError = error instanceof Error ? error : new Error(String(error));
     });
-    log('info', 'процесс opencode serve создан; ожидание URL прослушивания');
+    log('info', 'процесс opencode serve создан; ожидание URL прослушивания', {
+      sourceId: 'harness.start-host.11',
+    });
 
     let stopPromise: Promise<void> | undefined;
     const hostStop = async (): Promise<void> => {
       if (stopPromise) return stopPromise;
       stopPromise = (async () => {
-        log('info', 'остановка изолированного хоста opencode');
+        explicitlyStopping = true;
+        log('info', 'остановка изолированного хоста opencode', { sourceId: 'harness.host-stop.1' });
         if (child.exitCode === null) {
           child.kill('SIGTERM');
           await new Promise((resolve) => setTimeout(resolve, 300));
           if (child.exitCode === null) child.kill('SIGKILL');
         }
-        log('info', 'процесс opencode serve остановлен');
+        await childClosed;
+        log('info', 'процесс opencode serve остановлен', { sourceId: 'harness.host-stop.2' });
         await rm(root, { recursive: true, force: true });
         activeHostStops.delete(hostStop);
-        log('info', 'изолированный хост остановлен, временный каталог удалён');
+        log('info', 'изолированный хост остановлен, временный каталог удалён', {
+          sourceId: 'harness.host-stop.3',
+        });
       })();
       return stopPromise;
     };
@@ -819,14 +833,18 @@ export async function startHost(options: HostOptions): Promise<Host> {
     try {
       url = await new Promise<string>((resolveUrl, rejectUrl) => {
         const deadline = setTimeout(() => {
-          log('error', 'opencode serve не сообщил URL за 60 секунд');
-          rejectUrl(new EnvironmentUnavailableError(`opencode serve не сообщил URL:\n${buffer}`));
+          log('error', 'opencode serve не сообщил URL за 60 секунд', {
+            sourceId: 'harness.deadline.1',
+          });
+          rejectUrl(new EnvironmentUnavailableError('opencode serve не сообщил URL за 60 секунд'));
         }, 60_000);
         const poll = setInterval(() => {
           if (spawnError !== undefined) {
             clearInterval(poll);
             clearTimeout(deadline);
-            log('error', `opencode serve не запустился: ${spawnError.message}`);
+            log('error', `opencode serve не запустился: ${spawnError.message}`, {
+              sourceId: 'harness.poll.1',
+            });
             rejectUrl(
               new EnvironmentUnavailableError(`opencode serve не запустился: ${spawnError.message}`)
             );
@@ -837,10 +855,12 @@ export async function startHost(options: HostOptions): Promise<Host> {
             if (child.exitCode !== null) {
               clearInterval(poll);
               clearTimeout(deadline);
-              log('error', `opencode serve завершился до сообщения URL (${child.exitCode})`);
+              log('error', `opencode serve завершился до сообщения URL (${child.exitCode})`, {
+                sourceId: 'harness.poll.2',
+              });
               rejectUrl(
                 new EnvironmentUnavailableError(
-                  `opencode serve завершился (${child.exitCode}):\n${buffer}`
+                  `opencode serve завершился до сообщения URL (${child.exitCode})`
                 )
               );
             }
@@ -849,7 +869,9 @@ export async function startHost(options: HostOptions): Promise<Host> {
           clearInterval(poll);
           clearTimeout(deadline);
           resolveUrl(match[1]!);
-          log('info', `opencode serve прослушивает адрес ${match[1]}`);
+          log('info', `opencode serve прослушивает адрес ${match[1]}`, {
+            sourceId: 'harness.poll.3',
+          });
         }, 100);
       });
     } catch (error) {
@@ -868,7 +890,9 @@ export async function startHost(options: HostOptions): Promise<Host> {
       if (password) {
         authHeader = basicAuthHeader(password);
       } else {
-        log('warn', 'хост v2 не сообщил пароль сервера; вызовы /api будут без аутентификации');
+        log('warn', 'хост v2 не сообщил пароль сервера; вызовы /api будут без аутентификации', {
+          sourceId: 'harness.start-host.12',
+        });
       }
     }
 
@@ -876,6 +900,7 @@ export async function startHost(options: HostOptions): Promise<Host> {
       url,
       workDir,
       homeDir,
+      version,
       ...(authHeader ? { authHeader } : {}),
       logs: () => buffer,
       stop: hostStop,
@@ -886,6 +911,17 @@ export async function startHost(options: HostOptions): Promise<Host> {
       await rm(root, { recursive: true, force: true });
     }
     throw error;
+  }
+}
+
+export class HttpResponseError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly body: string
+  ) {
+    super(message);
+    this.name = 'HttpResponseError';
   }
 }
 
@@ -903,11 +939,19 @@ export async function api<T>(host: Host, method: string, path: string, body?: un
       ? ''
       : ` sincePrevious=${(startedAt - previousRequestAt).toFixed(1)}ms`;
   const requestMeta = `req=${requestId} call=${requestCount}${sincePrevious}`;
-  log('debug', `${method} ${path} ${requestMeta}${bodySize > 0 ? ` body=${bodySize}b` : ''}`);
-  if (isTraceEnabled() && body !== undefined) {
-    const sanitized = sanitizeTracePayload(JSON.stringify(body));
-    log('trace', `${method} ${path} request body: ${truncatePayload(sanitized, 2000)}`);
-  }
+  const sink = host.version === 'v2' ? 'host-v2' : 'host-v1';
+  log('debug', `${method} ${path} ${requestMeta}${bodySize > 0 ? ` body=${bodySize}b` : ''}`, {
+    sourceId: 'harness.api.request',
+    sink,
+    type: 'http.request',
+  });
+  log('trace', `${method} ${path} request payload`, {
+    sourceId: 'harness.api.request-payload',
+    sink,
+    human: false,
+    type: 'http.request.payload',
+    fields: { method, path, requestId, requestCount, bodySize, payload: body },
+  });
   const response = await fetch(`${host.url}${path}`, {
     method,
     headers: { 'content-type': 'application/json' },
@@ -915,37 +959,53 @@ export async function api<T>(host: Host, method: string, path: string, body?: un
   });
   const text = await response.text();
   const responseSize = Buffer.byteLength(text, 'utf-8');
-  const sanitizedResponse = sanitizeTracePayload(text);
-  const debugResponse = truncatePayload(sanitizedResponse, 2000);
+  const duration = (performance.now() - startedAt).toFixed(1);
+  log('trace', `${method} ${path} response payload`, {
+    sourceId: 'harness.api.response-payload',
+    sink,
+    human: false,
+    type: 'http.response.payload',
+    fields: {
+      method,
+      path,
+      requestId,
+      requestCount,
+      status: response.status,
+      durationMs: Number(duration),
+      responseSize,
+      payload: text,
+    },
+  });
   if (!response.ok) {
     log(
       'error',
-      `${method} ${path} ${requestMeta} returned HTTP ${response.status} (duration=${(performance.now() - startedAt).toFixed(1)}ms, resp=${responseSize}b) body=${debugResponse}`
+      `${method} ${path} ${requestMeta} returned HTTP ${response.status} (duration=${duration}ms, resp=${responseSize}b)`,
+      {
+        sourceId: 'harness.api.response-error',
+        sink,
+        type: 'http.response',
+        fields: {
+          method,
+          path,
+          status: response.status,
+          durationMs: Number(duration),
+          responseSize,
+        },
+      }
     );
-    if (isTraceEnabled()) {
-      log(
-        'trace',
-        `${method} ${path} ${requestMeta} response body: ${truncatePayload(sanitizedResponse, 4000)}`
-      );
-    }
-    throw new Error(`${method} ${path} → ${response.status}: ${text}`);
+    throw new HttpResponseError(`${method} ${path} → ${response.status}`, response.status, text);
   }
   log(
     'debug',
-    `${method} ${path} ${requestMeta} returned HTTP ${response.status} (duration=${(performance.now() - startedAt).toFixed(1)}ms, resp=${responseSize}b) body=${debugResponse}`
+    `${method} ${path} ${requestMeta} returned HTTP ${response.status} (duration=${duration}ms, resp=${responseSize}b)`,
+    {
+      sourceId: 'harness.api.response-success',
+      sink,
+      type: 'http.response',
+      fields: { method, path, status: response.status, durationMs: Number(duration), responseSize },
+    }
   );
-  if (isTraceEnabled()) {
-    log(
-      'trace',
-      `${method} ${path} ${requestMeta} response body: ${truncatePayload(sanitizedResponse, 4000)}`
-    );
-  }
   return text ? (JSON.parse(text) as T) : (undefined as T);
-}
-
-/** Включает ли текущий уровень логирования `trace` (т.е. равен `trace`). */
-export function isTraceEnabled(): boolean {
-  return configuredLogLevel() === 'trace';
 }
 
 /**
@@ -974,7 +1034,9 @@ export async function writeWorkflowSession(
   const runtime = join(host.homeDir, 'data', 'opencode', 'session-guard', 'runtime');
   await mkdir(runtime, { recursive: true });
   await writeFile(join(runtime, `${sessionId}.json`), JSON.stringify(state, null, 2), 'utf-8');
-  log('debug', `сессия workflow записана напрямую: ${join(runtime, `${sessionId}.json`)}`);
+  log('debug', `сессия workflow записана напрямую: ${join(runtime, `${sessionId}.json`)}`, {
+    sourceId: 'harness.write-workflow-session.1',
+  });
 }
 
 export async function readWorkflowSession(host: Host, sessionId: string): Promise<unknown | null> {
@@ -986,7 +1048,9 @@ export async function readWorkflowSession(host: Host, sessionId: string): Promis
     join(runtime, 'archive', `${sessionId}.json`),
   ]) {
     if (existsSync(file)) {
-      log('debug', `reading workflow session from ${file}`);
+      log('debug', `reading workflow session from ${file}`, {
+        sourceId: 'harness.read-workflow-session.1',
+      });
       try {
         return JSON.parse(await readFile(file, 'utf-8'));
       } catch (error) {
@@ -995,6 +1059,8 @@ export async function readWorkflowSession(host: Host, sessionId: string): Promis
       }
     }
   }
-  log('debug', `сессия workflow не найдена: ${sessionId}`);
+  log('debug', `сессия workflow не найдена: ${sessionId}`, {
+    sourceId: 'harness.read-workflow-session.2',
+  });
   return null;
 }
