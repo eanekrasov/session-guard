@@ -65,6 +65,28 @@ beforeEach(async () => {
 });
 
 describe('consent tag round trip', () => {
+  it('normalizes a JSON-encoded file list before emitting the consent tag', async () => {
+    const hooks = createRuntime(pluginInput());
+    const result = await hooks.tool!['workflow-consent'].execute(
+      { files: '["plan.md"]', summary: 'do the thing' } as never,
+      { sessionID: 's1' } as never
+    );
+    expect(parseConsentRequest(toolOutput(result))?.manifest.files).toEqual(['plan.md']);
+  });
+
+  it('resolves a V1 child session to its parent workflow', async () => {
+    const input = pluginInput();
+    input.client.session.get = vi.fn(async ({ path }: { path: { id: string } }) => ({
+      data: { id: path.id, ...(path.id === 'child' ? { parentID: 's1' } : {}) },
+    })) as never;
+    const hooks = createRuntime(input);
+    const result = await hooks.tool!['workflow-consent'].execute(
+      { files: ['plan.md'], summary: 'do the thing' },
+      { sessionID: 'child' } as never
+    );
+    expect(parseConsentRequest(toolOutput(result))).toBeDefined();
+  });
+
   it('emits a tag whose own parser accepts it', async () => {
     const hooks = createRuntime(pluginInput());
     const result = await hooks.tool!['workflow-consent'].execute(

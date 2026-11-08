@@ -223,6 +223,42 @@ describe('the session agent', () => {
 });
 
 describe('execution and step SSE events', () => {
+  test('waits for the parent execution, not a child execution', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = Object.assign(
+      async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes('/event')) {
+          const events = [
+            { type: 'session.execution.started', data: { sessionID: 'ses-1' } },
+            { type: 'session.created', data: { sessionID: 'child', parentID: 'ses-1' } },
+            { type: 'session.execution.started', data: { sessionID: 'child' } },
+            { type: 'session.execution.succeeded', data: { sessionID: 'child' } },
+            {
+              type: 'session.execution.failed',
+              data: { sessionID: 'ses-1', error: { message: 'parent failed' } },
+            },
+          ];
+          return new Response(
+            events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(''),
+            {
+              headers: { 'content-type': 'text/event-stream' },
+            }
+          );
+        }
+        return dataResponse({ id: 'msg-1', sessionID: 'ses-1' });
+      },
+      { preconnect: originalFetch.preconnect }
+    );
+    try {
+      const client = createV2SmokeClient(fakeHost());
+      await expect(client.prompt('ses-1', 'go')).rejects.toThrow('parent failed');
+      expect(client.lastExecution()?.sessionID).toBe('ses-1');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test('records the execution started and succeeded events from the SSE stream', async () => {
     const originalFetch = globalThis.fetch;
     const routes: string[] = [];

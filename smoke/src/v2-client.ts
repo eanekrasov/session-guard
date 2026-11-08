@@ -11,6 +11,7 @@ export type FormAnswer = Record<string, string | number | boolean | Array<string
 
 /** Событие выполнения сессии. */
 export interface ExecutionEvent {
+  sessionID: string;
   status: 'started' | 'succeeded' | 'failed' | 'interrupted';
   error?: { type: string; message: string; status?: number };
   timestamp: number;
@@ -171,6 +172,7 @@ export function createV2SmokeClient(host: Host, options: V2SmokeClientOptions = 
   const answeredForms: AnsweredForm[] = [];
   // События execution и step за последний prompt.
   let lastExecution: ExecutionEvent | null = null;
+  let activeSessionId: string | undefined;
   const stepEvents: StepEvent[] = [];
   const executionStream: SessionEventStream<ExecutionEvent> = createSessionEventStream();
   const events = new AbortController();
@@ -229,10 +231,11 @@ export function createV2SmokeClient(host: Host, options: V2SmokeClientOptions = 
   }
 
   /** Записать execution-событие в лог и локальную память клиента. */
-  function recordExecutionEvent(type: string, data: Record<string, unknown>): void {
+  function recordExecutionEvent(type: string, data: Record<string, unknown>): ExecutionEvent {
     // type = "session.execution.started" → status = "started"
     const status = type.split('.').pop() as ExecutionEvent['status'];
     const execution: ExecutionEvent = {
+      sessionID: String(data.sessionID),
       status,
       timestamp: Date.now(),
     };
@@ -244,13 +247,14 @@ export function createV2SmokeClient(host: Host, options: V2SmokeClientOptions = 
         ...(typeof err.status === 'number' ? { status: err.status } : {}),
       };
     }
-    lastExecution = execution;
+    if (execution.sessionID === activeSessionId) lastExecution = execution;
     log('debug', `execution event: ${type}`, {
       sourceId: 'v2.client.execution',
       sink: 'host-v2',
       type: 'execution.event',
       fields: { sessionType: type, execution },
     });
+    return execution;
   }
 
   /** Записать step-событие в лог и локальную память клиента. */
@@ -338,8 +342,9 @@ export function createV2SmokeClient(host: Host, options: V2SmokeClientOptions = 
             event.type === 'session.execution.interrupted') &&
           allowedSessions.has(event.data.sessionID as string)
         ) {
-          recordExecutionEvent(event.type, event.data as Record<string, unknown>);
-          executionStream.dispatch(lastExecution!);
+          executionStream.dispatch(
+            recordExecutionEvent(event.type, event.data as Record<string, unknown>)
+          );
           continue;
         }
         // Step events (session.step.*)
@@ -363,9 +368,13 @@ export function createV2SmokeClient(host: Host, options: V2SmokeClientOptions = 
     listener = listenForms(() => activeDecision, events.signal);
   };
 
-  const waitForExecutionTerminal = (signal?: AbortSignal): Promise<ExecutionEvent> => {
+  const waitForExecutionTerminal = (
+    sessionId: string,
+    signal?: AbortSignal
+  ): Promise<ExecutionEvent> => {
     let started = false;
     return executionStream.waitFor((event) => {
+      if (event.sessionID !== sessionId) return false;
       if (event.status === 'started') {
         started = true;
         return false;
@@ -401,13 +410,14 @@ export function createV2SmokeClient(host: Host, options: V2SmokeClientOptions = 
     ): Promise<void> {
       // Сбросить события предыдущего промпта.
       lastExecution = null;
+      activeSessionId = sessionId;
       stepEvents.length = 0;
 
       // Шаг может объявить свой предел: длинный шаг pipeline законно идёт дольше общего
       // бюджета клиента, и общий бюджет обрывал бы его на нормальном для него времени.
       allowedSessions.add(sessionId);
       activeDecision = decision;
-      const execution = waitForExecutionTerminal();
+      const execution = waitForExecutionTerminal(sessionId);
       startEvents();
 
       try {
@@ -421,8 +431,8 @@ export function createV2SmokeClient(host: Host, options: V2SmokeClientOptions = 
       }
     },
 
-    async waitForStateChange(_sessionId: string, signal?: AbortSignal): Promise<void> {
-      const stateChange = waitForExecutionTerminal(signal);
+    async waitForStateChange(sessionId: string, signal?: AbortSignal): Promise<void> {
+      const stateChange = waitForExecutionTerminal(sessionId, signal);
       startEvents();
       await stateChange;
     },
