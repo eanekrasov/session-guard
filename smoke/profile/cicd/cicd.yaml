@@ -88,7 +88,7 @@ transitions:
   # P1.4: fail-переход с retry — тесты не пройдены, перезапуск
   - from: test
     to: build
-    guard: "!allTasksCompleted('test_suite') && !isExhausted('cycles')"
+    guard: "hasFailedTasks('test_suite') && !isExhausted('cycles')"
     effects:
       - bumpRetry: cycles
         maxAttempts: 3
