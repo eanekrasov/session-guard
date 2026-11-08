@@ -55,8 +55,7 @@ function masksIntersect(a: string, b: string): boolean {
     if (segA !== segB) return false;
   }
 
-  if (segmentsA.length !== segmentsB.length) return false;
-  return true;
+  return segmentsA.length === segmentsB.length;
 }
 
 /**

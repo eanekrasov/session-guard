@@ -38,7 +38,7 @@ describe('InMemoryProvider', () => {
     const ready = await provider.getReadyTasks();
 
     expect(ready).toHaveLength(1);
-    expect(ready[0].id).toBe('T1');
+    expect(ready[0]?.id).toBe('T1');
   });
 
   it('getReadyTasks returns empty array when no ready tasks', async () => {
@@ -212,8 +212,8 @@ describe('createCliProvider', () => {
       const tasks = await provider.getReadyTasks();
 
       expect(tasks).toHaveLength(2);
-      expect(tasks[0].id).toBe('T1');
-      expect(tasks[1].id).toBe('T2');
+      expect(tasks[0]?.id).toBe('T1');
+      expect(tasks[1]?.id).toBe('T2');
     });
 
     it('returns empty array on non-array stdout', async () => {

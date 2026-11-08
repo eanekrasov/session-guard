@@ -43,7 +43,7 @@ async function main() {
 
   // Test 1: workflow-create with profileId
   console.log('\n🧪 Test 1: workflow-create with profileId');
-  const result1 = await runtime.tool!['workflow-create'].execute(
+  const result1 = await runtime.tool!['workflow-create']?.execute(
     { schemaId: 'android' },
     {
       sessionID: 'live-session-1',
@@ -57,14 +57,14 @@ async function main() {
     }
   );
 
-  const output1 = typeof result1 === 'string' ? result1 : result1.output;
-  const meta1 = typeof result1 === 'string' ? null : (result1.metadata ?? null);
+  const output1 = typeof result1 === 'string' ? result1 : result1?.output;
+  const meta1 = typeof result1 === 'string' ? null : (result1?.metadata ?? null);
   console.log('📤 Output:', output1);
   console.log('📊 Metadata:', JSON.stringify(meta1, null, 2));
 
   // Test 2: workflow-create without args (should fallback to HARNESS_PROFILE)
   console.log('\n🧪 Test 2: workflow-create without args (fallback to HARNESS_PROFILE)');
-  const result2 = await runtime.tool!['workflow-create'].execute(
+  const result2 = await runtime.tool!['workflow-create']?.execute(
     {},
     {
       sessionID: 'live-session-2',
@@ -78,7 +78,7 @@ async function main() {
     }
   );
 
-  const output2 = typeof result2 === 'string' ? result2 : result2.output;
+  const output2 = typeof result2 === 'string' ? result2 : result2?.output;
   console.log('📤 Output:', output2);
 
   // Cleanup

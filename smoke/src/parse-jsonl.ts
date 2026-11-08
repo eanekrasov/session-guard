@@ -14,7 +14,7 @@ async function main(args: string[]): Promise<number> {
   let fields: string[] | undefined;
 
   for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
+    const arg = args[i]!;
     if (arg === '-h' || arg === '--help') {
       process.stdout.write(`${usage}\n`);
       return 0;

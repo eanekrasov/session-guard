@@ -12,7 +12,7 @@ export interface CompiledNode {
   /** The nested stage itself. */
   stage: string;
   allowedAgents: string[];
-  entryGuards: string[];
+  enterGuards: string[];
   exitGuards: string[];
 }
 
@@ -206,7 +206,7 @@ const STAGE_KEYS = new Set([
   'allowedAgents',
   'actions',
   'gates',
-  'entryGuards',
+  'enterGuards',
   'exitGuards',
   'stages',
   'transitions',
@@ -398,8 +398,8 @@ function validateGuardSyntax(schema: ResolvedSchema, errors: CompileError[]): vo
     for (const [index, entry] of (stage.actions ?? []).entries()) {
       check(`${path}.actions[${index}].guard`, entry.guard);
     }
-    for (const [index, expression] of (stage.entryGuards ?? []).entries()) {
-      check(`${path}.entryGuards[${index}]`, expression);
+    for (const [index, expression] of (stage.enterGuards ?? []).entries()) {
+      check(`${path}.enterGuards[${index}]`, expression);
     }
     for (const [index, expression] of (stage.exitGuards ?? []).entries()) {
       check(`${path}.exitGuards[${index}]`, expression);
@@ -578,7 +578,7 @@ function compileNodes(
     owner: stageId,
     stage: stage.id,
     allowedAgents: stage.allowedAgents ?? stageDef.allowedAgents ?? [],
-    entryGuards: stage.entryGuards ?? [],
+    enterGuards: stage.enterGuards ?? [],
     exitGuards: stage.exitGuards ?? [],
   }));
 }

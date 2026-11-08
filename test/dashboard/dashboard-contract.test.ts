@@ -82,7 +82,7 @@ describe('buildDashboardSchema', () => {
     const schema = buildDashboardSchema(single);
 
     expect(schema.states).toHaveLength(1);
-    expect(schema.states[0].id).toBe('DONE');
+    expect(schema.states[0]?.id).toBe('DONE');
   });
 
   it('labels gates with human-readable labels', () => {

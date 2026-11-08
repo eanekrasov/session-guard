@@ -109,8 +109,8 @@ describe('SessionExecutor', () => {
       expect(result).toBe('mutated');
       expect(loadCalls).toEqual(['se-mutate']);
       expect(saveCalls).toHaveLength(1);
-      expect(saveCalls[0].sessionId).toBe('se-mutate');
-      expect(saveCalls[0].currentStage).toBe('code');
+      expect(saveCalls[0]?.sessionId).toBe('se-mutate');
+      expect(saveCalls[0]?.currentStage).toBe('code');
     });
 
     it('skips save on read-only action (no mutation)', async () => {
@@ -365,8 +365,8 @@ describe('SessionExecutor', () => {
       // Only one load, one save — the outer transaction
       expect(loadCalls).toHaveLength(1);
       expect(saveCalls).toHaveLength(1);
-      expect(saveCalls[0].currentStage).toBe('code');
-      expect(saveCalls[0].title).toBe('nested-wrote');
+      expect(saveCalls[0]?.currentStage).toBe('code');
+      expect(saveCalls[0]?.title).toBe('nested-wrote');
     });
 
     it('reentrant with multiple nesting levels', async () => {

@@ -67,7 +67,7 @@ beforeEach(async () => {
 describe('consent tag round trip', () => {
   it('normalizes a JSON-encoded file list before emitting the consent tag', async () => {
     const hooks = createRuntime(pluginInput());
-    const result = await hooks.tool!['workflow-consent'].execute(
+    const result = await hooks.tool!['workflow-consent']!.execute(
       { files: '["plan.md"]', summary: 'do the thing' } as never,
       { sessionID: 's1' } as never
     );
@@ -80,7 +80,7 @@ describe('consent tag round trip', () => {
       data: { id: path.id, ...(path.id === 'child' ? { parentID: 's1' } : {}) },
     })) as never;
     const hooks = createRuntime(input);
-    const result = await hooks.tool!['workflow-consent'].execute(
+    const result = await hooks.tool!['workflow-consent']!.execute(
       { files: ['plan.md'], summary: 'do the thing' },
       { sessionID: 'child' } as never
     );
@@ -89,7 +89,7 @@ describe('consent tag round trip', () => {
 
   it('emits a tag whose own parser accepts it', async () => {
     const hooks = createRuntime(pluginInput());
-    const result = await hooks.tool!['workflow-consent'].execute(
+    const result = await hooks.tool!['workflow-consent']!.execute(
       { files: ['plan.md'], summary: 'do the thing' },
       { sessionID: 's1' } as never
     );
@@ -101,7 +101,7 @@ describe('consent tag round trip', () => {
 
   it('reads the consent request from the question, not from the answer', async () => {
     const hooks = createRuntime(pluginInput());
-    const prepared = await hooks.tool!['workflow-consent'].execute(
+    const prepared = await hooks.tool!['workflow-consent']!.execute(
       { files: ['plan.md'], summary: 'do the thing' },
       { sessionID: 's1' } as never
     );

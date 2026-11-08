@@ -40,7 +40,7 @@ describe('Public API', () => {
       // since both profile and extended profile list the same schema filename,
       // they are combined into one resolved schema (with extends merged)
       expect(result.schemas).toHaveLength(1);
-      expect(result.schemas[0].source).toBe('android/session-guard.yaml');
+      expect(result.schemas[0]?.source).toBe('android/session-guard.yaml');
     });
 
     it('throws for unknown profileId', async () => {

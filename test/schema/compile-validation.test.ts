@@ -218,7 +218,7 @@ describe('a guard that cannot be parsed is refused at load', () => {
       execution: {
         loop: 'implementation',
         stages: { code: {}, verify: {} },
-        entryGuards: ['session.gates.((('],
+        enterGuards: ['session.gates.((('],
         transitions: [
           { from: 'code', to: 'verify', guard: '1 +' },
           { from: 'verify', to: 'done' },
@@ -227,7 +227,7 @@ describe('a guard that cannot be parsed is refused at load', () => {
     });
 
     const joined = reported(input);
-    expect(joined).toContain('stages.execution.entryGuards[0]');
+    expect(joined).toContain('stages.execution.enterGuards[0]');
     expect(joined).toContain('stages.execution.transitions[0].guard');
   });
 

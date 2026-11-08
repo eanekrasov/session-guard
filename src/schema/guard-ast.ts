@@ -172,7 +172,7 @@ function tokenise(input: string): Token[] {
   const tokens: Token[] = [];
   let i = 0;
   while (i < input.length) {
-    const ch = input[i];
+    const ch = input[i]!;
     if (ch === ' ' || ch === '\t' || ch === '\n') {
       i++;
       continue;
@@ -260,7 +260,7 @@ function tokenise(input: string): Token[] {
     // Number literal
     if (/[0-9]/.test(ch)) {
       let value = '';
-      while (i < input.length && /[0-9.eE+-]/.test(input[i])) {
+      while (i < input.length && /[0-9.eE+-]/.test(input[i]!)) {
         if (input[i] === '+' || input[i] === '-') {
           if (
             value.length > 0 &&
@@ -279,7 +279,7 @@ function tokenise(input: string): Token[] {
     // Identifier or keyword
     if (/[a-zA-Z_$]/.test(ch)) {
       let value = '';
-      while (i < input.length && /[a-zA-Z0-9_$]/.test(input[i])) {
+      while (i < input.length && /[a-zA-Z0-9_$]/.test(input[i]!)) {
         value += input[i];
         i++;
       }
@@ -305,7 +305,7 @@ class ParseError extends Error {
 }
 
 function peek(tokens: Token[], depth: number): string {
-  return tokens.length > 0 ? tokens[0].kind : 'EOF';
+  return tokens.length > 0 ? tokens[0]!.kind : 'EOF';
 }
 
 function consume(tokens: Token[], expected?: string): Token {
@@ -632,8 +632,8 @@ export function parse(input: string): AstNode {
   const node = parseExpr(tokens, 0);
   if (tokens.length > 0) {
     throw new ParseError(
-      `Unexpected token '${tokens[0].value}' after expression end`,
-      tokens[0].pos
+      `Unexpected token '${tokens[0]!.value}' after expression end`,
+      tokens[0]!.pos
     );
   }
   return node;
@@ -718,7 +718,7 @@ function evaluateNode(node: AstNode, ctx: EvalContext): unknown {
       // Check if callee is a built-in
       const calleeName = node.callee.type === 'identifier' ? node.callee.name : '';
       if (calleeName && calleeName in ctx.builtins) {
-        return ctx.builtins[calleeName](...args);
+        return ctx.builtins[calleeName]!(...args);
       }
 
       consumeCallback(ctx.budget);

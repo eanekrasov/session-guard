@@ -103,8 +103,8 @@ describe('beginMutation', () => {
     beginMutation(session, 'mutation-1', 'unknown', () => 'code');
 
     expect(session.activeOperations['mutation-1']).toBeDefined();
-    expect(session.activeOperations['mutation-1'].status).toBe('running');
-    expect(session.activeOperations['mutation-1'].startedAt).toBeDefined();
+    expect(session.activeOperations['mutation-1']?.status).toBe('running');
+    expect(session.activeOperations['mutation-1']?.startedAt).toBeDefined();
     expect(session.verifications).toEqual([]);
   });
 
@@ -131,7 +131,7 @@ describe('beginMutation', () => {
     beginMutation(session, 'new-mutation', 'unknown', () => 'code');
 
     expect(session.activeOperations['stale']).toBeUndefined();
-    expect(session.activeOperations['new-mutation'].status).toBe('running');
+    expect(session.activeOperations['new-mutation']?.status).toBe('running');
   });
 });
 
@@ -144,7 +144,7 @@ describe('generic step lifecycle', () => {
       tasks: taskList('completed'),
     });
     // First step can complete even though later work is pending
-    expect(session.tasks.implementation.every((t) => t.status === 'completed')).toBe(true);
+    expect(session.tasks.implementation!.every((t) => t.status === 'completed')).toBe(true);
   });
 
   it('keeps results separate across steps', () => {
@@ -154,10 +154,10 @@ describe('generic step lifecycle', () => {
       { step: 'change-first', output: 'file-a' },
       { step: 'change-second', output: 'file-b' },
     ];
-    expect(results[0].output).not.toBe(results[1].output);
+    expect(results[0]?.output).not.toBe(results[1]?.output);
     // Second step cannot use first step's completion
     const secondStep = results[1];
-    expect(secondStep.step).toBe('change-second');
+    expect(secondStep?.step).toBe('change-second');
   });
 });
 
@@ -176,7 +176,7 @@ describe('approve', () => {
       status: 'granted',
       evidence: 'sha256:abc123',
     });
-    expect(session.approvals[0].grantedAt).toBeDefined();
+    expect(session.approvals[0]?.grantedAt).toBeDefined();
   });
 
   it('adds an approval for commit type', () => {
@@ -201,8 +201,8 @@ describe('approve', () => {
     approve(session, 'plan', 'sha256:newhash', 'call-1');
 
     expect(session.approvals).toHaveLength(1);
-    expect(session.approvals[0].status).toBe('granted');
-    expect(session.approvals[0].evidence).toBe('sha256:newhash');
+    expect(session.approvals[0]?.status).toBe('granted');
+    expect(session.approvals[0]?.evidence).toBe('sha256:newhash');
   });
 });
 
@@ -232,8 +232,8 @@ describe('decline', () => {
     decline(session, 'plan', 'sha256:newhash', 'call-1', 'Revised feedback');
 
     expect(session.approvals).toHaveLength(1);
-    expect(session.approvals[0].status).toBe('denied');
-    expect(session.approvals[0].feedback).toBe('Revised feedback');
+    expect(session.approvals[0]?.status).toBe('denied');
+    expect(session.approvals[0]?.feedback).toBe('Revised feedback');
   });
 });
 
@@ -310,7 +310,7 @@ describe('finishMutation', () => {
     expect(session.activeOperations).toEqual({});
     expect(session.changedFiles).toEqual(['src/foo.ts']);
     // Вердикт ядра о ходе ложится на прогон задачи, а не в гейт.
-    expect(session.loopRuns['run-1'].checks).toBe('passed');
+    expect(session.loopRuns['run-1']?.checks).toBe('passed');
   });
 
   it('leaves the retry budget alone on a failed move', () => {
@@ -324,9 +324,9 @@ describe('finishMutation', () => {
     session.changedFiles = [];
     finishMutation(session, false);
 
-    expect(session.loopRuns['run-1'].checks).toBe('failed');
+    expect(session.loopRuns['run-1']?.checks).toBe('failed');
     // An attempt belongs to the move that takes it, not to the verdict.
-    expect(session.retryBudgets['task-1'].attempts).toBe(0);
+    expect(session.retryBudgets['task-1']?.attempts).toBe(0);
     expect(session.activeOperations).toEqual({});
   });
 });

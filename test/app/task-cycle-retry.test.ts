@@ -179,7 +179,7 @@ describe('task-cycle retry and recovery', () => {
 
     expect(loaded.retryBudgets['task-1']).toEqual({ attempts: 1, maximum: 3 });
     expect(loaded.loopRuns['run-1']).toMatchObject({ stage: 'dev', status: 'running' });
-    expect(loaded.tasks.implementation[0].status).toBe('running');
+    expect(loaded.tasks.implementation![0]!.status).toBe('running');
     expect(retry.args).toEqual(expect.objectContaining({ description: expect.any(String) }));
     expect(loaded.activeOperations['call-2']).toMatchObject({
       taskId: 'task-1',
@@ -201,7 +201,7 @@ describe('task-cycle retry and recovery', () => {
 
     expect(loaded.retryBudgets['task-1']).toEqual({ attempts: 1, maximum: 1 });
     expect(loaded.loopRuns['run-1']).toMatchObject({ stage: 'dev', status: 'awaiting_decision' });
-    expect(loaded.tasks.implementation[0].status).toBe('running');
+    expect(loaded.tasks.implementation![0]!.status).toBe('running');
     expect(loaded.pendingDecisions).toEqual([
       expect.objectContaining({
         subject: 'task',
@@ -223,7 +223,7 @@ describe('task-cycle retry and recovery', () => {
 
     await beforeTask(hooks, 'call-1');
     await afterTask(hooks, 'call-1', 'review', 'fail');
-    const result = await hooks.tool!['workflow-tasks-resolve-decision'].execute(
+    const result = await hooks.tool!['workflow-tasks-resolve-decision']!.execute(
       { decision: 'increase', maximum: 2 },
       toolContext()
     );
@@ -247,15 +247,15 @@ describe('task-cycle retry and recovery', () => {
 
     await beforeTask(hooks, 'call-1');
     await afterTask(hooks, 'call-1', 'review', 'fail');
-    const result = await hooks.tool!['workflow-tasks-resolve-decision'].execute(
+    const result = await hooks.tool!['workflow-tasks-resolve-decision']!.execute(
       { decision },
       toolContext()
     );
     const loaded = await load(store);
 
     expect(toolOutput(result)).toBe(output);
-    expect(loaded.loopRuns['run-1'].status).toBe(decision);
-    expect(loaded.tasks.implementation[0].status).toBe(decision);
+    expect(loaded.loopRuns['run-1']?.status).toBe(decision);
+    expect(loaded.tasks.implementation![0]!.status).toBe(decision);
     expect(loaded.pendingDecisions).toEqual([]);
   });
 
@@ -278,7 +278,7 @@ describe('task-cycle retry and recovery', () => {
     });
     expect(loaded.retryBudgets).toEqual({});
     expect(loaded.loopRuns['run-1']).toMatchObject({ stage: 'dev', status: 'running' });
-    expect(loaded.tasks.implementation[0].status).toBe('running');
+    expect(loaded.tasks.implementation![0]!.status).toBe('running');
   });
 
   it('leaves a parent task running when its child task is terminally failed', async () => {
@@ -290,14 +290,14 @@ describe('task-cycle retry and recovery', () => {
 
     await beforeTask(hooks, 'call-child', 'task-2');
     await afterTask(hooks, 'call-child', 'review', 'fail');
-    await hooks.tool!['workflow-tasks-resolve-decision'].execute(
+    await hooks.tool!['workflow-tasks-resolve-decision']!.execute(
       { decision: 'failed' },
       toolContext()
     );
     const loaded = await load(store);
 
-    expect(loaded.tasks.implementation[0].status).toBe('running');
-    expect(loaded.tasks['task-1'][0].status).toBe('failed');
+    expect(loaded.tasks.implementation![0]!.status).toBe('running');
+    expect(loaded.tasks['task-1']![0]!.status).toBe('failed');
     expect(loaded.loopRuns['run-1']).toMatchObject({
       taskId: 'task-2',
       ancestry: [{ listKey: 'implementation', taskId: 'task-1' }],
@@ -349,7 +349,7 @@ describe('task-cycle retry and recovery', () => {
     await store.save(loaded);
 
     // Try to resolve without decisionId — must fail with candidates
-    const result = await hooks.tool!['workflow-tasks-resolve-decision'].execute(
+    const result = await hooks.tool!['workflow-tasks-resolve-decision']!.execute(
       { decision: 'increase', maximum: 2 },
       toolContext()
     );
@@ -401,7 +401,7 @@ describe('task-cycle retry and recovery', () => {
     await store.save(loaded);
 
     // Resolve task-1 only
-    const result = await hooks.tool!['workflow-tasks-resolve-decision'].execute(
+    const result = await hooks.tool!['workflow-tasks-resolve-decision']!.execute(
       { decision: 'failed', decisionId: 'task-1:retry_exhausted' },
       toolContext()
     );
@@ -409,10 +409,10 @@ describe('task-cycle retry and recovery', () => {
 
     const loaded2 = await load(store);
     expect(loaded2.pendingDecisions.filter((d) => d.status === 'pending')).toHaveLength(1);
-    expect(loaded2.pendingDecisions[0].subjectId).toBe('task-2');
+    expect(loaded2.pendingDecisions[0]?.subjectId).toBe('task-2');
 
     // task-2 is still resolvable independently
-    const result2 = await hooks.tool!['workflow-tasks-resolve-decision'].execute(
+    const result2 = await hooks.tool!['workflow-tasks-resolve-decision']!.execute(
       { decision: 'increase', maximum: 2, decisionId: 'task-2:retry_exhausted' },
       toolContext()
     );
@@ -431,7 +431,7 @@ describe('task-cycle retry and recovery', () => {
     await afterTask(hooks, 'call-1', 'review', 'fail');
 
     // Unknown decisionId
-    const result1 = await hooks.tool!['workflow-tasks-resolve-decision'].execute(
+    const result1 = await hooks.tool!['workflow-tasks-resolve-decision']!.execute(
       { decision: 'failed', decisionId: 'nonexistent-id' },
       toolContext()
     );
@@ -455,7 +455,7 @@ describe('task-cycle retry and recovery', () => {
     delete loaded.retryBudgets['task-1'];
     await store.save(loaded);
 
-    const result = await hooks.tool!['workflow-tasks-resolve-decision'].execute(
+    const result = await hooks.tool!['workflow-tasks-resolve-decision']!.execute(
       { decision: 'increase', maximum: 2 },
       toolContext()
     );
@@ -505,18 +505,18 @@ describe('task-cycle retry and recovery', () => {
     // Reload from store
     const loaded1 = await load(store);
     expect(loaded1.pendingDecisions.filter((d) => d.status === 'pending')).toHaveLength(2);
-    expect(loaded1.pendingDecisions[0].runId).toBeDefined();
-    expect(loaded1.pendingDecisions[1].runId).toBeDefined();
+    expect(loaded1.pendingDecisions[0]!.runId).toBeDefined();
+    expect(loaded1.pendingDecisions[1]!.runId).toBeDefined();
 
     // Resolve task-1 via decisionId
-    const result = await hooks.tool!['workflow-tasks-resolve-decision'].execute(
+    const result = await hooks.tool!['workflow-tasks-resolve-decision']!.execute(
       { decision: 'failed', decisionId: 'task-1:retry_exhausted' },
       toolContext()
     );
     expect(toolOutput(result)).toMatch(/Failed.*task-1/);
 
     // Resolve task-2 via decisionId
-    const result2 = await hooks.tool!['workflow-tasks-resolve-decision'].execute(
+    const result2 = await hooks.tool!['workflow-tasks-resolve-decision']!.execute(
       { decision: 'increase', maximum: 2, decisionId: 'task-2:retry_exhausted' },
       toolContext()
     );

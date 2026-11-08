@@ -486,7 +486,7 @@ export class OpenCodeRulesRuntime {
     }
   }
 
-  /** Оценить хуки для вызова инструмента и заqueued матчи.
+  /** Оценить хуки для вызова инструмента и поставленные в очередь матчи.
    * @throws {Error} Когда PreToolUse хук с block:true матчит инструмент и аргументы. */
   private async evaluateAndQueueHooks(
     hookType: 'PreToolUse' | 'PostToolUse',
@@ -534,7 +534,7 @@ export class OpenCodeRulesRuntime {
       state?.lastAgentType
     );
 
-    // Check for blockers globally before any queuing or side-effects
+    // Check for blockers globally before any queuing or side effects
     if (hookType === 'PreToolUse') {
       const blocker = allMatches.find(
         (m) => m.hook.type === 'PreToolUse' && (m.hook as { block?: boolean }).block

@@ -66,7 +66,7 @@ describe('markOutputReady', () => {
 
     markOutputReady('m-1', session);
 
-    expect(session.activeOperations['m-1'].result).toBe('output_ready');
+    expect(session.activeOperations['m-1']?.result).toBe('output_ready');
   });
 
   it('is no-op when id does not match', () => {
@@ -76,7 +76,7 @@ describe('markOutputReady', () => {
 
     markOutputReady('different-id', session);
 
-    expect(session.activeOperations['m-1'].result).toBeUndefined();
+    expect(session.activeOperations['m-1']?.result).toBeUndefined();
   });
 
   it('is no-op when no active operation exists', () => {

@@ -7,14 +7,12 @@ import type { JSX } from '@opentui/solid';
 import { RendererContext } from '@opentui/solid';
 import { Plugin as PluginV2, usePlugin } from '@opencode/plugin/tui';
 import type { TuiPluginApi } from '@opencode-ai/plugin/tui';
-import { archiveDirOf } from '../public-api.ts';
 import {
   createStateSection,
   createSessionGuardCoordinator,
   WorkflowSidebarContent,
   RulesSidebarContent,
   readActiveStage,
-  runtimeDirs,
   DETAILS_TITLE,
   type SectionApi,
   type SessionGuardSnapshot,

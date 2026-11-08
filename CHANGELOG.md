@@ -1,3 +1,4 @@
-# Changelog
+# История изменений
 
-All notable changes to this project will be documented here by Release Please.
+Этот файл предназначен для Release Please. Пока workflow выпуска отключён,
+историю изменений нужно обновлять вручную.

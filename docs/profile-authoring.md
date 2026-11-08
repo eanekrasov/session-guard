@@ -148,12 +148,13 @@ bun run .opencode/session-guard/src/cli.ts sync-agents
 | `extends`           | Наследование другой схемы: `profileId/file.yaml`                 |
 | `stages`            | Стадии и их параметры                                            |
 | `transitions`       | Рёбра между стадиями                                             |
-| `gates`             | Список проверок, на которые стадии могут ссылаться               |
 | `editingAgents`     | Агенты, которых workflow считает исполнителями                   |
 | `taskControlAgents` | Кому разрешено менять состояние задач (по умолчанию оркестратор) |
 
+Гейты объявляются непосредственно на стадиях через `gates:`.
+
 Стадия может объявить: `loop`, `dispatch`, `retryBudget`, `allowedAgents`,
-`actions`, `gates`, `entryGuards`, `exitGuards`, `stages`, `transitions` — и
+`actions`, `gates`, `enterGuards`, `exitGuards`, `stages`, `transitions` — и
 ничего сверх того. Неизвестный ключ — это **ошибка компиляции**, а не молча проигнорированное
 поле.
 
@@ -284,13 +285,13 @@ stages:
 ```yaml
 stages:
   deploy:
-    entryGuards:
+    enterGuards:
       - "allTasksCompleted('test_suite')"
     exitGuards:
       - '!hasPendingTasks()'
 ```
 
-`entryGuards` не пускают в стадию, `exitGuards` не выпускают из неё — и
+`enterGuards` не пускают в стадию, `exitGuards` не выпускают из неё — и
 проверяются перед **любым** departure, включая то ребро, что заканчивает задачу.
 
 **Важно:** на уровне сессии фактов о задаче нет. Guard стадии верхнего уровня,
@@ -567,7 +568,7 @@ stages:
     gates: [build_done]
   deploy:
     gates: [deploy_done]
-    entryGuards:
+    enterGuards:
       - "session.gates.build_done == 'passed'"
   smoke:
     gates: [smoke]

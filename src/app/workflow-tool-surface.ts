@@ -317,7 +317,7 @@ class WorkflowToolSurfaceImpl implements WorkflowToolSurface {
       fileContents.push(canonicalizePlan(content));
     }
 
-    const primaryContent = fileContents[0];
+    const primaryContent = fileContents[0]!;
     const consentEvidence = computeSha256(primaryContent);
 
     const revision = session.revision;

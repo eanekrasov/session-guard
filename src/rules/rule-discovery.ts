@@ -95,7 +95,7 @@ function getGlobalRulesDir(): string | null {
 }
 
 /**
- * Рекурсивно просканировать директорию на markdown файлы правил
+ * Рекурсивно просканировать директорию на markdown файлы правил.
  * Пропускает скрытые файлы и директории (начинающиеся с .)
  * @param dir - Директория для сканирования
  * @param baseDir - Базовая директория для расчёта относительных путей
@@ -190,7 +190,7 @@ export async function loadRuleSnapshots(files: readonly DiscoveredRule[]): Promi
 }
 
 /**
- * Обнаружить markdown файлы правил из стандартных директорий
+ * Обнаружить markdown файлы правил из стандартных директорий.
  * Ищет рекурсивно в:
  * - $OPENCODE_CONFIG_DIR/rules/ (высший приоритет)
  * - $XDG_CONFIG_HOME/opencode/rules/ (или ~/.config/opencode/rules как фоллбек)

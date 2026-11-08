@@ -52,7 +52,7 @@ describe('workflow flexibility — coverage matrix', () => {
 
     const { workflow, errors } = compileWorkflow(schema);
     expect(errors).toHaveLength(0);
-    expect(workflow.stages.START.retryBudget).toBe(3);
-    expect(workflow.stages.START.nodes).toHaveLength(1);
+    expect(workflow.stages.START?.retryBudget).toBe(3);
+    expect(workflow.stages.START?.nodes).toHaveLength(1);
   });
 });

@@ -107,7 +107,7 @@ const StageDefSchema: z.ZodType<RuntimeStageDef> = z.lazy(() =>
         )
         .optional(),
       gates: z.array(z.string()).optional(),
-      entryGuards: z.array(z.string()).optional(),
+      enterGuards: z.array(z.string()).optional(),
       exitGuards: z.array(z.string()).optional(),
       stages: z.record(z.string(), StageDefSchema).optional(),
       transitions: z

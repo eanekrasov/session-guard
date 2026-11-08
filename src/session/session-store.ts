@@ -64,7 +64,7 @@ const LOCK_STALE_MS = 30_000;
 
 /** Сохранение, построенное на ревизии, которой в файле уже нет. */
 export class WorkflowSessionConflictError extends Error {
-  readonly name = 'WorkflowSessionConflictError';
+  override readonly name = 'WorkflowSessionConflictError';
   readonly expectedRevision: number;
   readonly actualRevision: number;
 
@@ -78,9 +78,9 @@ export class WorkflowSessionConflictError extends Error {
 // ─── WorkflowStore ────────────────────────────────────────────────────────────
 
 export class WorkflowStore {
-  private directory: string;
+  private readonly directory: string;
   private locks = new Map<string, Promise<void>>();
-  private log: LogFn;
+  private readonly log: LogFn;
 
   /**
    * Кэш: sessionID → parentID (или сам sessionID для корня).
@@ -302,7 +302,7 @@ export class WorkflowStore {
       throw new Error('[ERROR] Corrupt session file: invalid JSON');
     }
 
-    const result = WorkflowSessionSchema.passthrough().safeParse(parsed);
+    const result = WorkflowSessionSchema.loose().safeParse(parsed);
     if (!result.success) {
       void this.log('warn', `Session schema mismatch (not our format): ${sessionId}`, {
         issues: result.error.issues.map((i) => i.message),

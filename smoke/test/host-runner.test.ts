@@ -90,7 +90,7 @@ function makeHost(
         calls.stateReads += 1;
         if (options.stateError === true) throw new Error('[ERROR] damaged state file');
         if (options.states !== undefined && options.states.length > 0) {
-          const queued = options.states[Math.min(stateIndex, options.states.length - 1)];
+          const queued = options.states[Math.min(stateIndex, options.states.length - 1)]!;
           stateIndex += 1;
           return queued;
         }

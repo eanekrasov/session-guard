@@ -162,7 +162,7 @@ describe('bumpRetry', () => {
 
     bumpRetry(session, 'task-1');
 
-    expect(session.retryBudgets['task-1'].attempts).toBe(1);
+    expect(session.retryBudgets['task-1']!.attempts).toBe(1);
   });
 
   it('creates a budget key if missing with attempt=1 after bump', () => {
@@ -171,8 +171,8 @@ describe('bumpRetry', () => {
     bumpRetry(session, 'task-1');
 
     expect(session.retryBudgets['task-1']).toBeDefined();
-    expect(session.retryBudgets['task-1'].attempts).toBe(1);
-    expect(session.retryBudgets['task-1'].maximum).toBe(3);
+    expect(session.retryBudgets['task-1']!.attempts).toBe(1);
+    expect(session.retryBudgets['task-1']!.maximum).toBe(3);
   });
 });
 
@@ -213,8 +213,8 @@ describe('resetRetry', () => {
 
     resetRetry(session, 'task-1');
 
-    expect(session.retryBudgets['task-1'].attempts).toBe(0);
-    expect(session.retryBudgets['task-1'].maximum).toBe(3);
+    expect(session.retryBudgets['task-1']!.attempts).toBe(0);
+    expect(session.retryBudgets['task-1']!.maximum).toBe(3);
   });
 
   it('creates a default budget key if missing', () => {
@@ -223,8 +223,8 @@ describe('resetRetry', () => {
     resetRetry(session, 'task-1');
 
     expect(session.retryBudgets['task-1']).toBeDefined();
-    expect(session.retryBudgets['task-1'].attempts).toBe(0);
-    expect(session.retryBudgets['task-1'].maximum).toBe(3);
+    expect(session.retryBudgets['task-1']!.attempts).toBe(0);
+    expect(session.retryBudgets['task-1']!.maximum).toBe(3);
   });
 });
 
@@ -266,7 +266,7 @@ describe('setInvariantViolations', () => {
     setInvariantViolations(session, [{ severity: 'info', message: 'New', status: 'resolved' }]);
 
     expect(session.invariantViolations).toHaveLength(1);
-    expect(session.invariantViolations[0].evidenceId).toBe('iv-1');
-    expect(session.invariantViolations[0].message).toBe('New');
+    expect(session.invariantViolations[0]?.evidenceId).toBe('iv-1');
+    expect(session.invariantViolations[0]?.message).toBe('New');
   });
 });

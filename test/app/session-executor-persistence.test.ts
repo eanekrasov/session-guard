@@ -273,7 +273,7 @@ describe('SessionExecutor persistence semantics', () => {
       // Session was mutated — executor saves exactly once
       expect(saveCalls).toHaveLength(1);
       expect(saveCalls[0]!.approvals).toHaveLength(1);
-      expect(saveCalls[0]!.approvals[0].type).toBe('plan');
+      expect(saveCalls[0]!.approvals[0]?.type).toBe('plan');
     });
   });
 

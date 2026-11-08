@@ -1,43 +1,44 @@
-# Contributing
+# Участие в разработке
 
-Thank you for your interest in contributing!
+Спасибо за интерес к проекту и желание помочь.
 
-## Reporting Issues
+## Сообщение о проблеме
 
-- Search existing issues before opening a new one
-- Include steps to reproduce, expected behavior, and actual behavior
-- For bugs, include your environment (Bun version, OS, etc.)
+- Перед созданием issue проверьте, не сообщал ли кто-то о проблеме раньше.
+- Опишите шаги воспроизведения, ожидаемое и фактическое поведение.
+- Для ошибок укажите окружение: версию Bun, ОС и другие важные детали.
 
-> **Note:** Issues inactive for 60 days may be marked stale and closed after 7 days. Feel free to reopen if still relevant.
+> **Примечание:** issue без активности в течение 60 дней может получить отметку об устаревании
+> и быть закрыто через 7 дней. Если проблема всё ещё актуальна, его можно открыть повторно.
 
-## Submitting Changes
+## Отправка изменений
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feat/my-feature`)
-3. Make your changes
-4. Run tests and linting:
+1. Создайте fork репозитория.
+2. Создайте ветку для изменения (`git checkout -b feat/my-feature`).
+3. Внесите изменения.
+4. Запустите проверки:
    ```bash
    mise run check
    ```
    `mise run check` включает typecheck, lint и test, но не выполняет build. Для изменений
    runtime, API, schema compiler или поставочных артефактов дополнительно запустите
    `mise run build`; для host-интеграции — `mise run smoke`.
-5. Commit using [Conventional Commits](https://www.conventionalcommits.org/) format:
+5. Создайте коммит в формате [Conventional Commits](https://www.conventionalcommits.org/):
    - `feat: add new feature`
    - `fix: resolve bug`
    - `docs: update readme`
    - `chore: update dependencies`
-6. Push and open a Pull Request
+6. Отправьте ветку и откройте Pull Request.
 
-## Pull Request Guidelines
+## Требования к Pull Request
 
-- PR titles must follow Conventional Commits format (enforced by CI)
-- Keep PRs focused on a single change
-- Include tests for new functionality
-- Ensure all checks pass before requesting review
+- Заголовок PR должен соответствовать Conventional Commits (это проверяет CI).
+- Сосредоточьте PR на одном изменении.
+- Добавьте тесты для новой функциональности.
+- Перед запросом ревью убедитесь, что проверки проходят.
 
-## Code Style
+## Стиль кода
 
 This project uses ESLint and Prettier. Run `mise run lint-fix` to auto-fix issues.
 
-See [AGENTS.md](./AGENTS.md) for detailed code style guidelines.
+Подробные правила стиля кода приведены в [AGENTS.md](./AGENTS.md).

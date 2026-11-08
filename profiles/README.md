@@ -10,13 +10,12 @@ profiles/
   base/      profile.json + base.yaml       — канонический workflow, от него наследуется всё
   harness/   profile.json + harness.yaml    — дельта: самостоятельное редактирование TypeScript
   android/   profile.json + android.yaml    — дельта: Android
-             agent/*.md                     — инструкции агентов (agentsDir: "agent")
-             task-cycles.yaml               — незарегистрированный пример, см. его заголовок
+             agents/*.md                    — инструкции агентов
 ```
 
-Эталонная схема со всеми поддерживаемыми полями находится в
-`docs/examples/workflow-schema.example.yaml`. Это документация, а не загружаемый
-профиль.
+Поддерживаемые поля описаны в [справочнике схем](../docs/schema-reference.md),
+а рабочие примеры — в [руководстве автора профиля](../docs/profile-authoring.md)
+и [примерах схем](../docs/schema-examples.md).
 
 ## Разрешение схем
 

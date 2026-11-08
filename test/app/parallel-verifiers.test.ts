@@ -162,7 +162,7 @@ describe('a stage waits for every gate it declares', () => {
 
     const session = await load(store);
     expect(run(session).status).toBe('completed');
-    expect(session.tasks.implementation[0]!.status).toBe('completed');
+    expect(session.tasks.implementation![0]!.status).toBe('completed');
   });
 
   it('fails the stage as soon as one gate fails, without waiting for the other', async () => {
@@ -542,7 +542,7 @@ describe('a loop transition that asks for consent', () => {
 
     const session = await load(store);
     expect(
-      session.tasks.implementation[0]!.status,
+      session.tasks.implementation![0]!.status,
       'the task finished without the consent its transition asked for'
     ).not.toBe('completed');
 
@@ -553,7 +553,7 @@ describe('a loop transition that asks for consent', () => {
     await dispatch(hooks, 'call-code-2', 'code');
     await report(hooks, 'call-code-2', 'code', 'pass');
 
-    expect((await load(store)).tasks.implementation[0]!.status).toBe('completed');
+    expect((await load(store)).tasks.implementation![0]!.status).toBe('completed');
   });
 });
 
@@ -593,7 +593,7 @@ describe('an effect on a transition inside a loop', () => {
 
     const session = await load(store);
     expect(
-      session.tasks.implementation[0]!.status,
+      session.tasks.implementation![0]!.status,
       'the task was held by a consent an earlier effect should have granted'
     ).toBe('completed');
   });
@@ -612,7 +612,7 @@ describe('an effect on a transition inside a loop', () => {
     await report(hooks, 'call-code', 'code', 'pass');
 
     const session = await load(store);
-    expect(session.tasks.implementation[0]!.status).toBe('completed');
+    expect(session.tasks.implementation![0]!.status).toBe('completed');
     expect(
       session.approvals.map((approval) => approval.type),
       'the finishing edge dropped its effects'

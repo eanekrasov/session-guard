@@ -151,7 +151,7 @@ describe('Happy path: planning → tasks_ready → code → review → qa → co
     //   guard: hasPendingTasks() → хотя бы одна таска со статусом pending/running
     assertStaysAt(session, engine, 'tasks_ready');
 
-    session.tasks.implementation.push(createTask({ title: 'Implement feature' }));
+    session.tasks.implementation?.push(createTask({ title: 'Implement feature' }));
 
     advanceTo(session, engine, 'code');
 
@@ -212,7 +212,7 @@ describe('QA recovery path: qa → code → review → qa → commit → done', 
     session.refs.plan = '/plan.md';
     approve(session, 'plan', 'ok', 'c1');
     advanceTo(session, engine, 'tasks_ready');
-    session.tasks.implementation.push({
+    session.tasks.implementation?.push({
       id: 't1',
       status: 'pending',
       title: 'Fix bug',
@@ -234,8 +234,8 @@ describe('QA recovery path: qa → code → review → qa → commit → done', 
 
     // Проверяем, что ретрай-бюджет cycles увеличился (attempts=1, maximum=5)
     expect(session.retryBudgets.cycles).toBeDefined();
-    expect(session.retryBudgets.cycles.attempts).toBe(1);
-    expect(session.retryBudgets.cycles.maximum).toBe(5);
+    expect(session.retryBudgets.cycles?.attempts).toBe(1);
+    expect(session.retryBudgets.cycles?.maximum).toBe(5);
 
     // ── Проходим цикл повторно ──────────────────────────────────────
     setGateStatus(session, 'invariants', 'passed');
@@ -264,7 +264,7 @@ describe('QA exhausted path: qa → failed', () => {
     session.refs.plan = '/plan.md';
     approve(session, 'plan', 'ok', 'c1');
     advanceTo(session, engine, 'tasks_ready');
-    session.tasks.implementation.push({ id: 't1', status: 'pending', title: 'Fix' });
+    session.tasks.implementation?.push({ id: 't1', status: 'pending', title: 'Fix' });
     advanceTo(session, engine, 'code');
     setGateStatus(session, 'invariants', 'passed');
     advanceTo(session, engine, 'review');
@@ -286,8 +286,8 @@ describe('QA exhausted path: qa → failed', () => {
     }
 
     // Бюджет исчерпан — attempts=5, maximum=5
-    expect(session.retryBudgets.cycles.attempts).toBe(5);
-    expect(session.retryBudgets.cycles.maximum).toBe(5);
+    expect(session.retryBudgets.cycles?.attempts).toBe(5);
+    expect(session.retryBudgets.cycles?.maximum).toBe(5);
 
     // Ещё один QA failed — теперь isExhausted('cycles') == true
     // Переход qa→code блокируется (guard: ... !isExhausted('cycles'))
@@ -338,7 +338,7 @@ describe('Guard contracts — каждый тип guard-выражения из 
 
     assertStaysAt(session, engine, 'planning');
 
-    session.tasks.implementation.push({ id: 't1', status: 'pending', title: 'Do' });
+    session.tasks.implementation?.push({ id: 't1', status: 'pending', title: 'Do' });
     advanceTo(session, engine, 'code');
   });
 

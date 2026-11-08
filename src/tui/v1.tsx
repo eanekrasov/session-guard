@@ -258,7 +258,7 @@ export function createStateSection(api: SectionApi, baseDir: string) {
   }
 
   function openProfileSchemas(profileId: string): void {
-    void resolveConfig(profileId, profileDirs(baseDir)[0])
+    void resolveConfig(profileId, profileDirs(baseDir)[0]!)
       .then((profile) => {
         showSchemaList(profileId, profile.schemas);
       })

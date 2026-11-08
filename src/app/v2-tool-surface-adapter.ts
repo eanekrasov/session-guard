@@ -7,7 +7,7 @@ import {
   type WorkflowToolSurfacePorts,
 } from './workflow-tool-surface.ts';
 
-const descriptions: Record<string, string> = {
+const descriptions: Record<ToolOrder, string> = {
   'workflow-list':
     'List all available workflow profiles (schemas). Returns profilesDir and profile IDs with descriptions.',
   'workflow-create': 'Create a new session-guard workflow session',
@@ -20,7 +20,7 @@ const descriptions: Record<string, string> = {
   'workflow-gate-set': 'Set the result of a declared workflow gate and evaluate the transition.',
 };
 
-const inputs: Record<string, Record<string, unknown>> = {
+const inputs: Record<ToolOrder, Record<string, unknown>> = {
   'workflow-list': { type: 'object', properties: {}, additionalProperties: false },
   'workflow-create': {
     type: 'object',
@@ -94,6 +94,8 @@ const toolOrder = [
   'workflow-tasks-resolve-decision',
   'workflow-gate-set',
 ] as const;
+
+type ToolOrder = (typeof toolOrder)[number];
 
 /**
  * Every workflow tool answers with one line of text.

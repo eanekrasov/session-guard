@@ -66,7 +66,7 @@ function parseArguments(argv: string[]): ParsedArguments {
   let cwd: string | undefined;
 
   for (let index = hasCommand ? 1 : 0; index < argv.length; index += 1) {
-    const argument = argv[index];
+    const argument = argv[index]!;
 
     if (argument === '-h' || argument === '--help') return { kind: 'help' };
 

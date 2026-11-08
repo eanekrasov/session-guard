@@ -159,7 +159,7 @@ describe('YAML-driven workflow (profiles/base/base.yaml)', () => {
 
     expectNotApplied(ENGINE.tryApplyTransitions(session), session, 'execution');
     expect(session.retryBudgets['cycles']?.attempts).toBe(1);
-    expect(session.tasks.implementation[0]?.status).toBe('pending');
+    expect(session.tasks.implementation![0]!.status).toBe('pending');
   });
 
   test('TC3: validation that has spent the retry budget ends in failed', () => {

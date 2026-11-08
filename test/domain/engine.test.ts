@@ -84,7 +84,7 @@ describe('SessionGuardEngine', () => {
       makeConfig({
         stages: {
           a: { exitGuards: ['false'] },
-          b: { entryGuards: ['false'] },
+          b: { enterGuards: ['false'] },
         },
         transitions: [{ from: 'a', to: 'b' }],
       })
@@ -216,7 +216,7 @@ describe('SessionGuardEngine', () => {
     expect(result.applied).toBe(false);
 
     // Budget stays untouched because no transition effects fired
-    expect(session.retryBudgets['task-1'].attempts).toBe(0);
+    expect(session.retryBudgets['task-1']?.attempts).toBe(0);
     expect(session.approvals.length).toBe(0);
   });
 
@@ -317,9 +317,9 @@ describe('onFailure: retry', () => {
 });
 
 describe('alternative transitions between the same two stages', () => {
-  // A schema may declare several edges from a to b, told apart by their
+  // A schema may declare several edges from `a` to `b`, told apart by their
   // guards. Judging a candidate by its endpoints re-finds the first edge every
-  // time, so the second guard is never read and the session stays in a.
+  // time, so the second guard is never read and the session stays in `a`.
   const config = () =>
     makeConfig({
       transitions: [

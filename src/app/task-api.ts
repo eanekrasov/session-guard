@@ -42,9 +42,9 @@ export class TaskApi {
       this.assertListIsNotInUse(session, input.listKey);
       this.assertUniqueTaskIds(session, input);
       this.assertReplacementKeepsChildren(session, input);
-
-      session.tasks[input.listKey] = input.tasks.map((task) => ({ ...task }));
-      return this.copyTasks(session.tasks[input.listKey]);
+      const task = input.tasks.map((task) => ({ ...task }));
+      session.tasks[input.listKey] = task;
+      return this.copyTasks(task);
     });
   }
 

@@ -23,12 +23,12 @@ describe('compileWorkflow', () => {
 
     expect(workflow.version).toBe(1);
     expect(Object.keys(workflow.stages)).toEqual(['PLANNING', 'DONE']);
-    expect(workflow.stages.PLANNING.nodes).toHaveLength(2);
-    expect(workflow.stages.PLANNING.nodes[0].id).toBe('PLANNING/dev');
+    expect(workflow.stages.PLANNING?.nodes).toHaveLength(2);
+    expect(workflow.stages.PLANNING?.nodes[0]?.id).toBe('PLANNING/dev');
     expect(workflow.initialStage).toBe('PLANNING');
     expect(workflow.transitions).toHaveLength(1);
-    expect(workflow.transitions[0].from).toBe('PLANNING');
-    expect(workflow.transitions[0].to).toBe('DONE');
+    expect(workflow.transitions[0]?.from).toBe('PLANNING');
+    expect(workflow.transitions[0]?.to).toBe('DONE');
   });
 
   it('preserves inherited defaults on undefined fields', () => {
@@ -45,12 +45,12 @@ describe('compileWorkflow', () => {
 
     const { workflow, errors } = compileWorkflow(schema);
     expect(errors).toHaveLength(0);
-    expect(workflow.stages.WORK.loop).toBeNull();
-    expect(workflow.stages.WORK.dispatch).toBeNull();
-    expect(workflow.stages.WORK.retryBudget).toBeNull();
-    expect(workflow.stages.WORK.exitGuards).toEqual([]);
-    expect(workflow.stages.WORK.nodes[0].entryGuards).toEqual([]);
-    expect(workflow.stages.WORK.nodes[0].exitGuards).toEqual([]);
+    expect(workflow.stages.WORK?.loop).toBeNull();
+    expect(workflow.stages.WORK?.dispatch).toBeNull();
+    expect(workflow.stages.WORK?.retryBudget).toBeNull();
+    expect(workflow.stages.WORK?.exitGuards).toEqual([]);
+    expect(workflow.stages.WORK?.nodes[0]?.enterGuards).toEqual([]);
+    expect(workflow.stages.WORK?.nodes[0]?.exitGuards).toEqual([]);
   });
 
   it('validates cross-references — unknown source stage', () => {
@@ -105,7 +105,7 @@ describe('compileWorkflow', () => {
 
     const { workflow, errors } = compileWorkflow(schema);
     expect(errors).toHaveLength(0);
-    expect(workflow.stages.EXEC.dispatch).toEqual({
+    expect(workflow.stages.EXEC?.dispatch).toEqual({
       strategy: 'parallel',
       maxConcurrent: 3,
       overlapRoles: [],

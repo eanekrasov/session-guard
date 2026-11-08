@@ -144,9 +144,9 @@ describe('TransitionYamlSchema', () => {
       expect(result.success).toBe(true);
       if (result.success) {
         expect(result.data.effects).toHaveLength(1);
-        expect(result.data.effects![0].bumpRetry).toBe('task-1');
-        expect(result.data.effects![0].maxAttempts).toBe(3);
-        expect(result.data.effects![0].approve).toBe('plan');
+        expect(result.data.effects![0]?.bumpRetry).toBe('task-1');
+        expect(result.data.effects![0]?.maxAttempts).toBe(3);
+        expect(result.data.effects![0]?.approve).toBe('plan');
       }
     });
 
@@ -381,9 +381,9 @@ describe('StageYamlSchema', () => {
       }
     });
 
-    test('parses stage with entryGuards and exitGuards', () => {
+    test('parses stage with enterGuards and exitGuards', () => {
       const result = StageYamlSchema.safeParse({
-        entryGuards: ['session.checks === "passed"'],
+        enterGuards: ['session.checks === "passed"'],
         exitGuards: ['task.status === "completed"'],
       });
       expect(result.success).toBe(true);
@@ -420,7 +420,7 @@ describe('StageYamlSchema', () => {
         allowedAgents: ['coder'],
         actions: [{ action: 'edit', paths: ['src/**'] }],
         gates: ['build'],
-        entryGuards: ['true'],
+        enterGuards: ['true'],
         exitGuards: ['true'],
         stages: { nested: {} },
         transitions: [{ from: 'stage', to: 'next' }],

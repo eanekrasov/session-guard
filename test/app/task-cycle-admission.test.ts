@@ -153,7 +153,7 @@ describe('task-cycle admission', () => {
       agent: 'code',
       status: 'running',
     });
-    const runId = session.activeOperations['call-1'].runId!;
+    const runId = session.activeOperations!['call-1']!.runId!;
     expect(session.loopRuns[runId]).toEqual({
       id: runId,
       taskId: 'task-1',
@@ -164,7 +164,7 @@ describe('task-cycle admission', () => {
       gates: {},
       round: 0,
     });
-    expect(session.tasks.implementation[0].status).toBe('running');
+    expect(session.tasks.implementation![0]!.status).toBe('running');
   });
 
   it.each([
@@ -267,8 +267,8 @@ describe('task-cycle admission', () => {
     await afterTask(hooks, 'call-dev', 'Task complete.', workflowResult('review', 'pass'));
     let session = await load(store);
     expect(session.activeOperations).toEqual({});
-    expect(session.loopRuns['run-1'].stage).toBe('review');
-    expect(session.loopRuns['run-1'].status).toBe('running');
+    expect(session.loopRuns['run-1']?.stage).toBe('review');
+    expect(session.loopRuns['run-1']?.status).toBe('running');
 
     await beforeTask(hooks, 'call-review', '[workflow-task:task-1] Review', 'review');
     await afterTask(
@@ -279,14 +279,14 @@ describe('task-cycle admission', () => {
       'review'
     );
     session = await load(store);
-    expect(session.loopRuns['run-1'].stage).toBe('qa');
+    expect(session.loopRuns['run-1']?.stage).toBe('qa');
 
     await beforeTask(hooks, 'call-qa', '[workflow-task:task-1] QA', 'qa');
     await afterTask(hooks, 'call-qa', 'Task complete.', workflowResult('qa', 'pass'), 'qa');
     session = await load(store);
     expect(session.activeOperations).toEqual({});
-    expect(session.loopRuns['run-1'].status).toBe('completed');
-    expect(session.tasks.implementation[0].status).toBe('completed');
+    expect(session.loopRuns['run-1']?.status).toBe('completed');
+    expect(session.tasks.implementation![0]?.status).toBe('completed');
 
     const next = await beforeTask(hooks, 'call-next', '[workflow-task:task-2] Next');
     expect(next.args).toEqual(expect.objectContaining({ description: expect.any(String) }));
@@ -296,7 +296,7 @@ describe('task-cycle admission', () => {
     setTaskAdmissionFixtureProfilesDir('serial');
     const store = await createWorkflowSession();
     const session = await load(store);
-    session.tasks.implementation[0].editingAgents = ['code'];
+    session.tasks.implementation![0]!.editingAgents = ['code'];
     await store.save(session);
     const hooks = createRuntime(pluginInput());
 
@@ -323,14 +323,14 @@ describe('task-cycle admission', () => {
     let session = await load(store);
     expect(session.activeOperations).toEqual({});
     expect(session.loopRuns['run-1']).toMatchObject({ stage: 'dev', status: 'running' });
-    expect(session.tasks.implementation[0].status).toBe('running');
+    expect(session.tasks.implementation![0]!.status).toBe('running');
 
     await beforeTask(hooks, 'call-malformed', '[workflow-task:task-1] Develop again');
     await afterTask(hooks, 'call-malformed', 'No gate tool call was made.');
     session = await load(store);
     expect(session.activeOperations).toEqual({});
     expect(session.loopRuns['run-1']).toMatchObject({ stage: 'dev', status: 'running' });
-    expect(session.tasks.implementation[0].status).toBe('running');
+    expect(session.tasks.implementation![0]?.status).toBe('running');
   });
 
   it('records a valid failed result as a retry and keeps the task cycle slot', async () => {
@@ -343,7 +343,7 @@ describe('task-cycle admission', () => {
     let session = await load(store);
     expect(session.activeOperations).toEqual({});
     expect(session.loopRuns['run-1']).toMatchObject({ stage: 'dev', status: 'running' });
-    expect(session.tasks.implementation[0].status).toBe('running');
+    expect(session.tasks.implementation![0]!.status).toBe('running');
 
     const admitted = await beforeTask(hooks, 'call-next', '[workflow-task:task-2] Next');
     session = await load(store);
@@ -390,7 +390,7 @@ describe('task-cycle admission', () => {
 
     expect(tooEarly.blockedReason).toEqual(expect.any(String));
     expect(admitted.args).toEqual(expect.objectContaining({ description: expect.any(String) }));
-    expect(loaded.activeOperations['call-2'].taskId).toBe('task-2');
+    expect(loaded.activeOperations['call-2']?.taskId).toBe('task-2');
     expect(Object.keys(loaded.loopRuns)).toHaveLength(2);
   });
 });

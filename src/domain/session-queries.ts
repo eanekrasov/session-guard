@@ -248,7 +248,7 @@ const WRITES_OR_HIDES = /[>]|\$\(|`|<\(/u;
  *
  * `bash` is in the runtime's `mutatingTools` because it usually is one, so a
  * read had to satisfy a lifecycle built for writes: `git status --short` was
- * refused before the plan was approved, and refused afterwards with "Cannot
+ * refused before the plan was approved, and refused afterward with "Cannot
  * resolve a single workflow task run for mutation" whenever the session had no
  * runnable task.
  *
@@ -281,8 +281,7 @@ export function isReadOnlyBashCommand(command: string): boolean {
 
     if (name === 'git') {
       const subcommand = gitSubcommandOf(words);
-      if (subcommand === undefined || !READ_ONLY_GIT_SUBCOMMANDS.has(subcommand)) return false;
-      return true;
+      return !(subcommand === undefined || !READ_ONLY_GIT_SUBCOMMANDS.has(subcommand));
     }
 
     // `sort` is only read-only when it writes to stdout. `-o FILE` and its

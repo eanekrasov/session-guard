@@ -259,7 +259,7 @@ describe('ConsentOrchestrator.after', () => {
 
     // Verify prompt was called with the synthetic message
     expect(client.prompt).toHaveBeenCalledTimes(1);
-    const promptCall = (client.prompt as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const promptCall = (client.prompt as ReturnType<typeof vi.fn>).mock.calls[0]![0];
     expect(promptCall.path.id).toBe('co-synthetic');
     expect(promptCall.body.noReply).toBe(true);
     expect(promptCall.body.parts[0].type).toBe('text');

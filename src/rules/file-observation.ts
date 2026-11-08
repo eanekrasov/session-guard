@@ -68,7 +68,7 @@ function readContent(output: string | undefined): string | null | undefined {
   }
   // Strip wrapper blank lines left by <content> tags, then the
   // `{lineNumber}: ` prefixes on returned lines.
-  return contentMatch[1]
+  return contentMatch[1]!
     .replace(/^\n+/, '')
     .replace(/\n+$/, '')
     .split('\n')
@@ -114,14 +114,14 @@ export function parsePatch(patchText: string): FileObservation[] | undefined {
       flush();
       sawStructure = true;
       const header = add ?? del ?? update;
-      currentPath = header?.[1].trim();
+      currentPath = header?.[1]?.trim();
       currentIsDelete = del !== null;
       continue;
     }
     if (moveTo) {
       // A following Move header retargets the buffered file before its
       // hunks arrive.
-      currentPath = moveTo[1].trim();
+      currentPath = moveTo[1]?.trim();
       continue;
     }
     if (currentPath === undefined) continue;
@@ -142,9 +142,9 @@ function summaryPaths(output: string | undefined): FileObservation[] {
     const move = /^R\s+(\S+)\s+->\s+(\S+)\s*$/.exec(line);
     const simple = /^([ADM])\s+(\S+)\s*$/.exec(line);
     if (move) {
-      result.push({ path: move[2], tool: 'apply_patch', content: '' });
+      result.push({ path: move[2]!, tool: 'apply_patch', content: '' });
     } else if (simple) {
-      result.push({ path: simple[2], tool: 'apply_patch', content: '' });
+      result.push({ path: simple[2]!, tool: 'apply_patch', content: '' });
     }
   }
   return result;

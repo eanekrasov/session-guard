@@ -47,7 +47,7 @@ describe('ProfileSchemaSchema', () => {
       };
 
       const result = ProfileSchemaSchema.parse(input);
-      const nested = result.stages!.PLANNING.stages!;
+      const nested = result.stages!.PLANNING!.stages!;
 
       expect(nested.plan!.exitGuards).toEqual([
         'session.activeMutation?.outputReady == true',
@@ -71,16 +71,16 @@ describe('ProfileSchemaSchema', () => {
         transitions: [{ from: 'execution', to: 'done', onFailure: 'terminal' }],
       });
 
-      expect(parsed.stages!.execution.loop).toBe('implementation');
-      expect(parsed.stages!.execution.retryBudget!.maximum).toBe(3);
+      expect(parsed.stages!.execution?.loop).toBe('implementation');
+      expect(parsed.stages!.execution!.retryBudget!.maximum).toBe(3);
 
       expect(() =>
         ProfileSchemaSchema.parse({
           stages: { execution: { loop: 'implementation', retryBudget: { maximum: 0 } } },
         })
       ).toThrow();
-      expect(parsed.stages!.execution.exitGuards).toEqual(['allTasksCompleted()']);
-      expect(parsed.transitions![0].onFailure).toBe('terminal');
+      expect(parsed.stages!.execution?.exitGuards).toEqual(['allTasksCompleted()']);
+      expect(parsed.transitions![0]?.onFailure).toBe('terminal');
     });
 
     it('allows serial dispatch only without maxConcurrent', () => {
@@ -148,7 +148,7 @@ describe('ProfileSchemaSchema', () => {
 
       expect(result.success).toBe(false);
       if (!result.success) {
-        expect(result.error.issues[0].path).toEqual(['stages', 'verification', 'loop']);
+        expect(result.error.issues[0]?.path).toEqual(['stages', 'verification', 'loop']);
       }
     });
   });
@@ -168,9 +168,9 @@ describe('ProfileSchemaSchema', () => {
       const result = ProfileSchemaSchema.parse(input);
 
       expect(result.transitions).toHaveLength(1);
-      expect(result.transitions![0].from).toBe('PLANNING');
-      expect(result.transitions![0].to).toBe('EXECUTION');
-      expect(result.transitions![0].guard).toBe("session.granted('plan')");
+      expect(result.transitions![0]?.from).toBe('PLANNING');
+      expect(result.transitions![0]?.to).toBe('EXECUTION');
+      expect(result.transitions![0]?.guard).toBe("session.granted('plan')");
     });
 
     it('accepts transition without an optional guard', () => {
@@ -180,7 +180,7 @@ describe('ProfileSchemaSchema', () => {
 
       const result = ProfileSchemaSchema.parse(input);
 
-      expect(result.transitions![0].guard).toBeUndefined();
+      expect(result.transitions![0]?.guard).toBeUndefined();
     });
   });
 

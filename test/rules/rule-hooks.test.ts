@@ -27,7 +27,7 @@ describe('rule-hooks', () => {
         hookType: 'PreToolUse',
       });
       expect(result).toHaveLength(1);
-      expect(result[0].tool).toBe('bash');
+      expect(result[0]?.tool).toBe('bash');
     });
 
     it('excludes PostToolUse hooks when evaluating PreToolUse', () => {
@@ -41,7 +41,7 @@ describe('rule-hooks', () => {
         hookType: 'PreToolUse',
       });
       expect(result).toHaveLength(1);
-      expect(result[0].type).toBe('PreToolUse');
+      expect(result[0]?.type).toBe('PreToolUse');
     });
 
     it('returns empty when no PostToolUse hooks match', () => {
@@ -69,7 +69,7 @@ describe('rule-hooks', () => {
         hookType: 'PreToolUse',
       });
       expect(result).toHaveLength(1);
-      expect(result[0].tool).toBe('*');
+      expect(result[0]?.tool).toBe('*');
     });
   });
 });

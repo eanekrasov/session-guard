@@ -18,8 +18,8 @@ OpenCode из него не загружает плагин автоматиче
 
 ## Требования
 
-OpenCode `>= 1.18.29` (объявлено в `engines`) и
-[mise](https://mise.jdx.dev/) для команд source repository. mise устанавливает
+В `package.json` заявлена совместимость с OpenCode `>= 1.18.29` (поле `engines`). Для
+работы с source repository также нужен [mise](https://mise.jdx.dev/): он устанавливает
 закреплённую версию Bun из `mise.toml` и запускает сборку и тесты через задачи.
 
 ---

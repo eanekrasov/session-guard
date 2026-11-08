@@ -75,7 +75,7 @@ export class TaskAdmissionImpl implements TaskAdmission {
         : null;
 
     // match гарантированно не null — проверка уже в isWorkflowTask
-    const taskId = match![1];
+    const taskId = match![1]!;
 
     // Захвачено до допуска (D2): это реальный I/O (git status + хеш на каждый
     // грязный путь) который не должен запускаться внутри сериализованной очереди
@@ -116,11 +116,11 @@ export class TaskAdmissionImpl implements TaskAdmission {
         blockTaskAdmission(`Stage ${derivedStageId} does not declare an executable task loop`);
       }
 
-      // Луп, который владеет списком этой задачи — не всегда стадия, в которой
-      // сессия: стадия-луп может гнездить свой собственный луп
-      // (`loop: $currentTask.id`), и задачи этого внутреннего лупа живут в
+      // Цикл, который владеет списком этой задачи — не всегда стадия, в которой
+      // сессия: стадия-луп может гнездить свой собственный цикл
+      // (`loop: $currentTask.id`), и задачи этого внутреннего цикла живут в
       // списке, закеированном по id родительской задачи. Допуск смотрел только
-      // в список внешнего лупа, так что схема с вложенным лупом принималась, а
+      // в список внешнего цикла, так что схема с вложенным лупом принималась, а
       // её дочерние задачи были всегда "not eligible" — форма могла быть
       // написана и никогда не запущена.
       const owner = this.resolveAdmissionLoop(tx.session, derivedStageId, derivedStage, taskId);
@@ -241,7 +241,7 @@ export class TaskAdmissionImpl implements TaskAdmission {
         listKey,
       });
       if (
-        stage.entryGuards?.some(
+        stage.enterGuards?.some(
           (guard) => !engine.evaluateGuard(guard, guardContext, { currentLoopListKey: listKey })
         )
       ) {
@@ -381,7 +381,7 @@ export class TaskAdmissionImpl implements TaskAdmission {
           /^task-[0-9]+$/.test(listKey) && tasks.some((task) => task.id === taskId)
       )
       .map(([listKey]) => listKey);
-    return matches.length === 1 ? matches[0] : null;
+    return matches.length === 1 ? matches[0]! : null;
   }
 
   /**
@@ -463,7 +463,7 @@ export class TaskAdmissionImpl implements TaskAdmission {
     if (dispatch.strategy === 'parallel') return null;
 
     if (taskIndex === 0) return cycleRuns.length === 0 ? null : 'First task is already active';
-    const priorTask = tasks[taskIndex - 1];
+    const priorTask = tasks[taskIndex - 1]!;
     const priorRun = cycleRuns.find((run) => run.taskId === priorTask.id);
     const priorIsTerminal = ['completed', 'failed', 'cancelled'].includes(priorTask.status);
     if (!priorIsTerminal && (!priorRun || priorRun.stage === firstStageId)) {

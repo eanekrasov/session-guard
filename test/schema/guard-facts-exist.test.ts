@@ -16,7 +16,7 @@ import type { StageDef } from '../../src/schema/types.ts';
  *
  * The compiler parses every expression now, so a syntax error is caught at
  * load — but `session.taskLists.implementation` parses perfectly and then
- * reads `false` for ever, because the list of task lists is `session.tasks`.
+ * reads `false` forever, because the list of task lists is `session.tasks`.
  * The base fixture carried exactly that for months: its `uncommitted →
  * execution` transition guard never fired once, and nothing was red.
  *
@@ -60,8 +60,8 @@ function collect(where: string, schema: Record<string, unknown>): Expression[] {
   walkTransitions('transitions', schema.transitions);
 
   const walkStage = (path: string, stage: StageDef): void => {
-    for (const [index, guard] of (stage.entryGuards ?? []).entries()) {
-      push(`${path}.entryGuards[${index}]`, guard);
+    for (const [index, guard] of (stage.enterGuards ?? []).entries()) {
+      push(`${path}.enterGuards[${index}]`, guard);
     }
     for (const [index, guard] of (stage.exitGuards ?? []).entries()) {
       push(`${path}.exitGuards[${index}]`, guard);

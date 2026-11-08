@@ -37,28 +37,28 @@ export class ProfileResolver {
 
     // Build metadata
     const primary = chain[0];
-    const agentsDir = primary.agentsDir;
-    const skillsDir = primary.skillsDir;
-    const description = primary.description;
+    const agentsDir = primary?.agentsDir;
+    const skillsDir = primary?.skillsDir;
+    const description = primary?.description;
 
     // Схемы профиля — свои. Схемы комбинируются только через schema-level `extends`,
     // так что объединение списков цепочки положило бы workflow родителя рядом с
     // дельтой ребёнка как вторую независимую схему — и сессии пришлось бы
     // выбирать между ними. Профиль, не декларирующий своих, наследует список
     // ближайшего предка, так же как его агенты и скиллы.
-    let schemaFiles = primary.schemas;
+    let schemaFiles = primary?.schemas;
     if (schemaFiles === undefined) {
       for (let i = 1; i < chain.length; i++) {
-        if (chain[i].schemas) {
-          schemaFiles = chain[i].schemas;
+        if (chain[i]?.schemas) {
+          schemaFiles = chain[i]?.schemas;
           break;
         }
       }
     }
     const allSchemas = new Set<string>(schemaFiles ?? []);
 
-    let skills = primary.skills;
-    let invariants = primary.invariants;
+    let skills = primary?.skills;
+    let invariants = primary?.invariants;
 
     /**
      * Агенты аккумулируются вниз по цепочке; они не наследуются целиком.
@@ -85,8 +85,8 @@ export class ProfileResolver {
 
     if (skills === undefined) {
       for (let i = 1; i < chain.length; i++) {
-        if (chain[i].skills) {
-          skills = chain[i].skills;
+        if (chain[i]?.skills) {
+          skills = chain[i]?.skills;
           break;
         }
       }
@@ -94,8 +94,8 @@ export class ProfileResolver {
     }
     if (invariants === undefined) {
       for (let i = 1; i < chain.length; i++) {
-        if (chain[i].invariants) {
-          invariants = chain[i].invariants;
+        if (chain[i]?.invariants) {
+          invariants = chain[i]?.invariants;
           break;
         }
       }
@@ -107,7 +107,7 @@ export class ProfileResolver {
 
     return {
       metadata: {
-        id: primary.id!,
+        id: primary?.id!,
         description,
         agents,
         skills,
@@ -278,21 +278,22 @@ export class ProfileResolver {
       ? await this.resolveInheritedSchema(owner.id, schemaFile, chain, new Set())
       : null;
 
+    const profile = chain[0]?.id!;
     if (!currentSchema) {
       // Схема, которую профиль декларирует и не имеет — дефект в профиле,
       // а не пустой workflow. Возврат стаба тут заставил `workflow-create`
       // репортить успех и персистить сессию с `currentStage: ''` — сессию
       // под state machine без стадий.
       throw new Error(
-        `Profile "${chain[0].id}" declares schema "${schemaFile}", but no profile in its ` +
+        `Profile "${chain[0]?.id}" declares schema "${schemaFile}", but no profile in its ` +
           `extends chain [${chain.map((profile) => profile.id).join(' → ')}] has that file`
       );
     }
 
     return {
       id: schemaId(schemaFile),
-      source: `${chain[0].id}/${schemaFile}`,
-      stages: qualifyStageAgents(chain[0].id, currentSchema.stages),
+      source: `${profile}/${schemaFile}`,
+      stages: qualifyStageAgents(profile, currentSchema.stages),
       transitions: currentSchema.transitions,
       editingAgents: currentSchema.editingAgents,
       taskControlAgents: currentSchema.taskControlAgents,

@@ -166,9 +166,9 @@ describe('parseRuntimeState', () => {
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.value.activeOperations).toHaveLength(1);
-    expect(r.value.activeOperations[0].callId).toBe('call_1');
-    expect(r.value.activeOperations[0].agent).toBe('code');
-    expect(r.value.activeOperations[0].outputReady).toBe(true);
+    expect(r.value.activeOperations[0]?.callId).toBe('call_1');
+    expect(r.value.activeOperations[0]?.agent).toBe('code');
+    expect(r.value.activeOperations[0]?.outputReady).toBe(true);
   });
 
   test('retry budgets exposed', () => {
@@ -201,7 +201,7 @@ describe('parseRuntimeState', () => {
 
   test('completed tasks counted', () => {
     const tasks = makeTasks(3);
-    tasks.implementation[1].status = 'completed';
+    tasks.implementation[1]!.status = 'completed';
     const r = parseRuntimeState(makeSession({ tasks, currentStage: 'code' }));
     expect(r.ok).toBe(true);
     if (!r.ok) return;

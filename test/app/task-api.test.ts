@@ -67,7 +67,7 @@ describe('TaskApi', () => {
     await api.setTaskStatus(sessionId, 'task-1', 'completed');
 
     const persisted = await store.load(sessionId);
-    expect(persisted?.tasks.implementation[0].status).toBe('completed');
+    expect(persisted?.tasks.implementation![0]!.status).toBe('completed');
     expect(persisted?.retryBudgets).toEqual({});
   });
 
@@ -211,7 +211,7 @@ describe('TaskApi', () => {
       // The session should still be valid for the next call
       const tasks = await api.getTasks(sessionId, 'implementation');
       expect(tasks).toHaveLength(1);
-      expect(tasks[0].id).toBe('task-1');
+      expect(tasks[0]?.id).toBe('task-1');
     });
   });
 });

@@ -114,7 +114,7 @@ export interface StageDef {
    * загрузки схемы, а не молчаливое поведение в рантайме.
    */
   gates?: string[];
-  entryGuards?: string[];
+  enterGuards?: string[];
   exitGuards?: string[];
   /** Стадии, выполняемые на каждую задачу, когда эта стадия объявляет `loop`. */
   stages?: Record<string, StageDef>;
@@ -143,7 +143,7 @@ const StageDefSchema: z.ZodType<StageDef> = z.lazy(() =>
       allowedAgents: z.array(z.string()).optional(),
       actions: z.array(ActionEntrySchema).optional(),
       gates: z.array(z.string()).optional(),
-      entryGuards: z.array(z.string()).optional(),
+      enterGuards: z.array(z.string()).optional(),
       exitGuards: z.array(z.string()).optional(),
       stages: z.record(z.string(), StageDefSchema).optional(),
       transitions: z.array(TransitionDefSchema).optional(),

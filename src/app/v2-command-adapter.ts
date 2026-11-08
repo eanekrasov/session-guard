@@ -21,7 +21,7 @@ import { Agent } from '@opencode/schema/agent';
  * Команды, которые V1 handleConfig регистрировал через config.command.
  * Каждая команда — дескриптор с template (prompt), description и agent.
  *
- * V2 CommandDefinition.execute receives the full invocation context. The V1
+ * V2 `CommandDefinition.execute` receives the full invocation context. The V1
  * commands remain prompt-driven: execution forwards the configured template to
  * the host session prompt rather than implementing command-specific workflow
  * mutations here.
@@ -148,7 +148,7 @@ export async function registerV2Commands(ctx: Context): Promise<Registration> {
 /**
  * Register the V1 session-guard agent through the confirmed V2 agent editor.
  * AgentEditor.update also materializes a missing agent with V2 defaults.
- * V2 does not expose the V1 resolved config.model on Context, so model is
+ * V2 does not expose the V1 resolved `config.model` on Context, so model is
  * intentionally left at the host default rather than guessed.
  */
 export async function registerV2Agent(ctx: Context): Promise<Registration> {

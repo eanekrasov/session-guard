@@ -341,7 +341,7 @@ describe('E2E: Full state machine flow', () => {
     expect(session.activeOperations).toEqual({});
     expect(getExecutionProgress(session).active).toBe(0);
 
-    implementationTasks(session)[0].status = 'completed';
+    implementationTasks(session)[0]!.status = 'completed';
     expect(canExitExecution(session)).toBe(true);
   });
 
@@ -462,9 +462,9 @@ describe('E2E: Full state machine flow', () => {
     session = await persistAndReload(session);
 
     expect(session.approvals).toHaveLength(1);
-    expect(session.approvals[0].type).toBe('plan');
-    expect(session.approvals[0].status).toBe('denied');
-    expect(session.approvals[0].feedback).toBe('Bad plan');
+    expect(session.approvals[0]?.type).toBe('plan');
+    expect(session.approvals[0]?.status).toBe('denied');
+    expect(session.approvals[0]?.feedback).toBe('Bad plan');
   });
 
   // ─── TC17: Double approve (idempotent) ────────────────────────────────────
@@ -476,11 +476,11 @@ describe('E2E: Full state machine flow', () => {
 
     approve(session, 'plan', 'ev-1', 'call-1');
     expect(session.approvals).toHaveLength(1);
-    expect(session.approvals[0].evidence).toBe('ev-1');
+    expect(session.approvals[0]?.evidence).toBe('ev-1');
 
     approve(session, 'plan', 'ev-2', 'call-1');
     expect(session.approvals).toHaveLength(1);
-    expect(session.approvals[0].evidence).toBe('ev-2');
+    expect(session.approvals[0]?.evidence).toBe('ev-2');
   });
 
   // ─── TC18: Decline then approve same type+callId (reversal) ───────────────
@@ -490,11 +490,11 @@ describe('E2E: Full state machine flow', () => {
     const session = baseSession();
 
     decline(session, 'plan', 'ev-1', 'call-1', 'Not ready');
-    expect(session.approvals[0].status).toBe('denied');
+    expect(session.approvals[0]?.status).toBe('denied');
 
     approve(session, 'plan', 'ev-2', 'call-1');
-    expect(session.approvals[0].status).toBe('granted');
-    expect(session.approvals[0].evidence).toBe('ev-2');
+    expect(session.approvals[0]?.status).toBe('granted');
+    expect(session.approvals[0]?.evidence).toBe('ev-2');
   });
 
   // ─── TC19: beginMutation throws on double-begin without expiry ────────────
@@ -560,7 +560,7 @@ describe('E2E: Full state machine flow', () => {
     // The attempts the retrying moves spend are what exhausts it.
     for (let i = 1; i <= 3; i++) bumpRetry(session, 'task-1');
 
-    expect(session.retryBudgets['task-1'].attempts).toBe(3);
+    expect(session.retryBudgets['task-1']?.attempts).toBe(3);
     expect(isExhausted(session, 'task-1')).toBe(true);
   });
 
@@ -572,10 +572,10 @@ describe('E2E: Full state machine flow', () => {
 
     bumpRetry(session, 'task-1');
     bumpRetry(session, 'task-1');
-    expect(session.retryBudgets['task-1'].attempts).toBe(2);
+    expect(session.retryBudgets['task-1']?.attempts).toBe(2);
 
     resetRetry(session, 'task-1');
-    expect(session.retryBudgets['task-1'].attempts).toBe(0);
+    expect(session.retryBudgets['task-1']?.attempts).toBe(0);
     expect(isExhausted(session, 'task-1')).toBe(false);
   });
 
@@ -591,10 +591,10 @@ describe('E2E: Full state machine flow', () => {
 
     // First step completed independently
     const step1 = session.tasks.implementation[0];
-    expect(step1.status).toBe('completed');
+    expect(step1?.status).toBe('completed');
     // Later work is still pending
     const step2 = session.tasks.implementation[1];
-    expect(step2.status).toBe('pending');
+    expect(step2?.status).toBe('pending');
   });
 
   test('TC24: two steps produce independent results', () => {
@@ -602,8 +602,8 @@ describe('E2E: Full state machine flow', () => {
       { id: 'step-1', output: 'result-a' },
       { id: 'step-2', output: 'result-b' },
     ];
-    expect(results[0].output).not.toBe(results[1].output);
-    expect(results[1].id).toBe('step-2');
+    expect(results[0]?.output).not.toBe(results[1]?.output);
+    expect(results[1]?.id).toBe('step-2');
   });
 
   // ─── TC26: Empty changedFiles list survives roundtrip ─────────────────────

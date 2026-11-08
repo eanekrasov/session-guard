@@ -1,4 +1,4 @@
-import { resolve, join } from 'node:path';
+import { resolve } from 'node:path';
 import type { WorkflowSession } from '../session/session-schema.ts';
 import { WorkflowStore } from '../session/session-store.ts';
 import { findTask } from '../session/helpers.ts';

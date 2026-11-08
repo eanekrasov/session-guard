@@ -71,8 +71,8 @@ export class SessionExecutor {
   }>();
 
   private store: WorkflowStore;
-  private log: LogFn;
-  private resolveParent?: ResolveParentFn;
+  private readonly log: LogFn;
+  private readonly resolveParent?: ResolveParentFn;
 
   /**
    * Кэш: sessionID → резолвленный root session ID.

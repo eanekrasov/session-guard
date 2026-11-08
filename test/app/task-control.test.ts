@@ -67,7 +67,7 @@ async function load(store: WorkflowStore): Promise<WorkflowSession> {
 }
 
 function setStatus(hooks: Hooks, agent: string | undefined) {
-  return hooks.tool!['workflow-tasks-set-status'].execute(
+  return hooks.tool!['workflow-tasks-set-status']!.execute(
     { taskId: 'task-1', status: 'completed' },
     toolContext(agent)
   );
@@ -101,7 +101,7 @@ describe('workflow task state is orchestrator-owned', () => {
     const result = await setStatus(hooks, 'orchestrator');
 
     expect(toolOutput(result)).toBe('Updated task-1 to completed');
-    expect((await load(store)).tasks.implementation[0]!.status).toBe('completed');
+    expect((await load(store)).tasks.implementation![0]!.status).toBe('completed');
   });
 
   it('accepts the profile-qualified orchestrator name the host reports', async () => {
@@ -112,7 +112,7 @@ describe('workflow task state is orchestrator-owned', () => {
     const result = await setStatus(hooks, 'cycle-minimal_orchestrator');
 
     expect(toolOutput(result)).toBe('Updated task-1 to completed');
-    expect((await load(store)).tasks.implementation[0]!.status).toBe('completed');
+    expect((await load(store)).tasks.implementation![0]!.status).toBe('completed');
   });
 
   it('refuses a worker agent closing its own task', async () => {
@@ -124,7 +124,7 @@ describe('workflow task state is orchestrator-owned', () => {
 
     expect(toolOutput(result)).toContain('refused');
     expect(toolOutput(result)).toContain('orchestrator');
-    expect((await load(store)).tasks.implementation[0]!.status).toBe('pending');
+    expect((await load(store)).tasks.implementation![0]!.status).toBe('pending');
   });
 
   it("refuses another profile's orchestrator", async () => {
@@ -135,7 +135,7 @@ describe('workflow task state is orchestrator-owned', () => {
     const result = await setStatus(hooks, 'android/orchestrator');
 
     expect(toolOutput(result)).toContain('refused');
-    expect((await load(store)).tasks.implementation[0]!.status).toBe('pending');
+    expect((await load(store)).tasks.implementation![0]!.status).toBe('pending');
   });
 
   it('refuses a caller whose agent the host did not report', async () => {
@@ -146,7 +146,7 @@ describe('workflow task state is orchestrator-owned', () => {
     const result = await setStatus(hooks, undefined);
 
     expect(toolOutput(result)).toContain('refused');
-    expect((await load(store)).tasks.implementation[0]!.status).toBe('pending');
+    expect((await load(store)).tasks.implementation![0]!.status).toBe('pending');
   });
 
   it('honours taskControlAgents declared by the schema', async () => {
@@ -159,7 +159,7 @@ describe('workflow task state is orchestrator-owned', () => {
 
     expect(toolOutput(refused)).toContain('refused');
     expect(toolOutput(allowed)).toBe('Updated task-1 to completed');
-    expect((await load(store)).tasks.implementation[0]!.status).toBe('completed');
+    expect((await load(store)).tasks.implementation![0]!.status).toBe('completed');
   });
 
   it('refuses a worker replacing the whole task list', async () => {
@@ -167,7 +167,7 @@ describe('workflow task state is orchestrator-owned', () => {
     const store = await createWorkflowSession();
     const hooks = createRuntime(pluginInput());
 
-    const result = await hooks.tool!['workflow-tasks-set'].execute(
+    const result = await hooks.tool!['workflow-tasks-set']!.execute(
       { tasks: [{ status: 'completed' }] },
       toolContext('code')
     );
@@ -181,7 +181,7 @@ describe('workflow task state is orchestrator-owned', () => {
     await createWorkflowSession();
     const hooks = createRuntime(pluginInput());
 
-    const result = await hooks.tool!['workflow-tasks-resolve-decision'].execute(
+    const result = await hooks.tool!['workflow-tasks-resolve-decision']!.execute(
       { decision: 'increase', maximum: 2 },
       toolContext('code')
     );
@@ -194,7 +194,7 @@ describe('workflow task state is orchestrator-owned', () => {
     await createWorkflowSession();
     const hooks = createRuntime(pluginInput());
 
-    const result = await hooks.tool!['workflow-tasks-get'].execute(
+    const result = await hooks.tool!['workflow-tasks-get']!.execute(
       { listKey: 'implementation' },
       toolContext('code')
     );

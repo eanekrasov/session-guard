@@ -181,7 +181,7 @@ function extractPathsFromText(text: string, paths: Set<string>): void {
 
   let match;
   while ((match = pathRegex.exec(text)) !== null) {
-    let potentialPath = match[1];
+    let potentialPath = match[1]!;
 
     // Trim trailing punctuation that likely belongs to prose, not the path
     potentialPath = potentialPath.replace(/[.,!?:;]+$/, '');

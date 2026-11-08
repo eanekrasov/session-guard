@@ -68,7 +68,7 @@ async function importFirst(paths: string[]): Promise<InvariantCheck[]> {
  * "everything passed", превращал сломанный профиль в зелёный гейт.
  */
 export class InvariantsUnavailableError extends Error {
-  readonly name = 'InvariantsUnavailableError';
+  override readonly name = 'InvariantsUnavailableError';
 }
 
 export async function getAllProfileInvariants(

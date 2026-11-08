@@ -194,7 +194,7 @@ describe('declarative control flow', () => {
       engine.tryApplyTransitions(session);
       expect(session.currentStage).toBe('CODE');
       expect(session.retryBudgets.cycles).toBeDefined();
-      expect(session.retryBudgets.cycles.attempts).toBe(1);
+      expect(session.retryBudgets.cycles?.attempts).toBe(1);
     });
   });
 

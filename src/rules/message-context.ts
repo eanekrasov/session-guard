@@ -92,7 +92,7 @@ export function extractSessionID(messages: MessageWithInfo[]): string | undefine
  */
 export function extractLatestUserPrompt(messages: MessageWithInfo[]): string | undefined {
   for (let i = messages.length - 1; i >= 0; i--) {
-    const message = messages[i];
+    const message = messages[i]!;
     if (message.info?.role !== 'user') continue;
     const parts = message.parts || [];
 
@@ -130,7 +130,7 @@ export function filterValidMessages(messages: MessageWithInfo[]): Message[] {
  */
 export function extractSlashCommand(prompt?: string): string | undefined {
   if (!prompt) return undefined;
-  const first = prompt.trim().split(/\s+/, 1)[0];
+  const first = prompt.trim().split(/\s+/, 1)[0]!;
   // Must start with '/' and have at least one additional character
   if (first.length > 1 && first.startsWith('/')) {
     return first;

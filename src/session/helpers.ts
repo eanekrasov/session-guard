@@ -139,7 +139,7 @@ export function removeActiveTaskContext(session: WorkflowSession, runId: string)
 /**
  * Resolve a pending retry context, optionally selecting by decisionId.
  *
- * If `decisionId` is provided, only that decision is considered and it must be
+ * If `decisionId` is provided, only that decision is considered, and it must be
  * pending, of kind `retry_exhausted`, and its `runId`, context, run, task, and
  * retry budget must agree.
  *
@@ -182,7 +182,7 @@ export function findPendingRetryContext(
   );
   if (awaitingContexts.length !== 1) return null;
 
-  const context = awaitingContexts[0];
+  const context = awaitingContexts[0]!;
   const decisions = pendingDecisions.filter(
     (d) => d.subject === 'task' && d.subjectId === context.taskId
   );
@@ -193,5 +193,5 @@ export function findPendingRetryContext(
   );
   if (!run) return null;
 
-  return { taskId: context.taskId, context, decision: decisions[0], run };
+  return { taskId: context.taskId, context, decision: decisions[0]!, run };
 }

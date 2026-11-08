@@ -517,7 +517,7 @@ describe('handleTaskBefore (via handleToolBefore)', () => {
 
     const session = await loadSession(sessionId);
     expect(session).not.toBeNull();
-    expect(session!.activeOperations['call-agent'].agent).toBe('my-agent');
+    expect(session!.activeOperations['call-agent']?.agent).toBe('my-agent');
   });
 
   test('uses .type field when both subagent_type and agent are absent', async () => {
@@ -538,7 +538,7 @@ describe('handleTaskBefore (via handleToolBefore)', () => {
 
     const session = await loadSession(sessionId);
     expect(session).not.toBeNull();
-    expect(session!.activeOperations['call-type'].agent).toBe('fallback-agent');
+    expect(session!.activeOperations['call-type']?.agent).toBe('fallback-agent');
   });
 });
 

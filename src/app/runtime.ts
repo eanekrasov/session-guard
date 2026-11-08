@@ -73,7 +73,7 @@ class SessionGuardRuntime {
   private readonly log: LogFn;
   private readonly report: Reporter;
   private rulesRuntime: OpenCodeRulesRuntime;
-  private workflowToolSurface: ReturnType<typeof createWorkflowToolSurface>;
+  private readonly workflowToolSurface: ReturnType<typeof createWorkflowToolSurface>;
   private readonly sessionContext: RuntimeSessionContext;
   private workflowResultSettler: WorkflowResultSettlerImpl;
   private readonly taskAdmission: TaskAdmission;

@@ -45,7 +45,7 @@ async function create(sessionID: string, schemaId: string | undefined): Promise<
     serverUrl: new URL('http://localhost:0'),
     $: {} as PluginInput['$'],
   });
-  const result = await runtime.tool!['workflow-create'].execute(
+  const result = await runtime.tool!['workflow-create']!.execute(
     { schemaId } as never,
     {
       sessionID,

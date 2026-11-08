@@ -69,8 +69,8 @@ describe('filterValidMessages', () => {
     ];
     const result = filterValidMessages(messages);
     expect(result).toHaveLength(2);
-    expect(result[0].role).toBe('user');
-    expect(result[1].role).toBe('user');
+    expect(result[0]?.role).toBe('user');
+    expect(result[1]?.role).toBe('user');
   });
 
   it('returns empty array for empty input', () => {

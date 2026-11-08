@@ -25,7 +25,7 @@ describe('resolveConfig', () => {
 
     // Schemas
     expect(profile.schemas).toHaveLength(1);
-    expect(profile.schemas[0].source).toBe('android/session-guard.yaml');
+    expect(profile.schemas[0]?.source).toBe('android/session-guard.yaml');
   });
 
   it('resolves base profile directly (no extends)', async () => {

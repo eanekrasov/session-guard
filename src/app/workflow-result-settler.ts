@@ -1,7 +1,7 @@
 import type { LogFn } from './logger.ts';
 import { computeChangeScope, changedAgainstHead } from './change-scope.ts';
 import { validateFilesForProfile, SUPPORTED_EXTENSIONS } from './invariants.ts';
-import { findTask, isOpenLoopRun } from '../session/helpers.ts';
+import { findTask } from '../session/helpers.ts';
 import type { ActiveOperation, WorkflowSession } from '../session/session-schema.ts';
 import { matchesScope } from './scope-match.ts';
 import { resolve, relative, isAbsolute } from 'node:path';

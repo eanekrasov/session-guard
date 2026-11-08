@@ -1,7 +1,7 @@
 # CI/CD pipeline profile — a complete pipeline from init through deploy.
 #
 # Completely standalone — does NOT inherit base.yaml.
-# Tests: entryGuards, exitGuards, alternative transitions, consent on transitions,
+# Tests: enterGuards, exitGuards, alternative transitions, consent on transitions,
 #        retry budget, gate-based task movement, verification recording.
 #
 # Pipeline:
@@ -25,8 +25,8 @@ stages:
   build:
     allowedAgents: [builder, orchestrator]
     gates: [build_done]
-    # P2.1: entryGuards — не пускает в build, пока checkout gate не passed
-    entryGuards:
+    # P2.1: enterGuards — не пускает в build, пока checkout gate не passed
+    enterGuards:
       - "session.gates.checkout_done == 'passed'"
 
   test:
@@ -54,9 +54,9 @@ stages:
   deploy:
     allowedAgents: [deployer, orchestrator]
     gates: [deploy_done]
-    # P2.4: entryGuards — не пускает в deploy, пока тесты не пройдены. Тоже
+    # P2.4: enterGuards — не пускает в deploy, пока тесты не пройдены. Тоже
     # сессионный уровень: спрашиваем список задач, а не гейты одной из них.
-    entryGuards:
+    enterGuards:
       - "allTasksCompleted('test_suite')"
 
   smoke:

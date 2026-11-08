@@ -44,7 +44,7 @@ export interface DispatchConfig {
 
 export interface TaskStageConfig {
   allowedAgents?: string[];
-  entryGuards?: string[];
+  enterGuards?: string[];
   exitGuards?: string[];
 }
 
@@ -89,7 +89,7 @@ import type { GuardEvaluationSession } from './session-facts.ts';
  * Одна нормализация для всех. Гард, читающий `session.gates.review`,
  * должен означать одно и то же на любом уровне: внешние переходы получали
  * нормализованные факты, где гейты — мапа, а внутренние — сырую сессию,
- * где гейты — массив записей — так что то же выражение читало статус снаружи
+ * где гейты — массив записей — так что-то же выражение читало статус снаружи
  * цикла и `undefined` внутри, молча и навсегда.
  *
  * `task` — факты задачи, которую двигают, присутствует только внутри цикла.
@@ -424,10 +424,10 @@ export class SessionGuardEngine {
       if (blockedExitGuard !== undefined) {
         continue;
       }
-      const blockedEntryGuard = (targetStageDef?.entryGuards ?? []).find(
+      const blockedEnterGuard = (targetStageDef?.enterGuards ?? []).find(
         (guard) => !this.evaluateGuard(guard, facts, evaluationContext)
       );
-      if (blockedEntryGuard !== undefined) {
+      if (blockedEnterGuard !== undefined) {
         continue;
       }
 
@@ -449,7 +449,7 @@ export class SessionGuardEngine {
           if (effect.bumpRetry) {
             bumpRetry(session, effect.bumpRetry);
             if (effect.maxAttempts !== undefined) {
-              session.retryBudgets[effect.bumpRetry].maximum = effect.maxAttempts;
+              session.retryBudgets[effect.bumpRetry]!.maximum = effect.maxAttempts;
             }
           }
           if (effect.approve) {

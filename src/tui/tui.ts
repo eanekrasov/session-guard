@@ -158,9 +158,9 @@ export function parseRuntimeState(session: WorkflowSession): ParseResult {
   // условию `stageIndex < STAGES.length - 1`, и панель предлагала STAGES[0]
   // следующей стадией для каждой неизвестной.
   const stageIndex = (STAGES as readonly string[]).indexOf(finalStage);
-  const prevStage: Stage | null = stageIndex > 0 ? STAGES[stageIndex - 1] : null;
+  const prevStage: Stage | null = stageIndex > 0 ? STAGES[stageIndex - 1]! : null;
   const nextStage: Stage | null =
-    stageIndex >= 0 && stageIndex < STAGES.length - 1 ? STAGES[stageIndex + 1] : null;
+    stageIndex >= 0 && stageIndex < STAGES.length - 1 ? STAGES[stageIndex + 1]! : null;
 
   const gates: GateInfo[] = (session.stageGateResults ?? []).map((gate) => ({
     id: gate.id,

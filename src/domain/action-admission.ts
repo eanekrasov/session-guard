@@ -24,7 +24,7 @@ export interface AdmissionRequest {
 
 /**
  * Не размеченное объединение: в проекте `strictNullChecks: false`, и сужение
- * по литеральному `allowed` там не работает.
+ * по-литеральному `allowed` там не работает.
  */
 export interface ActionAdmission {
   allowed: boolean;

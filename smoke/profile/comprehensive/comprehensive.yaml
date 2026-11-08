@@ -1,7 +1,7 @@
 # Comprehensive profile — covers every plugin feature and P1/P2 contracts.
 #
 # Inherits: base.yaml (gates, base stages).
-# Delivers: entryGuards, exitGuards, fail transition with retry,
+# Delivers: enterGuards, exitGuards, fail transition with retry,
 #           alternative transitions, gate-based task movement.
 #
 # Happy path: planning → tasks_ready → execution(code→verify→done) →
@@ -29,10 +29,10 @@ stages:
       strategy: serial
     retryBudget:
       maximum: 5
-    # P2.1: entryGuards на вход в loop — блокирует задачу из fixup,
+    # P2.1: enterGuards на вход в loop — блокирует задачу из fixup,
     # пока invariants не пройдены. Нормальная задача (task-0) не fixup,
     # так что guard не срабатывает.
-    entryGuards:
+    enterGuards:
       - "task.id != 'fixup' || session.gates.invariants == 'passed'"
     stages:
       code:

@@ -73,12 +73,12 @@ describe('operation-lifecycle', () => {
       beginMutation(session, 'call-1', 'agent-1', resolveStage, 'tasks');
 
       expect(session.activeOperations['call-1']).toBeDefined();
-      expect(session.activeOperations['call-1'].callId).toBe('call-1');
-      expect(session.activeOperations['call-1'].agent).toBe('agent-1');
-      expect(session.activeOperations['call-1'].kind).toBe('mutation');
-      expect(session.activeOperations['call-1'].status).toBe('running');
-      expect(session.activeOperations['call-1'].runId).toBeDefined();
-      expect(session.activeOperations['call-1'].taskId).toBeDefined();
+      expect(session.activeOperations['call-1']?.callId).toBe('call-1');
+      expect(session.activeOperations['call-1']?.agent).toBe('agent-1');
+      expect(session.activeOperations['call-1']?.kind).toBe('mutation');
+      expect(session.activeOperations['call-1']?.status).toBe('running');
+      expect(session.activeOperations['call-1']?.runId).toBeDefined();
+      expect(session.activeOperations['call-1']?.taskId).toBeDefined();
       expect(session.verifications).toEqual([]);
       expect(session.checks).toBeUndefined();
     });
@@ -136,7 +136,7 @@ describe('operation-lifecycle', () => {
       const resolveStage = () => 'executing';
       beginMutation(session, 'call-1', 'agent-1', resolveStage, 'tasks', fixedTime);
 
-      expect(session.activeOperations['call-1'].startedAt).toBe(fixedTime);
+      expect(session.activeOperations['call-1']?.startedAt).toBe(fixedTime);
     });
 
     it('expires an existing operation against the injected now, not the wall clock', () => {
@@ -199,7 +199,7 @@ describe('operation-lifecycle', () => {
       const resolveStage = () => 'executing';
       beginMutation(session, 'call-1', 'agent-1', resolveStage, 'tasks');
 
-      expect(session.loopRuns[session.activeOperations['call-1'].runId!].gates).toEqual({});
+      expect(session.loopRuns[session.activeOperations['call-1']!.runId!]?.gates).toEqual({});
     });
 
     it('clears session.checks when no run is created', () => {
@@ -217,22 +217,22 @@ describe('operation-lifecycle', () => {
     it('records passed verdict on run when run exists', () => {
       const resolveStage = () => 'executing';
       beginMutation(session, 'call-1', 'agent-1', resolveStage, 'tasks');
-      const runId = session.activeOperations['call-1'].runId!;
+      const runId = session.activeOperations['call-1']!.runId!;
 
       finishMutation(session, true, 'call-1');
 
-      expect(session.loopRuns[runId].checks).toBe('passed');
+      expect(session.loopRuns[runId]?.checks).toBe('passed');
       expect(session.activeOperations['call-1']).toBeUndefined();
     });
 
     it('records failed verdict on run when run exists', () => {
       const resolveStage = () => 'executing';
       beginMutation(session, 'call-1', 'agent-1', resolveStage, 'tasks');
-      const runId = session.activeOperations['call-1'].runId!;
+      const runId = session.activeOperations['call-1']!.runId!;
 
       finishMutation(session, false, 'call-1');
 
-      expect(session.loopRuns[runId].checks).toBe('failed');
+      expect(session.loopRuns[runId]?.checks).toBe('failed');
       expect(session.activeOperations['call-1']).toBeUndefined();
     });
 

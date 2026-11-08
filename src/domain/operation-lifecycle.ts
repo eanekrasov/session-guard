@@ -9,7 +9,7 @@ function getActiveOperation(session: WorkflowSession, callId?: string): ActiveOp
   if (callId) return session.activeOperations?.[callId] ?? null;
 
   const operations = getActiveOperations(session);
-  return operations.length === 1 ? operations[0] : null;
+  return operations.length === 1 ? operations[0]! : null;
 }
 
 /**

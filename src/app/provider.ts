@@ -112,7 +112,7 @@ export function createBunExecutor(command: string): ShellExecutor {
 export interface CliProviderOptions {
   command?: string; // по умолчанию "bd"
   ttlMs?: number; // кеш в мс (0 = без кеша)
-  /** Injectable executor — defaults to Bun.spawn when omitted */
+  /** Injectable executor — defaults to `Bun.spawn` when omitted */
   executor?: ShellExecutor;
 }
 
@@ -170,14 +170,14 @@ export function createCliProvider(opts?: CliProviderOptions): TaskProvider {
     };
   }
 
-  const provider: TaskProvider = {
+  return {
     async getTask(id: string): Promise<Task> {
       const ck = cacheKey('show', id);
       const cached = getCached<Task>(ck);
       if (cached) return cached;
 
       const result = await exec.run(['show', id, '--json']);
-      if (result.ok === false) throw new Error(result.error);
+      if (!result.ok) throw new Error(result.error);
 
       const parsed = JSON.parse(result.stdout);
       const task = parseTask(parsed as Record<string, unknown>);
@@ -191,7 +191,7 @@ export function createCliProvider(opts?: CliProviderOptions): TaskProvider {
       if (cached) return cached;
 
       const result = await exec.run(['ready', '--json']);
-      if (result.ok === false) throw new Error(result.error);
+      if (!result.ok) throw new Error(result.error);
 
       const raw = JSON.parse(result.stdout);
       const tasks: Task[] = (Array.isArray(raw) ? raw : []).map((item: unknown) =>
@@ -218,6 +218,4 @@ export function createCliProvider(opts?: CliProviderOptions): TaskProvider {
       }
     },
   };
-
-  return provider;
 }
