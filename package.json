@@ -1,6 +1,6 @@
 {
   "name": "@eanekrasov/session-guard",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Session guard for OpenCode — gives schema-based workflow with strict validation between steps",
   "keywords": [
     "opencode",
@@ -19,7 +19,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "session-guard": "./dist/cli.js"
+    "session-guard": "dist/cli.js"
   },
   "exports": {
     ".": {
@@ -69,30 +69,30 @@
     "package.json"
   ],
   "dependencies": {
-    "@opencode-ai/plugin": "^1.18.34",
-    "@opencode/plugin": "2.0.22",
-    "@opentui/core": "^0.5.14",
-    "@opentui/keymap": "^0.5.14",
-    "@opentui/solid": "^0.5.14",
+    "@opencode-ai/plugin": "^1.19.5",
+    "@opencode/plugin": "2.2.7",
+    "@opentui/core": "^0.8.3",
+    "@opentui/keymap": "^0.8.3",
+    "@opentui/solid": "^0.8.3",
     "@tsconfig/bun": "^1.0.11",
-    "minimatch": "^10.2.6",
-    "solid-js": "^1.9.15",
+    "minimatch": "11.0.1",
+    "solid-js": "^1.9.18",
     "yaml": "^2.9.1",
-    "zod": "^4.0.0"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@jclem/logfmt2": "2.4.3",
-    "@types/node": "^26.6.4",
-    "@typescript-eslint/eslint-plugin": "8.71.0",
-    "@typescript-eslint/parser": "8.71.0",
+    "@types/node": "^26.6.6",
+    "@typescript-eslint/eslint-plugin": "8.72.2",
+    "@typescript-eslint/parser": "8.72.2",
     "bun-types": "latest",
-    "eslint": "^10.12.0",
+    "eslint": "^10.14.0",
     "eslint-config-prettier": "10.1.8",
-    "eslint-plugin-prettier": "^5.5.6",
+    "eslint-plugin-prettier": "^5.5.7",
     "jsmin": "1.0.1",
-    "prettier": "^3.2.4",
-    "typescript-eslint": "^8.71.0",
-    "vitest": "5.0.3"
+    "prettier": "^3.9.10",
+    "typescript-eslint": "^8.72.2",
+    "vitest": "5.1.0"
   }
 }
