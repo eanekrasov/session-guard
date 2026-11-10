@@ -74,6 +74,7 @@ export async function setupV2Runtime(context: Context): Promise<() => Promise<vo
   ensureDirectory(sessionStoreDirectory);
 
   const runtimeContext: RuntimeContext = {
+    stageInstructionsEnabled: true,
     host: createV2RuntimeHostAdapter({ context, directory: worktreeDirectory }),
     directory: worktreeDirectory,
   };
@@ -145,14 +146,14 @@ export async function setupV2Runtime(context: Context): Promise<() => Promise<vo
       registrations.push(
         await context.session.hook('context', async (event) => {
           const mapped = v2ContextEvent(event);
-          const system = [...mapped.output.system];
+          const systemOutput = { system: [...mapped.output.system] };
           const messages = [...mapped.output.messages];
-          await hooks['experimental.chat.system.transform']!(mapped.input as never, { system });
+          await hooks['experimental.chat.system.transform']!(mapped.input as never, systemOutput);
           await hooks['experimental.chat.messages.transform']!(
             { sessionID: event.sessionID },
             { messages: messages as never }
           );
-          event.system = system.map((text) => ({ type: 'text' as const, text }));
+          event.system = systemOutput.system.map((text) => ({ type: 'text' as const, text }));
           // The legacy layer only pushes synthetic messages; the host's own
           // messages — tool calls and their results included — must survive.
           event.messages = v2MessagesWithInjected(event.messages, messages, event.sessionID);

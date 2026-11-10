@@ -65,6 +65,7 @@ interface EventEnvelope {
 }
 
 class SessionGuardRuntime {
+  private readonly stageInstructionsEnabled: boolean;
   private readonly store: WorkflowStore;
   private readonly executor: SessionExecutor;
   private readonly mutationOrchestrator: MutationOrchestrator;
@@ -98,6 +99,7 @@ class SessionGuardRuntime {
   private readonly projectDir: string;
 
   constructor(context: RuntimeContext, paths?: RuntimePaths) {
+    this.stageInstructionsEnabled = context.stageInstructionsEnabled === true;
     const client = context.client ?? {};
     this.log = context.host?.log ?? createLogFn(client);
     this.report = context.host?.report ?? createReporter(client, this.log);
@@ -125,7 +127,12 @@ class SessionGuardRuntime {
     };
     const resolveHostParent =
       context.host?.resolveParent ?? context.resolveParent ?? resolveV1HostParent;
-    this.executor = new SessionExecutor(this.store, this.log, resolveHostParent);
+    this.executor = new SessionExecutor(
+      this.store,
+      this.log,
+      resolveHostParent,
+      this.stageInstructionsEnabled
+    );
     this.sessionContext = new RuntimeSessionContextImpl(
       this.store,
       this.executor,
@@ -142,7 +149,8 @@ class SessionGuardRuntime {
       this.projectDir,
       this.profilesDir,
       this.log,
-      (context.host?.session ?? client.session) as Pick<SessionClient, 'list'> | undefined
+      (context.host?.session ?? client.session) as Pick<SessionClient, 'list'> | undefined,
+      this.stageInstructionsEnabled
     );
     this.workflowLifecycle = createWorkflowLifecycle({
       store: this.store,
@@ -264,6 +272,7 @@ class SessionGuardRuntime {
       matchedRulesStateStore,
     });
     this.workflowToolSurface = createWorkflowToolSurface({
+      stageInstructionsEnabled: this.stageInstructionsEnabled,
       profilesDir: this.profilesDir,
       projectDir: this.projectDir,
       store: this.store,
@@ -540,8 +549,14 @@ class SessionGuardRuntime {
   ): Promise<void> {
     if (!input.sessionID) return;
 
-    const session = await this.sessionContext.load(input.sessionID);
-    if (!session) return;
+    const activeSession = await this.sessionContext.load(input.sessionID);
+    const session =
+      activeSession ??
+      (this.stageInstructionsEnabled &&
+      (await this.sessionContext.rootOf(input.sessionID)) === input.sessionID
+        ? await this.store.loadArchived(input.sessionID)
+        : null);
+    if (!session || (!activeSession && !session.pendingStageContext)) return;
 
     const lines = [...output.system];
     lines.push(`[workflow session: ${session.sessionId}]`);
@@ -554,6 +569,39 @@ class SessionGuardRuntime {
     // базового профиля, который никогда не сработал бы и был бы неправ, если б.
     const stage = session.currentStage;
     lines.push(`[workflow stage: ${stage}]`);
+
+    if (
+      this.stageInstructionsEnabled &&
+      input.sessionID === session.sessionId &&
+      session.pendingStageContext
+    ) {
+      const engine = await this.mutationOrchestrator.resolveEngine(
+        session.profileId,
+        session.schemaId
+      );
+      const activePending = activeSession
+        ? await this.executor.run(session.sessionId, async (tx) => {
+            if (!tx.session) return undefined;
+            const current = tx.session?.pendingStageContext;
+            if (tx.session && current) delete tx.session.pendingStageContext;
+            return current ?? null;
+          })
+        : undefined;
+      const pending =
+        activePending === undefined
+          ? (await this.store.consumeStageContext(session.sessionId))?.pendingStageContext
+          : activePending;
+      if (pending?.listKey) {
+        const text = engine.getLoopStage(pending.listKey)?.stages?.[pending.stage]?.instructions;
+        if (text)
+          lines.push(
+            `[workflow task ${pending.taskId} stage ${pending.stage} instructions]\n${text}`
+          );
+      } else if (pending) {
+        const text = engine.getStages()[pending.stage]?.instructions;
+        if (text) lines.push(`[workflow stage instructions]\n${text}`);
+      }
+    }
 
     const gateLines = session.stageGateResults
       .filter((g) => g.status !== 'pending')
@@ -849,6 +897,7 @@ export interface RuntimePaths {
 }
 
 export interface RuntimeContext {
+  readonly stageInstructionsEnabled?: boolean;
   readonly client?: {
     readonly session?: Pick<SessionClient, 'get' | 'list' | 'messages' | 'prompt'>;
     readonly app?: Pick<PluginInput['client']['app'], 'log'>;
@@ -890,6 +939,7 @@ export function createRuntime(
     {
       client: runtimeContext.client,
       host: runtimeContext.host,
+      stageInstructionsEnabled: runtimeContext.stageInstructionsEnabled,
       directory: runtimeContext.directory,
       resolveParent: runtimeContext.resolveParent,
     },

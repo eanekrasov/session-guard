@@ -267,7 +267,9 @@ export function v2MessagesFromLegacy(
       .map((part) => ({
         type: 'text' as const,
         text: part.text,
-        ...(part.synthetic ? { metadata: { synthetic: true, sessionID } } : {}),
+        ...(part.synthetic
+          ? { providerMetadata: { 'session-guard': { synthetic: true, sessionID } } }
+          : {}),
       }));
     return content.length > 0 ? [{ id: message.info?.id, role, content } as Message] : [];
   });

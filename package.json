@@ -1,6 +1,6 @@
 {
   "name": "@eanekrasov/session-guard",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "Session guard for OpenCode — gives schema-based workflow with strict validation between steps",
   "keywords": [
     "opencode",
@@ -41,7 +41,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/eanekrasov/session-guard"
+    "url": "git+https://github.com/eanekrasov/session-guard.git"
   },
   "bugs": {
     "url": "https://github.com/eanekrasov/session-guard/issues"

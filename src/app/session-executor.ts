@@ -83,7 +83,12 @@ export class SessionExecutor {
    */
   private readonly parentCache = new Map<string, string>();
 
-  constructor(store: WorkflowStore, log?: LogFn, resolveParent?: ResolveParentFn) {
+  constructor(
+    store: WorkflowStore,
+    log?: LogFn,
+    resolveParent?: ResolveParentFn,
+    private readonly trackStageContext = false
+  ) {
     this.store = store;
     this.log = log ?? (() => Promise.resolve());
     this.resolveParent = resolveParent;
@@ -141,6 +146,27 @@ export class SessionExecutor {
       };
 
       const result = await this.active.run({ root: rootSessionId, tx }, () => action(tx));
+
+      if (this.trackStageContext && loaded && snapshot !== null) {
+        const before = JSON.parse(snapshot) as WorkflowSession;
+        if (loaded.currentStage !== before.currentStage) {
+          loaded.pendingStageContext = { stage: loaded.currentStage };
+        } else {
+          for (const [id, run] of Object.entries(loaded.loopRuns)) {
+            const old = before.loopRuns[id];
+            if (
+              (run.status === 'running' || run.status === 'awaiting_decision') &&
+              (!old || old.stage !== run.stage || old.round !== run.round)
+            ) {
+              loaded.pendingStageContext = {
+                stage: run.stage,
+                listKey: run.listKey,
+                taskId: run.taskId,
+              };
+            }
+          }
+        }
+      }
 
       // Сравнение снимков — условный save только когда сессия мутировала
       // (или была создана из null action'ом).

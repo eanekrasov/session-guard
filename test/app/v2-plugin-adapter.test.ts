@@ -329,7 +329,7 @@ describe('V2 plugin setup adapter', () => {
         {
           type: 'text',
           text: 'a rule arrived',
-          metadata: { synthetic: true, sessionID: 'session-1' },
+          providerMetadata: { 'session-guard': { synthetic: true, sessionID: 'session-1' } },
         },
       ],
     });

@@ -90,6 +90,7 @@ export type ProfileRetryBudget = z.infer<typeof RetryBudgetSchema>;
  * одно и то же, поэтому читателю нужен один набор правил, а не два.
  */
 export interface StageDef {
+  instructions?: string;
   /** Список задач, по которому стадия ходит циклом. Её `stages` выполняются на каждую задачу. */
   loop?: LoopSource;
   dispatch?: DispatchDef;
@@ -137,6 +138,7 @@ export interface StageDef {
 const StageDefSchema: z.ZodType<StageDef> = z.lazy(() =>
   z
     .object({
+      instructions: z.string().optional(),
       loop: LoopSourceSchema.optional(),
       dispatch: DispatchSchema.optional(),
       retryBudget: RetryBudgetSchema.optional(),

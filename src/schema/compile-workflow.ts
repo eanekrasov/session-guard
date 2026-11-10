@@ -200,6 +200,7 @@ const SCHEMA_KEYS = new Set([
 ]);
 
 const STAGE_KEYS = new Set([
+  'instructions',
   'loop',
   'dispatch',
   'retryBudget',

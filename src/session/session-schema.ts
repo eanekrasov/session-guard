@@ -394,6 +394,13 @@ export const WorkflowSessionSchema = z
     verifications: z.array(VerificationReadSchema).default([]),
     changedFiles: z.array(z.string()).default([]),
     currentStage: z.string(),
+    pendingStageContext: z
+      .object({
+        stage: z.string(),
+        listKey: z.string().optional(),
+        taskId: z.string().optional(),
+      })
+      .optional(),
     /**
      * Вердикт ядра о последнем ходе на текущей стадии — вне цикла задач.
      *

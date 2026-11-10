@@ -423,6 +423,27 @@ export class WorkflowStore {
     }
   }
 
+  /** Atomically claim the latest pending stage context, including after archival. */
+  async consumeStageContext(sessionId: string): Promise<WorkflowSession | null> {
+    return this.withFileLock(sessionId, async () => {
+      const active = this.sessionPath(sessionId);
+      const archived = path.join(archiveDirOf(this.directory), sessionFileName(sessionId));
+      const target = existsSync(active) ? active : archived;
+      if (!existsSync(target)) return null;
+      const session = WorkflowSessionSchema.parse(JSON.parse(await readFile(target, 'utf-8')));
+      if (!session.pendingStageContext) return null;
+      const claimed = structuredClone(session);
+      delete session.pendingStageContext;
+      session.revision++;
+      session.updatedAt = new Date().toISOString();
+      const temp = `${target}.${process.pid}.${randomUUID()}.tmp`;
+      await writeFile(temp, JSON.stringify(session, null, 2) + '\n', { mode: 0o600 });
+      await rename(temp, target);
+      for (const cb of this.onSave) cb();
+      return claimed;
+    });
+  }
+
   async list(): Promise<string[]> {
     let entries;
     try {

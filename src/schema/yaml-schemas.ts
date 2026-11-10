@@ -91,6 +91,7 @@ const DispatchDefSchema = z.discriminatedUnion('strategy', [
 const StageDefSchema: z.ZodType<RuntimeStageDef> = z.lazy(() =>
   z
     .object({
+      instructions: z.string().optional(),
       loop: LoopSourceSchema.optional(),
       dispatch: DispatchDefSchema.optional(),
       retryBudget: RetryBudgetSchema.optional(),

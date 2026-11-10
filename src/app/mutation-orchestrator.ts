@@ -261,7 +261,8 @@ export class MutationOrchestrator {
     projectDir: string | undefined,
     private readonly profilesDir: string,
     log?: LogFn,
-    client?: Pick<SessionClient, 'list'> | string
+    client?: Pick<SessionClient, 'list'> | string,
+    private readonly trackStageContext = false
   ) {
     // Сохранить совместимость с pre-merge конструктором, где директория проекта
     // занимала последний аргумент.
@@ -309,6 +310,7 @@ export class MutationOrchestrator {
     // остановить workflow при загрузке, а не по одному тихому гарду за раз.
     const schema = selectSchema(profileId, resolved.schemas, schemaId);
     const engineConfig = schemaToEngineConfig(schema);
+    engineConfig.trackStageContext = this.trackStageContext;
 
     // Скомпилировать схему, которую сессия реально запускает, после того как её
     // цепочка `extends` свёрнута: дельта-схема называет стадии, которые

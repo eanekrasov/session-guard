@@ -51,6 +51,7 @@ export interface TaskStageConfig {
 // ─── Конфиг движка ────────────────────────────────────────────────────────────
 
 export interface EngineConfig {
+  trackStageContext?: boolean;
   stages?: Record<string, StageDef>;
   transitions: TransitionDef[];
   /** agents allowed to drive workflow task state (schema-level, last wins) */
@@ -464,6 +465,9 @@ export class SessionGuardEngine {
         }
         const leftStage = currentStage;
         session.currentStage = transition.to;
+        if (this.config.trackStageContext) {
+          session.pendingStageContext = { stage: transition.to };
+        }
         // Вердикт ядра о ходе принадлежит стадии, на которой этот ход был
         // сделан. Унесённый на следующую, он утверждал бы о её работе то,
         // чего никто не проверял.

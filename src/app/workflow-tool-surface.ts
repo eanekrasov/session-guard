@@ -48,6 +48,7 @@ function tool<A extends Record<string, unknown>>(def: {
 }
 
 export interface WorkflowToolSurfacePorts {
+  stageInstructionsEnabled?: boolean;
   profilesDir: string;
   projectDir: string;
   store: WorkflowStore;
@@ -257,6 +258,9 @@ class WorkflowToolSurfaceImpl implements WorkflowToolSurface {
       resolvedSchemaId,
       engine.getInitialStage()
     );
+    if (this.ports.stageInstructionsEnabled) {
+      session.pendingStageContext = { stage: session.currentStage };
+    }
     await this.ports.store.save(session);
 
     void this.ports.log('info', `Workflow session created`, {
