@@ -129,6 +129,28 @@ const StageDefSchema: z.ZodType<RuntimeStageDef> = z.lazy(() =>
 
 const ProfileSchemaSchema = z
   .object({
+    description: z.string().optional(),
+    autoStartTrigger: z
+      .object({
+        globs: z.array(z.string().min(1)).min(1).optional(),
+        fileContains: z.array(z.string().min(1)).min(1).optional(),
+        keywords: z.array(z.string().min(1)).min(1).optional(),
+        tools: z.array(z.string().min(1)).min(1).optional(),
+        model: z.array(z.string().min(1)).min(1).optional(),
+        agent: z.array(z.string().min(1)).min(1).optional(),
+        command: z.array(z.string().min(1)).min(1).optional(),
+        project: z.array(z.string().min(1)).min(1).optional(),
+        branch: z.array(z.string().min(1)).min(1).optional(),
+        os: z.array(z.string().min(1)).min(1).optional(),
+        ci: z.boolean().optional(),
+        match: z.enum(['any', 'all']).optional(),
+      })
+      .strict()
+      .refine(
+        (trigger) => Object.keys(trigger).some((key) => key !== 'match'),
+        'autoStartTrigger must declare at least one condition'
+      )
+      .optional(),
     extends: z.string().optional(),
     stages: z.record(z.string(), StageDefSchema).optional(),
     transitions: z
@@ -149,21 +171,18 @@ const ProfileSchemaSchema = z
   .strict() // Strict mode: reject unknown keys at profile level
   .superRefine((value, ctx) => {
     const seen = new Map<string, string>();
-    for (const [stageId, stage] of Object.entries(
-      ((value as Record<string, unknown>).stages as Record<string, { loop?: string }>) ?? {}
-    )) {
-      const stageObj = stage as { loop?: string };
-      if (!stageObj.loop || stageObj.loop === '$currentTask.id') continue;
-      const previousStage = seen.get(stageObj.loop);
+    for (const [stageId, stage] of Object.entries(value.stages ?? {})) {
+      if (!stage.loop || stage.loop === '$currentTask.id') continue;
+      const previousStage = seen.get(stage.loop);
       if (previousStage) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ['stages', stageId, 'loop'],
-          message: `Loop source '${stageObj.loop}' is already used by stage '${previousStage}'`,
+          message: `Loop source '${stage.loop}' is already used by stage '${previousStage}'`,
         });
         return;
       }
-      seen.set(stageObj.loop, stageId);
+      seen.set(stage.loop, stageId);
     }
   });
 

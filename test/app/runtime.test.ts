@@ -3,8 +3,9 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execSync } from 'node:child_process';
-import type { PluginInput } from '@opencode-ai/plugin';
 import { createSession, WorkflowStore } from '../../src/session/session-store.ts';
+import type { RuntimeContext } from '../../src/app/runtime.ts';
+import { createReporter } from '../../src/app/report.ts';
 import { sessionFileName } from '../../src/session/session-files.ts';
 import { createTask } from '../support/task-factory.ts';
 import { hostPayload } from '../support/host-payload.ts';
@@ -39,51 +40,37 @@ afterEach(() => {
   }
 });
 
-function createPluginInput(log: (input?: unknown) => Promise<void> = async () => {}): PluginInput {
+function createRuntimeContext(
+  directory = '/tmp/test',
+  log: NonNullable<RuntimeContext['host']>['log'] = async () => {}
+): RuntimeContext {
   return {
-    client: {
-      app: {
-        log,
-      },
-    } as unknown as PluginInput['client'],
-    project: {
-      id: 'test',
-      name: 'test',
-      directory: '/tmp/test',
-      worktree: '/tmp/test',
-      time: { created: Date.now() },
-    } as PluginInput['project'],
-    directory: '/tmp/test',
-    worktree: '/tmp/test',
-    experimental_workspace: {} as PluginInput['experimental_workspace'],
-    serverUrl: new URL('http://localhost:0'),
-    $: {} as PluginInput['$'],
+    directory,
+    host: {
+      directory,
+      session: {},
+      tools: {},
+      log,
+      report: createReporter({}, log),
+    },
   };
 }
 
 async function createRuntime() {
   const mod = await import('../../src/app/runtime.ts');
-  return mod.createRuntime(createPluginInput());
+  return mod.createRuntime(createRuntimeContext());
 }
 
 describe('event session lookup', () => {
   test('does not load the workflow session for message part events', async () => {
     let loadCount = 0;
-    const log = async (input?: unknown): Promise<void> => {
-      if (
-        typeof input === 'object' &&
-        input !== null &&
-        'body' in input &&
-        typeof input.body === 'object' &&
-        input.body !== null &&
-        'message' in input.body &&
-        input.body.message === 'Session loaded: part-events-no-load'
-      ) {
+    const log: NonNullable<RuntimeContext['host']>['log'] = async (_level, message) => {
+      if (message === 'Session loaded: part-events-no-load') {
         loadCount += 1;
       }
     };
     const mod = await import('../../src/app/runtime.ts');
-    const hooks = mod.createRuntime(createPluginInput(log));
+    const hooks = mod.createRuntime(createRuntimeContext('/tmp/test', log));
     const sessionId = 'part-events-no-load';
     await createTestSession(sessionId);
 
@@ -579,22 +566,7 @@ describe('handleFileToolAfter with real file on disk', () => {
     writeFileSync(testFilePath, 'const x = 1;\n', 'utf-8');
 
     const mod = await import('../../src/app/runtime.ts');
-    const input: PluginInput = {
-      client: { app: { log: async () => {} } } as unknown as PluginInput['client'],
-      project: {
-        id: 'test',
-        name: 'test',
-        directory: tmpDir,
-        worktree: tmpDir,
-        time: { created: Date.now() },
-      } as PluginInput['project'],
-      directory: tmpDir,
-      worktree: tmpDir,
-      experimental_workspace: {} as PluginInput['experimental_workspace'],
-      serverUrl: new URL('http://localhost:0'),
-      $: {} as PluginInput['$'],
-    };
-    const hooks = mod.createRuntime(input);
+    const hooks = mod.createRuntime(createRuntimeContext(tmpDir));
     await createTestSession(sessionId, 'base');
 
     const stateDir = process.env.SESSION_GUARD_PROFILES_DIR;
@@ -645,25 +617,9 @@ describe('handleFileToolAfter with real file on disk', () => {
     writeFileSync(join(testFileDir, 'test.ts'), 'const x = 1;\n', 'utf-8');
 
     const mod = await import('../../src/app/runtime.ts');
-    const input: PluginInput = {
-      client: { app: { log: async () => {} } } as unknown as PluginInput['client'],
-      project: {
-        id: 'test',
-        name: 'test',
-        directory: tmpDir,
-        worktree: tmpDir,
-        time: { created: Date.now() },
-      } as PluginInput['project'],
-      directory: tmpDir,
-      worktree: tmpDir,
-      experimental_workspace: {} as PluginInput['experimental_workspace'],
-      serverUrl: new URL('http://localhost:0'),
-      $: {} as PluginInput['$'],
-    };
-
     // Don't set SESSION_GUARD_PROFILES_DIR — profiles dir defaults to <directory>/profiles
     // which doesn't exist. Still should not throw.
-    const hooks = mod.createRuntime(input);
+    const hooks = mod.createRuntime(createRuntimeContext(tmpDir));
     await createTestSession(sessionId, 'nonexistent-profile');
 
     const output = { title: 'edit', output: 'ok', metadata: {} };
@@ -695,23 +651,7 @@ describe('handleFileToolAfter default profiles dir (no SESSION_GUARD_PROFILES_DI
     writeFileSync(join(testFileDir, 'test.ts'), 'const x = 1;\n', 'utf-8');
 
     const mod = await import('../../src/app/runtime.ts');
-    const input: PluginInput = {
-      client: { app: { log: async () => {} } } as unknown as PluginInput['client'],
-      project: {
-        id: 'test',
-        name: 'test',
-        directory: tmpDir,
-        worktree: tmpDir,
-        time: { created: Date.now() },
-      } as PluginInput['project'],
-      directory: tmpDir,
-      worktree: tmpDir,
-      experimental_workspace: {} as PluginInput['experimental_workspace'],
-      serverUrl: new URL('http://localhost:0'),
-      $: {} as PluginInput['$'],
-    };
-
-    const hooks = mod.createRuntime(input);
+    const hooks = mod.createRuntime(createRuntimeContext(tmpDir));
     const sessionId = 'file-def-profile';
     await createTestSession(sessionId, 'base');
 
@@ -816,7 +756,7 @@ describe('handleDispose, handleConfig, listSessions', () => {
     const config: Record<string, unknown> = {
       model: 'test-model',
     };
-    await hooks.config!(config as never);
+    await hooks.config!(config);
     expect(config.command).toBeDefined();
     expect((config.command as Record<string, unknown>)['sm-status']).toBeDefined();
     expect((config.command as Record<string, unknown>)['sm-list']).toBeDefined();
@@ -1200,12 +1140,7 @@ describe('handleFileToolAfter tool-name normalisation', () => {
     process.env.SESSION_GUARD_PROFILES_DIR = REAL_PROFILES_DIR;
 
     const mod = await import('../../src/app/runtime.ts');
-    const pluginInput = createPluginInput();
-    const hooks = mod.createRuntime({
-      ...pluginInput,
-      directory: tmpDir,
-      worktree: tmpDir,
-    } as PluginInput);
+    const hooks = mod.createRuntime(createRuntimeContext(tmpDir));
 
     await createTestSession('file-case-lower', 'base');
     await createTestSession('file-case-upper', 'base');
@@ -1393,10 +1328,7 @@ describe('opt-in session gate', () => {
     const hooks = await createRuntime();
     const output = { context: ['host line'], prompt: undefined as string | undefined };
 
-    await hooks['experimental.session.compacting']!(
-      { sessionID: 'no-session-compact' },
-      output as never
-    );
+    await hooks['experimental.session.compacting']!({ sessionID: 'no-session-compact' }, output);
 
     expect(output.context).toEqual(['host line']);
     expect(output.prompt).toBeUndefined();

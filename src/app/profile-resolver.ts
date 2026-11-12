@@ -124,17 +124,34 @@ export class ProfileResolver {
    */
   async listProfiles(): Promise<ProfileMetadata[]> {
     const loaded = await this.loadAll();
-    return loaded.map((p) => ({
-      id: p.id,
-      description: p.description,
-      extends: p.extends,
-      schemas: p.schemas,
-      agentsDir: p.agentsDir,
-      skillsDir: p.skillsDir,
-      agents: p.agents,
-      skills: p.skills,
-      invariants: p.invariants,
-    }));
+    return Promise.all(
+      loaded.map(async (p) => ({
+        id: p.id,
+        description: p.description,
+        extends: p.extends,
+        schemas: p.schemas,
+        schemaDescriptions: Object.fromEntries(
+          (
+            await Promise.all(
+              (p.schemas ?? []).map(async (file) => {
+                let schema: ProfileSchema | null;
+                try {
+                  schema = await this.schemaLoader.loadSchemaFile(p.id, file);
+                } catch {
+                  return null;
+                }
+                return schema?.description ? [file, schema.description] : null;
+              })
+            )
+          ).filter((entry): entry is [string, string] => entry !== null)
+        ),
+        agentsDir: p.agentsDir,
+        skillsDir: p.skillsDir,
+        agents: p.agents,
+        skills: p.skills,
+        invariants: p.invariants,
+      }))
+    );
   }
 
   /**
@@ -293,6 +310,8 @@ export class ProfileResolver {
     return {
       id: schemaId(schemaFile),
       source: `${profile}/${schemaFile}`,
+      description: currentSchema.description,
+      autoStartTrigger: currentSchema.autoStartTrigger,
       stages: qualifyStageAgents(profile, currentSchema.stages),
       transitions: currentSchema.transitions,
       editingAgents: currentSchema.editingAgents,

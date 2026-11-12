@@ -19,8 +19,26 @@ stages:
     allowedAgents: [orchestrator]
   execution:
     loop: implementation
+    actions:
+      - action: bash
+        commands: ['git status', 'git status .*', 'git diff.*', 'git log.*', 'git show.*']
     stages:
       code:
+        actions:
+          - action: edit
+            paths: ['**']
+            guard: "session.approved('plan')"
+          - action: bash
+            commands:
+              [
+                'git status',
+                'git status .*',
+                'git diff.*',
+                'git log.*',
+                'git show.*',
+                'git add -- src/smoke-1.ts',
+              ]
+            guard: "session.approved('plan')"
         allowedAgents: [coder, orchestrator]
       verify:
         allowedAgents: [reviewer, tester]

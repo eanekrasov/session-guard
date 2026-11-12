@@ -18,10 +18,12 @@ function rgb(raw: unknown): { r: number; g: number; b: number } | null {
     };
   }
   if (raw && typeof raw === 'object') {
-    const o = raw as Record<string, unknown>;
-    if (typeof o.r === 'number' && typeof o.g === 'number' && typeof o.b === 'number') {
-      const scale = o.r > 1 || o.g > 1 || o.b > 1 ? 1 : 255;
-      return { r: Math.round(o.r * scale), g: Math.round(o.g * scale), b: Math.round(o.b * scale) };
+    const r = Reflect.get(raw, 'r');
+    const g = Reflect.get(raw, 'g');
+    const b = Reflect.get(raw, 'b');
+    if (typeof r === 'number' && typeof g === 'number' && typeof b === 'number') {
+      const scale = r > 1 || g > 1 || b > 1 ? 1 : 255;
+      return { r: Math.round(r * scale), g: Math.round(g * scale), b: Math.round(b * scale) };
     }
   }
   return null;
@@ -87,8 +89,8 @@ export function toneBrandHex(hex: string, fallback: string): string {
   return desaturateTo(hex, MAX_SAT, fallback);
 }
 
-export function buildPanelPalette(theme: Record<string, unknown>): PanelPalette {
-  const sat = (k: string, fb: string) => desaturateTo(theme[k], MAX_SAT, fb);
+export function buildPanelPalette(theme: object): PanelPalette {
+  const sat = (k: string, fb: string) => desaturateTo(Reflect.get(theme, k), MAX_SAT, fb);
   return {
     primary: sat('primary', FALLBACK.primary),
     text: sat('text', FALLBACK.text),

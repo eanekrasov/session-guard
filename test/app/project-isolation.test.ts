@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createOpencodeClient } from '@opencode-ai/sdk/client';
 
 let alpha: string;
 let beta: string;
@@ -11,7 +12,7 @@ let previousHarness: string | undefined;
 
 function makeCtx(directory: string) {
   return {
-    client: {} as Record<string, unknown>,
+    client: createOpencodeClient(),
     project: {
       id: 'test',
       name: 'test',
@@ -22,8 +23,8 @@ function makeCtx(directory: string) {
     directory,
     worktree: directory,
     serverUrl: new URL('http://localhost:0'),
-    $: {} as Record<string, unknown>,
-    experimental_workspace: {} as Record<string, unknown>,
+    $: Bun.$,
+    experimental_workspace: { register: () => undefined },
   };
 }
 
@@ -78,8 +79,8 @@ describe('two projects in one process', () => {
     // first project's path — and listed the first project's profiles.
     const { SessionGuardPluginV1 } = await import('../../src/index.ts');
 
-    const first = (await SessionGuardPluginV1(makeCtx(alpha) as never)) as Record<string, unknown>;
-    const second = (await SessionGuardPluginV1(makeCtx(beta) as never)) as Record<string, unknown>;
+    const first = (await SessionGuardPluginV1(makeCtx(alpha))) as Record<string, unknown>;
+    const second = (await SessionGuardPluginV1(makeCtx(beta))) as Record<string, unknown>;
 
     const alphaOutput = await listProfilesThrough(first);
     const betaOutput = await listProfilesThrough(second);

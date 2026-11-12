@@ -69,19 +69,17 @@ function readProperty(obj: unknown, key: string): unknown | typeof MISSING {
   }
 
   if (typeof obj === 'string' || Array.isArray(obj)) {
-    if (key === 'length') return (obj as { length: number }).length;
+    if (key === 'length') return obj.length;
     if (ALLOWED_METHODS.has(key)) {
-      const method = (obj as unknown as Record<string, unknown>)[key];
-      return typeof method === 'function' ? (method as Function).bind(obj) : MISSING;
+      const method = Reflect.get(Object(obj), key);
+      return typeof method === 'function' ? method.bind(obj) : MISSING;
     }
-    return Array.isArray(obj) && /^[0-9]+$/.test(key)
-      ? (obj as unknown as Record<string, unknown>)[key]
-      : MISSING;
+    return Array.isArray(obj) && /^[0-9]+$/.test(key) ? Reflect.get(obj, key) : MISSING;
   }
 
   if (typeof obj === 'object' && obj !== null) {
     if (Object.prototype.hasOwnProperty.call(obj, key)) {
-      return (obj as Record<string, unknown>)[key];
+      return Reflect.get(obj, key);
     }
     return MISSING;
   }
@@ -104,7 +102,7 @@ export type AstNode =
 
 interface LiteralNode {
   type: 'literal';
-  value: string | number | boolean | null;
+  value: string | number | boolean | null | undefined;
 }
 
 interface IdentifierNode {
@@ -515,7 +513,7 @@ function parsePrimary(tokens: Token[], depth: number): AstNode {
     if (id === 'undefined') {
       // The `id` token was already consumed above — `undefined` is a literal,
       // not a prefix keyword, so nothing further may be consumed here.
-      return parsePostfix({ type: 'literal', value: undefined as unknown as null }, tokens, depth);
+      return parsePostfix({ type: 'literal', value: undefined }, tokens, depth);
     }
 
     // Arrow function: (params) => body  or  param => body

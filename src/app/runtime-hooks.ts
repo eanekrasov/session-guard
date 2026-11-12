@@ -2,13 +2,31 @@ import type { Config, Hooks, ToolDefinition } from '@opencode-ai/plugin';
 
 export interface RuntimeHooksDelegates {
   config(config: Config): Promise<void>;
-  chatMessage(input: unknown, output: unknown): Promise<void>;
-  before(input: unknown, output: unknown): Promise<void>;
-  after(input: unknown, output: unknown): Promise<void>;
-  event(input: unknown): Promise<void>;
-  systemTransform(input: unknown, output: unknown): Promise<void>;
-  compacting(input: unknown, output: unknown): Promise<void>;
-  messagesTransform(input: unknown, output: unknown): Promise<void>;
+  chatMessage(
+    input: Parameters<NonNullable<Hooks['chat.message']>>[0],
+    output: Parameters<NonNullable<Hooks['chat.message']>>[1]
+  ): Promise<void>;
+  before(
+    input: Parameters<NonNullable<Hooks['tool.execute.before']>>[0],
+    output: Parameters<NonNullable<Hooks['tool.execute.before']>>[1]
+  ): Promise<void>;
+  after(
+    input: Parameters<NonNullable<Hooks['tool.execute.after']>>[0],
+    output: Parameters<NonNullable<Hooks['tool.execute.after']>>[1]
+  ): Promise<void>;
+  event(input: Parameters<NonNullable<Hooks['event']>>[0]): Promise<void>;
+  systemTransform(
+    input: Parameters<NonNullable<Hooks['experimental.chat.system.transform']>>[0],
+    output: Parameters<NonNullable<Hooks['experimental.chat.system.transform']>>[1]
+  ): Promise<void>;
+  compacting(
+    input: Parameters<NonNullable<Hooks['experimental.session.compacting']>>[0],
+    output: Parameters<NonNullable<Hooks['experimental.session.compacting']>>[1]
+  ): Promise<void>;
+  messagesTransform(
+    input: Parameters<NonNullable<Hooks['experimental.chat.messages.transform']>>[0],
+    output: Parameters<NonNullable<Hooks['experimental.chat.messages.transform']>>[1]
+  ): Promise<void>;
   dispose(): Promise<void>;
   tools: Record<string, ToolDefinition>;
 }

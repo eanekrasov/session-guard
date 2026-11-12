@@ -54,17 +54,39 @@ schema. В текущем репозитории есть:
 через конфигурацию OpenCode или локальный путь установки. Точный путь подключения
 проверяйте в конфигурации конкретного OpenCode checkout.
 
+Автозапуск workflow по `autoStartTrigger` включён по умолчанию. Его можно
+отключить в настройках экземпляра плагина опцией `autoStart: false`; это не
+меняет описания триггеров в YAML, а полностью выключает их обработку.
+Инжектирование инструкций стадий в системный контекст (в V2 включено по
+умолчанию) отключается отдельно опцией `stageInstructionsEnabled: false`.
+Для объектной записи плагина опция задаётся в `options`:
+
+```jsonc
+{
+  "plugins": [
+    {
+      "package": "@eanekrasov/session-guard",
+      "options": {
+        "autoStart": false,
+        "stageInstructionsEnabled": false,
+      },
+    },
+  ],
+}
+```
+
 ## Dashboard
 
-Dashboard запускается отдельным процессом в source repository:
+Dashboard запускается отдельным процессом и поставляется отдельным пакетом от
+плагина. В source repository:
 
 ```bash
 mise run dashboard
 ```
 
-У target project нет автоматически создаваемого dashboard-процесса. Если сервер
-запускается из checkout-а плагина, передайте ему `SESSION_GUARD_PROFILES_DIR` и
-`SESSION_GUARD_STORE_DIR` target project; иначе сервер из source repository
-будет искать собственные значения по умолчанию. Сервер использует порт `3456`.
+У target project нет автоматически создаваемого dashboard-процесса. Dashboard
+получает сессии и профили через `session-guard` CLI и наследует его переменные
+окружения, включая `SESSION_GUARD_PROFILES_DIR` и `SESSION_GUARD_STORE_DIR`.
+Сервер использует порт `3456`.
 Если задан `DASHBOARD_TOKEN`, клиент должен передавать
 `Authorization: Bearer <token>`; `ALLOWED_ORIGIN` задаёт CORS.

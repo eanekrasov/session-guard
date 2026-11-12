@@ -67,11 +67,13 @@ workflow может перейти в terminal failure.
 dashboard отдельно проверьте, что сервер запущен на ожидаемом порту и что token
 передаётся корректно.
 
-Dashboard запускается в source repository через `mise run dashboard` и читает
-тот же store, что и runtime. По умолчанию store находится в глобальном каталоге
-OpenCode; при `SESSION_GUARD_STORE_DIR` это значение должно совпадать у runtime
-и dashboard. Порт по умолчанию — `3456`; при удалённом или браузерном доступе
-проверьте также `DASHBOARD_HOST`, `DASHBOARD_TOKEN` и `ALLOWED_ORIGIN`.
+Dashboard запускается отдельно через `mise run dashboard` или пакет
+`@eanekrasov/session-guard-dashboard` и получает сессии вызовами `session-guard`
+CLI. Проверьте, что команда доступна dashboard-процессу и использует нужное
+окружение. По умолчанию store находится в глобальном каталоге OpenCode; при
+`SESSION_GUARD_STORE_DIR` это значение должно совпадать у runtime и CLI. Порт по
+умолчанию — `3456`; при удалённом или браузерном доступе проверьте также
+`DASHBOARD_HOST`, `DASHBOARD_TOKEN` и `ALLOWED_ORIGIN`.
 
 ## Что приложить при обращении за помощью
 

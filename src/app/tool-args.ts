@@ -88,6 +88,5 @@ export function isToolArgs<T extends keyof ToolArgsMap>(
   keys: string[]
 ): args is ToolArgsMap[T] {
   if (!args || typeof args !== 'object') return false;
-  const obj = args as Record<string, unknown>;
-  return keys.every((k) => k in obj && typeof obj[k] === 'string');
+  return keys.every((key) => Reflect.has(args, key) && typeof Reflect.get(args, key) === 'string');
 }

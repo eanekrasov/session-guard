@@ -169,9 +169,11 @@ export interface GuardHit {
   action: 'block' | 'warn' | 'sanitize';
 }
 
-export function validateUserInput(input: string): GuardResult {
+export function validateUserInput(input: unknown): GuardResult {
   const hits = GUARDS.filter(
-    (guard) => guard.patterns.some((pattern) => pattern.test(input)) || guard.custom?.(input)
+    (guard) =>
+      typeof input === 'string' &&
+      (guard.patterns.some((pattern) => pattern.test(input)) || guard.custom?.(input))
   );
   const blocked = hits.filter((hit) => hit.severity === 'block').map((hit) => hit.id);
   return {

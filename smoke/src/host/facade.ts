@@ -105,6 +105,7 @@ export interface SmokeHostOptions {
   kind: HostKind;
   model: string;
   profile: string;
+  pluginSpec?: string;
   env?: Record<string, string>;
   files?: Record<string, string>;
   git?: boolean;
@@ -252,6 +253,7 @@ export async function startSmokeHost(options: SmokeHostOptions): Promise<Running
     model: options.model,
     version: options.kind,
     profile: options.profile,
+    ...(options.pluginSpec === undefined ? {} : { pluginSpec: options.pluginSpec }),
     ...(options.env === undefined ? {} : { env: options.env }),
     ...(options.files === undefined ? {} : { files: options.files }),
     ...(options.git === undefined ? {} : { git: options.git }),

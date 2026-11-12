@@ -232,6 +232,8 @@ export class SchemaLoader {
       // asked for, and it stamps both `id` and `source` on the way out.
       id: '',
       source: extension.extends ?? '',
+      description: extension.description ?? base.description,
+      autoStartTrigger: extension.autoStartTrigger ?? base.autoStartTrigger,
       stages: mergeStages(base.stages, extension.stages),
       transitions: mergeTransitions(base.transitions, extension.transitions),
       editingAgents: extension.editingAgents ?? base.editingAgents,

@@ -337,14 +337,20 @@ export function createNotRunParityEntry(
   return { ...entry, parity: 'not-run' };
 }
 
-export function assertScenarioResultInvariant(result: ScenarioResult): void {
-  if (result.status === 'blocked' && result.blockedReason === undefined) {
+export function assertScenarioResultInvariant(result: unknown): void {
+  if (typeof result !== 'object' || result === null || !('status' in result)) {
+    throw new Error('[ERROR] scenario result must be an object with a status');
+  }
+  const status = result.status;
+  const blockedReason = 'blockedReason' in result ? result.blockedReason : undefined;
+  const failureKind = 'failureKind' in result ? result.failureKind : undefined;
+  if (status === 'blocked' && blockedReason === undefined) {
     throw new Error('[ERROR] blocked scenario result requires blockedReason');
   }
-  if (result.status !== 'blocked' && result.blockedReason !== undefined) {
+  if (status !== 'blocked' && blockedReason !== undefined) {
     throw new Error('[ERROR] blockedReason is only valid for blocked scenario results');
   }
-  if (result.status === 'pass' && result.failureKind !== undefined) {
+  if (status === 'pass' && failureKind !== undefined) {
     throw new Error('[ERROR] failureKind is only valid for a failing scenario result');
   }
 }

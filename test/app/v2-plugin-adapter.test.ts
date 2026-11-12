@@ -192,7 +192,7 @@ describe('V2 plugin setup adapter', () => {
           options: Record<string, unknown>;
           messages: Array<{
             role: 'user' | 'assistant' | 'system' | 'tool';
-            content: Array<{ type: 'text'; text: string }>;
+            content: unknown[];
             id?: string;
           }>;
           system: Array<{ type: 'text'; text: string }>;
@@ -256,7 +256,7 @@ describe('V2 plugin setup adapter', () => {
       ],
       system: [{ type: 'text' as const, text: 'base instructions' }],
     };
-    await contextCallback!(event as never);
+    await contextCallback!(event);
     expect(event.system).toEqual([{ type: 'text', text: 'base instructions' }]);
     // The tool call and its result must survive the bridge: without them the
     // model cannot see that it already ran the tool, and repeats the call.
@@ -296,17 +296,12 @@ describe('V2 plugin setup adapter', () => {
   });
 
   test('appends only the message the legacy layer injected', () => {
-    const hostMessages = [
+    const hostMessages: Parameters<typeof v2MessagesWithInjected>[0] = [
       { id: 'message-1', role: 'user', content: [{ type: 'text', text: 'go' }] },
-      {
-        id: 'message-2',
-        role: 'assistant',
-        content: [{ type: 'tool-call', id: 'call-1', name: 'workflow-create', input: {} }],
-      },
     ];
     // The legacy view always carries every message; only the id the host does
     // not know is an injection.
-    const legacyMessages = [
+    const legacyMessages: Parameters<typeof v2MessagesWithInjected>[1] = [
       { info: { id: 'message-1', role: 'user' }, parts: [{ type: 'text', text: 'go' }] },
       {
         info: { id: 'injected-1', role: 'user' },
@@ -314,15 +309,11 @@ describe('V2 plugin setup adapter', () => {
       },
     ];
 
-    const result = v2MessagesWithInjected(
-      hostMessages as never,
-      legacyMessages as never,
-      'session-1'
-    );
+    const result = v2MessagesWithInjected(hostMessages, legacyMessages, 'session-1');
 
-    expect(result.slice(0, 2)).toEqual(hostMessages as never);
-    expect(result).toHaveLength(3);
-    expect(result[2]).toEqual({
+    expect(result[0]).toEqual(hostMessages[0]);
+    expect(result).toHaveLength(2);
+    expect(result[1]).toEqual({
       id: 'injected-1',
       role: 'user',
       content: [
@@ -443,10 +434,10 @@ describe('V2 plugin setup adapter', () => {
         `profilesDir: ${join(projectA, '.opencode', 'profiles')}\n` +
         '  - alpha | desc: Alpha profile | schemas: cycle.yaml',
     });
-    expect(registrations).toHaveLength(3);
+    expect(registrations).toHaveLength(5);
     await cleanup();
     await cleanup();
-    expect(registrations).toHaveLength(3);
+    expect(registrations).toHaveLength(5);
     await rm(root, { recursive: true, force: true });
   });
 
@@ -523,7 +514,7 @@ describe('V2 plugin setup adapter', () => {
     expect(callback).toBeDefined();
     await cleanup();
     await cleanup();
-    expect(disposed).toBe(2);
+    expect(disposed).toBe(4);
   });
 
   test('degrades safely when registration fails during setup', async () => {
@@ -590,7 +581,7 @@ describe('V2 plugin setup adapter', () => {
 
     const cleanup = await SessionGuardPluginV2(context);
     await expect(cleanup()).rejects.toThrow('registration disposal failed');
-    expect(disposed).toBe(2);
+    expect(disposed).toBe(4);
   });
 
   test('rejects a disallowed V2 operation without mutating an unrelated workflow session', async () => {

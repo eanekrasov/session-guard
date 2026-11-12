@@ -29,9 +29,9 @@ describe('normalized smoke contracts', () => {
       status: 'blocked',
       blockedReason: 'adapter_contract_mismatch',
     });
-    expect(() =>
-      assertScenarioResultInvariant({ ...baseResult, status: 'blocked' } as never)
-    ).toThrow('blocked scenario result requires blockedReason');
+    expect(() => assertScenarioResultInvariant({ ...baseResult, status: 'blocked' })).toThrow(
+      'blocked scenario result requires blockedReason'
+    );
   });
 
   test('requires a reason for every not-run parity entry', () => {

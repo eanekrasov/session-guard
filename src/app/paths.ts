@@ -23,9 +23,9 @@ export function opencodeStateDir(): string {
  * Корневая директория харнесса в проекте (по умолчанию .opencode).
  */
 export function harnessDir(projectDir: string, useOverride = true): string {
-  return useOverride && process.env.OPENCODE_HARNESS_DIR
-    ? absEnv(process.env.OPENCODE_HARNESS_DIR, projectDir)!
-    : `${projectDir}/.opencode`;
+  const override = process.env.OPENCODE_HARNESS_DIR;
+  if (!useOverride || !override) return `${projectDir}/.opencode`;
+  return absEnv(override, projectDir) ?? `${projectDir}/.opencode`;
 }
 
 /**

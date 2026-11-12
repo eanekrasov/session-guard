@@ -78,13 +78,13 @@ describe('ConsentOrchestrator.before', () => {
     const orchestrator = await makeOrchestrator();
     const { evidenceOf, CONSENT_EVIDENCE_SCHEMA } = await import('../../src/app/consent.ts');
 
-    const manifest = {
+    const manifest: ConsentManifest = {
       schema: CONSENT_EVIDENCE_SCHEMA,
       revision: 1,
       summary: 'Test feature',
       files: ['.opencode/plan/missing-story/plan.md'],
-    } as const;
-    const evidence = evidenceOf(manifest as unknown as ConsentManifest);
+    };
+    const evidence = evidenceOf(manifest);
     const questionText = `<consent-request schema="harness.consent/v1" revision="1" evidence="${evidence}" grant="grant" decline="decline">${JSON.stringify(manifest)}</consent-request>`;
 
     await orchestrator.before('co-no-plan', 'call-no-plan', questionText);
@@ -98,13 +98,13 @@ describe('ConsentOrchestrator.before', () => {
     const orchestrator = await makeOrchestrator();
     const { evidenceOf, CONSENT_EVIDENCE_SCHEMA } = await import('../../src/app/consent.ts');
 
-    const manifest = {
+    const manifest: ConsentManifest = {
       schema: CONSENT_EVIDENCE_SCHEMA,
       revision: 1,
       summary: 'Implement feature X',
       files: ['.opencode/plan/feature-x/plan.md'],
-    } as const;
-    const evidence = evidenceOf(manifest as unknown as ConsentManifest);
+    };
+    const evidence = evidenceOf(manifest);
 
     const planDir = join(directory, '.opencode/plan/feature-x');
     mkdirSync(planDir, { recursive: true });
@@ -128,13 +128,13 @@ describe('ConsentOrchestrator.before', () => {
     const orchestrator = await makeOrchestrator();
     const { evidenceOf, CONSENT_EVIDENCE_SCHEMA } = await import('../../src/app/consent.ts');
 
-    const manifest = {
+    const manifest: ConsentManifest = {
       schema: CONSENT_EVIDENCE_SCHEMA,
       revision: 1,
       summary: 'Dup feature',
       files: ['.opencode/plan/dup-feature/plan.md'],
-    } as const;
-    const evidence = evidenceOf(manifest as unknown as ConsentManifest);
+    };
+    const evidence = evidenceOf(manifest);
     const questionText = `<consent-request schema="harness.consent/v1" revision="1" evidence="${evidence}" grant="grant" decline="decline">${JSON.stringify(manifest)}</consent-request>`;
 
     await orchestrator.before('co-dedup', 'call-dup', questionText);
@@ -156,13 +156,13 @@ describe('ConsentOrchestrator.after', () => {
     const { evidenceOf, calculatePlanEvidence, CONSENT_EVIDENCE_SCHEMA } =
       await import('../../src/app/consent.ts');
 
-    const manifest = {
+    const manifest: ConsentManifest = {
       schema: CONSENT_EVIDENCE_SCHEMA,
       revision: 1,
       summary: 'Feature grant',
       files: [`.opencode/plan/${storyId}/plan.md`],
-    } as const;
-    const manifestEvidence = evidenceOf(manifest as unknown as ConsentManifest);
+    };
+    const manifestEvidence = evidenceOf(manifest);
     const planEvidence = calculatePlanEvidence(planContent);
     void planEvidence;
 
@@ -211,13 +211,13 @@ describe('ConsentOrchestrator.after', () => {
     const orchestrator = await makeOrchestrator(client);
     const { evidenceOf, CONSENT_EVIDENCE_SCHEMA } = await import('../../src/app/consent.ts');
 
-    const manifest = {
+    const manifest: ConsentManifest = {
       schema: CONSENT_EVIDENCE_SCHEMA,
       revision: 1,
       summary: 'Messages test',
       files: ['.opencode/plan/no-plan/plan.md'],
-    } as const;
-    const evidence = evidenceOf(manifest as unknown as ConsentManifest);
+    };
+    const evidence = evidenceOf(manifest);
     const questionText = `<consent-request schema="harness.consent/v1" revision="1" evidence="${evidence}" grant="grant" decline="decline">${JSON.stringify(manifest)}</consent-request>`;
 
     await orchestrator.before('co-messages', 'call-messages', questionText);
@@ -239,13 +239,13 @@ describe('ConsentOrchestrator.after', () => {
     const orchestrator = await makeOrchestrator(client);
     const { evidenceOf, CONSENT_EVIDENCE_SCHEMA } = await import('../../src/app/consent.ts');
 
-    const manifest = {
+    const manifest: ConsentManifest = {
       schema: CONSENT_EVIDENCE_SCHEMA,
       revision: 1,
       summary: 'Synthetic test',
       files: [`.opencode/plan/${storyId}/plan.md`],
-    } as const;
-    const evidence = evidenceOf(manifest as unknown as ConsentManifest);
+    };
+    const evidence = evidenceOf(manifest);
     const questionText = `<consent-request schema="harness.consent/v1" revision="1" evidence="${evidence}" grant="grant" decline="decline">${JSON.stringify(manifest)}</consent-request>`;
 
     await store.save(createSession('co-synthetic', 'base', 'session-guard'));
@@ -276,13 +276,13 @@ describe('ConsentOrchestrator.after', () => {
     const orchestrator = await makeOrchestrator();
     const { evidenceOf, CONSENT_EVIDENCE_SCHEMA } = await import('../../src/app/consent.ts');
 
-    const manifest = {
+    const manifest: ConsentManifest = {
       schema: CONSENT_EVIDENCE_SCHEMA,
       revision: 1,
       summary: 'Mismatch feature',
       files: [`.opencode/plan/${storyId}/plan.md`],
-    } as const;
-    const evidence = evidenceOf(manifest as unknown as ConsentManifest);
+    };
+    const evidence = evidenceOf(manifest);
     const questionText = `<consent-request schema="harness.consent/v1" revision="1" evidence="${evidence}" grant="grant" decline="decline">${JSON.stringify(manifest)}</consent-request>`;
 
     await store.save(createSession('co-mismatch', 'base', 'session-guard'));
@@ -312,13 +312,13 @@ describe('ConsentOrchestrator.after', () => {
       const orchestrator = await makeOrchestrator();
       const { evidenceOf, CONSENT_EVIDENCE_SCHEMA } = await import('../../src/app/consent.ts');
 
-      const manifest = {
+      const manifest: ConsentManifest = {
         schema: CONSENT_EVIDENCE_SCHEMA,
         revision: 1,
         summary: 'Verify stable',
         files: [`.opencode/plan/${storyId}/plan.md`],
-      } as const;
-      const evidence = evidenceOf(manifest as unknown as ConsentManifest);
+      };
+      const evidence = evidenceOf(manifest);
       const questionText = `<consent-request schema="harness.consent/v1" revision="1" evidence="${evidence}" grant="grant" decline="decline">${JSON.stringify(manifest)}</consent-request>`;
 
       await store.save(createSession('co-stable', 'base', 'session-guard'));
@@ -346,13 +346,13 @@ describe('ConsentOrchestrator.after', () => {
       const orchestrator = await makeOrchestrator();
       const { evidenceOf, CONSENT_EVIDENCE_SCHEMA } = await import('../../src/app/consent.ts');
 
-      const manifest = {
+      const manifest: ConsentManifest = {
         schema: CONSENT_EVIDENCE_SCHEMA,
         revision: 1,
         summary: 'Changed plan',
         files: [`.opencode/plan/${storyId}/plan.md`],
-      } as const;
-      const evidence = evidenceOf(manifest as unknown as ConsentManifest);
+      };
+      const evidence = evidenceOf(manifest);
       const questionText = `<consent-request schema="harness.consent/v1" revision="1" evidence="${evidence}" grant="grant" decline="decline">${JSON.stringify(manifest)}</consent-request>`;
 
       await store.save(createSession('co-changed', 'base', 'session-guard'));
@@ -389,13 +389,13 @@ describe('ConsentOrchestrator.after', () => {
       const orchestrator = await makeOrchestrator();
       const { evidenceOf, CONSENT_EVIDENCE_SCHEMA } = await import('../../src/app/consent.ts');
 
-      const manifest = {
+      const manifest: ConsentManifest = {
         schema: CONSENT_EVIDENCE_SCHEMA,
         revision: 1,
         summary: 'Auto approve',
         files: [`.opencode/plan/${storyId}/plan.md`],
-      } as const;
-      const evidence = evidenceOf(manifest as unknown as ConsentManifest);
+      };
+      const evidence = evidenceOf(manifest);
       const questionText = `<consent-request schema="harness.consent/v1" revision="1" evidence="${evidence}" grant="grant" decline="decline">${JSON.stringify(manifest)}</consent-request>`;
 
       await store.save(createSession('co-auto', 'base', 'session-guard'));
@@ -423,13 +423,13 @@ describe('ConsentOrchestrator.after', () => {
       const orchestrator = await makeOrchestrator();
       const { evidenceOf, CONSENT_EVIDENCE_SCHEMA } = await import('../../src/app/consent.ts');
 
-      const manifest = {
+      const manifest: ConsentManifest = {
         schema: CONSENT_EVIDENCE_SCHEMA,
         revision: 1,
         summary: 'No auto',
         files: [`.opencode/plan/${storyId}/plan.md`],
-      } as const;
-      const evidence = evidenceOf(manifest as unknown as ConsentManifest);
+      };
+      const evidence = evidenceOf(manifest);
       const questionText = `<consent-request schema="harness.consent/v1" revision="1" evidence="${evidence}" grant="grant" decline="decline">${JSON.stringify(manifest)}</consent-request>`;
 
       await store.save(createSession('co-no-auto', 'base', 'session-guard'));
@@ -459,13 +459,13 @@ describe('consent covers every document it named, and only the plan in hand', ()
       writeFileSync(join(dir, name), content);
       refs.push(`.opencode/plan/${storyId}/${name}`);
     }
-    const manifest = {
+    const manifest: ConsentManifest = {
       schema: CONSENT_EVIDENCE_SCHEMA,
       revision: 1,
       summary: `Plan ${storyId}`,
       files: refs,
-    } as const;
-    const evidence = evidenceOf(manifest as unknown as ConsentManifest);
+    };
+    const evidence = evidenceOf(manifest);
     const questionText = `<consent-request schema="harness.consent/v1" revision="1" evidence="${evidence}" grant="grant" decline="decline">${JSON.stringify(manifest)}</consent-request>`;
     const orchestrator = await makeOrchestrator();
     await orchestrator.before(sessionID, callID, questionText);
@@ -570,14 +570,14 @@ describe('a consent under any name is treated like the plan', () => {
       writeFileSync(join(dir, name), content);
       refs.push(`.opencode/plan/${storyId}/${name}`);
     }
-    const manifest = {
+    const manifest: ConsentManifest = {
       schema: CONSENT_EVIDENCE_SCHEMA,
       revision: 1,
       summary: `Consent ${storyId}`,
       type,
       files: refs,
-    } as const;
-    const evidence = evidenceOf(manifest as unknown as ConsentManifest);
+    };
+    const evidence = evidenceOf(manifest);
     const questionText = `<consent-request schema="harness.consent/v1" revision="1" evidence="${evidence}" grant="grant" decline="decline">${JSON.stringify(manifest)}</consent-request>`;
     const orchestrator = await makeOrchestrator();
     await orchestrator.before(sessionID, callID, questionText);
@@ -651,14 +651,14 @@ describe('a consent under any name is treated like the plan', () => {
     // wrong reason.
     const { evidenceOf, CONSENT_EVIDENCE_SCHEMA } = await import('../../src/app/consent.ts');
     writeFileSync(join(dir, 'deploy.md'), '# Deploy\n');
-    const manifest = {
+    const manifest: ConsentManifest = {
       schema: CONSENT_EVIDENCE_SCHEMA,
       revision: 1,
       summary: 'Deploy',
       type: 'deploy',
       files: ['.opencode/plan/fallback/deploy.md'],
-    } as const;
-    const questionText = `<consent-request schema="harness.consent/v1" revision="1" evidence="${evidenceOf(manifest as unknown as ConsentManifest)}" grant="grant" decline="decline">${JSON.stringify(manifest)}</consent-request>`;
+    };
+    const questionText = `<consent-request schema="harness.consent/v1" revision="1" evidence="${evidenceOf(manifest)}" grant="grant" decline="decline">${JSON.stringify(manifest)}</consent-request>`;
 
     const orchestrator = await makeOrchestrator();
     await orchestrator.after(

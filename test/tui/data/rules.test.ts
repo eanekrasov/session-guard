@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, afterEach, afterAll, spyOn } from 'bu
 import path from 'node:path';
 import os from 'node:os';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync, chmodSync } from 'node:fs';
-import { clearRuleCache } from '../../../src/rules/rule-discovery.ts';
+import { clearRuleCache } from '../../../src/rules-engine/rules/rule-discovery.js';
 import {
   classifyRuleScope,
   hasConditions,

@@ -65,7 +65,7 @@ const V1_SSE_RECONNECT_DELAYS_MS = [10, 25, 50, 100] as const;
 
 function eventSessionId(event: V1SseEvent): string | undefined {
   if (typeof event.data !== 'object' || event.data === null) return undefined;
-  const value = (event.data as { sessionID?: unknown }).sessionID;
+  const value = Reflect.get(event.data, 'sessionID');
   return typeof value === 'string' ? value : undefined;
 }
 
@@ -75,10 +75,8 @@ export function isV1TerminalEvent(event: V1SseEvent, sessionId: string): boolean
   if (event.type !== 'session.status') return false;
   const data = event.data;
   if (typeof data !== 'object' || data === null) return false;
-  const status = (data as { status?: unknown }).status;
-  return (
-    typeof status === 'object' && status !== null && (status as { type?: unknown }).type === 'idle'
-  );
+  const status = Reflect.get(data, 'status');
+  return typeof status === 'object' && status !== null && Reflect.get(status, 'type') === 'idle';
 }
 
 export function waitForV1Event(
@@ -115,12 +113,11 @@ export function parseV1SseEvent(record: string): V1SseEvent | undefined {
   }
   if (data.length === 0) return undefined;
   try {
-    const payload = JSON.parse(data.join('\n')) as {
-      type?: unknown;
-      properties?: unknown;
-    };
-    if (typeof payload.type === 'string' && 'properties' in payload) {
-      return { type: payload.type, data: payload.properties };
+    const payload: unknown = JSON.parse(data.join('\n'));
+    if (payload === null) return undefined;
+    const payloadType = typeof payload === 'object' ? Reflect.get(payload, 'type') : undefined;
+    if (typeof payloadType === 'string' && typeof payload === 'object' && 'properties' in payload) {
+      return { type: payloadType, data: Reflect.get(payload, 'properties') };
     }
     if (!eventType) return undefined;
     return { type: eventType, data: payload };

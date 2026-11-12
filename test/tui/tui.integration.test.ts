@@ -47,7 +47,7 @@ function makeApi(tree: SessionTree): SectionApi {
     slots: { register: () => '' as string },
     keymap: { registerLayer: () => {} },
     ui: {
-      DialogAlert: () => '' as never,
+      DialogAlert: () => '',
       dialog: { setSize: () => {}, replace: () => {}, clear: () => {} },
     },
     kv: {
@@ -67,7 +67,7 @@ function makeApi(tree: SessionTree): SectionApi {
       },
     },
     lifecycle: { onDispose: () => {} },
-    renderer: { requestRender: () => {} } as never,
+    renderer: { requestRender: () => {} },
     event: {
       on: (event: string, handler: (event: unknown) => void): (() => void) => {
         const handlers = eventHandlers.get(event) ?? [];
@@ -214,7 +214,7 @@ describe('sidebar-state: проводка плагина', () => {
       ui: {
         DialogAlert: (props) => {
           alerts.push(props);
-          return '' as never;
+          return '';
         },
         dialog: {
           setSize: (size) => {
@@ -241,12 +241,13 @@ describe('sidebar-state: проводка плагина', () => {
     const commandLayer = layers.find((l) => l.commands !== undefined)!;
     const bindingLayer = layers.find((l) => l.bindings !== undefined)!;
     expect(commandLayer.mode).toBeUndefined();
-    const command = commandLayer.commands!.find(
-      (c) => (c as { name?: string }).name === 'harness.workflow.details'
-    ) as unknown as { namespace?: string; title?: string; run: () => void };
+    const command = commandLayer.commands!.find((c) => c.name === 'harness.workflow.details');
+    if (!command) throw new Error('workflow details command was not registered');
     expect(command.namespace).toBe('palette');
     expect(command.title).toContain('full state');
 
+    if (typeof command.run !== 'function')
+      throw new Error('workflow details command has no runner');
     command.run();
     expect(alerts.at(-1)!.title).toContain('full state');
     expect(alerts.at(-1)!.message).toContain('currentStage: "code"');

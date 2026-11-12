@@ -1,0 +1,550 @@
+# OpenCode Rules
+
+This document explains how to use OpenCode Rules to inject custom instructions into the agent's context. Rules are automatically discovered and injected via OpenCode's hook system, enabling context-aware rule filtering based on:
+
+- **Legacy filters**: file paths (`globs`), file content (`fileContains`), user prompts (`keywords`), and available tools (`tools`)
+- **Runtime filters**: model, agent, command, project type, git branch, OS, and CI environment
+- **Match semantics**: `match: any` (default OR logic) or `match: all` (AND logic)
+
+## Rule Files
+
+Rules are defined in Markdown files (`.md` or `.mdc`). These files can be located in two places:
+
+- **Global Rules:** `$OPENCODE_CONFIG_DIR/rules/` if set, otherwise `$XDG_CONFIG_HOME/opencode/rules/` (typically `~/.config/opencode/rules/`)
+- **Project Rules:** `.opencode/rules/` in the root of your project.
+
+Both directories are scanned **recursively**, so you can organize your rules into subdirectories. Rule discovery happens once when the plugin initializes.
+
+### Organizing Rules with Subdirectories
+
+You can create subdirectories to group related rules:
+
+```
+~/.config/opencode/rules/
+├── coding-standards.md       # Root-level rule (always applied)
+├── languages/
+│   ├── typescript.mdc        # TypeScript-specific (conditional)
+│   └── python.mdc            # Python-specific (conditional)
+├── frameworks/
+│   ├── react.mdc             # React rules
+│   └── nextjs.mdc            # Next.js rules
+└── workflows/
+    ├── testing.md            # Testing guidelines
+    └── git.md                # Git commit conventions
+```
+
+Hidden files and directories (starting with `.`) are automatically excluded from discovery.
+
+## Conditional Rules
+
+You can define conditional rules in both `.md` and `.mdc` files using YAML frontmatter with various filter fields.
+
+Set `name` to control the short label used when the rule is delivered. The
+value is trimmed; when omitted, the filename stem is used.
+
+```markdown
+---
+name: TypeScript components
+globs:
+  - 'src/components/**/*.ts'
+---
+
+This is a rule for TypeScript components.
+```
+
+### Legacy Filters
+
+#### File-Based Conditions (globs)
+
+The `globs` key contains a list of glob patterns. The rule applies if any observed file's path matches one of the patterns.
+
+```markdown
+---
+globs:
+  - 'src/components/**/*.ts'
+---
+
+This is a rule for TypeScript components.
+```
+
+Observed files come from successful Read, Write, Edit, Apply Patch, and LSP tool events. Prose path mentions and excluded tools (grep, glob, bash, ...) do not contribute paths.
+
+#### File-Content Conditions (fileContains)
+
+The `fileContains` key accepts a single string or a list of literal substrings. The rule applies when one observed file's text contains any literal (OR across literals). Matching is case-sensitive and literal: regex metacharacters have no special meaning, and literals may span lines.
+
+```markdown
+---
+globs:
+  - '**/*.rs'
+fileContains: 'unsafe {'
+---
+
+Review guidance for unsafe Rust.
+```
+
+When both `globs` and `fileContains` are declared, they form one file-observation family: a single observed file must satisfy the path pattern AND contain a literal. The family counts as one condition in the `match: any|all` algebra — for example, `globs` + `fileContains` + `keywords` under `match: any` means `(globs AND fileContains) OR keywords`.
+
+`fileContains` can be used without `globs` to match content alone:
+
+```markdown
+---
+fileContains:
+  - 'TODO: fix'
+---
+
+Cleanup guidance for files with unresolved todos.
+```
+
+Notes:
+
+- A declared `fileContains` that yields no valid literal (empty values) makes the rule never match and logs a warning — it never degrades to an unconditional rule.
+- `fileContains` is a durable condition: once the rule is delivered, later observations never retract it.
+- Read observations carry the returned file slice (line-number prefixes stripped); Write contributes the submitted content; Edit contributes removed plus added text; Apply Patch contributes per-file hunk lines; LSP contributes returned path-associated text.
+
+#### Prompt-Based Conditions (keywords)
+
+The `keywords` key contains a list of keywords. The rule applies if the user's prompt contains any of the keywords (case-insensitive, word-boundary matching).
+
+```markdown
+---
+keywords:
+  - 'testing'
+  - 'unit test'
+  - 'jest'
+---
+
+Follow these testing best practices.
+```
+
+Keyword matching uses word boundaries, so:
+
+- "test" matches "testing" (prefix match)
+- "test" does NOT match "contest" (mid-word)
+
+#### Tool-Based Conditions (tools)
+
+The `tools` key contains a list of tool IDs. The rule applies if any listed tool is available in the current environment.
+
+```markdown
+---
+tools:
+  - 'mcp_websearch'
+  - 'mcp_lsp'
+---
+
+Use LSP for type information and web search for documentation.
+```
+
+### Runtime Environment Filters
+
+These filters match against the current runtime environment and session state.
+
+#### Model Filter
+
+The `model` key matches against the current LLM model ID:
+
+```markdown
+---
+model:
+  - gpt-5.3-codex
+  - claude-sonnet-4
+---
+
+Instructions specific to these models.
+```
+
+#### Agent Filter
+
+The `agent` key matches against the current agent type (e.g., `programmer`, `planner`):
+
+```markdown
+---
+agent:
+  - programmer
+---
+
+Programming-specific guidance.
+```
+
+#### Command Filter
+
+The `command` key matches against the current slash command. The command is inferred from the leading slash token (first token) of the latest user prompt:
+
+```markdown
+---
+command:
+  - /plan
+  - /review
+---
+
+Planning and review workflow guidance.
+```
+
+#### Project Filter
+
+The `project` key matches against detected project type tags (e.g., `node`, `python`, `go`, `rust`, `monorepo`):
+
+```markdown
+---
+project:
+  - node
+  - monorepo
+---
+
+Node.js monorepo best practices.
+```
+
+#### Branch Filter
+
+The `branch` key matches against the current git branch name. Supports glob patterns:
+
+```markdown
+---
+branch:
+  - main
+  - feature/*
+  - release/**
+---
+
+Rules for main, feature branches, and release branches.
+```
+
+#### OS Filter
+
+The `os` key matches against the current operating system (`linux`, `darwin`, `win32`):
+
+```markdown
+---
+os:
+  - linux
+  - darwin
+---
+
+Unix-specific commands and paths.
+```
+
+#### CI Filter
+
+The `ci` key matches against whether the environment is a CI system (boolean):
+
+```markdown
+---
+ci: true
+---
+
+CI-specific build and test guidance.
+```
+
+### Combined Conditions (OR logic by default)
+
+You can use multiple condition types together. By default (`match: any`), the rule applies if ANY condition matches:
+
+```markdown
+---
+globs:
+  - '**/*.test.ts'
+keywords:
+  - 'testing'
+---
+
+Testing standards for the project.
+```
+
+This rule applies when EITHER a test file is in context OR the user mentions testing.
+
+### Requiring All Conditions (match: all)
+
+Use `match: all` when you need every declared condition to match:
+
+```markdown
+---
+model:
+  - gpt-5.3-codex
+agent:
+  - programmer
+branch:
+  - feature/*
+match: all
+---
+
+This rule only applies when ALL conditions match: specific model, programmer agent, AND a feature branch.
+```
+
+### Unconditional Rules
+
+If no conditional fields are specified, the rule is applied unconditionally to all prompts.
+
+## How Rules are Loaded and Injected
+
+The plugin uses OpenCode's hook system to track context and inject rules:
+
+1. **Context Tracking**:
+   - `tool.execute.after` hook normalizes successful live file-handling tool events (read, edit, write, apply_patch, lsp) into File observations with path and content — the sole source for `globs` and `fileContains`
+   - The session `prompt` hook captures the latest user prompt as messages arrive
+   - The session `context` hook rebuilds the path-only Working context from message history on first call only; it never feeds rule matching
+   - Excluded tools (grep, glob, bash, task, webfetch, custom/MCP, ...) contribute
+     nothing, and historical tool parts never recreate File observations.
+
+2. **Rule Injection**:
+   - Matching rules are evaluated against the accumulated context on every user message
+   - Rules are filtered based on:
+     - **File paths and content** (`globs`, `fileContains`): Glob and literal matching against normalized file observations in context
+     - **User prompts** (`keywords`): Keyword matching against the latest user message
+     - **Available tools** (`tools`): Exact match against tool IDs available in the environment
+     - **Model** (`model`): Exact match against current LLM model ID
+     - **Agent** (`agent`): Exact match against current agent type
+     - **Command** (`command`): Exact match against current slash command
+     - **Project** (`project`): Match against detected project type tags
+     - **Branch** (`branch`): Exact or glob match against current git branch
+     - **OS** (`os`): Exact match against current operating system
+     - **CI** (`ci`): Boolean equality against CI environment detection
+   - Missing runtime context (e.g., no git branch available) is treated as a non-match for that dimension
+
+Rule delivery is split by the rule's **lifetime classification**:
+
+- **Session-durable rules** — unconditional rules and rules gated only by
+  `globs`, `fileContains`, `keywords`, `command`, `project`, `os`, or `ci` — are
+  published once per turn as one persisted synthetic message via
+  `session.synthetic` on the session `prompt` hook (`resume: false`, no
+  description, so the admitted rule never triggers a reply and stays hidden
+  from the UI); the prompt hook runs before the user message is dispatched, so
+  a scheduled run would execute on a context containing the rule block alone.
+  Once persisted, a durable rule is never re-evaluated for removal during that
+  session. A Durable Rule first matched by a live File observation is admitted
+  at that observation's earliest applicable dispatch as one hidden synthetic
+  message (`session.synthetic` with `resume: false` and no description);
+  equivalent pending guidance remains available transiently if persistence
+  fails, and persistence retries on a later dispatch. Identity-ledger evidence
+  prevents duplicate delivery, including admissions persisted by the retired
+  prompt channel in older sessions.
+- **Ephemeral rules** — rules gated by `agent`, `model`, `branch`, or `tools`
+  — are appended only to the transformed model request via
+  the session `context` hook as one transient synthetic message
+  per matching turn.
+  They are never written to persisted history, so
+  switching agent or model does not leave stale rule text behind.
+
+Each durable or transient injection event uses the same framing:
+
+```xml
+<system-message>
+The following rules were injected by a plugin. Follow them silently; do not acknowledge them to the user.
+
+<rule name="TypeScript components">
+This is a rule for TypeScript components.
+</rule>
+
+<rule name="testing">
+Testing guidance.
+</rule>
+</system-message>
+```
+
+The preamble appears exactly once per event. Each rule uses its trimmed
+frontmatter `name`, or its filename stem when `name` is absent; relative paths
+are not included in the visible framing.
+
+Synthetic parts are hidden in the TUI but included in provider requests, so
+rules reach the model without ever touching the system prompt — the prompt
+stays byte-stable across requests, preserving provider prompt caching. Durable
+rules already present in session history are not re-appended (path-derived
+identity dedup), so content edits, restarts, and resumes do not duplicate them.
+If a delivered user message is canceled or reverted, its removal invalidates the
+ledger and the missing durable rules are attached to the replacement message.
+After compaction, the ledger is rebuilt from transformed request history and
+any durable rules removed by compaction are re-appended.
+Rule content and metadata are snapshotted per session at first evaluation;
+editing a rule file does not change an existing session's delivery.
+
+3. **Session Persistence**:
+   - `experimental.session.compacting` hook preserves context paths during session compression
+   - Compaction rebuilds durable delivery identities from the transformed request, allowing missing durable rules to be re-appended; ephemeral rules are recomputed per request
+
+## Hook-Based Rule Triggers
+
+In addition to static conditions (`globs`, `keywords`, etc.), rules can declare **hooks** that fire reactively when the agent invokes tools. This enables corrective guidance at the point of use — for example, warning about insecure server bindings or steering the agent away from outdated tools.
+
+### Hook Types
+
+Two hook types are supported:
+
+- **`PreToolUse`** — fires **before** the tool executes. Can optionally `block: true` to prevent execution entirely.
+- **`PostToolUse`** — fires **after** the tool executes. Delivers a corrective message on the agent's next turn.
+
+### Hook Frontmatter
+
+```markdown
+---
+hooks:
+  - type: PostToolUse
+    tool: bash
+    match: "\\bgrep\\b"
+    run: "canon remember 'use rg instead of grep' --type pattern"
+---
+
+# Use ripgrep (rg) instead of grep
+
+Do not use `grep`. Use `rg` (ripgrep) instead. It is significantly faster,
+respects `.gitignore` by default, and produces better formatted output.
+```
+
+#### Fields
+
+| Field   | Required | Description                                                                    |
+| ------- | -------- | ------------------------------------------------------------------------------ |
+| `type`  | Yes      | `PreToolUse` or `PostToolUse`                                                  |
+| `tool`  | Yes      | Tool name to intercept. Use `*` for all tools.                                 |
+| `match` | Yes      | Regex pattern matched against the **serialized tool arguments** (JSON string). |
+| `block` | No       | If `true` and `type: PreToolUse`, throws an error to prevent tool execution.   |
+| `run`   | No       | Shell command to execute when the hook fires (fire-and-forget).                |
+
+### How Hook Injections Work
+
+1. When a tool call matches a hook's `tool` and `match`, the rule's body is queued as a **pending hook injection** in the session state. Hook blocking (`block: true`) and `run` side effects are unchanged.
+2. Pending hook injections are routed by the owning rule's lifetime:
+   - **Durable owners** are delivered two ways: immediately, joined into the
+     next framed transient synthetic message (session `context` hook, never
+     persisted), and durably, joined into the next framed synthetic message
+     admitted through `session.synthetic` on the session `prompt` hook
+     (`resume: false`) so they remain in session history.
+   - **Ephemeral owners** (rules gated by `agent`, `model`, `branch`, or
+     `tools`) are joined into the transient synthetic message via the session
+     `context` hook and are never persisted into history.
+3. The agent sees the corrective guidance on its next turn and can self-correct.
+4. Durable pending injections are cleared once delivered durably via `session.synthetic`; ephemeral pending injections are cleared after a successful transient delivery.
+
+### Security Example: Blocking Insecure Bindings
+
+```markdown
+---
+hooks:
+  - type: PreToolUse
+    tool: bash
+    match: "0\\.0\\.0\\.0"
+    block: true
+---
+
+# Server Binding Security Warning
+
+You just attempted to start a server bound to `0.0.0.0`. This exposes the port
+on all network interfaces. Always use `localhost` or `127.0.0.1` instead.
+```
+
+### Tool-Steering Example: Redirecting from grep to rg
+
+```markdown
+---
+hooks:
+  - type: PostToolUse
+    tool: bash
+    match: "\\bgrep\\b"
+    run: "canon remember 'always use rg (ripgrep) instead of grep' --type pattern"
+---
+
+# Use ripgrep (rg) instead of grep
+
+Do not use `grep`. Use `rg` (ripgrep) instead. It is significantly faster,
+respects `.gitignore` by default, and produces better formatted output.
+```
+
+### Important Notes
+
+- **Regex matching** is performed against the JSON-serialized tool arguments (e.g., `{"command":"node server.js --host 0.0.0.0"}`). Escape dots and other regex metacharacters accordingly.
+- **`block: true`** only works with `PreToolUse`. It throws an error that OpenCode should surface to prevent execution. Use sparingly — `PostToolUse` with corrective guidance is usually preferred.
+- **`run` commands** execute fire-and-forget via `child_process.exec` in the project directory. Failures are logged as warnings when debug logging is enabled and do not block the agent.
+- Hook-triggered rules are **injected independently** of the per-message rule deduplication. They can fire multiple times per session and are always delivered when pending, with the delivery channel determined by the owning rule's lifetime as described above.
+
+## Rule Matching Examples
+
+### Scenario 1: TypeScript File Context
+
+- User edits `src/components/Button.tsx` (observed by `tool.execute.after`)
+- Plugin evaluates rules with `globs: ['**/*.ts', '**/*.tsx']`
+- The TypeScript rule is a Durable Rule first matched by a live File
+  observation, so it is admitted immediately at the earliest applicable
+  dispatch (no-reply persistence with transient fallback)
+
+### Scenario 2: Rust File Contains Unsafe
+
+- Agent writes `src/lib.rs` containing `unsafe {`
+- A rule with `globs: ['**/*.rs']` and `fileContains: 'unsafe {'` matches: the same observation satisfies both checks
+- The Durable Rule is persisted by no-reply admission at the earliest dispatch rather than appended to the next user message
+
+### Scenario 3: User Mentions Testing
+
+- User types prompt: "How do I write unit tests for this function?"
+- The session `prompt` hook captures the prompt
+- Plugin evaluates rules with `keywords: ['testing', 'unit test']`
+- The matched rule is published as a hidden synthetic message (`resume: false`) for the dispatch
+
+### Scenario 4: Tool-Based Rules
+
+- OpenCode provides websearch tool
+- Plugin evaluates rules with `tools: ['mcp_websearch']`
+- Web search best practices rules are injected
+
+### Scenario 5: Combined Conditions
+
+- A rule has both `globs: ['**/*.test.ts']` and `keywords: ['testing']`
+- Rule is injected if EITHER condition matches (OR logic)
+- File context OR user prompt will trigger the rule
+- Contrast: `globs` + `fileContains` form one family that ANDs over the same observation
+
+### Scenario 6: Runtime Environment Filtering
+
+- A rule has `model: ['claude-sonnet-4']`, `branch: ['feature/*']`, and `match: all`
+- Rule is only injected when BOTH the model matches AND the branch matches the glob
+- If git branch cannot be determined, the branch dimension is a non-match
+
+## Complete Example: Combined Legacy and Runtime Filters
+
+This example demonstrates a rule using both legacy filters (`globs`, `keywords`) and new runtime filters:
+
+```markdown
+---
+globs:
+  - 'src/**/*.ts'
+  - 'src/**/*.tsx'
+keywords:
+  - 'refactor'
+  - 'cleanup'
+model:
+  - gpt-5.3-codex
+  - claude-sonnet-4
+agent:
+  - programmer
+project:
+  - node
+branch:
+  - feature/*
+  - main
+os:
+  - linux
+  - darwin
+ci: false
+match: any
+---
+
+# TypeScript Refactoring Guidelines
+
+When refactoring TypeScript code:
+
+- Prefer composition over inheritance
+- Extract reusable utilities to shared modules
+- Add comprehensive type annotations
+- Run tests after each significant change
+```
+
+With `match: any` (the default), this rule applies if ANY of the following is true:
+
+- A TypeScript file is in conversation context
+- User prompt contains "refactor" or "cleanup"
+- Model is gpt-5.3-codex or claude-sonnet-4
+- Agent type is programmer
+- Project is detected as a Node.js project
+- Git branch matches `feature/*` or is `main`
+- OS is Linux or macOS
+- Not running in CI
+
+With `match: all`, the rule would only apply when ALL declared conditions match.

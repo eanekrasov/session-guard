@@ -174,7 +174,7 @@ describe('a guard is evaluated with the context it was given', () => {
     await store.save(session);
 
     const context = { currentLoopListKey: 'jobs' };
-    const facts = toGuardContext(session) as unknown as Record<string, unknown>;
+    const facts = toGuardContext(session);
     const direct = new GuardEvaluator(facts, undefined, context).evaluate('allTasksCompleted()');
     expect(direct).toBe(true);
 
@@ -220,7 +220,7 @@ describe('a task is judged by the checks the core ran on its own move', () => {
 
     const { GuardEvaluator } = await import('../../src/schema/guard-evaluator.ts');
     const evaluate = (expression: string, task: unknown): boolean =>
-      new GuardEvaluator({ task } as unknown as Record<string, unknown>).evaluate(expression);
+      new GuardEvaluator({ task }).evaluate(expression);
 
     expect(nextTaskStage(execution, run, true, evaluate).kind).not.toBe('move');
 

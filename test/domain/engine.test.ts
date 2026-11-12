@@ -175,14 +175,15 @@ describe('SessionGuardEngine', () => {
 
     // After transition, currentStage is set; stageOverride was removed from schema
     expect(session.currentStage).toBe('EXECUTION');
-    expect((session as Record<string, unknown>).stageOverride).toBeUndefined();
+    expect(Reflect.get(session, 'stageOverride')).toBeUndefined();
   });
 
   it('deriveStage ignores stageOverride (dead field, never read)', () => {
     const config = makeConfig({});
     const engine = new SessionGuardEngine(config);
     // stageOverride on the session object has no effect on deriveStage
-    const session = makeSession({ stageOverride: 'COMMIT' } as never);
+    const overrides = { currentStage: 'PLANNING', stageOverride: 'COMMIT' };
+    const session = makeSession(overrides);
 
     // deriveStage evaluates rules — rules say true -> PLANNING
     const stage = engine.deriveStage(session);

@@ -192,6 +192,8 @@ const SCHEMA_KEYS = new Set([
   // из которого она пришла.
   'id',
   'source',
+  'description',
+  'autoStartTrigger',
   'extends',
   'stages',
   'transitions',

@@ -15,7 +15,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execSync } from 'node:child_process';
-import type { PluginInput } from '@opencode-ai/plugin';
+import type { RuntimeContext } from '../../src/app/runtime.ts';
 import { createSession, WorkflowStore } from '../../src/session/session-store.ts';
 import type { WorkflowSession } from '../../src/session/session-schema.ts';
 import { createTask } from '../support/task-factory.ts';
@@ -50,25 +50,16 @@ afterEach(() => {
   }
 });
 
-function createPluginInput(): PluginInput {
+function createPluginInput(): RuntimeContext {
   return {
-    client: {
-      app: {
-        log: async () => {},
-      },
-    } as unknown as PluginInput['client'],
-    project: {
-      id: 'test',
-      name: 'test',
-      directory: '/tmp/test',
-      worktree: '/tmp/test',
-      time: { created: Date.now() },
-    } as PluginInput['project'],
     directory: '/tmp/test',
-    worktree: '/tmp/test',
-    experimental_workspace: {} as PluginInput['experimental_workspace'],
-    serverUrl: new URL('http://localhost:0'),
-    $: {} as PluginInput['$'],
+    host: {
+      directory: '/tmp/test',
+      session: {},
+      tools: {},
+      log: async () => {},
+      report: () => {},
+    },
   };
 }
 
@@ -115,7 +106,7 @@ function createMockStore() {
     save: vi.fn(async (sess: WorkflowSession) => {
       saveCalls.push(sess);
     }),
-  } as unknown as WorkflowStore;
+  };
 
   return {
     store,
@@ -349,9 +340,8 @@ describe('Real WorkflowStore persistence integration', () => {
     const executor = new SessionExecutor(store);
 
     let saveCount = 0;
-    store.save = vi.fn(async (s) => {
+    store.save = vi.fn(async () => {
       saveCount++;
-      await (s as unknown as Promise<void>);
     }) as typeof store.save;
 
     await executor.run('pr2-real-readonly', async (tx) => {

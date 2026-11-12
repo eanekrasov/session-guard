@@ -38,11 +38,11 @@ describe('trace summaries', () => {
   });
 
   it('handles null and undefined args gracefully', () => {
-    expect(() => summarizeToolArgs(null as unknown as Record<string, unknown>)).not.toThrow();
-    expect(summarizeToolArgs(null as unknown as Record<string, unknown>)).toEqual({
+    expect(() => summarizeToolArgs(null)).not.toThrow();
+    expect(summarizeToolArgs(null)).toEqual({
       type: 'object',
     });
-    expect(summarizeToolArgs(undefined as unknown as Record<string, unknown>)).toEqual({
+    expect(summarizeToolArgs(undefined)).toEqual({
       type: 'undefined',
     });
   });

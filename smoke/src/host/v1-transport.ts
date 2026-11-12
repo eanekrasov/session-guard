@@ -47,6 +47,83 @@ interface LegacyMessageEntry {
   parts?: Part[];
 }
 
+function record(value: unknown): object | undefined {
+  return typeof value === 'object' && value !== null && !Array.isArray(value) ? value : undefined;
+}
+
+function legacyParts(value: unknown): Part[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    const part = record(item);
+    if (part === undefined) return [];
+    const type = Reflect.get(part, 'type');
+    if (typeof type !== 'string') return [];
+    const tool = Reflect.get(part, 'tool');
+    const text = Reflect.get(part, 'text');
+    const rawState = record(Reflect.get(part, 'state'));
+    let state: Part['state'];
+    if (rawState !== undefined) {
+      const status = Reflect.get(rawState, 'status');
+      const error = Reflect.get(rawState, 'error');
+      const output = Reflect.get(rawState, 'output');
+      state = {
+        ...(typeof status === 'string' ? { status } : {}),
+        ...(typeof error === 'string' ? { error } : {}),
+        ...(typeof output === 'string' ? { output } : {}),
+        input: Reflect.get(rawState, 'input'),
+      };
+    }
+    return [
+      {
+        type,
+        ...(typeof tool === 'string' ? { tool } : {}),
+        ...(typeof text === 'string' ? { text } : {}),
+        ...(state === undefined ? {} : { state }),
+      },
+    ];
+  });
+}
+
+function legacyMessage(value: unknown): LegacyMessage {
+  const message = record(value);
+  if (message === undefined) return {};
+  const rawInfo = record(Reflect.get(message, 'info'));
+  const rawError = rawInfo === undefined ? undefined : record(Reflect.get(rawInfo, 'error'));
+  const rawData = rawError === undefined ? undefined : record(Reflect.get(rawError, 'data'));
+  const errorMessage = rawData === undefined ? undefined : Reflect.get(rawData, 'message');
+  return {
+    ...(rawData === undefined
+      ? {}
+      : {
+          info: {
+            error: { data: typeof errorMessage === 'string' ? { message: errorMessage } : {} },
+          },
+        }),
+    parts: legacyParts(Reflect.get(message, 'parts')),
+  };
+}
+
+function legacyMessageEntries(value: unknown): LegacyMessageEntry[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    const message = record(item);
+    if (message === undefined) return [];
+    const rawInfo = record(Reflect.get(message, 'info'));
+    const rawTime = rawInfo === undefined ? undefined : record(Reflect.get(rawInfo, 'time'));
+    const role = rawInfo === undefined ? undefined : Reflect.get(rawInfo, 'role');
+    const created = rawTime === undefined ? undefined : Reflect.get(rawTime, 'created');
+    return [
+      {
+        info: {
+          ...(typeof role === 'string' ? { role } : {}),
+          ...(typeof created === 'number' ? { time: { created } } : {}),
+        },
+        parts: legacyParts(Reflect.get(message, 'parts')),
+      },
+    ];
+  });
+}
+
 async function logChildSessionResponse(
   host: Host,
   parentSessionID: string,
@@ -56,9 +133,10 @@ async function logChildSessionResponse(
   if (childSessionID === undefined) return;
 
   try {
-    const listed = (await api(host, 'GET', `/session/${childSessionID}/message`)) as
-      LegacyMessageEntry[] | undefined;
-    const parts = (Array.isArray(listed) ? listed : [])
+    const listed = legacyMessageEntries(
+      await api(host, 'GET', `/session/${childSessionID}/message`)
+    );
+    const parts = listed
       .filter((message) => message.info?.role === 'assistant')
       .flatMap((message) => message.parts ?? []);
     const diagnostics = rawV1ResponseDiagnostics(parts, '');
@@ -70,8 +148,8 @@ async function logChildSessionResponse(
       fields: {
         parentSessionID,
         childSessionID,
-        messageCount: Array.isArray(listed) ? listed.length : 0,
-        roles: Array.isArray(listed) ? listed.map((message) => message.info?.role) : [],
+        messageCount: listed.length,
+        roles: listed.map((message) => message.info?.role),
         hasDsmlToolResult: diagnostics.hasDsmlToolResult,
         responseLength: diagnostics.text.length,
       },
@@ -107,9 +185,7 @@ async function listedTurnParts(
   from: number | undefined
 ): Promise<Part[] | undefined> {
   try {
-    const listed = (await api(host, 'GET', `/session/${sessionId}/message`)) as
-      LegacyMessageEntry[] | undefined;
-    const messages = Array.isArray(listed) ? listed : [];
+    const messages = legacyMessageEntries(await api(host, 'GET', `/session/${sessionId}/message`));
     const items =
       from === undefined
         ? // No boundary was measured; fall back to the last instruction the session holds.
@@ -124,7 +200,7 @@ async function listedTurnParts(
             .slice(from)
             .filter((message) => message.info?.role === 'assistant')
             .flatMap((message) => message.parts ?? []);
-    return items as Part[];
+    return legacyParts(items);
   } catch (error) {
     log('warn', 'Could not read V1 session messages', {
       sourceId: 'v1-transport.list-messages-error',
@@ -142,8 +218,7 @@ async function listedTurnParts(
 /** How many messages the session already holds, measured before the prompt is sent. */
 async function listedCount(host: Host, sessionId: string): Promise<number | undefined> {
   try {
-    const listed = (await api(host, 'GET', `/session/${sessionId}/message`)) as
-      unknown[] | undefined;
+    const listed = await api(host, 'GET', `/session/${sessionId}/message`);
     return Array.isArray(listed) ? listed.length : undefined;
   } catch {
     return undefined;
@@ -166,11 +241,12 @@ export function createLegacyHttpTransport(
       // последующих сообщений, если сообщение не переопределит его своим параметром agent.
       const body: Record<string, unknown> = { title };
       if (options.agent !== undefined) body.agent = options.agent;
-      const created = (await api(host, 'POST', '/session', body)) as { id?: unknown };
-      if (typeof created?.id !== 'string') {
+      const created = record(await api(host, 'POST', '/session', body));
+      const id = created === undefined ? undefined : Reflect.get(created, 'id');
+      if (typeof id !== 'string') {
         throw new Error('[ERROR] хост V1 не вернул идентификатор сессии при её создании');
       }
-      const session = { id: created.id, hostKind: 'v1' as const };
+      const session = { id, hostKind: 'v1' as const };
       sessionEvents.set(session.id, createV1SessionEvents(host, session.id));
       return session;
     },
@@ -220,11 +296,13 @@ export function createLegacyHttpTransport(
       });
       let reply: LegacyMessage;
       try {
-        reply = (await api(host, 'POST', `/session/${session.id}/message`, {
-          model: { providerID, modelID: rest.join('/') },
-          ...(agent === undefined ? {} : { agent }),
-          parts: [{ type: 'text', text: input.text }],
-        })) as LegacyMessage;
+        reply = legacyMessage(
+          await api(host, 'POST', `/session/${session.id}/message`, {
+            model: { providerID, modelID: rest.join('/') },
+            ...(agent === undefined ? {} : { agent }),
+            parts: [{ type: 'text', text: input.text }],
+          })
+        );
         await terminal;
       } finally {
         // The event stream is session-scoped and remains active for the next prompt.

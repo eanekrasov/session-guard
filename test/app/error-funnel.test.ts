@@ -2,9 +2,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { Hooks, PluginInput } from '@opencode-ai/plugin';
+import type { Hooks } from '@opencode-ai/plugin';
 
-import { createRuntime } from '../../src/app/runtime.ts';
+import { createRuntime, type RuntimeContext } from '../../src/app/runtime.ts';
+import { createReporter } from '../../src/app/report.ts';
 import { createSession, WorkflowStore } from '../../src/session/session-store.ts';
 import { createTask } from '../support/task-factory.ts';
 
@@ -21,31 +22,26 @@ let previousProfiles: string | undefined;
 let previousLevel: string | undefined;
 let previousDebugTui: string | undefined;
 
-function pluginInput(): PluginInput {
-  const client = {
-    app: {
-      log: async (input: { body: { level: string; message: string } }) => {
-        logged.push({ level: input.body.level, message: input.body.message });
-      },
-    },
-    post: async (path: string, input: { body: { message: string } }) => {
-      if (path === '/tui/show-toast') toasted.push({ message: input.body.message });
-    },
+function pluginInput(): RuntimeContext {
+  const log = async (level: 'debug' | 'info' | 'warn' | 'error', message: string) => {
+    logged.push({ level, message });
   };
   return {
-    client: client as unknown as PluginInput['client'],
-    project: {
-      id: 'test',
-      name: 'test',
-      directory: projectDirectory,
-      worktree: projectDirectory,
-      time: { created: Date.now() },
-    } as PluginInput['project'],
     directory: projectDirectory,
-    worktree: projectDirectory,
-    experimental_workspace: {} as PluginInput['experimental_workspace'],
-    serverUrl: new URL('http://localhost:0'),
-    $: {} as PluginInput['$'],
+    host: {
+      directory: projectDirectory,
+      session: {},
+      tools: {},
+      log,
+      report: createReporter(
+        {
+          post: async (path, input) => {
+            if (path === '/tui/show-toast') toasted.push({ message: input.body.message });
+          },
+        },
+        log
+      ),
+    },
   };
 }
 

@@ -9,11 +9,14 @@ import {
   attemptsFromEnv,
   ensureOpencodeBinary,
   filterOperatorProviders,
+  freePort,
   hostExitLogLevel,
   hostVersionFromEnv,
   legacyApiKeyFor,
   opencodeBinary,
   operatorProviders,
+  pluginSpecForHost,
+  REPO_ROOT,
   readWorkflowSession,
   serverPasswordFromLogs,
   V1_BINARY,
@@ -21,6 +24,14 @@ import {
   withProviderApiKey,
   writeSmokeConfigs,
 } from '../src/harness.ts';
+
+test('uses the package root for V2 and the built entry directory for V1', () => {
+  expect(pluginSpecForHost('v2', undefined, '/repo/dist')).toBe(REPO_ROOT);
+  expect(pluginSpecForHost('v1', undefined, '/repo/dist')).toBe('/repo/dist');
+  expect(pluginSpecForHost('v2', '/custom/plugin', '/repo/dist')).toBe('/custom/plugin');
+  expect(pluginSpecForHost('v1', '', '/repo/dist')).toBe('/repo/dist');
+  expect(pluginSpecForHost('v2', '', '/repo/dist')).toBe(REPO_ROOT);
+});
 
 let configDirectory: string;
 let savedOperatorConfig: string | undefined;
@@ -135,6 +146,19 @@ describe('host smoke provider filtering', () => {
     });
   });
 
+  test('removes an unresolved environment API key from operator provider config', async () => {
+    writeFileSync(
+      join(configDirectory, 'opencode.json'),
+      JSON.stringify({
+        provider: { acme: { options: { apiKey: '{env:HOST_SMOKE_MISSING_KEY}' } } },
+      })
+    );
+
+    await expect(operatorProviders()).resolves.toEqual({
+      provider: { acme: { options: {} } },
+    });
+  });
+
   test('does not accept malformed JSONC as an operator configuration', async () => {
     writeFileSync(
       join(configDirectory, 'opencode.jsonc'),
@@ -143,9 +167,22 @@ describe('host smoke provider filtering', () => {
 
     await expect(operatorProviders()).resolves.toEqual({});
   });
+
+  test('ignores a valid JSON config whose top-level value is not an object', async () => {
+    writeFileSync(join(configDirectory, 'opencode.json'), 'null');
+
+    await expect(operatorProviders()).resolves.toEqual({});
+  });
 });
 
 describe('host version selection', () => {
+  test('returns an available TCP port', async () => {
+    const port = await freePort();
+
+    expect(Number.isInteger(port)).toBe(true);
+    expect(port).toBeGreaterThan(0);
+  });
+
   test('defaults to V1 and selects canonical binaries', () => {
     expect(hostVersionFromEnv(undefined)).toBe('v1');
     expect(opencodeBinary('v1', {})).toBe(V1_BINARY);
@@ -189,7 +226,7 @@ describe('smoke environment and persisted state diagnostics', () => {
     mkdirSync(join(file, '..'), { recursive: true });
     writeFileSync(file, '{broken');
     try {
-      await expect(readWorkflowSession({ homeDir } as never, 'broken')).rejects.toThrow(
+      await expect(readWorkflowSession({ homeDir }, 'broken')).rejects.toThrow(
         `[ERROR] не удалось прочитать файл сессии workflow ${file}`
       );
     } finally {
@@ -221,15 +258,37 @@ describe('the V2 server credential', () => {
 });
 
 describe('host smoke configuration', () => {
-  test('uses the V2 local package configuration without changing V1 loading', async () => {
+  test('writes the provider in each host version’s supported config format', async () => {
     const v1 = mkdtempSync(join(tmpdir(), 'host-smoke-v1-config-'));
     const v2 = mkdtempSync(join(tmpdir(), 'host-smoke-v2-config-'));
     try {
-      await writeSmokeConfigs(v1, {}, 'acme/fast-model', '/plugin/dist');
+      await writeSmokeConfigs(
+        v1,
+        {
+          providers: {
+            acme: {
+              name: 'Acme',
+              env: ['ACME_API_KEY'],
+              package: 'aisdk:@ai-sdk/openai-compatible',
+              settings: { baseURL: 'https://example.test/v1' },
+              models: { 'fast-model': { name: 'Fast model', capabilities: { tools: true } } },
+            },
+          },
+        },
+        'acme/fast-model',
+        '/plugin/dist'
+      );
       await writeSmokeConfigs(v2, {}, 'acme/fast-model', '/plugin/dist', 'v2');
 
       expect(JSON.parse(readFileSync(join(v1, 'opencode.json'), 'utf-8'))).toMatchObject({
         plugin: ['file:///plugin/dist'],
+        provider: {
+          acme: {
+            npm: '@ai-sdk/openai-compatible',
+            options: { baseURL: 'https://example.test/v1' },
+            models: { 'fast-model': { name: 'Fast model', tool_call: true } },
+          },
+        },
       });
       expect(JSON.parse(readFileSync(join(v2, 'opencode.json'), 'utf-8'))).toMatchObject({
         plugins: [{ package: '/plugin/dist' }],
@@ -241,10 +300,10 @@ describe('host smoke configuration', () => {
             ]),
           },
           smoke_reviewer: {
-            permissions: expect.arrayContaining([
-              { action: 'read', resource: '*', effect: 'deny' },
-              { action: 'shell', resource: 'git log *', effect: 'allow' },
-            ]),
+            permissions: [
+              { action: '*', resource: '*', effect: 'deny' },
+              { action: 'workflow-gate-set', resource: '*', effect: 'allow' },
+            ],
           },
         },
       });
@@ -276,9 +335,12 @@ describe('host smoke configuration', () => {
       await writeSmokeConfigs(v1, { providers }, 'acme/fast-model', '/plugin/dist', 'v1', auth);
       await writeSmokeConfigs(v2, { providers }, 'acme/fast-model', '/plugin/dist', 'v2', auth);
 
-      // V1 самостоятельно читает auth.json; только V2 нужен ключ в записи провайдера.
-      expect(read(v1).providers).toMatchObject({
-        acme: { settings: { baseURL: 'https://example.test/v1' } },
+      // V1 использует legacy-карту провайдеров; только V2 нужен ключ в modern-записи.
+      expect(read(v1).provider).toMatchObject({
+        acme: {
+          npm: '@opencode/ai/providers/openai-compatible',
+          options: { baseURL: 'https://example.test/v1' },
+        },
       });
       expect(read(v2).providers).toMatchObject({
         acme: { settings: { baseURL: 'https://example.test/v1', apiKey: 'test-key' } },

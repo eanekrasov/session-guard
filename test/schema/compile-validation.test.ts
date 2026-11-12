@@ -259,10 +259,11 @@ describe('a key nothing reads is reported, not ignored', () => {
   });
 
   it('names an unknown key on a stage, at its path', () => {
+    const invalidStage = { instructions: '', agents: ['code'] };
     const input = schema({
       execution: {
         loop: 'implementation',
-        stages: { code: { agents: ['code'] } as never },
+        stages: { code: invalidStage },
         transitions: [{ from: 'code', to: 'done' }],
       },
     });

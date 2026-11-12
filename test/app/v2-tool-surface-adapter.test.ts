@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ToolEditor } from '@opencode/plugin/promise/tool';
+import { CallID } from '@opencode/plugin/promise/tool';
+import { Agent, Session, SessionMessage } from '@opencode/schema';
 
 import { registerWorkflowTools } from '../../src/app/v2-tool-surface-adapter.ts';
 import type { WorkflowToolSurfacePorts } from '../../src/app/workflow-tool-surface.ts';
 import type { WorkflowStore } from '../../src/session/session-store.ts';
-import type { TaskApi } from '../../src/app/task-api.ts';
-import type { SessionExecutor } from '../../src/app/session-executor.ts';
-import type { MutationOrchestrator } from '../../src/app/mutation-orchestrator.ts';
+import type { SessionTransaction } from '../../src/app/session-executor.ts';
 import type { LogFn } from '../../src/app/logger.ts';
 import type { Reporter } from '../../src/app/report.ts';
 import type { WorkflowSession } from '../../src/session/session-schema.ts';
@@ -14,43 +14,33 @@ import { createSession } from '../../src/session/session-store.ts';
 
 // ── Test helpers ──────────────────────────────────────────────────────────
 
-/** Tool shape captured by the fake editor */
-interface CapturedTool {
-  readonly name: string;
-  readonly description: string;
-  readonly input: unknown;
-  readonly output: unknown;
-  readonly execute: (
-    input: unknown,
-    context: { sessionID: string; agent: string }
-  ) => Promise<{ output?: string; metadata?: unknown }>;
-}
+type CapturedTool = Parameters<ToolEditor['add']>[0];
 
 function createMockPorts(): WorkflowToolSurfacePorts {
   return {
     profilesDir: '/profiles',
     projectDir: '/project',
     store: {} as WorkflowStore,
-    executor: {} as SessionExecutor,
+    executor: {
+      run: async <T>(_sessionID: string, action: (tx: SessionTransaction) => Promise<T>) =>
+        action({ session: null, deferAfterSave: () => {} }),
+    },
     mutationOrchestrator: {
-      resolveEngine: vi.fn(async () => ({
-        getInitialStage: () => 'CREATE',
-        getTaskControlAgents: () => ['task-controller'],
-        getLoopStage: vi.fn(),
-      })),
-    } as unknown as MutationOrchestrator,
+      resolveEngine: async () => {
+        throw new Error('Unexpected engine resolution in V2 tool surface fixture');
+      },
+    },
     consentOrchestrator: {
       before: vi.fn(async () => {}),
       after: vi.fn(async () => {}),
     },
     taskApi: {
-      setTasks: vi.fn(async () => []),
-      getTasks: vi.fn(async () => []),
-      setTaskStatus: vi.fn(async () => ({
-        id: 'task-1',
-        status: 'pending' as const,
-      })),
-    } as unknown as TaskApi,
+      setTasks: async () => [],
+      getTasks: async () => [],
+      setTaskStatus: async () => {
+        throw new Error('Unexpected task status update in V2 tool surface fixture');
+      },
+    },
     sessionContext: {
       load: vi.fn(async () => null as WorkflowSession | null),
     },
@@ -68,7 +58,7 @@ function fakeEditor(): {
     list: () => [],
     get: () => undefined,
     namespace: () => {},
-    add: (tool) => tools.push(tool as unknown as CapturedTool),
+    add: (tool) => tools.push(tool),
     update: () => {},
     remove: () => {},
   };
@@ -82,9 +72,20 @@ function fakeEditor(): {
 async function runTool(
   tool: CapturedTool,
   input: Record<string, unknown> = {},
-  context: { sessionID: string; agent: string } = { sessionID: 'ses-test', agent: '' }
+  context: Parameters<CapturedTool['execute']>[1] = toolContext()
 ): Promise<{ output?: string; metadata?: unknown }> {
   return tool.execute(input, context);
+}
+
+function toolContext(): Parameters<CapturedTool['execute']>[1] {
+  return {
+    sessionID: Session.ID.create(),
+    agent: Agent.ID.make('test'),
+    messageID: SessionMessage.ID.create(),
+    id: CallID.make('call-test'),
+    signal: new AbortController().signal,
+    progress: async () => {},
+  };
 }
 
 // ── Suite ─────────────────────────────────────────────────────────────────
@@ -117,7 +118,7 @@ describe('V2ToolSurfaceAdapter', () => {
       registerWorkflowTools(editor, createMockPorts());
 
       const wl = tools.find((t) => t.name === 'workflow-list')!;
-      const returned = wl.execute({}, { sessionID: 'ses-test', agent: '' });
+      const returned = wl.execute({}, toolContext());
 
       expect(returned).toBeInstanceOf(Promise);
       await expect(returned).resolves.toMatchObject({

@@ -4,6 +4,7 @@ import type { WorkflowStore } from '../session/session-store.ts';
 import type { MutationOrchestrator } from './mutation-orchestrator.ts';
 import type { SessionExecutor, SessionTransaction } from './session-executor.ts';
 import type { LogFn } from './logger.ts';
+import type { SessionGuardEngine } from '../domain/engine.ts';
 import { getCurrentHead } from './git-utils.ts';
 
 export interface LifecycleEventInput {
@@ -33,8 +34,13 @@ export interface WorkflowLifecycleDependencies {
   executor: Pick<SessionExecutor, 'run'>;
   mutationOrchestrator: Pick<
     MutationOrchestrator,
-    'applyTransitions' | 'clearOnError' | 'dispose' | 'resolveEngine'
-  >;
+    'applyTransitions' | 'clearOnError' | 'dispose'
+  > & {
+    resolveEngine(
+      profileId: string,
+      schemaId?: string
+    ): Promise<Pick<SessionGuardEngine, 'isTerminalStage'>>;
+  };
   log: LogFn;
   projectDir: string;
 }
@@ -64,7 +70,9 @@ export function createWorkflowLifecycle(
   ): Promise<void> => {
     if (!moved.to) return;
 
-    let engine: Awaited<ReturnType<MutationOrchestrator['resolveEngine']>>;
+    let engine: Awaited<
+      ReturnType<WorkflowLifecycleDependencies['mutationOrchestrator']['resolveEngine']>
+    >;
     try {
       engine = await mutationOrchestrator.resolveEngine(session.profileId, session.schemaId);
     } catch {
@@ -95,19 +103,29 @@ export function createWorkflowLifecycle(
   };
 
   const archiveIfFinished = async (session: WorkflowSession): Promise<void> => {
-    let engine: Awaited<ReturnType<MutationOrchestrator['resolveEngine']>>;
+    const current = await store.load(session.sessionId);
+    if (!current) return;
+    let engine: Awaited<
+      ReturnType<WorkflowLifecycleDependencies['mutationOrchestrator']['resolveEngine']>
+    >;
     try {
-      engine = await mutationOrchestrator.resolveEngine(session.profileId, session.schemaId);
+      engine = await mutationOrchestrator.resolveEngine(current.profileId, current.schemaId);
     } catch {
       return;
     }
-    if (!engine.isTerminalStage(session.currentStage)) return;
+    if (!engine.isTerminalStage(current.currentStage)) return;
 
-    const archived = await store.archive(session.sessionId);
+    const archived = await store.archive(
+      current.sessionId,
+      (latest) =>
+        latest.profileId === current.profileId &&
+        latest.schemaId === current.schemaId &&
+        engine.isTerminalStage(latest.currentStage)
+    );
     if (archived) {
       void log('info', 'Workflow finished: session archived', {
-        sessionID: session.sessionId,
-        stage: session.currentStage,
+        sessionID: current.sessionId,
+        stage: current.currentStage,
         path: archived,
       });
     }

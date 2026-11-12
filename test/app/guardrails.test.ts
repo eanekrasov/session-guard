@@ -30,7 +30,7 @@ describe('validateUserInput', () => {
 
   test('CONTEXT_CONFUSION: non-string input does not throw or warn', () => {
     for (const input of [undefined, null, { command: 'stop reset exit' }, ['stop', 'reset'], 42]) {
-      const result = validateUserInput(input as unknown as string);
+      const result = validateUserInput(input);
       expect(result.warnings).not.toContain('CONTEXT_CONFUSION');
     }
   });

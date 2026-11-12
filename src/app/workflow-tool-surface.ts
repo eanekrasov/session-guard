@@ -14,7 +14,7 @@ import type { LogFn } from './logger.ts';
 import { createReporter, errorMessage, type Reporter } from './report.ts';
 import { agentIsAllowed } from './agent-names.ts';
 import { canonicalizePlan, computeSha256 } from './sdd-artifacts.ts';
-import { evidenceOf, type ConsentManifest } from './consent.ts';
+import { CONSENT_EVIDENCE_SCHEMA, evidenceOf, type ConsentManifest } from './consent.ts';
 import { listProfiles, resolveConfig } from '../public-api.ts';
 import { schemaId } from './profile-resolver.ts';
 import { selectSchema } from './mutation-orchestrator.ts';
@@ -37,23 +37,13 @@ import type {
 import { isOpenLoopRun, nextLoopRunId } from '../session/helpers.ts';
 import { WorkflowGateService } from './workflow-gate-service.ts';
 
-type SdkToolInput = Parameters<typeof toolFn>[0];
-
-function tool<A extends Record<string, unknown>>(def: {
-  description: string;
-  args: A;
-  execute(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult>;
-}): ToolDefinition {
-  return toolFn(def as unknown as SdkToolInput);
-}
-
 export interface WorkflowToolSurfacePorts {
   stageInstructionsEnabled?: boolean;
   profilesDir: string;
   projectDir: string;
   store: WorkflowStore;
-  executor: SessionExecutor;
-  mutationOrchestrator: MutationOrchestrator;
+  executor: Pick<SessionExecutor, 'run'>;
+  mutationOrchestrator: Pick<MutationOrchestrator, 'resolveEngine'>;
   consentOrchestrator: {
     before: (sessionID: string, callID: string, questionText: string) => Promise<void>;
     after: (
@@ -63,7 +53,7 @@ export interface WorkflowToolSurfacePorts {
       output: { title: string; output: string; metadata: unknown }
     ) => Promise<void>;
   };
-  taskApi: TaskApi;
+  taskApi: Pick<TaskApi, 'setTasks' | 'getTasks' | 'setTaskStatus'>;
   sessionContext: { load: (sessionID: string) => Promise<WorkflowSession | null> };
   prepareTaskVerdict?: (session: WorkflowSession, operation: ActiveOperation) => Promise<void>;
   log: LogFn;
@@ -83,7 +73,7 @@ class WorkflowToolSurfaceImpl implements WorkflowToolSurface {
 
   createTools(): Record<string, ToolDefinition> {
     return {
-      'workflow-create': tool({
+      'workflow-create': toolFn({
         description: 'Create a new session-guard workflow session',
         args: {
           schemaId: z.string().optional().describe('Schema ID without .yaml (e.g., android)'),
@@ -91,13 +81,13 @@ class WorkflowToolSurfaceImpl implements WorkflowToolSurface {
         execute: async (args: { schemaId?: string }, ctx: ToolContext) =>
           this.handleCreateWorkflow(args, ctx),
       }),
-      'workflow-list': tool({
+      'workflow-list': toolFn({
         description:
           'List all available workflow profiles (schemas). Returns profilesDir and profile IDs with descriptions.',
         args: {},
         execute: async () => this.handleWorkflowList(),
       }),
-      'workflow-consent': tool({
+      'workflow-consent': toolFn({
         description:
           'Request file consent from the operator. Reads files from disk, ' +
           'computes integrity evidence, and prepares the session for a consent question. ' +
@@ -118,18 +108,12 @@ class WorkflowToolSurfaceImpl implements WorkflowToolSurface {
           grant: z.string().default('grant').describe('Label for the approve option'),
           decline: z.string().default('decline').describe('Label for the decline option'),
         },
-        execute: async (
-          args: {
-            files: string[] | string;
-            summary: string;
-            type?: string;
-            grant?: string;
-            decline?: string;
-          },
-          ctx: ToolContext
-        ) => this.handleWorkflowConsent(args, ctx),
+        execute: async (args, ctx) => {
+          if (args.files === undefined) return { output: 'files is required' };
+          return this.handleWorkflowConsent({ ...args, files: args.files }, ctx);
+        },
       }),
-      'workflow-tasks-set': tool({
+      'workflow-tasks-set': toolFn({
         description:
           'Replace a workflow task list. Without listKey the list is the one the run in ' +
           'flight is cycling over, or the single list this workflow declares; a workflow ' +
@@ -144,13 +128,13 @@ class WorkflowToolSurfaceImpl implements WorkflowToolSurface {
           ctx: ToolContext
         ) => this.handleTasksSet(args, ctx),
       }),
-      'workflow-tasks-get': tool({
+      'workflow-tasks-get': toolFn({
         description: 'Read one named workflow task list',
         args: { listKey: z.string().min(1) },
         execute: async (args: { listKey: string }, ctx: ToolContext) =>
           this.handleTasksGet(args, ctx),
       }),
-      'workflow-tasks-set-status': tool({
+      'workflow-tasks-set-status': toolFn({
         description: 'Set a workflow task status by global task ID',
         args: { taskId: z.string().regex(/^task-[0-9]+$/), status: z.enum(TASK_STATUS) },
         execute: async (
@@ -158,7 +142,7 @@ class WorkflowToolSurfaceImpl implements WorkflowToolSurface {
           ctx: ToolContext
         ) => this.handleTasksSetStatus(args, ctx),
       }),
-      'workflow-tasks-resolve-decision': tool({
+      'workflow-tasks-resolve-decision': toolFn({
         description:
           'Resolve a pending workflow task retry decision. ' +
           'Accepts an optional decisionId selector. Without it, selects the single unique pending retry context; ' +
@@ -177,7 +161,7 @@ class WorkflowToolSurfaceImpl implements WorkflowToolSurface {
           ctx: ToolContext
         ) => this.handleTasksResolveDecision(args, ctx),
       }),
-      'workflow-gate-set': tool({
+      'workflow-gate-set': toolFn({
         description:
           'Set the result of a declared workflow gate and evaluate the transition. ' +
           'Records the gate verdict in the current loop run or outer stage, ' +
@@ -204,8 +188,8 @@ class WorkflowToolSurfaceImpl implements WorkflowToolSurface {
     const requested = args.schemaId ?? process.env.HARNESS_SCHEMA_ID ?? process.env.HARNESS_PROFILE;
 
     const slash = requested?.indexOf('/') ?? -1;
-    const requestedProfileId = slash === -1 ? requested : requested!.substring(0, slash);
-    const requestedSchemaId = slash === -1 ? undefined : requested!.substring(slash + 1);
+    const requestedProfileId = slash === -1 ? requested : requested?.substring(0, slash);
+    const requestedSchemaId = slash === -1 ? undefined : requested?.substring(slash + 1);
 
     const profiles = await listProfiles(this.ports.profilesDir);
     const resolvedProfileId = profiles.some((profile) => profile.id === requestedProfileId)
@@ -327,7 +311,7 @@ class WorkflowToolSurfaceImpl implements WorkflowToolSurface {
     const revision = session.revision;
 
     const manifest: ConsentManifest = {
-      schema: 'harness.consent.evidence/v1' as const,
+      schema: CONSENT_EVIDENCE_SCHEMA,
       revision,
       summary: args.summary,
       files,
@@ -391,7 +375,7 @@ class WorkflowToolSurfaceImpl implements WorkflowToolSurface {
 
       return await this.ports.executor.run(ctx.sessionID, async (tx) => {
         if (!tx.session) {
-          return { output: 'No workflow session found. Call workflow-create first.' } as ToolResult;
+          return { output: 'No workflow session found. Call workflow-create first.' };
         }
 
         const activeRun = Object.values(tx.session.loopRuns).find(
@@ -408,7 +392,7 @@ class WorkflowToolSurfaceImpl implements WorkflowToolSurface {
                 declared.length === 0
                   ? `${tx.session.profileId}/${tx.session.schemaId} declares no task list to fill: no stage names a \`loop:\` source.`
                   : `listKey is required: ${tx.session.profileId}/${tx.session.schemaId} declares [${declared.join(', ')}].`,
-            } as ToolResult;
+            };
           }
         }
 
@@ -431,7 +415,7 @@ class WorkflowToolSurfaceImpl implements WorkflowToolSurface {
         return {
           output: `Stored ${tasks.length} task(s) in ${listKey}`,
           metadata: { sessionId: ctx.sessionID, listKey, taskCount: tasks.length },
-        } as ToolResult;
+        };
       });
     } catch (error) {
       return { output: error instanceof Error ? error.message : String(error) };
@@ -706,7 +690,15 @@ export function formatWorkflowList(
     if (profile.description) parts.push(`desc: ${profile.description}`);
     if (profile.extends) parts.push(`extends: ${profile.extends}`);
     if (profile.schemas && profile.schemas.length > 0)
-      parts.push(`schemas: ${profile.schemas.join(', ')}`);
+      parts.push(
+        `schemas: ${profile.schemas
+          .map((file) =>
+            profile.schemaDescriptions?.[file]
+              ? `${file} (${profile.schemaDescriptions[file]})`
+              : file
+          )
+          .join(', ')}`
+      );
     lines.push(`  - ${parts.join(' | ')}`);
   }
   if (profiles.length === 0) lines.push('  (no profiles found)');

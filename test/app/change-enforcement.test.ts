@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { canonicalProjectPath, isReadOnlyBash } from '../../src/app/change-enforcement.ts';
 import { matchesScope } from '../../src/app/scope-match.ts';
-import { extractToolCallPaths } from '../../src/rules/message-paths.ts';
+import { extractToolCallPaths } from '../../src/rules-engine/session/message-extraction.js';
 
 describe('change enforcement helpers', () => {
   it('canonicalizes relative paths inside the project and rejects outside paths', () => {

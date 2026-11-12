@@ -18,7 +18,7 @@ import type { SessionClient } from './runtime-types.ts';
 
 export interface ConsentSessionCapabilities {
   readonly hasMessageContext?: (sessionID: string) => Promise<boolean>;
-  readonly prompt?: SessionClient['prompt'];
+  readonly prompt?: (input: Parameters<SessionClient['prompt']>[0]) => Promise<unknown>;
 }
 
 // ─── ConsentOrchestrator ─────────────────────────────────────────────────────
@@ -292,12 +292,13 @@ export class ConsentOrchestrator {
       // Извлечь ответ пользователя из метаданных output
       const answers: string[] = [];
       if (output.metadata && typeof output.metadata === 'object') {
-        const meta = output.metadata as Record<string, unknown>;
-        if (Array.isArray(meta.answers)) {
-          answers.push(...meta.answers.map(String));
+        const metadataAnswers = Reflect.get(output.metadata, 'answers');
+        if (Array.isArray(metadataAnswers)) {
+          answers.push(...metadataAnswers.map(String));
         }
-        if (typeof meta.answer === 'string') {
-          answers.push(meta.answer);
+        const metadataAnswer = Reflect.get(output.metadata, 'answer');
+        if (typeof metadataAnswer === 'string') {
+          answers.push(metadataAnswer);
         }
       }
 

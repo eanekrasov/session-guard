@@ -44,10 +44,7 @@ test('V2 injects the current stage on model requests without starting a session'
   const request = async (): Promise<string> => {
     calls.push('model request');
     const output = { system: [] as string[] };
-    await runtime['experimental.chat.system.transform']!(
-      { sessionID: 'root', model: {} } as never,
-      output
-    );
+    await runtime.handleSystemTransform({ sessionID: 'root' }, output);
     return output.system.join('\n');
   };
   expect(await request()).toContain('First instruction');

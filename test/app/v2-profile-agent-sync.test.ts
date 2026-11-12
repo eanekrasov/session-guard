@@ -2,10 +2,16 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
-import type { Context } from '@opencode/plugin/promise/plugin';
+import { Agent } from '@opencode/schema/agent';
 import { registerV2ProfileAgents } from '../../src/app/v2-profile-agent-sync.ts';
 
 const temporaryDirectories: string[] = [];
+
+type AgentUpdateFields = {
+  -readonly [
+    Key in keyof Pick<Agent.Info, 'name' | 'system' | 'description' | 'mode' | 'color'>
+  ]: Pick<Agent.Info, 'name' | 'system' | 'description' | 'mode' | 'color'>[Key];
+};
 
 afterEach(async () => {
   await Promise.all(
@@ -33,12 +39,16 @@ function createContext(updates: string[]) {
     agent: {
       transform: async (
         callback: (editor: {
-          update: (id: string, update: (agent: Record<string, unknown>) => void) => void;
+          update: (id: string, update: (agent: AgentUpdateFields) => void) => void;
         }) => void
       ) => {
         callback({
           update: (id, update) => {
-            const agent: Record<string, unknown> = {};
+            const agent = {
+              name: Agent.Name.make(''),
+              system: '',
+              mode: 'subagent' as const,
+            };
             update(agent);
             updates.push(`${id}:${JSON.stringify(agent)}`);
           },
@@ -50,7 +60,7 @@ function createContext(updates: string[]) {
         };
       },
     },
-  } as unknown as Context;
+  };
   return { context, isDisposed: () => disposed };
 }
 

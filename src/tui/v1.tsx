@@ -5,7 +5,7 @@
 import { existsSync, readFileSync, watch as watchFs } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { createEffect, createMemo, createSignal, For, Show } from 'solid-js';
-import type { KeyEvent } from '@opentui/core';
+import type { KeyEvent, RGBA } from '@opentui/core';
 import type { JSX } from '@opentui/solid';
 import type { TuiPlugin, TuiPluginApi } from '@opencode-ai/plugin/tui';
 import {
@@ -27,6 +27,7 @@ import { toSessionSnapshot } from '../types/session-snapshot.ts';
 import type { SessionSnapshot } from '../types/session-snapshot.ts';
 import { buildPanelPalette, createPanelLayout, TuiPanel, TuiSection } from './tui-panel/index.ts';
 import { SidebarContent as RulesSidebarContent } from './slots/sidebar-content.tsx';
+import { isColorValue } from './slots/theme-colors.ts';
 export { SidebarContent as RulesSidebarContent } from './slots/sidebar-content.tsx';
 
 const id = 'session-guard.sidebar-state' as const;
@@ -92,7 +93,7 @@ export type SectionApi = {
     register: (config: never) => unknown;
   };
   keymap: {
-    registerLayer: (layer: never) => unknown;
+    registerLayer: TuiPluginApi['keymap']['registerLayer'];
   };
   ui: {
     DialogAlert: (props: { title: string; message: string; onConfirm?: () => void }) => JSX.Element;
@@ -122,6 +123,8 @@ export type SectionApi = {
   };
   renderer: { requestRender: () => void };
 };
+
+export type TuiThemeApi = Pick<TuiPluginApi, 'theme'>;
 
 type ResolveTask = {
   sessionID: string;
@@ -706,7 +709,7 @@ function SchemaDetailsDialog(props: {
 
 // ── SidebarContent — SolidJS component with filesystem/event reactivity ─────
 export function WorkflowSidebarContent(props: {
-  api: TuiPluginApi;
+  api: TuiThemeApi;
   section: ReturnType<typeof createStateSection>;
   sessionId?: string;
   snapshot: () => SessionGuardSnapshot;
@@ -722,14 +725,16 @@ export function WorkflowSidebarContent(props: {
 
   const theme = props.api.theme.current;
   const view = () => sessionView();
-  const color = (tone: 'success' | 'warning' | 'error' | 'muted'): string => {
+  const color = (tone: 'success' | 'warning' | 'error' | 'muted'): string | RGBA => {
     const themeColors = {
       success: theme.success,
       warning: theme.warning,
       error: theme.error,
       muted: theme.textMuted,
     };
-    return (themeColors[tone] as unknown as string) ?? (theme.text as unknown as string) ?? '#ccc';
+    const value = themeColors[tone];
+    if (isColorValue(value)) return value;
+    return isColorValue(theme.text) ? theme.text : '#ccc';
   };
   const previousStage = () => neighbors().previous ?? view()?.prevStage ?? null;
   const nextStage = () => neighbors().next ?? view()?.nextStage ?? null;
@@ -747,9 +752,7 @@ export function WorkflowSidebarContent(props: {
   };
   const title = () =>
     view()?.stage ?? (view()?.snapshot.title ? compactValue(view()!.snapshot.title) : 'Workflow');
-  const panelPalette = createMemo(() =>
-    buildPanelPalette(theme as unknown as Record<string, unknown>)
-  );
+  const panelPalette = createMemo(() => buildPanelPalette(theme));
   const layout = createPanelLayout({ border: createMemo(() => false) });
 
   return (
@@ -795,7 +798,7 @@ export function WorkflowSidebarContent(props: {
                 flexShrink={0}
                 onMouseUp={() => props.section.openDetails(null)}
               >
-                <text fg={(theme.accent as unknown as string) ?? color('success')}>
+                <text fg={isColorValue(theme.accent) ? theme.accent : color('success')}>
                   current: {current().stage}
                 </text>
                 <For each={current().gates}>
@@ -817,9 +820,13 @@ export function WorkflowSidebarContent(props: {
                     <text
                       fg={
                         row.label === 'profile'
-                          ? (theme.primary as unknown as string)
+                          ? isColorValue(theme.primary)
+                            ? theme.primary
+                            : undefined
                           : row.label === 'revision'
-                            ? (theme.secondary as unknown as string)
+                            ? isColorValue(theme.secondary)
+                              ? theme.secondary
+                              : undefined
                             : color(row.tone)
                       }
                     >
@@ -839,7 +846,7 @@ export function WorkflowSidebarContent(props: {
                       .join(', ')}
                   </text>
                 </Show>
-                <text width="100%" fg={(theme.info as unknown as string) ?? color('warning')}>
+                <text width="100%" fg={isColorValue(theme.info) ? theme.info : color('warning')}>
                   ──────── available: {availableStages()} ────────
                 </text>
               </box>
@@ -852,14 +859,14 @@ export function WorkflowSidebarContent(props: {
 }
 
 export function HomeProfiles(props: {
-  api: TuiPluginApi;
+  api: TuiThemeApi;
   section: ReturnType<typeof createStateSection>;
   snapshot: () => SessionGuardSnapshot;
 }) {
   const theme = props.api.theme.current;
   const color = (
     key: 'primary' | 'text' | 'textMuted' | 'success' | 'warning' | 'accent' | 'info'
-  ): string => (theme[key] as unknown as string) ?? '#ccc';
+  ): string | RGBA => (isColorValue(theme[key]) ? theme[key] : '#ccc');
 
   return (
     <Show when={props.section.enabled()}>
@@ -932,13 +939,14 @@ const tui: TuiPlugin = async (api: TuiPluginApi) => {
               <WorkflowSidebarContent
                 api={api}
                 section={section}
-                sessionId={(props as { session_id?: string }).session_id}
+                sessionId={props.session_id}
                 snapshot={snapshot}
                 coordinator={coordinator}
               />
               <RulesSidebarContent
-                sessionId={(props as { session_id?: string }).session_id ?? ''}
-                api={api}
+                sessionId={props.session_id ?? ''}
+                projectDir={api.state.path.directory}
+                event={api.event}
                 theme={_ctx.theme}
               />
             </box>
@@ -953,35 +961,43 @@ const tui: TuiPlugin = async (api: TuiPluginApi) => {
           return <HomeProfiles api={api} section={section} snapshot={snapshot} />;
         } catch (err) {
           console.error('[tui] home_bottom render error:', err);
-          return null as unknown as JSX.Element;
+          return null;
         }
       },
       home_prompt_right(_ctx, _props) {
         try {
           const view = snapshot().view;
           const stage = typeof view?.stage === 'string' ? view.stage : '';
-          if (stage === '') return null as unknown as JSX.Element;
-          const theme = (_ctx.theme?.current ?? {}) as Record<string, unknown>;
-          const color = (theme.success as string) ?? (theme.text as string) ?? '#ccc';
+          if (stage === '') return null;
+          const theme = _ctx.theme.current;
+          const color = isColorValue(theme.success)
+            ? theme.success
+            : isColorValue(theme.text)
+              ? theme.text
+              : '#ccc';
           const badge = formatBadge(stage);
           return <text fg={color}>{badge.text}</text>;
         } catch (err) {
           console.error('[tui] home_prompt_right render error:', err);
-          return null as unknown as JSX.Element;
+          return null;
         }
       },
       session_prompt_right(_ctx, _props) {
         try {
           const view = snapshot().view;
           const stage = typeof view?.stage === 'string' ? view.stage : '';
-          if (stage === '') return null as unknown as JSX.Element;
-          const theme = (_ctx.theme?.current ?? {}) as Record<string, unknown>;
-          const color = (theme.success as string) ?? (theme.text as string) ?? '#ccc';
+          if (stage === '') return null;
+          const theme = _ctx.theme.current;
+          const color = isColorValue(theme.success)
+            ? theme.success
+            : isColorValue(theme.text)
+              ? theme.text
+              : '#ccc';
           const badge = formatBadge(stage);
           return <text fg={color}>{badge.text}</text>;
         } catch (err) {
           console.error('[tui] session_prompt_right render error:', err);
-          return null as unknown as JSX.Element;
+          return null;
         }
       },
     },
@@ -1004,11 +1020,11 @@ const tui: TuiPlugin = async (api: TuiPluginApi) => {
           run: () => section.toggleVisibility(),
         },
       ],
-    } as never);
+    });
     api.keymap.registerLayer({
       mode: 'base',
       bindings: [{ key: '<leader>w', cmd: DETAILS_COMMAND }],
-    } as never);
+    });
   } catch {
     /* keep the widget usable if keymap registration is unavailable */
   }

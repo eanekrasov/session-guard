@@ -10,7 +10,7 @@ export interface HostSessionCapabilities {
   readonly list?: SessionClient['list'];
   readonly messages?: SessionClient['messages'];
   readonly hasMessageContext?: (sessionID: string) => Promise<boolean>;
-  readonly prompt?: SessionClient['prompt'];
+  readonly prompt?: (input: Parameters<SessionClient['prompt']>[0]) => Promise<unknown>;
 }
 
 export interface HostToolCapabilities {
@@ -19,7 +19,6 @@ export interface HostToolCapabilities {
 
 export interface RuntimeHostAdapter {
   readonly directory: string;
-  readonly project?: unknown;
   readonly session: HostSessionCapabilities;
   readonly tools: HostToolCapabilities;
   readonly log: LogFn;
@@ -112,7 +111,6 @@ export function createV2RuntimeHostAdapter(
   const log = createConsoleLogFn();
   return {
     directory: options.directory,
-    project: context.location.project,
     session: {
       hasMessageContext: async (sessionID) =>
         (await context.session.context({ sessionID })).some(

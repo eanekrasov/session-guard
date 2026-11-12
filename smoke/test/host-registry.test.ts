@@ -360,6 +360,24 @@ describe('the canonical scenario registry', () => {
     expect(scenario?.steps?.[1]?.retry).toBe('poll-state');
   });
 
+  test('runs protocol-only review probes without dispatching a project reviewer', () => {
+    const verdict = findScenario('workflow-result')?.steps?.[1]?.instruction;
+    const commitReview = findScenario('commit-cwd')?.steps?.[5]?.instruction;
+    const realReviewer = findScenario('verify-loop')?.steps?.[4]?.instruction;
+
+    expect(verdict).toContain('subagent_type "smoke_reviewer"');
+    expect(commitReview).toContain('subagent_type "smoke_reviewer"');
+    expect(realReviewer).toContain('subagent_type "reviewer"');
+  });
+
+  test('stages the intended file before the mismatch commit', () => {
+    const write = findScenario('commit-mismatch')?.steps?.[3]?.instruction;
+    const commit = findScenario('commit-mismatch')?.steps?.[7]?.instruction;
+
+    expect(write).toContain('git add -- src/smoke-1.ts');
+    expect(commit).toContain('git commit -m "smoke: sweep"');
+  });
+
   test('derives the parity matrix from the registry, requiring every scenario on both hosts', () => {
     const matrix = parityMatrix();
 

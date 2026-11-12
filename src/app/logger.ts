@@ -1,3 +1,5 @@
+import type { PluginInput } from '@opencode-ai/plugin';
+
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 const LOG_LEVELS: Record<LogLevel, number> = {
@@ -32,12 +34,12 @@ export const noopLog: LogFn = () => Promise.resolve();
  * Respects SESSION_GUARD_LOG_LEVEL env var — messages below the threshold
  * are silently dropped.
  */
-export function createLogFn(client: { app?: { log?: (...args: never[]) => unknown } }): LogFn {
+export function createLogFn(client: { app?: Pick<PluginInput['client']['app'], 'log'> }): LogFn {
   return async (level, message, extra) => {
     if (LOG_LEVELS[level] < LOG_LEVELS[EFFECTIVE_LEVEL]) return;
 
     try {
-      await (client.app?.log as ((input: unknown) => Promise<unknown>) | undefined)?.({
+      await client.app?.log({
         body: { service: 'session-guard', level, message, extra: extra ?? {} },
       });
     } catch {

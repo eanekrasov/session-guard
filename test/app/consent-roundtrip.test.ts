@@ -1,13 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { PluginInput } from '@opencode-ai/plugin';
-
-import { createRuntime } from '../../src/app/runtime.ts';
+import { createRuntime, type RuntimeContext } from '../../src/app/runtime.ts';
 import { createSession, WorkflowStore } from '../../src/session/session-store.ts';
 import { parseConsentRequest, questionTextOf } from '../../src/app/consent.ts';
-import type { SessionClient } from '../../src/app/runtime-types.ts';
 import { toolOutput } from '../support/tool-result.ts';
 
 /**
@@ -23,31 +20,32 @@ let projectDir: string;
 let storeDir: string;
 let store: WorkflowStore;
 
-function client(): SessionClient {
+function runtimeContext(
+  resolveParent: NonNullable<RuntimeContext['resolveParent']> = async () => null
+): RuntimeContext {
   return {
-    messages: vi.fn().mockResolvedValue({
-      data: [{ id: 'msg-1', parts: [{ type: 'text' }] }],
-    }),
-    prompt: vi.fn().mockResolvedValue({ data: {} }),
-    list: vi.fn().mockResolvedValue({ data: [] }),
-  } as unknown as SessionClient;
+    directory: projectDir,
+    resolveParent,
+    host: {
+      directory: projectDir,
+      session: { hasMessageContext: async () => true, prompt: async () => {} },
+      tools: {},
+      log: async () => {},
+      report: () => {},
+    },
+  };
 }
 
-function pluginInput(): PluginInput {
+function toolContext(sessionID: string) {
   return {
-    client: { session: client() } as unknown as PluginInput['client'],
-    project: {
-      id: 'test',
-      name: 'test',
-      directory: projectDir,
-      worktree: projectDir,
-      time: { created: Date.now() },
-    } as PluginInput['project'],
+    sessionID,
+    messageID: 'message-1',
+    agent: 'test',
     directory: projectDir,
     worktree: projectDir,
-    experimental_workspace: {} as PluginInput['experimental_workspace'],
-    serverUrl: new URL('http://localhost:0'),
-    $: {} as PluginInput['$'],
+    abort: new AbortController().signal,
+    metadata: () => {},
+    ask: async () => {},
   };
 }
 
@@ -66,32 +64,30 @@ beforeEach(async () => {
 
 describe('consent tag round trip', () => {
   it('normalizes a JSON-encoded file list before emitting the consent tag', async () => {
-    const hooks = createRuntime(pluginInput());
+    const hooks = createRuntime(runtimeContext());
     const result = await hooks.tool!['workflow-consent']!.execute(
-      { files: '["plan.md"]', summary: 'do the thing' } as never,
-      { sessionID: 's1' } as never
+      { files: '["plan.md"]', summary: 'do the thing' },
+      toolContext('s1')
     );
     expect(parseConsentRequest(toolOutput(result))?.manifest.files).toEqual(['plan.md']);
   });
 
-  it('resolves a V1 child session to its parent workflow', async () => {
-    const input = pluginInput();
-    input.client.session.get = vi.fn(async ({ path }: { path: { id: string } }) => ({
-      data: { id: path.id, ...(path.id === 'child' ? { parentID: 's1' } : {}) },
-    })) as never;
-    const hooks = createRuntime(input);
+  it('resolves a child session to its parent workflow', async () => {
+    const hooks = createRuntime(
+      runtimeContext(async (sessionID) => (sessionID === 'child' ? 's1' : null))
+    );
     const result = await hooks.tool!['workflow-consent']!.execute(
       { files: ['plan.md'], summary: 'do the thing' },
-      { sessionID: 'child' } as never
+      toolContext('child')
     );
     expect(parseConsentRequest(toolOutput(result))).toBeDefined();
   });
 
   it('emits a tag whose own parser accepts it', async () => {
-    const hooks = createRuntime(pluginInput());
+    const hooks = createRuntime(runtimeContext());
     const result = await hooks.tool!['workflow-consent']!.execute(
       { files: ['plan.md'], summary: 'do the thing' },
-      { sessionID: 's1' } as never
+      toolContext('s1')
     );
 
     const parsed = parseConsentRequest(toolOutput(result));
@@ -100,10 +96,10 @@ describe('consent tag round trip', () => {
   });
 
   it('reads the consent request from the question, not from the answer', async () => {
-    const hooks = createRuntime(pluginInput());
+    const hooks = createRuntime(runtimeContext());
     const prepared = await hooks.tool!['workflow-consent']!.execute(
       { files: ['plan.md'], summary: 'do the thing' },
-      { sessionID: 's1' } as never
+      toolContext('s1')
     );
     const tag = /<consent-request[\s\S]*?<\/consent-request>/.exec(toolOutput(prepared))?.[0];
     expect(tag).toBeDefined();

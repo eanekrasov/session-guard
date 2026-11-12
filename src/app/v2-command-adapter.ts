@@ -1,7 +1,27 @@
 import type { Context } from '@opencode/plugin/promise/plugin';
-import type { CommandInvocation } from '@opencode/plugin/promise/command';
+import type {
+  CommandDefinition,
+  CommandEditor,
+  CommandInvocation,
+} from '@opencode/plugin/promise/command';
+import type { AgentEditor } from '@opencode/plugin/promise/agent';
 import type { Registration } from '@opencode/plugin/promise/registration';
 import { Agent } from '@opencode/schema/agent';
+
+type CommandContext = {
+  command: {
+    transform: (callback: (editor: Pick<CommandEditor, 'add'>) => void) => Promise<Registration>;
+  };
+  session: {
+    prompt: (input: Parameters<Context['session']['prompt']>[0]) => Promise<unknown>;
+  };
+};
+
+type AgentContext = {
+  agent: {
+    transform: (callback: (editor: Pick<AgentEditor, 'update'>) => void) => Promise<Registration>;
+  };
+};
 
 // ─── Public contract ──────────────────────────────────────────────────────────
 
@@ -119,7 +139,7 @@ export function v1CommandToV2Definition(v1: V1CommandDescriptor): {
 }
 
 function forwardV1Prompt(
-  ctx: Context,
+  ctx: CommandContext,
   command: V1CommandDescriptor,
   invocation: CommandInvocation
 ): Promise<void> {
@@ -133,7 +153,7 @@ function forwardV1Prompt(
 }
 
 /** Register the V1 prompt-driven commands through the confirmed V2 API. */
-export async function registerV2Commands(ctx: Context): Promise<Registration> {
+export async function registerV2Commands(ctx: CommandContext): Promise<Registration> {
   return ctx.command.transform((editor) => {
     for (const v1 of V1_SM_COMMANDS) {
       editor.add({
@@ -151,7 +171,7 @@ export async function registerV2Commands(ctx: Context): Promise<Registration> {
  * V2 does not expose the V1 resolved `config.model` on Context, so model is
  * intentionally left at the host default rather than guessed.
  */
-export async function registerV2Agent(ctx: Context): Promise<Registration> {
+export async function registerV2Agent(ctx: AgentContext): Promise<Registration> {
   return ctx.agent.transform((editor) => {
     editor.update(V1_SESSION_GUARD_AGENT.id, (agent) => {
       agent.name = Agent.Name.make(V1_SESSION_GUARD_AGENT.name);
@@ -170,7 +190,7 @@ export async function registerV2Agent(ctx: Context): Promise<Registration> {
  *
  * @returns V2CommandAdapterResult с registrations для cleanup.
  */
-export async function createV2CommandAdapter(ctx: Context): Promise<V2CommandAdapterResult> {
+export async function createV2CommandAdapter(ctx: CommandContext): Promise<V2CommandAdapterResult> {
   const registrations: Registration[] = [];
 
   const commandReg = await registerV2Commands(ctx);

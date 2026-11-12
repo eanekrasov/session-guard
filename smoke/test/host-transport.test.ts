@@ -31,12 +31,22 @@ import {
 } from '../src/host/v2-transport.ts';
 import {
   extractTaskChildSessionId,
+  parseV1SseEvent,
   rawV1ResponseDiagnostics,
   subscribeToV1Events,
 } from '../src/host/v1-exchange.ts';
 import type { V2SmokeClient } from '../src/v2-client.ts';
 import type { ScenarioDefinition } from '../src/host/types.ts';
 import { closeJsonlSinks, initializeJsonlSinks } from '../src/log.ts';
+
+describe('V1 SSE parsing', () => {
+  test('keeps JSON payloads unknown until extracting a checked event envelope', () => {
+    expect(
+      parseV1SseEvent('data: {"type":"session.status","properties":{"sessionID":"ses-1"}}')
+    ).toEqual({ type: 'session.status', data: { sessionID: 'ses-1' } });
+    expect(parseV1SseEvent('event: session.status\ndata: null')).toBeUndefined();
+  });
+});
 
 describe('V1 raw response diagnostics', () => {
   test('extracts the child session ID from a task result', () => {
@@ -482,9 +492,11 @@ describe('the V1 transport strategy', () => {
     // a question lands in the middle of them as a user message of its own.
     let turnComplete = false;
     const listing = [
+      null,
       {
         info: { role: 'assistant', time: { created: 4 } },
         parts: [
+          { type: 42, text: false },
           { type: 'step-start' },
           {
             type: 'tool',
@@ -826,6 +838,7 @@ describe('the V2 transport strategy', () => {
   test('orders messages by host timestamps when picking the last turn', () => {
     const content = assistantContentAfterLastUser([
       { type: 'assistant', time: { created: 9 }, content: [{ type: 'text', text: 'new' }] },
+      { type: 7, time: { created: 8.5 }, content: [{ type: 'text', text: 'malformed' }] },
       { type: 'user', time: { created: 8 }, content: [] },
       { type: 'assistant', time: { created: 5 }, content: [{ type: 'text', text: 'old' }] },
       { type: 'user', time: { created: 4 }, content: [] },

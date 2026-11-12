@@ -1,5 +1,8 @@
 import { describe, expect, test } from 'bun:test';
+import type { AgentEditor } from '@opencode/plugin/promise/agent';
+import type { CommandDefinition, CommandEditor } from '@opencode/plugin/promise/command';
 import type { Context } from '@opencode/plugin/promise/plugin';
+import { Session } from '@opencode/schema/session';
 import {
   V1_SM_COMMANDS,
   V1_SESSION_GUARD_AGENT,
@@ -14,24 +17,17 @@ import type { V1CommandDescriptor } from '../../src/app/v2-command-adapter.ts';
 // ─── Helper: minimal Context stub with command transform ──────────────────────
 
 function contextWithCommandCapture(
-  capture: Array<{ name: string; description: string; execute: (input: unknown) => Promise<void> }>,
-  prompt: (input: unknown) => Promise<void> = async () => {}
-): Context {
+  capture: CommandDefinition[],
+  prompt: (
+    input: Parameters<Context['session']['prompt']>[0]
+  ) => Promise<unknown> = async () => ({})
+) {
   return {
     location: { directory: '/tmp', project: { directory: '/tmp' } },
     command: {
       list: async () => ({ location: { directory: '/tmp' }, data: [] }),
-      transform: async (callback: (editor: unknown) => void) => {
-        callback({
-          add: (def: unknown) => {
-            const d = def as {
-              name: string;
-              description: string;
-              execute: (input: unknown) => Promise<void>;
-            };
-            capture.push(d);
-          },
-        });
+      transform: async (callback: (editor: Pick<CommandEditor, 'add'>) => void) => {
+        callback({ add: (definition) => capture.push(definition) });
         return { dispose: async () => {} };
       },
       reload: async () => {},
@@ -39,15 +35,15 @@ function contextWithCommandCapture(
     session: { prompt },
     agent: {
       list: async () => ({ data: [] }),
-      transform: async (callback: (editor: unknown) => void) => {
+      transform: async (_callback: (editor: Pick<AgentEditor, 'update'>) => void) => {
         // agent transform — no-op default; tests that need it override ctx.agent.transform
       },
       reload: async () => {},
     },
-  } as unknown as Context;
+  };
 }
 
-function minContext(): Context {
+function minContext() {
   return {
     location: { directory: '/tmp', project: { directory: '/tmp' } },
     command: {
@@ -55,12 +51,13 @@ function minContext(): Context {
       transform: async () => ({ dispose: async () => {} }),
       reload: async () => {},
     },
+    session: { prompt: async () => ({}) },
     agent: {
       list: async () => ({ data: [] }),
-      transform: async () => undefined as unknown as Promise<never>,
+      transform: async () => ({ dispose: async () => {} }),
       reload: async () => {},
     },
-  } as unknown as Context;
+  };
 }
 
 // ─── Tests ─────────────────────────────────────────────────────────────────────
@@ -118,11 +115,7 @@ describe('V2 command adapter', () => {
 
   describe('registerV2Commands', () => {
     test('registers four commands through ctx.command.transform', async () => {
-      const added: Array<{
-        name: string;
-        description: string;
-        execute: (input: unknown) => Promise<void>;
-      }> = [];
+      const added: CommandDefinition[] = [];
       const ctx = contextWithCommandCapture(added);
 
       const reg = await registerV2Commands(ctx);
@@ -139,32 +132,29 @@ describe('V2 command adapter', () => {
     });
 
     test('forwards the V1 prompt and delivery to the host session', async () => {
-      const added: Array<{
-        name: string;
-        description: string;
-        execute: (input: unknown) => Promise<void>;
-      }> = [];
+      const added: CommandDefinition[] = [];
       let promptInput: unknown;
+      const sessionID = Session.ID.create();
       const ctx = contextWithCommandCapture(added, async (input) => {
         promptInput = input;
       });
 
       await registerV2Commands(ctx);
-      await added[0]!.execute({ sessionID: 'session-1', prompt: {}, delivery: 'queue' });
+      await added[0]!.execute({
+        sessionID,
+        prompt: { text: 'unused' },
+        delivery: 'queue',
+      });
 
       expect(promptInput).toEqual({
-        sessionID: 'session-1',
+        sessionID,
         text: 'tell the user the current session-guard workflow status for this session',
         delivery: 'queue',
       });
     });
 
     test('forwards host prompt failures unchanged', async () => {
-      const added: Array<{
-        name: string;
-        description: string;
-        execute: (input: unknown) => Promise<void>;
-      }> = [];
+      const added: CommandDefinition[] = [];
       const failure = new Error('prompt failed');
       const ctx = contextWithCommandCapture(added, async () => {
         throw failure;
@@ -172,7 +162,11 @@ describe('V2 command adapter', () => {
 
       await registerV2Commands(ctx);
       await expect(
-        added[0]!.execute({ sessionID: 'session-1', prompt: {}, delivery: 'steer' })
+        added[0]!.execute({
+          sessionID: Session.ID.create(),
+          prompt: { text: 'unused' },
+          delivery: 'steer',
+        })
       ).rejects.toBe(failure);
     });
   });
@@ -183,30 +177,16 @@ describe('V2 command adapter', () => {
       const ctx = {
         ...minContext(),
         agent: {
-          transform: async (callback: (editor: unknown) => void) => {
+          transform: async (callback: (editor: Pick<AgentEditor, 'update'>) => void) => {
             callback({
-              get: (id: string) =>
-                id === 'session-guard'
-                  ? ({ id, name: 'session-guard', mode: 'subagent' } as unknown as Record<
-                      string,
-                      unknown
-                    >)
-                  : undefined,
-              update: (
-                id: string,
-                cb: (agent: { id: string; description: string; mode: 'subagent' }) => void
-              ) => {
+              update: (id) => {
                 updatedId = id;
-                cb({ id, description: '', mode: 'subagent' });
               },
-              list: () => [],
-              default: () => {},
-              remove: () => {},
             });
             return { dispose: async () => {} };
           },
         },
-      } as unknown as Context;
+      };
 
       await registerV2Agent(ctx);
       expect(updatedId).toBe('session-guard');
@@ -216,18 +196,14 @@ describe('V2 command adapter', () => {
       const ctx = {
         ...minContext(),
         agent: {
-          transform: async (callback: (editor: unknown) => void) => {
+          transform: async (callback: (editor: Pick<AgentEditor, 'update'>) => void) => {
             callback({
-              get: () => undefined,
               update: () => {},
-              list: () => [],
-              default: () => {},
-              remove: () => {},
             });
             return { dispose: async () => {} };
           },
         },
-      } as unknown as Context;
+      };
 
       await expect(registerV2Agent(ctx)).resolves.toBeDefined();
     });
@@ -235,32 +211,28 @@ describe('V2 command adapter', () => {
 
   describe('createV2CommandAdapter', () => {
     test('returns registrations without throwing', async () => {
-      const added: Array<{ name: string; description: string }> = [];
+      const added: CommandDefinition[] = [];
       const ctx = {
         ...minContext(),
         command: {
           ...minContext().command,
-          transform: async (callback: (editor: unknown) => void) => {
+          transform: async (callback: (editor: Pick<CommandEditor, 'add'>) => void) => {
             callback({
-              add: (def: unknown) => added.push(def as { name: string; description: string }),
+              add: (def) => added.push(def),
             });
             return { dispose: async () => {} };
           },
         },
         agent: {
           ...minContext().agent,
-          transform: async (callback: (editor: unknown) => void) => {
+          transform: async (callback: (editor: Pick<AgentEditor, 'update'>) => void) => {
             callback({
-              get: () => undefined,
               update: () => {},
-              list: () => [],
-              default: () => {},
-              remove: () => {},
             });
             return { dispose: async () => {} };
           },
         },
-      } as unknown as Context;
+      };
       const result = await createV2CommandAdapter(ctx);
       expect(result.registrations).toBeDefined();
       expect(result.registrations).toHaveLength(1);
@@ -270,32 +242,28 @@ describe('V2 command adapter', () => {
     });
 
     test('all registrations are disposable without error', async () => {
-      const added: Array<{ name: string; description: string }> = [];
+      const added: CommandDefinition[] = [];
       const ctx = {
         ...minContext(),
         command: {
           ...minContext().command,
-          transform: async (callback: (editor: unknown) => void) => {
+          transform: async (callback: (editor: Pick<CommandEditor, 'add'>) => void) => {
             callback({
-              add: (def: unknown) => added.push(def as { name: string; description: string }),
+              add: (def) => added.push(def),
             });
             return { dispose: async () => {} };
           },
         },
         agent: {
           ...minContext().agent,
-          transform: async (callback: (editor: unknown) => void) => {
+          transform: async (callback: (editor: Pick<AgentEditor, 'update'>) => void) => {
             callback({
-              get: () => undefined,
               update: () => {},
-              list: () => [],
-              default: () => {},
-              remove: () => {},
             });
             return { dispose: async () => {} };
           },
         },
-      } as unknown as Context;
+      };
       const result = await createV2CommandAdapter(ctx);
       for (const reg of result.registrations) {
         await expect(reg.dispose()).resolves.toBeUndefined();

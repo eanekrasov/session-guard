@@ -1,12 +1,15 @@
 {
   "name": "@eanekrasov/session-guard",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "description": "Session guard for OpenCode — gives schema-based workflow with strict validation between steps",
   "keywords": [
     "opencode",
     "opencode-plugin",
     "session-guard",
+    "system-prompt",
+    "typescript",
     "workflow",
+    "rules",
     "agent",
     "tui"
   ],
@@ -16,8 +19,8 @@
     "email": "e.nekrasov@crpt.ru"
   },
   "type": "module",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "bin": {
     "session-guard": "dist/cli.js"
   },
@@ -38,6 +41,17 @@
       "import": "./dist/tui.js",
       "types": "./dist/tui.d.ts"
     }
+  },
+  "scripts": {
+    "build": "tsc && bun run build-tui.mjs",
+    "dev": "tsc --watch",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "lint": "eslint src tui",
+    "format": "prettier --write 'src/**/*.ts' 'tui/**/*.tsx' 'tui/**/*.ts'",
+    "format:check": "prettier --check 'src/**/*.ts' 'tui/**/*.tsx' 'tui/**/*.ts'",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "bun run clean && bun run build"
   },
   "repository": {
     "type": "git",
@@ -64,13 +78,39 @@
   },
   "files": [
     "dist",
+    "!dist/**/*.test.*",
+    "!dist/**/*.spec.*",
+    "!dist/**/test-fixtures.*",
+    "!dist/**/api-surface.typecheck.*",
+    "src/",
+    "!src/**/*.test.ts",
+    "!src/**/*.spec.ts",
+    "!src/test-fixtures.ts",
+    "!src/api-surface.typecheck.ts",
+    "tui/",
+    "!tui/**/*.test.ts",
+    "!tui/**/*.test.tsx",
+    "!tui/**/*.spec.ts",
+    "!tui/**/*.spec.tsx",
+    "LICENSE",
     "README.md",
     "docs",
     "package.json"
   ],
+  "peerDependenciesMeta": {
+    "@opentui/core": {
+      "optional": true
+    },
+    "@opentui/solid": {
+      "optional": true
+    }
+  },
   "dependencies": {
+    "@opencode-ai/client": "0.0.0-beta-18999",
     "@opencode-ai/plugin": "^1.19.5",
+    "@opencode-ai/theme": "0.0.0-beta-18999",
     "@opencode/plugin": "2.2.7",
+    "@jclem/logfmt2": "2.4.3",
     "@opentui/core": "^0.8.3",
     "@opentui/keymap": "^0.8.3",
     "@opentui/solid": "^0.8.3",
@@ -78,11 +118,16 @@
     "minimatch": "11.0.1",
     "solid-js": "^1.9.18",
     "yaml": "^2.9.1",
-    "zod": "^4.6.7"
+    "zod": "4.1.8"
+  },
+  "peerDependencies": {
+    "@opencode-ai/plugin": ">=0.0.0-beta-18999 <0.0.1",
+    "@opentui/core": ">=0.8.3",
+    "@opentui/solid": ">=0.8.3",
+    "solid-js": ">=1.9.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@jclem/logfmt2": "2.4.3",
     "@types/node": "^26.6.6",
     "@typescript-eslint/eslint-plugin": "8.72.2",
     "@typescript-eslint/parser": "8.72.2",
@@ -93,6 +138,7 @@
     "jsmin": "1.0.1",
     "prettier": "^3.9.10",
     "typescript-eslint": "^8.72.2",
-    "vitest": "5.1.0"
+    "vitest": "5.1.0",
+    "typescript": "^5.9.3"
   }
 }

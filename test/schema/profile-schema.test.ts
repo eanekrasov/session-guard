@@ -1,8 +1,68 @@
 import { describe, it, expect } from 'vitest';
 
-import { ProfileSchemaSchema } from '../../src/schema/profile-schema.ts';
+import { ProfileSchemaJsonSchema, ProfileSchemaSchema } from '../../src/schema/profile-schema.ts';
 
 describe('ProfileSchemaSchema', () => {
+  it('rejects legacy auto-start command triggers', () => {
+    expect(
+      ProfileSchemaSchema.safeParse({
+        autoStartTrigger: { commands: ['^npm test$'] },
+        stages: { start: {} },
+      }).success
+    ).toBe(false);
+  });
+
+  it('rejects mixed legacy and new auto-start trigger fields', () => {
+    expect(
+      ProfileSchemaSchema.safeParse({
+        autoStartTrigger: { commands: ['^npm test$'], keywords: ['test'] },
+        stages: { start: {} },
+      }).success
+    ).toBe(false);
+  });
+
+  it('requires at least one new-format condition', () => {
+    expect(
+      ProfileSchemaSchema.safeParse({
+        autoStartTrigger: {},
+        stages: { start: {} },
+      }).success
+    ).toBe(false);
+    expect(
+      ProfileSchemaSchema.safeParse({
+        autoStartTrigger: { match: 'all' },
+        stages: { start: {} },
+      }).success
+    ).toBe(false);
+  });
+
+  it('publishes the non-empty condition requirement in JSON Schema', () => {
+    expect(JSON.stringify(ProfileSchemaJsonSchema)).toContain('"required":["globs"]');
+    expect(JSON.stringify(ProfileSchemaJsonSchema)).toContain('"required":["ci"]');
+  });
+
+  it('accepts every supported condition field', () => {
+    expect(
+      ProfileSchemaSchema.safeParse({
+        autoStartTrigger: {
+          globs: ['src/**/*.ts'],
+          fileContains: ['needle'],
+          keywords: ['implement'],
+          tools: ['bash'],
+          model: ['model-id'],
+          agent: ['code'],
+          command: ['review'],
+          project: ['typescript'],
+          branch: ['feature/*'],
+          os: ['darwin'],
+          ci: false,
+          match: 'all',
+        },
+        stages: { start: {} },
+      }).success
+    ).toBe(true);
+  });
+
   describe('unknown keys', () => {
     it('keeps a stage key it does not know, for the compiler to refuse', async () => {
       // zod used to strip it, which deleted the evidence before

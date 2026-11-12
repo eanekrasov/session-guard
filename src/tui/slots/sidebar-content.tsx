@@ -1,11 +1,11 @@
 // tui/slots/sidebar-content.tsx
 /** @jsxImportSource @opentui/solid */
 import { createSignal, createEffect, createMemo, onCleanup, For, type JSX } from 'solid-js';
-import type { TuiPluginApi, TuiTheme } from '@opencode-ai/plugin/tui';
+import type { Plugin as TuiPluginNamespace } from '@opencode-ai/plugin/tui';
 import { loadSidebarRules, type SidebarRuleEntry } from '../data/rules.js';
 import { createRulesLoadCoordinator } from '../data/rules-load-coordinator.js';
-import type { RuleMetadata } from '../../rules/utils.js';
-import { logError } from '../../rules/debug.js';
+import type { RuleMetadata } from '../../rules-engine/rules/rule-metadata.js';
+import { logError } from '../../rules-engine/shared/debug.js';
 import {
   TuiPanel,
   TuiSection,
@@ -33,8 +33,14 @@ const metadataFieldDescriptors: Array<{
 
 interface SidebarContentProps {
   sessionId: string;
-  api: TuiPluginApi;
-  theme: TuiTheme;
+  projectDir: string | null;
+  event: {
+    on: (
+      type: string,
+      handler: (event: { type: string; properties: Record<string, unknown> }) => void
+    ) => () => void;
+  };
+  theme: TuiPluginNamespace.Context['theme'];
 }
 
 type ThemeColor = string | import('@opentui/core').RGBA;
@@ -140,14 +146,16 @@ export function SidebarContent(props: SidebarContentProps): JSX.Element {
   const theme = (): ThemeColors => props.theme.current as ThemeColors;
 
   const resolveProjectDir = (): string | null => {
-    return props.api.state.path.directory ?? null;
+    return props.projectDir;
   };
 
   // Debounce timer for event-driven refresh
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
   const rulesLoadCoordinator = createRulesLoadCoordinator({
-    load: (target) => loadSidebarRules(target.projectDir, target.sessionId),
+    load: (target) => {
+      return loadSidebarRules(target.projectDir, target.sessionId);
+    },
     onReset: (target) => {
       setLastDir(target.projectDir);
       setLastSessionId(target.sessionId);
@@ -165,6 +173,11 @@ export function SidebarContent(props: SidebarContentProps): JSX.Element {
         setStatus('error');
       }
     },
+  });
+
+  rulesLoadCoordinator.reset({
+    projectDir: resolveProjectDir(),
+    sessionId: props.sessionId,
   });
 
   // Effect 1: Initial load on session/directory change
@@ -216,8 +229,8 @@ export function SidebarContent(props: SidebarContentProps): JSX.Element {
     }, 150);
   };
 
-  const unsubMessageUpdated = props.api.event.on('message.updated', triggerRefresh);
-  const unsubSessionStatus = props.api.event.on('session.status', triggerRefresh);
+  const unsubMessageUpdated = props.event.on('message.updated', triggerRefresh);
+  const unsubSessionStatus = props.event.on('session.status', triggerRefresh);
 
   onCleanup(() => {
     if (debounceTimer !== null) {
@@ -234,17 +247,11 @@ export function SidebarContent(props: SidebarContentProps): JSX.Element {
 
   const projectRules = createMemo(() => rules().filter((r) => r.source === 'project'));
   const globalRules = createMemo(() => rules().filter((r) => r.source === 'global'));
-  const panelPalette = createMemo(() =>
-    buildPanelPalette(theme() as unknown as Record<string, unknown>)
-  );
+  const panelPalette = createMemo(() => buildPanelPalette(theme()));
   const panelLayout = createPanelLayout({ border: createMemo(() => false) });
 
   return (
     <TuiPanel pal={panelPalette()} border={false} layout={panelLayout}>
-      <text fg={panelPalette().primary}>
-        <b>Rules</b>
-      </text>
-
       {status() === 'loading' && <text fg={panelPalette().muted}>Loading...</text>}
       {status() === 'error' && <text fg={panelPalette().muted}>Failed to load rules</text>}
 
@@ -253,7 +260,7 @@ export function SidebarContent(props: SidebarContentProps): JSX.Element {
           {rules().length > 0 ? (
             <>
               <RuleSection
-                title="Project"
+                title="Project Rules"
                 rules={projectRules()}
                 palette={panelPalette()}
                 layout={panelLayout}
@@ -265,7 +272,7 @@ export function SidebarContent(props: SidebarContentProps): JSX.Element {
                 hasEvaluationState={hasEvaluationState()}
               />
               <RuleSection
-                title="Global"
+                title="Global Rules"
                 rules={globalRules()}
                 palette={panelPalette()}
                 layout={panelLayout}

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { createToolExecutionPolicy } from '../../src/app/tool-execution-policy.ts';
+import { createSession } from '../../src/session/session-store.ts';
 
 describe('tool execution policy', () => {
   it('keeps the authorization pipeline explicit and ordered', async () => {
@@ -8,9 +9,6 @@ describe('tool execution policy', () => {
     const policy = createToolExecutionPolicy({
       guardrails: async () => {
         calls.push('guardrails');
-      },
-      rules: async () => {
-        calls.push('rules');
       },
       consent: async () => {
         calls.push('consent');
@@ -22,7 +20,11 @@ describe('tool execution policy', () => {
           calls.push('task-admission');
         },
       },
-      taskInput: (input) => ({ ...input, output: { args: input.args }, session: {} as never }),
+      taskInput: (input) => ({
+        ...input,
+        output: { args: input.args },
+        session: createSession('session', 'profile', 'schema', 'stage'),
+      }),
       scope: async () => {
         calls.push('scope');
       },
@@ -41,7 +43,6 @@ describe('tool execution policy', () => {
 
     expect(calls).toEqual([
       'guardrails',
-      'rules',
       'consent',
       'task-admission',
       'scope',
@@ -56,9 +57,6 @@ describe('tool execution policy', () => {
     const policy = createToolExecutionPolicy({
       guardrails: async () => {
         calls.push('guardrails');
-      },
-      rules: async () => {
-        calls.push('rules');
         throw new Error('blocked');
       },
       consent: async () => {
@@ -82,6 +80,6 @@ describe('tool execution policy', () => {
     await expect(
       policy.before({ tool: 'write', sessionID: 'session', callID: 'call', args: {} })
     ).rejects.toThrow('blocked');
-    expect(calls).toEqual(['guardrails', 'rules']);
+    expect(calls).toEqual(['guardrails']);
   });
 });

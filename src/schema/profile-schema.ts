@@ -35,6 +35,40 @@ const LoopSourceSchema = z
 export type LoopSource = z.infer<typeof LoopSourceSchema>;
 export type ActionEntry = z.infer<typeof ActionEntrySchema>;
 
+const AUTO_START_CONDITION_FIELDS = [
+  'globs',
+  'fileContains',
+  'keywords',
+  'tools',
+  'model',
+  'agent',
+  'command',
+  'project',
+  'branch',
+  'os',
+  'ci',
+] as const;
+
+const AutoStartTriggerSchema = z
+  .object({
+    globs: z.array(z.string().min(1)).min(1).optional(),
+    fileContains: z.array(z.string().min(1)).min(1).optional(),
+    keywords: z.array(z.string().min(1)).min(1).optional(),
+    tools: z.array(z.string().min(1)).min(1).optional(),
+    model: z.array(z.string().min(1)).min(1).optional(),
+    agent: z.array(z.string().min(1)).min(1).optional(),
+    command: z.array(z.string().min(1)).min(1).optional(),
+    project: z.array(z.string().min(1)).min(1).optional(),
+    branch: z.array(z.string().min(1)).min(1).optional(),
+    os: z.array(z.string().min(1)).min(1).optional(),
+    ci: z.boolean().optional(),
+    match: z.enum(['any', 'all']).optional(),
+  })
+  .strict()
+  .refine((trigger) => AUTO_START_CONDITION_FIELDS.some((key) => key in trigger), {
+    message: 'autoStartTrigger must declare at least one condition',
+  });
+
 /**
  * Одно объявление действия на стадии.
  *
@@ -182,6 +216,9 @@ export type DispatchDef = z.infer<typeof DispatchSchema>;
  */
 export const ProfileSchemaSchema = z
   .object({
+    description: z.string().optional(),
+    autoStartTrigger: AutoStartTriggerSchema.optional(),
+
     /**
      * Схема, дельтой к которой является эта, в виде `<profile>/<file>.yaml`.
      *
@@ -258,3 +295,17 @@ export const ProfileSchemaJsonSchema = z.toJSONSchema(ProfileSchemaSchema, {
   io: 'input',
   unrepresentable: 'any',
 });
+
+const schemaProperties = Reflect.get(ProfileSchemaJsonSchema, 'properties');
+const autoStartTriggerJsonSchema =
+  schemaProperties !== null && typeof schemaProperties === 'object'
+    ? Reflect.get(schemaProperties, 'autoStartTrigger')
+    : undefined;
+if (autoStartTriggerJsonSchema === null || typeof autoStartTriggerJsonSchema !== 'object') {
+  throw new Error('Profile JSON Schema is missing autoStartTrigger');
+}
+Reflect.set(
+  autoStartTriggerJsonSchema,
+  'anyOf',
+  AUTO_START_CONDITION_FIELDS.map((field) => ({ required: [field] }))
+);

@@ -7,6 +7,7 @@
  * produces no scenario result at all.
  */
 
+import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -489,6 +490,7 @@ const commitTaskSetStep: ScenarioStep = {
 const commitWriteStep: ScenarioStep = {
   instruction:
     `Use the write tool to create ${COMMIT_FILE} with the content "export const smoke = 1;\n". ` +
+    `Then use the bash tool exactly once to run: git add -- ${COMMIT_FILE}. ` +
     'Do nothing else.',
   mutation: 'mutating',
   retry: 'poll-state',
@@ -516,8 +518,8 @@ const commitTaskDoneStep: ScenarioStep = {
 
 /** Вердикт review закрывает гейт стадии валидации. */
 const commitReviewStep = subagentStep({
-  type: 'reviewer',
-  description: 'review the work',
+  type: 'smoke_reviewer',
+  description: 'close the review gate',
   task: 'telling it this is a workflow protocol probe; do not review or inspect anything',
   verdict: `gate="review", status="pass"`,
   expect: (state) => {
@@ -612,6 +614,7 @@ const mismatchCommitStep: ScenarioStep = {
   prepare: async ({ workDir }) => {
     // Файл, которого workflow не видел: коммит понесёт больше, чем допускает разрешение.
     await writeFile(join(workDir, UNRELATED_FILE), 'not part of the work\n', 'utf-8');
+    execFileSync('git', ['add', '--', UNRELATED_FILE], { cwd: workDir });
   },
   expect: (result, workspace) => {
     const state = result.workflowState;
@@ -824,7 +827,7 @@ const cicdSmokeStep = subagentStep({
  * workflow-гейт `review`; payload сессии вручную не формируется.
  */
 const verdictProbeStep = subagentStep({
-  type: 'reviewer',
+  type: 'smoke_reviewer',
   description: 'report the workflow result',
   task:
     'telling it to finish immediately with the requested workflow result; this is a protocol probe, not a code review. ' +

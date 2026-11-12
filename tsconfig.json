@@ -11,7 +11,7 @@
       "@eanekrasov/session-guard": ["./src/index.ts"]
     },
     "outDir": "dist",
-    "declaration": false,
+    "declaration": false, // true
     "types": ["bun-types"],
 
     // Environment setup & latest features
@@ -37,10 +37,25 @@
     "noImplicitOverride": true,
 
     // Some stricter flags (disabled by default)
-    "noUnusedLocals": false,
-    "noUnusedParameters": false,
+    "noUnusedLocals": false, // true
+    "noUnusedParameters": false, // true
     "noPropertyAccessFromIndexSignature": false
+
+    // Everything else
+    //"rootDir": ".",
+    //"esModuleInterop": true,
+    //"noImplicitThis": true,
+    //"noImplicitReturns": true,
+    //"forceConsistentCasingInFileNames": true,
+    //"declarationMap": true,
+    //"sourceMap": true,
+    //"removeComments": false,
+    //"noImplicitAny": true,
+    //"exactOptionalPropertyTypes": true,
+    //"allowSyntheticDefaultImports": true,
+    //"resolveJsonModule": true,
+    //"isolatedModules": true
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "test/**/*.ts", "scripts/**/*.ts", "smoke/**/*.ts"],
-  "exclude": ["profiles/**/*.ts"]
+  "include": ["src/**/*", "test/**/*", "scripts/**/*", "smoke/**/*"],
+  "exclude": ["profiles/**/*", "src/rules-engine/**/*.vitest.ts"]
 }

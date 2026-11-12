@@ -1,12 +1,67 @@
 import { describe, expect, it, vi } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createWorkflowLifecycle } from '../../src/app/workflow-lifecycle.ts';
-import { createSession } from '../../src/session/session-store.ts';
-import type { SessionTransaction } from '../../src/app/session-executor.ts';
+import { createSession, WorkflowStore } from '../../src/session/session-store.ts';
+import type { SessionExecutor, SessionTransaction } from '../../src/app/session-executor.ts';
 
 describe('workflow lifecycle', () => {
+  it('does not archive when another store changes the stage before archive', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'lifecycle-archive-race-'));
+    try {
+      const store = new WorkflowStore(directory);
+      const other = new WorkflowStore(directory);
+      const session = createSession('race', 'profile', 'schema', 'working');
+      await store.save(session);
+      const originalArchive = store.archive.bind(store);
+      const archive = vi.spyOn(store, 'archive').mockImplementation(async (...args) => {
+        const latest = (await other.load('race'))!;
+        latest.currentStage = 'working';
+        await other.save(latest);
+        return originalArchive(...args);
+      });
+      const lifecycle = createWorkflowLifecycle({
+        store,
+        projectDir: directory,
+        executor: {
+          run: async <T>(
+            _sessionID: string,
+            _action: (tx: SessionTransaction) => Promise<T>
+          ): Promise<T> => {
+            throw new Error('Unexpected executor.run call');
+          },
+        },
+        mutationOrchestrator: {
+          applyTransitions: vi.fn(async () => {
+            session.currentStage = 'done';
+            return { applied: true, from: 'working', to: 'done' };
+          }),
+          resolveEngine: vi.fn(async () => ({
+            isTerminalStage: (stage: string) => stage === 'done',
+          })),
+          clearOnError: vi.fn(async () => undefined),
+          dispose: vi.fn(),
+        },
+        log: vi.fn(async () => undefined),
+      });
+      const deferred: Array<() => Promise<void>> = [];
+      await lifecycle.afterTool(session, { deferAfterSave: (fn) => deferred.push(fn) });
+      await store.save(session);
+      await deferred[0]!();
+
+      expect(archive).toHaveBeenCalled();
+      expect((await store.load('race'))?.currentStage).toBe('working');
+      expect(await store.loadArchived('race')).toBeNull();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it('records a terminal outcome and defers archive until after save', async () => {
     const session = createSession('session-1', 'profile', 'schema', 'working');
     const archive = vi.fn(async () => '/archive/session-1.json');
+    const load = vi.fn(async () => session as typeof session | null);
     const lifecycle = createWorkflowLifecycle({
       projectDir: '/tmp/test-project',
       mutationOrchestrator: {
@@ -21,16 +76,14 @@ describe('workflow lifecycle', () => {
         }),
         resolveEngine: vi.fn(async () => ({
           isTerminalStage: (stage: string) => stage === 'done',
-        })) as never,
+        })),
         clearOnError: vi.fn(async () => undefined),
         dispose: vi.fn(),
       },
-      store: { archive, list: vi.fn(async () => []), load: vi.fn(async () => null) },
+      store: { archive, list: vi.fn(async () => []), load },
       executor: {
-        run: vi.fn(
-          async (_sessionID: string, _action: (tx: SessionTransaction) => Promise<unknown>) =>
-            undefined
-        ) as never,
+        run: async <T>(_sessionID: string, action: (tx: SessionTransaction) => Promise<T>) =>
+          action({ session, deferAfterSave: () => undefined }),
       },
       log: vi.fn(async () => undefined),
     });
@@ -50,9 +103,18 @@ describe('workflow lifecycle', () => {
     expect(archive).not.toHaveBeenCalled();
     expect(deferred).toHaveLength(1);
 
+    load.mockResolvedValueOnce({ ...session, currentStage: 'working' });
+    await deferred[0]!();
+    expect(archive).not.toHaveBeenCalled();
+
+    load.mockResolvedValueOnce(null);
+    await deferred[0]!();
+    expect(archive).not.toHaveBeenCalled();
+
     await deferred[0]!();
 
-    expect(archive).toHaveBeenCalledWith('session-1');
+    expect(load).toHaveBeenCalledWith('session-1');
+    expect(archive).toHaveBeenCalledWith('session-1', expect.any(Function));
   });
 
   it('continues the host-error sweep when one session cannot be read', async () => {
@@ -65,15 +127,19 @@ describe('workflow lifecycle', () => {
       round: 1,
       startedAt: new Date().toISOString(),
     };
-    const run = vi.fn(
-      async (_sessionID: string, action: (tx: SessionTransaction) => Promise<unknown>) =>
-        action({ session, deferAfterSave: () => undefined })
-    ) as never;
+    const runCalls: string[] = [];
+    const run: SessionExecutor['run'] = async <T>(
+      sessionID: string,
+      action: (tx: SessionTransaction) => Promise<T>
+    ) => {
+      runCalls.push(sessionID);
+      return action({ session, deferAfterSave: () => undefined });
+    };
     const lifecycle = createWorkflowLifecycle({
       projectDir: '/tmp/test-project',
       mutationOrchestrator: {
         applyTransitions: vi.fn(async () => ({ applied: false })),
-        resolveEngine: vi.fn(async () => ({ isTerminalStage: () => false })) as never,
+        resolveEngine: vi.fn(async () => ({ isTerminalStage: () => false })),
         clearOnError: vi.fn(async () => undefined),
         dispose: vi.fn(),
       },
@@ -96,7 +162,7 @@ describe('workflow lifecycle', () => {
       },
     });
 
-    expect(run).toHaveBeenCalledWith('session-2', expect.any(Function));
+    expect(runCalls).toContain('session-2');
     expect(session.activeOperations['call-2']?.status).toBe('interrupted');
   });
 });

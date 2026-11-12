@@ -56,7 +56,9 @@ export interface V2SmokeClient {
 }
 
 /** Всё, что содержит форма, чтобы тег consent можно было найти, где бы он ни оказался. */
-function formText(form: Pick<FormInfo, 'title' | 'fields'>): string {
+type AnswerableForm = Pick<FormInfo, 'title'> & { fields: FormField[] };
+
+function formText(form: AnswerableForm): string {
   return [form.title, ...form.fields.flatMap((field) => [field.title, field.description])]
     .filter(Boolean)
     .join(' ');
@@ -82,10 +84,7 @@ export interface FormAnswerPlan {
  * копируется в текст вопроса — поэтому именно тег, где бы он ни оказался,
  * делает это собственным предметом сценария, а не вопросом, придуманным моделью.
  */
-export function planFormAnswer(
-  form: Pick<FormInfo, 'title' | 'fields'>,
-  decision: OperatorDecision
-): FormAnswerPlan {
+export function planFormAnswer(form: AnswerableForm, decision: OperatorDecision): FormAnswerPlan {
   const consent = formText(form).includes('<consent-request');
   const answer: FormAnswer = {};
   const offScript: string[] = [];
@@ -231,20 +230,34 @@ export function createV2SmokeClient(host: Host, options: V2SmokeClientOptions = 
   }
 
   /** Записать execution-событие в лог и локальную память клиента. */
-  function recordExecutionEvent(type: string, data: Record<string, unknown>): ExecutionEvent {
-    // type = "session.execution.started" → status = "started"
-    const status = type.split('.').pop() as ExecutionEvent['status'];
+  function recordExecutionEvent(type: string, data: object): ExecutionEvent | undefined {
+    const status =
+      type === 'session.execution.started'
+        ? 'started'
+        : type === 'session.execution.succeeded'
+          ? 'succeeded'
+          : type === 'session.execution.failed'
+            ? 'failed'
+            : type === 'session.execution.interrupted'
+              ? 'interrupted'
+              : undefined;
+    const sessionID = Reflect.get(data, 'sessionID');
+    if (status === undefined || typeof sessionID !== 'string') return undefined;
     const execution: ExecutionEvent = {
-      sessionID: String(data.sessionID),
+      sessionID,
       status,
       timestamp: Date.now(),
     };
-    if (typeof data.error === 'object' && data.error !== null) {
-      const err = data.error as Record<string, unknown>;
+    const rawError = Reflect.get(data, 'error');
+    if (typeof rawError === 'object' && rawError !== null) {
+      const err = rawError;
+      const errorType = Reflect.get(err, 'type');
+      const message = Reflect.get(err, 'message');
+      const errorStatus = Reflect.get(err, 'status');
       execution.error = {
-        type: String(err.type ?? ''),
-        message: String(err.message ?? ''),
-        ...(typeof err.status === 'number' ? { status: err.status } : {}),
+        type: typeof errorType === 'string' ? errorType : '',
+        message: typeof message === 'string' ? message : '',
+        ...(typeof errorStatus === 'number' ? { status: errorStatus } : {}),
       };
     }
     if (execution.sessionID === activeSessionId) lastExecution = execution;
@@ -258,30 +271,45 @@ export function createV2SmokeClient(host: Host, options: V2SmokeClientOptions = 
   }
 
   /** Записать step-событие в лог и локальную память клиента. */
-  function recordStepEvent(type: string, data: Record<string, unknown>): void {
-    // type = "session.step.started" → status = "started"
-    const status = type.split('.').pop() as StepEvent['status'];
+  function recordStepEvent(type: string, data: object): void {
+    const status =
+      type === 'session.step.started'
+        ? 'started'
+        : type === 'session.step.ended'
+          ? 'ended'
+          : type === 'session.step.failed'
+            ? 'failed'
+            : undefined;
+    if (status === undefined) return;
     const step: StepEvent = {
       status,
       timestamp: Date.now(),
     };
-    if (typeof data.assistantMessageID === 'string')
-      step.assistantMessageID = data.assistantMessageID;
-    if (typeof data.agent === 'string') step.agent = data.agent;
-    if (typeof data.model === 'object' && data.model !== null) {
-      const m = data.model as Record<string, unknown>;
+    const assistantMessageID = Reflect.get(data, 'assistantMessageID');
+    const agent = Reflect.get(data, 'agent');
+    if (typeof assistantMessageID === 'string') step.assistantMessageID = assistantMessageID;
+    if (typeof agent === 'string') step.agent = agent;
+    const rawModel = Reflect.get(data, 'model');
+    if (typeof rawModel === 'object' && rawModel !== null) {
+      const providerID = Reflect.get(rawModel, 'providerID');
+      const modelID = Reflect.get(rawModel, 'modelID');
       step.model = {
-        providerID: String(m.providerID ?? ''),
-        modelID: String(m.modelID ?? ''),
+        providerID: typeof providerID === 'string' ? providerID : '',
+        modelID: typeof modelID === 'string' ? modelID : '',
       };
     }
-    if (typeof data.finish === 'string') step.finish = data.finish;
-    if (typeof data.error === 'object' && data.error !== null) {
-      const err = data.error as Record<string, unknown>;
+    const finish = Reflect.get(data, 'finish');
+    if (typeof finish === 'string') step.finish = finish;
+    const rawError = Reflect.get(data, 'error');
+    if (typeof rawError === 'object' && rawError !== null) {
+      const err = rawError;
+      const errorType = Reflect.get(err, 'type');
+      const message = Reflect.get(err, 'message');
+      const errorStatus = Reflect.get(err, 'status');
       step.error = {
-        type: String(err.type ?? ''),
-        message: String(err.message ?? ''),
-        ...(typeof err.status === 'number' ? { status: err.status } : {}),
+        type: typeof errorType === 'string' ? errorType : '',
+        message: typeof message === 'string' ? message : '',
+        ...(typeof errorStatus === 'number' ? { status: errorStatus } : {}),
       };
     }
     stepEvents.push(step);
@@ -340,11 +368,11 @@ export function createV2SmokeClient(host: Host, options: V2SmokeClientOptions = 
             event.type === 'session.execution.succeeded' ||
             event.type === 'session.execution.failed' ||
             event.type === 'session.execution.interrupted') &&
-          allowedSessions.has(event.data.sessionID as string)
+          typeof event.data.sessionID === 'string' &&
+          allowedSessions.has(event.data.sessionID)
         ) {
-          executionStream.dispatch(
-            recordExecutionEvent(event.type, event.data as Record<string, unknown>)
-          );
+          const execution = recordExecutionEvent(event.type, event.data);
+          if (execution !== undefined) executionStream.dispatch(execution);
           continue;
         }
         // Step events (session.step.*)
@@ -352,9 +380,10 @@ export function createV2SmokeClient(host: Host, options: V2SmokeClientOptions = 
           (event.type === 'session.step.started' ||
             event.type === 'session.step.ended' ||
             event.type === 'session.step.failed') &&
-          allowedSessions.has(event.data.sessionID as string)
+          typeof event.data.sessionID === 'string' &&
+          allowedSessions.has(event.data.sessionID)
         ) {
-          recordStepEvent(event.type, event.data as Record<string, unknown>);
+          recordStepEvent(event.type, event.data);
         }
       }
     } catch (error) {

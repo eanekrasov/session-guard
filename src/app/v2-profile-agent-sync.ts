@@ -1,7 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parse } from 'yaml';
-import type { Context } from '@opencode/plugin/promise/plugin';
 import type { Registration } from '@opencode/plugin/promise/registration';
 import { Agent } from '@opencode/schema/agent';
 import { listProfileAgents, syncAllProfileAgents, type SyncReport } from './profile-agent-sync.ts';
@@ -18,6 +17,22 @@ interface ProfileAgentUpdate {
   metadata: ProfileAgentMetadata;
   system: string;
 }
+
+type ProfileAgentContext = {
+  agent: {
+    transform: (
+      callback: (editor: {
+        update: (id: string, update: (agent: ProfileAgentFields) => void) => void;
+      }) => void
+    ) => Promise<Registration>;
+  };
+};
+
+type ProfileAgentFields = {
+  -readonly [
+    Key in keyof Pick<Agent.Info, 'name' | 'system' | 'description' | 'mode' | 'color'>
+  ]: Pick<Agent.Info, 'name' | 'system' | 'description' | 'mode' | 'color'>[Key];
+};
 
 function readFrontmatter(content: string): { metadata: ProfileAgentMetadata; system: string } {
   if (!content.startsWith('---\n')) return { metadata: {}, system: content.trim() };
@@ -84,7 +99,7 @@ function formatError(error: unknown): string {
 
 /** Sync profile files, then materialize their catalog entries through the V2 editor. */
 export async function registerV2ProfileAgents(
-  context: Context,
+  context: ProfileAgentContext,
   projectDirectory: string,
   profilesDirectory: string,
   log: (message: string) => void

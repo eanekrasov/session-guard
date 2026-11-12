@@ -11,13 +11,14 @@ export type {
   LoopSource,
 } from './profile-schema.ts';
 
-import type { StageDef, TransitionDef, TransitionEffect } from './profile-schema.ts';
+import type { ProfileSchema, StageDef, TransitionDef, TransitionEffect } from './profile-schema.ts';
 
 export interface ProfileMetadata {
   id: string;
   description?: string;
   extends?: string;
   schemas?: string[];
+  schemaDescriptions?: Record<string, string>;
   agentsDir?: string;
   skillsDir?: string;
   agents?: string[];
@@ -67,6 +68,8 @@ export interface ResolvedSchema {
    */
   id: string;
   source: string;
+  description?: string;
+  autoStartTrigger?: ProfileSchema['autoStartTrigger'];
   stages?: Record<string, StageDef>;
   transitions?: TransitionDef[];
   editingAgents?: string[];

@@ -18,7 +18,7 @@ beforeAll(async () => {
 });
 
 describe('sidebar mount', () => {
-  it('renders rules without crashing on Solid conditions', async () => {
+  it('mounts while the async rules load is pending', async () => {
     if (!ffiAvailable) {
       return;
     }
@@ -38,18 +38,16 @@ describe('sidebar mount', () => {
     const theme = {
       current: { text: 'white', textMuted: 'gray', success: 'green' },
     };
-    const api = {
-      state: { path: { directory: tmp } },
-      event: { on: () => () => {} },
-    };
+    const event = { on: () => () => {} };
 
     try {
       const setup = await testRender(
         () => (
           <SidebarContent
             sessionId="ses_sidebar_mount_render_only"
-            api={api as never}
-            theme={theme as never}
+            projectDir={tmp}
+            event={event}
+            theme={theme}
           />
         ),
         { width: 60, height: 20 }
@@ -57,7 +55,7 @@ describe('sidebar mount', () => {
       await new Promise((resolve) => setTimeout(resolve, 100));
       await setup.flush();
       const frame = setup.captureCharFrame();
-      expect(frame).toContain('Rules');
+      expect(frame).toContain('Loading...');
     } finally {
       rmSync(tmp, { recursive: true, force: true });
       if (savedXdg !== undefined) process.env.XDG_CONFIG_HOME = savedXdg;

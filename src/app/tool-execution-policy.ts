@@ -17,7 +17,6 @@ export interface ToolPolicyInput {
 
 export interface ToolPolicyPorts {
   guardrails(input: ToolPolicyInput): Promise<void>;
-  rules(input: ToolPolicyInput): Promise<void>;
   consent(input: ToolPolicyInput): Promise<boolean>;
   taskAdmission?: TaskAdmission;
   changeEnforcement?: ChangeEnforcement;
@@ -40,7 +39,6 @@ export function createToolExecutionPolicy(ports: ToolPolicyPorts): ToolExecution
   return {
     async before(input) {
       await ports.guardrails(input);
-      await ports.rules(input);
       if (await ports.consent(input)) return;
       if (ports.taskAdmission?.isWorkflowTask(input.tool, input.args)) {
         if (!ports.taskInput) throw new Error('Task admission input adapter is missing');

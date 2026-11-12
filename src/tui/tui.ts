@@ -352,10 +352,10 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function collectionLines(
+function collectionLines<Item>(
   label: string,
-  items: readonly unknown[],
-  formatItem?: (item: unknown) => string
+  items: readonly Item[],
+  formatItem?: (item: Item) => string
 ): string[] {
   const head = `${label}: ${items.length}`;
   if (items.length === 0) return [head];

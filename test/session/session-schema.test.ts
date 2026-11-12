@@ -302,10 +302,10 @@ describe('MutationTaskSchema', () => {
       status: 'pending',
       manifest: ['a.ts'],
       declaredScope: 'src',
-    } as unknown as Record<string, unknown>);
+    });
 
-    expect((result as Record<string, unknown>).manifest).toBeUndefined();
-    expect((result as Record<string, unknown>).declaredScope).toBeUndefined();
+    expect(Reflect.get(result, 'manifest')).toBeUndefined();
+    expect(Reflect.get(result, 'declaredScope')).toBeUndefined();
   });
 });
 

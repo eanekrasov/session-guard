@@ -1,20 +1,24 @@
 import { describe, expect, test } from 'bun:test';
 
 import { createV2SmokeClient, planFormAnswer } from '../src/v2-client.ts';
+import type { FormField } from '@opencode/client';
 import type { Host } from '../src/harness.ts';
 
 /** Минимальные формы: план ответа читает только `type`, `key`, `label` и `value`. */
-const stringField = (key: string, options?: Array<{ label: string; value: string }>) =>
-  ({ key, type: 'string', title: key, ...(options ? { options } : {}) }) as never;
-const multiselectField = (key: string, options: Array<{ label: string; value: string }>) =>
-  ({ key, type: 'multiselect', title: key, options }) as never;
-const booleanField = (key: string, fallback?: boolean) =>
-  ({
-    key,
-    type: 'boolean',
-    title: key,
-    ...(fallback === undefined ? {} : { default: fallback }),
-  }) as never;
+const stringField = (
+  key: string,
+  options?: Array<{ label: string; value: string }>
+): FormField => ({ key, type: 'string', title: key, ...(options ? { options } : {}) });
+const multiselectField = (
+  key: string,
+  options: Array<{ label: string; value: string }>
+): FormField => ({ key, type: 'multiselect', title: key, options });
+const booleanField = (key: string, fallback?: boolean): FormField => ({
+  key,
+  type: 'boolean',
+  title: key,
+  ...(fallback === undefined ? {} : { default: fallback }),
+});
 
 const GRANT_DECLINE = [
   { label: 'grant', value: 'provider-granted' },
@@ -96,7 +100,7 @@ describe('the operator answer for one form', () => {
             title: 'decision',
             description: '<consent-request type="plan">approve?</consent-request>',
             options: GRANT_DECLINE,
-          } as never,
+          },
         ],
       },
       'decline'

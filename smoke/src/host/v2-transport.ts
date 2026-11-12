@@ -41,8 +41,9 @@ function createdAt(value: unknown): number {
   return typeof created === 'number' ? created : 0;
 }
 
-function messageType(value: unknown): unknown {
-  return fields(value).type;
+function messageType(value: unknown): string | undefined {
+  const type = fields(value).type;
+  return typeof type === 'string' ? type : undefined;
 }
 
 /**

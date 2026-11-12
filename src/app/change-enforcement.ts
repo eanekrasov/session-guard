@@ -7,8 +7,8 @@ import {
 } from '../domain/session-queries.ts';
 import { getCurrentHead } from './git-utils.ts';
 import { matchesScope } from './scope-match.ts';
-import { extractToolCallPaths } from '../rules/message-paths.ts';
-import { parsePatch } from '../rules/file-observation.ts';
+import { extractToolCallPaths } from '../rules-engine/session/message-extraction.js';
+import { parsePatch } from '../rules-engine/session/file-observation.js';
 import { changedAgainstHead } from './change-scope.ts';
 import type { WorkflowSession, MutationTask } from '../session/session-schema.ts';
 import { findTask, isOpenLoopRun } from '../session/helpers.ts';
@@ -283,6 +283,7 @@ export function createChangeEnforcement(ports: ChangeEnforcementPorts): ChangeEn
     args: unknown
   ): Promise<void> {
     if (await isCommitDelivery(tool, sessionID, args)) {
+      // Вложенный вызов использует сессию внешней транзакции, которая её сохранит.
       const session = await executor.run(sessionID, async (tx) => tx.session ?? null);
       if (!session) return;
 
@@ -295,12 +296,6 @@ export function createChangeEnforcement(ports: ChangeEnforcementPorts): ChangeEn
         ),
         startedAt: new Date().toISOString(),
       };
-      // Save via executor to maintain transactional semantics
-      await executor.run(sessionID, async (tx) => {
-        if (tx.session) {
-          // The session is already the same object, just persist
-        }
-      });
       void log('info', `Issued deliveryPermit for commit`, { callID, preCommitHead, sessionID });
     }
   }

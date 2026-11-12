@@ -1,11 +1,7 @@
 // tui/data/rules.ts
-import {
-  discoverRuleFiles,
-  getCachedRule,
-  readMatchedRulesState,
-  hasConditions,
-  type RuleMetadata,
-} from '../../rules/utils.js';
+import { discoverRuleFiles, getCachedRule } from '../../rules-engine/rules/rule-discovery.js';
+import { readMatchedRulesState } from '../../rules-engine/session/matched-rules-state.js';
+import { hasConditions, type RuleMetadata } from '../../rules-engine/rules/rule-metadata.js';
 export { hasConditions };
 import path from 'node:path';
 
@@ -75,7 +71,7 @@ export async function loadSidebarRules(
     const meta = cached.metadata;
     const source = classifyRuleScope(rule.filePath, projectDir);
     const isConditional = hasConditions(meta);
-    const conditionSummary = isConditional ? formatConditionSummary(meta!) : 'always active';
+    const conditionSummary = isConditional ? formatConditionSummary(meta ?? {}) : 'always active';
 
     // Determine isActive based on state file or fallback logic
     let isActive: boolean | null;
@@ -152,7 +148,7 @@ export function formatConditionSummary(meta: RuleMetadata): string {
   for (const [field, label] of arrayFields) {
     const value = meta[field];
     if (Array.isArray(value) && value.length > 0) {
-      parts.push(`${label}: ${(value as string[]).join(', ')}`);
+      parts.push(`${label}: ${value.join(', ')}`);
     }
   }
 

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { PluginInput } from '@opencode-ai/plugin';
+import type { RuntimeContext } from '../../src/app/runtime.ts';
 import { WorkflowStore } from '../../src/session/session-store.ts';
 import { fixtureProfilesDir } from '../support/fixture-profiles.ts';
 
@@ -30,23 +30,19 @@ afterEach(() => {
 
 async function create(sessionID: string, schemaId: string | undefined): Promise<string> {
   const { createRuntime } = await import('../../src/app/runtime.ts');
-  const runtime = createRuntime({
-    client: { app: { log: async () => {} } } as unknown as PluginInput['client'],
-    project: {
-      id: 'test',
-      name: 'test',
-      directory: '/tmp/test',
-      worktree: '/tmp/test',
-      time: { created: Date.now() },
-    } as PluginInput['project'],
+  const context: RuntimeContext = {
     directory: '/tmp/test',
-    worktree: '/tmp/test',
-    experimental_workspace: {} as PluginInput['experimental_workspace'],
-    serverUrl: new URL('http://localhost:0'),
-    $: {} as PluginInput['$'],
-  });
+    host: {
+      directory: '/tmp/test',
+      session: {},
+      tools: {},
+      log: async () => {},
+      report: () => {},
+    },
+  };
+  const runtime = createRuntime(context);
   const result = await runtime.tool!['workflow-create']!.execute(
-    { schemaId } as never,
+    { schemaId },
     {
       sessionID,
       messageID: 'm1',
@@ -56,7 +52,7 @@ async function create(sessionID: string, schemaId: string | undefined): Promise<
       abort: new AbortController().signal,
       metadata: () => {},
       ask: async () => {},
-    } as never
+    }
   );
   return typeof result === 'string' ? result : result.output;
 }

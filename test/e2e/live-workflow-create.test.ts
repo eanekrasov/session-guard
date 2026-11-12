@@ -5,6 +5,7 @@
 import { resolve } from 'node:path';
 import { mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { createOpencodeClient } from '@opencode-ai/sdk/client';
 
 const TEST_DIR = resolve(tmpdir(), 'workflow-live-test-' + Date.now());
 mkdirSync(TEST_DIR, { recursive: true });
@@ -23,19 +24,17 @@ async function main() {
   const { createRuntime } = await import('../../src/app/runtime.ts');
 
   const runtime = createRuntime({
-    client: {} as never,
+    client: createOpencodeClient(),
     project: {
       id: 'live-test',
-      name: 'live-test',
-      directory: TEST_DIR,
       worktree: TEST_DIR,
       time: { created: Date.now() },
-    } as never,
+    },
     directory: TEST_DIR,
     worktree: TEST_DIR,
-    experimental_workspace: {} as never,
+    experimental_workspace: { register: () => undefined },
     serverUrl: new URL('http://localhost:0'),
-    $: {} as never,
+    $: Bun.$,
   });
 
   console.log('✅ Runtime created');

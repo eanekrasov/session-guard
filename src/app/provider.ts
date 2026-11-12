@@ -155,18 +155,29 @@ export function createCliProvider(opts?: CliProviderOptions): TaskProvider {
     return value.replace(/["$\\`]/g, (c) => `\\${c}`);
   }
 
-  function parseTask(raw: Record<string, unknown>): Task {
+  function parseTask(raw: unknown): Task {
+    if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+      throw new Error('[ERROR] CLI task response must be a JSON object');
+    }
+
+    const read = (key: string): unknown => Reflect.get(raw, key);
+    const description = read('description');
+    const tags = read('tags');
+    const createdAt = read('createdAt');
+    const updatedAt = read('updatedAt');
+    const assignee = read('assignee');
+    const labels = read('labels');
     return {
-      id: String(raw.id ?? ''),
-      title: String(raw.title ?? ''),
-      state: String(raw.state ?? ''),
-      priority: String(raw.priority ?? ''),
-      description: raw.description ? String(raw.description) : undefined,
-      tags: Array.isArray(raw.tags) ? raw.tags.map(String) : undefined,
-      createdAt: raw.createdAt ? String(raw.createdAt) : undefined,
-      updatedAt: raw.updatedAt ? String(raw.updatedAt) : undefined,
-      assignee: raw.assignee ? String(raw.assignee) : undefined,
-      labels: Array.isArray(raw.labels) ? raw.labels.map(String) : undefined,
+      id: String(read('id') ?? ''),
+      title: String(read('title') ?? ''),
+      state: String(read('state') ?? ''),
+      priority: String(read('priority') ?? ''),
+      description: description ? String(description) : undefined,
+      tags: Array.isArray(tags) ? tags.map(String) : undefined,
+      createdAt: createdAt ? String(createdAt) : undefined,
+      updatedAt: updatedAt ? String(updatedAt) : undefined,
+      assignee: assignee ? String(assignee) : undefined,
+      labels: Array.isArray(labels) ? labels.map(String) : undefined,
     };
   }
 
@@ -179,8 +190,8 @@ export function createCliProvider(opts?: CliProviderOptions): TaskProvider {
       const result = await exec.run(['show', id, '--json']);
       if (result.ok === false) throw new Error(result.error);
 
-      const parsed = JSON.parse(result.stdout);
-      const task = parseTask(parsed as Record<string, unknown>);
+      const parsed: unknown = JSON.parse(result.stdout);
+      const task = parseTask(parsed);
       setCache(ck, task);
       return task;
     },
@@ -193,10 +204,8 @@ export function createCliProvider(opts?: CliProviderOptions): TaskProvider {
       const result = await exec.run(['ready', '--json']);
       if (result.ok === false) throw new Error(result.error);
 
-      const raw = JSON.parse(result.stdout);
-      const tasks: Task[] = (Array.isArray(raw) ? raw : []).map((item: unknown) =>
-        parseTask(item as Record<string, unknown>)
-      );
+      const raw: unknown = JSON.parse(result.stdout);
+      const tasks: Task[] = Array.isArray(raw) ? raw.map(parseTask) : [];
       setCache(ck, tasks);
       return tasks;
     },

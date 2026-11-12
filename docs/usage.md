@@ -104,6 +104,37 @@ CLI поддерживает `session-guard validate-schemas [--cwd <dir>]`: о�
 Код выхода `0` означает, что ошибки не найдены, `1` — ошибки схем, `2` — неверные
 аргументы. Без команды сохраняется прежний запуск `sync-agents`.
 
+Команды для схем и сессий:
+
+```bash
+session-guard sessions schemas [--cwd <dir>] [--json]
+session-guard sessions list [--json]
+session-guard sessions archived [--json]
+session-guard sessions show <id> [--archived] [--json]
+session-guard sessions restore <id>
+session-guard sessions delete <id> [--archived]
+session-guard sessions clear --archived --yes
+session-guard sessions clear --all --yes
+```
+
+`sessions schemas` показывает profile/schema и описание из YAML. `sessions list`
+показывает активные сессии, `sessions archived` — архивные; `sessions show <id>`
+выводит полную запись одной активной сессии в JSON, а `--archived` выбирает
+архивную. Сессии берутся из настроенного хранилища (по умолчанию — каталог
+OpenCode state, переопределяемый `SESSION_GUARD_STORE_DIR`). `sessions restore`
+перемещает архивную сессию обратно в активное хранилище и отказывается при
+конфликте ID. `sessions delete` удаляет одну активную сессию; для удаления одной
+архивной добавьте `--archived`.
+`sessions clear --archived --yes` удаляет весь архив, а `sessions clear --all
+--yes` — все активные и архивные сессии. Флаг `--yes` обязателен для этих
+массовых операций.
+
+Команды чтения `sessions list`, `sessions archived`, `sessions schemas` и
+`sessions show` также принимают `--json`. Для списков CLI возвращает JSON-массив
+записей; `sessions schemas --json` возвращает разрешённые профили и схемы. Этот
+машинный вывод используется отдельным пакетом dashboard; обычный текстовый вывод
+без `--json` сохранён.
+
 ---
 
 ## Где лежат данные
@@ -117,7 +148,8 @@ CLI поддерживает `session-guard validate-schemas [--cwd <dir>]`: о�
 переопределяется `SESSION_GUARD_STORE_DIR`. Законченные сессии переезжают в
 подкаталог `archive/` и перестают чем-либо управлять, оставаясь читаемыми.
 
-Каталоги создаются при инициализации плагина. Значения вычисляются **на
+Каталог сессий создаётся при инициализации плагина; каталог профилей должен уже
+существовать. Значения вычисляются **на
 экземпляр** и не пишутся в `process.env`: запись превращала локальный дефолт
 первого проекта в глобальный, и второй проект получал чужие профили и сессии.
 
@@ -169,15 +201,17 @@ mise run smoke verify-loop
 
 ---
 
-## Dashboard в source repository
+## Отдельный пакет dashboard
 
 ```bash
 mise run dashboard
 ```
 
-Это задача source repository. Для target project нужен отдельный способ запуска
-сервера; наличие исходного checkout в `.opencode/session-guard` не создаёт
-dashboard-процесс автоматически. Сервер слушает фиксированный порт `3456`.
+Dashboard поставляется отдельно от `@eanekrasov/session-guard`, не запускается
+внутри активной сессии OpenCode и получает сведения о сессиях через CLI. В source
+repository `mise run dashboard` запускает пакет с CLI из исходников.
+Dashboard — отдельный приватный пакет репозитория и не публикуется. Для локального
+запуска ему нужны Bun и CLI `session-guard`; сервер слушает порт `3456`.
 `DASHBOARD_TOKEN` включает Bearer-аутентификацию, `DASHBOARD_HOST` меняет адрес
 (по умолчанию `127.0.0.1`), `ALLOWED_ORIGIN` задаёт CORS. Показывает все сессии,
 включая архивные, из настроенного store.

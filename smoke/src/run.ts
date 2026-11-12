@@ -24,6 +24,7 @@ import {
   attemptsFromEnv,
   buildPlugin,
   hostVersionFromEnv,
+  pluginSpecForHost,
   stopAllHosts,
 } from './harness.ts';
 import {
@@ -99,7 +100,6 @@ function resolvePlugin(): string {
   if (provided !== undefined && provided !== '') return provided;
   try {
     const plugin = buildPlugin();
-    process.env.HOST_SMOKE_PLUGIN = plugin;
     return plugin;
   } catch (error) {
     log('error', `сборка плагина не удалась: ${messageOf(error)}`, {
@@ -163,6 +163,7 @@ async function runCanonical(
   models: Map<HostKind, string>,
   unavailable: Map<HostKind, string>,
   commonFiles: Record<string, string>,
+  plugin: string,
   ledger: RunLedger
 ): Promise<void> {
   const attempts = attemptsFromEnv();
@@ -183,7 +184,10 @@ async function runCanonical(
       });
       let host: RunningSmokeHost | undefined;
       try {
-        host = await startSmokeHost(scenarioHostOptions(scenario, kind, model, commonFiles));
+        host = await startSmokeHost({
+          ...scenarioHostOptions(scenario, kind, model, commonFiles),
+          pluginSpec: pluginSpecForHost(kind, process.env.HOST_SMOKE_PLUGIN, plugin),
+        });
         const result = await runScenario(host, scenario, { attempts, ...polls });
         ledger.results.push(result);
         recordResult(ledger.byScenario, scenario.id, result);
@@ -347,7 +351,15 @@ async function main(): Promise<number> {
     parityEntries: [],
     byScenario: new Map(),
   };
-  await runCanonical(selected, kinds, models, unavailable, await commonSmokeFiles(), ledger);
+  await runCanonical(
+    selected,
+    kinds,
+    models,
+    unavailable,
+    await commonSmokeFiles(),
+    plugin,
+    ledger
+  );
   collectParityEntries(selected, kinds, mode, unavailable, ledger);
   assertSingleEntryPerScenario(ledger.parityEntries);
 

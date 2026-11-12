@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { createOpencodeClient } from '@opencode-ai/sdk/client';
 
 const TEST_DIR = '/tmp/session-guard-plugin-test-' + Date.now();
 const ORIG_STORE_DIR = process.env.SESSION_GUARD_STORE_DIR;
@@ -12,7 +13,7 @@ const DEFAULT_STORE = join(homedir(), '.local/share/opencode/session-guard/runti
 
 function makeMockCtx(overrides?: Record<string, unknown>) {
   return {
-    client: {} as Record<string, unknown>,
+    client: createOpencodeClient(),
     project: {
       id: 'test',
       name: 'test',
@@ -23,8 +24,8 @@ function makeMockCtx(overrides?: Record<string, unknown>) {
     directory: TEST_DIR,
     worktree: TEST_DIR,
     serverUrl: new URL('http://localhost:0'),
-    $: {} as Record<string, unknown>,
-    experimental_workspace: {} as Record<string, unknown>,
+    $: Bun.$,
+    experimental_workspace: { register: () => undefined },
     ...overrides,
   };
 }
@@ -55,7 +56,7 @@ describe('plugin.ts', () => {
     const { sessionsDir, opencodeStateDir } = await import('../../src/app/paths.ts');
 
     const ctx = makeMockCtx();
-    await SessionGuardPluginV1(ctx as never);
+    await SessionGuardPluginV1(ctx);
 
     expect(process.env.SESSION_GUARD_STORE_DIR).toBeUndefined();
     expect(process.env.SESSION_GUARD_PROFILES_DIR).toBeUndefined();
@@ -68,7 +69,7 @@ describe('plugin.ts', () => {
     const { SessionGuardPluginV1 } = await import('../../src/index.ts');
 
     const ctx = makeMockCtx();
-    await SessionGuardPluginV1(ctx as never);
+    await SessionGuardPluginV1(ctx);
 
     expect(process.env.SESSION_GUARD_STORE_DIR).toBe('/custom/store/dir');
   });
@@ -80,7 +81,7 @@ describe('plugin.ts', () => {
     process.env.OPENCODE_HARNESS_DIR = 'custom-harness';
 
     const ctx = makeMockCtx();
-    await SessionGuardPluginV1(ctx as never);
+    await SessionGuardPluginV1(ctx);
 
     expect(profilesDir(TEST_DIR)).toBe(join(TEST_DIR, 'custom-harness/profiles'));
     expect(process.env.SESSION_GUARD_PROFILES_DIR).toBeUndefined();
@@ -93,7 +94,7 @@ describe('plugin.ts', () => {
     process.env.OPENCODE_HARNESS_DIR = '/absolute/path';
 
     const ctx = makeMockCtx();
-    await SessionGuardPluginV1(ctx as never);
+    await SessionGuardPluginV1(ctx);
 
     expect(profilesDir(TEST_DIR)).toBe('/absolute/path/profiles');
   });
@@ -104,7 +105,7 @@ describe('plugin.ts', () => {
 
     process.env.OPENCODE_HARNESS_DIR = 'custom-harness';
     const ctx = makeMockCtx();
-    await SessionGuardPluginV1(ctx as never);
+    await SessionGuardPluginV1(ctx);
 
     expect(sessionsDir(opencodeStateDir())).toBe(DEFAULT_STORE);
     expect(process.env.SESSION_GUARD_STORE_DIR).toBeUndefined();

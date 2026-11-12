@@ -258,7 +258,8 @@ export class WorkflowStore {
     let onDisk: number | undefined;
     try {
       const parsed: unknown = JSON.parse(await readFile(filePath, 'utf-8'));
-      const value = (parsed as { revision?: unknown }).revision;
+      const value =
+        typeof parsed === 'object' && parsed !== null ? Reflect.get(parsed, 'revision') : undefined;
       if (typeof value === 'number') onDisk = value;
     } catch {
       // Нечитаемый или повреждённый файл не несет ревизии для конфликта.
@@ -334,8 +335,17 @@ export class WorkflowStore {
    * в которую никто не мог писать, всё равно должно быть можно удалить.
    */
   async delete(sessionId: string): Promise<void> {
-    const filePath = this.sessionPath(sessionId);
+    await this.deleteFile(sessionId, this.sessionPath(sessionId));
+  }
 
+  async deleteArchived(sessionId: string): Promise<void> {
+    await this.deleteFile(
+      sessionId,
+      path.join(archiveDirOf(this.directory), sessionFileName(sessionId))
+    );
+  }
+
+  private async deleteFile(sessionId: string, filePath: string): Promise<void> {
     const key = sessionId;
     const prev = this.locks.get(key) ?? Promise.resolve();
     let removed = false;
@@ -375,7 +385,10 @@ export class WorkflowStore {
    * лок, иначе `save()`, уже державший свою полезную нагрузку, переименует
    * сессию обратно в рантайм после переноса.
    */
-  async archive(sessionId: string): Promise<string | null> {
+  async archive(
+    sessionId: string,
+    shouldArchive?: (session: WorkflowSession) => boolean
+  ): Promise<string | null> {
     const filePath = this.sessionPath(sessionId);
     const targetPath = path.join(archiveDirOf(this.directory), sessionFileName(sessionId));
 
@@ -388,6 +401,10 @@ export class WorkflowStore {
       .then(() =>
         this.withFileLock(sessionId, async () => {
           if (!existsSync(filePath)) return;
+          if (shouldArchive) {
+            const current = await this.load(sessionId);
+            if (!current || !shouldArchive(current)) return;
+          }
           await mkdir(path.dirname(targetPath), { recursive: true });
           await rename(filePath, targetPath);
           moved = true;
@@ -407,6 +424,41 @@ export class WorkflowStore {
       });
     }
     return moved ? targetPath : null;
+  }
+
+  async restoreArchived(sessionId: string): Promise<'restored' | 'not_archived' | 'active_exists'> {
+    const activePath = this.sessionPath(sessionId);
+    const archivedPath = path.join(archiveDirOf(this.directory), sessionFileName(sessionId));
+    if (!existsSync(archivedPath)) return 'not_archived';
+    const key = sessionId;
+    const prev = this.locks.get(key) ?? Promise.resolve();
+    const outcome: { result: 'restored' | 'not_archived' | 'active_exists' } = {
+      result: 'not_archived',
+    };
+    const chain: Promise<void> = prev
+      .catch(() => {})
+      .then(() =>
+        this.withFileLock(sessionId, async () => {
+          if (existsSync(activePath)) {
+            outcome.result = 'active_exists';
+            return;
+          }
+          if (!existsSync(archivedPath)) return;
+          await mkdir(path.dirname(activePath), { recursive: true });
+          await rename(archivedPath, activePath);
+          outcome.result = 'restored';
+        })
+      )
+      .finally(() => {
+        if (this.locks.get(key) === chain) this.locks.delete(key);
+      });
+
+    this.locks.set(key, chain);
+    await chain;
+    if (outcome.result === 'restored') {
+      void this.log('info', `Archived session restored: ${sessionId}`);
+    }
+    return outcome.result;
   }
 
   /**
@@ -449,13 +501,15 @@ export class WorkflowStore {
     try {
       entries = await readdir(this.directory, { withFileTypes: true });
     } catch (err: unknown) {
-      const nodeErr = err as NodeJS.ErrnoException;
-      if (nodeErr.code === 'ENOENT') {
+      const code = err !== null && typeof err === 'object' ? Reflect.get(err, 'code') : undefined;
+      const message =
+        err !== null && typeof err === 'object' ? Reflect.get(err, 'message') : undefined;
+      if (code === 'ENOENT') {
         void this.log('info', 'Listed sessions: 0 found (directory does not exist)');
         return [];
       }
       void this.log('error', 'list: readdir failed', {
-        error: nodeErr.message ?? String(err),
+        error: message ?? String(err),
       });
       throw err;
     }

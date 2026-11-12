@@ -167,6 +167,13 @@ describe('GuardAST', () => {
       const session = { flag: false };
       expect(evaluateGuard('!session.flag', session, makeBuiltins(session))).toBe(true);
     });
+
+    it('calls allowlisted array methods', () => {
+      const session = { values: [1, 2, 3] };
+      expect(evaluateGuard('session.values.includes(2)', session, makeBuiltins(session))).toBe(
+        true
+      );
+    });
   });
 
   describe('short-circuit evaluation', () => {

@@ -219,7 +219,7 @@ export function v2ContextEvent(event: V2ContextEvent): {
   readonly input: { sessionID: string; model: unknown };
   readonly output: {
     system: string[];
-    messages: import('../rules/message-context.js').MessageWithInfo[];
+    messages: import('../rules-engine/session/message-extraction.js').MessageWithInfo[];
   };
 } {
   return {
@@ -251,7 +251,7 @@ export function v2ContextEvent(event: V2ContextEvent): {
  * `v2MessagesWithInjected` for that.
  */
 export function v2MessagesFromLegacy(
-  messages: import('../rules/message-context.js').MessageWithInfo[],
+  messages: import('../rules-engine/session/message-extraction.js').MessageWithInfo[],
   sessionID: string
 ): Message[] {
   return messages.flatMap((message) => {
@@ -288,7 +288,7 @@ export function v2MessagesFromLegacy(
  */
 export function v2MessagesWithInjected(
   hostMessages: Message[],
-  legacyMessages: import('../rules/message-context.js').MessageWithInfo[],
+  legacyMessages: import('../rules-engine/session/message-extraction.js').MessageWithInfo[],
   sessionID: string
 ): Message[] {
   const known = new Set(hostMessages.map((message) => message.id));
@@ -297,10 +297,7 @@ export function v2MessagesWithInjected(
 }
 
 interface V2SessionLookup {
-  get(
-    input: Parameters<Context['session']['get']>[0],
-    requestOptions?: Parameters<Context['session']['get']>[1]
-  ): ReturnType<Context['session']['get']>;
+  get(input: { sessionID: string }): Promise<{ parentID?: string }>;
 }
 
 /**

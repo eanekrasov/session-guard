@@ -12,7 +12,6 @@
  */
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { createServer } from 'node:net';
-import type { AddressInfo } from 'node:net';
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { closeSync, existsSync, mkdtempSync, openSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
@@ -165,8 +164,11 @@ export interface Host {
 export async function freePort(): Promise<number> {
   const probe = createServer();
   await new Promise<void>((resolve) => probe.listen(0, '127.0.0.1', resolve));
-  const address = probe.address() as AddressInfo;
+  const address = probe.address();
   await new Promise<void>((resolve) => probe.close(() => resolve()));
+  if (address === null || typeof address === 'string') {
+    throw new Error('[ERROR] не удалось определить выделенный TCP-порт');
+  }
   return address.port;
 }
 
@@ -203,6 +205,8 @@ export interface HostOptions {
   profile: string;
   /** Версия хоста OpenCode для запуска. По умолчанию 'v1'. */
   version?: HostVersion;
+  /** Plugin spec to load. Defaults to the package root for V2 and dist for V1. */
+  pluginSpec?: string;
   /** Дополнительные файлы для записи в проект, путь → содержимое. */
   files?: Record<string, string>;
   /** Нужно ли выполнить `git init` в проекте и сделать seed-коммит. */
@@ -288,6 +292,14 @@ export function buildPlugin(): string {
   return pluginPath;
 }
 
+export function pluginSpecForHost(
+  version: HostVersion,
+  override?: string,
+  builtPlugin = join(REPO_ROOT, 'dist')
+): string {
+  return override || (version === 'v2' ? REPO_ROOT : builtPlugin);
+}
+
 /** Собрать и упаковать плагин в tarball. Сохранён для проверок упаковки. */
 export function packPlugin(): string {
   // Тот же запрет на установку зависимостей, что и у `buildPlugin`: пакеты уже на месте,
@@ -329,25 +341,26 @@ function removeTrailingCommas(text: string): string {
 }
 
 /** Разобрать JSONC, используя то же поведение jsmin, что и загрузчик провайдеров V1. */
-function parseJsonc<T = unknown>(text: string): T {
-  return JSON.parse(removeTrailingCommas(jsmin(text))) as T;
+function parseJsonc(text: string): unknown {
+  return JSON.parse(removeTrailingCommas(jsmin(text)));
 }
 
 function resolveProviderKeys(provider: unknown): unknown {
   if (typeof provider !== 'object' || provider === null) return provider;
-  for (const entry of Object.values(provider as Record<string, unknown>)) {
+  for (const entry of Object.values(provider)) {
     if (typeof entry !== 'object' || entry === null) continue;
-    const options = (entry as { options?: Record<string, unknown> }).options;
-    const key = options?.apiKey;
+    const options = Reflect.get(entry, 'options');
+    if (typeof options !== 'object' || options === null) continue;
+    const key = Reflect.get(options, 'apiKey');
     const match = typeof key === 'string' ? /^\{env:([A-Z0-9_]+)\}$/.exec(key) : null;
-    if (match && !process.env[match[1]!]) delete options!.apiKey;
+    if (match && !process.env[match[1]!]) Reflect.deleteProperty(options, 'apiKey');
   }
   return provider;
 }
 
 function providerContainsModel(providerName: string, provider: unknown, model: string): boolean {
   if (typeof provider !== 'object' || provider === null) return false;
-  const models = (provider as { models?: unknown }).models;
+  const models = Reflect.get(provider, 'models');
   if (typeof models !== 'object' || models === null) return false;
   const [modelProvider, ...modelID] = model.split('/');
   if (!modelProvider || modelID.length === 0 || modelProvider !== providerName) return false;
@@ -360,10 +373,9 @@ function providerContainsModel(providerName: string, provider: unknown, model: s
 export function filterProviders(providers: unknown, model: string): unknown {
   if (typeof providers !== 'object' || providers === null || Array.isArray(providers))
     return providers;
+  const entries: Array<[string, unknown]> = Object.entries(providers);
   return Object.fromEntries(
-    Object.entries(providers as Record<string, unknown>).filter(([name, provider]) =>
-      providerContainsModel(name, provider, model)
-    )
+    entries.filter(([name, provider]) => providerContainsModel(name, provider, model))
   );
 }
 
@@ -375,6 +387,78 @@ export function filterOperatorProviders(
     ...(operator.provider ? { provider: filterProviders(operator.provider, model) } : {}),
     ...(operator.providers ? { providers: filterProviders(operator.providers, model) } : {}),
   };
+}
+
+function v1ProviderConfig(providers: unknown): Record<string, unknown> {
+  if (typeof providers !== 'object' || providers === null || Array.isArray(providers)) {
+    return {};
+  }
+  const entries: Array<[string, unknown]> = Object.entries(providers);
+  return Object.fromEntries(
+    entries.map(([id, provider]) => {
+      if (typeof provider !== 'object' || provider === null || Array.isArray(provider)) {
+        return [id, provider];
+      }
+      const name = Reflect.get(provider, 'name');
+      const env = Reflect.get(provider, 'env');
+      const packageName = Reflect.get(provider, 'package');
+      const settings = Reflect.get(provider, 'settings');
+      const headers = Reflect.get(provider, 'headers');
+      const body = Reflect.get(provider, 'body');
+      const rawModels = Reflect.get(provider, 'models');
+      const modelEntries: Array<[string, unknown]> =
+        typeof rawModels === 'object' && rawModels !== null && !Array.isArray(rawModels)
+          ? Object.entries(rawModels)
+          : [];
+      const models =
+        typeof rawModels === 'object' && rawModels !== null && !Array.isArray(rawModels)
+          ? Object.fromEntries(
+              modelEntries.map(([modelID, model]) => {
+                if (typeof model !== 'object' || model === null || Array.isArray(model)) {
+                  return [modelID, model];
+                }
+                const modelName = Reflect.get(model, 'name');
+                const family = Reflect.get(model, 'family');
+                const limit = Reflect.get(model, 'limit');
+                const capabilities = Reflect.get(model, 'capabilities');
+                const tools =
+                  typeof capabilities === 'object' && capabilities !== null
+                    ? Reflect.get(capabilities, 'tools')
+                    : undefined;
+                return [
+                  modelID,
+                  {
+                    ...(typeof modelName === 'string' ? { name: modelName } : {}),
+                    ...(typeof family === 'string' ? { family } : {}),
+                    ...(limit ? { limit } : {}),
+                    ...(typeof tools === 'boolean' ? { tool_call: tools } : {}),
+                  },
+                ];
+              })
+            )
+          : undefined;
+      return [
+        id,
+        {
+          ...(typeof name === 'string' ? { name } : {}),
+          ...(Array.isArray(env) ? { env } : {}),
+          ...(typeof packageName === 'string'
+            ? {
+                npm: packageName.startsWith('aisdk:')
+                  ? packageName.slice('aisdk:'.length)
+                  : packageName,
+              }
+            : {}),
+          options: {
+            ...(typeof settings === 'object' && settings !== null ? settings : {}),
+            ...(headers ? { headers } : {}),
+            ...(body ? { body } : {}),
+          },
+          ...(models ? { models } : {}),
+        },
+      ];
+    })
+  );
 }
 
 /**
@@ -419,24 +503,21 @@ export function withProviderApiKey(providers: unknown, model: string, authFile?:
     authFile === undefined ? legacyApiKeyFor(providerID) : legacyApiKeyFor(providerID, authFile);
   if (!key) return providers;
 
-  const map = providers as Record<string, unknown>;
-  const entry = map[providerID];
+  const entry = Reflect.get(providers, providerID);
   if (typeof entry !== 'object' || entry === null) return providers;
 
-  const settings = (entry as { settings?: unknown }).settings;
+  const settings = Reflect.get(entry, 'settings');
   const existing =
-    typeof settings === 'object' && settings !== null
-      ? (settings as Record<string, unknown>).apiKey
-      : undefined;
+    typeof settings === 'object' && settings !== null ? Reflect.get(settings, 'apiKey') : undefined;
   if (typeof existing === 'string' && existing !== '') return providers;
 
   log('debug', `ключ провайдера ${providerID} настроен из базы учётных данных оператора`, {
     sourceId: 'harness.with-provider-api-key.1',
   });
   return {
-    ...map,
+    ...providers,
     [providerID]: {
-      ...(entry as Record<string, unknown>),
+      ...entry,
       settings: {
         ...(typeof settings === 'object' && settings !== null ? settings : {}),
         apiKey: key,
@@ -463,13 +544,18 @@ export async function operatorProviders(requestedModel?: string): Promise<{
     const file = join(configHome, name);
     if (!existsSync(file)) continue;
     try {
-      const parsed = name.endsWith('.jsonc')
-        ? parseJsonc<Record<string, unknown>>(await readFile(file, 'utf-8'))
-        : (JSON.parse(await readFile(file, 'utf-8')) as Record<string, unknown>);
-      if (parsed.provider) merged.provider = resolveProviderKeys(parsed.provider);
-      if (parsed.providers) merged.providers = resolveProviderKeys(parsed.providers);
-      if (parsed.disabled_providers) merged.disabled_providers = parsed.disabled_providers;
-      if (typeof parsed.model === 'string') merged.model = parsed.model;
+      const text = await readFile(file, 'utf-8');
+      const parsed: unknown = name.endsWith('.jsonc') ? parseJsonc(text) : JSON.parse(text);
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) continue;
+
+      const provider = Reflect.get(parsed, 'provider');
+      const providers = Reflect.get(parsed, 'providers');
+      const disabledProviders = Reflect.get(parsed, 'disabled_providers');
+      const model = Reflect.get(parsed, 'model');
+      if (provider) merged.provider = resolveProviderKeys(provider);
+      if (providers) merged.providers = resolveProviderKeys(providers);
+      if (disabledProviders) merged.disabled_providers = disabledProviders;
+      if (typeof model === 'string') merged.model = model;
     } catch {
       // Некорректная или нечитаемая опциональная конфигурация игнорируется, сохраняя поведение V1.
     }
@@ -566,6 +652,11 @@ const V2_REVIEWER_PERMISSIONS = [
   { action: 'edit', resource: '*', effect: 'deny' },
 ] as const;
 
+const V2_SMOKE_REVIEWER_PERMISSIONS = [
+  { action: '*', resource: '*', effect: 'deny' },
+  { action: 'workflow-gate-set', resource: '*', effect: 'allow' },
+] as const;
+
 export async function writeSmokeConfigs(
   opencodeDir: string,
   operator: Awaited<ReturnType<typeof operatorProviders>>,
@@ -586,22 +677,30 @@ export async function writeSmokeConfigs(
       {
         $schema: 'https://opencode.ai/config.json',
         model,
-        ...(operator.provider ? { provider: operator.provider } : {}),
-        ...(operator.providers
+        ...(version === 'v1'
           ? {
-              providers:
-                version === 'v2'
-                  ? withProviderApiKey(operator.providers, model, operatorAuthFile)
-                  : operator.providers,
+              ...(operator.provider || operator.providers
+                ? {
+                    provider: {
+                      ...(operator.providers ? v1ProviderConfig(operator.providers) : {}),
+                      ...(operator.provider ?? {}),
+                    },
+                  }
+                : {}),
             }
-          : {}),
+          : {
+              ...(operator.provider ? { provider: operator.provider } : {}),
+              ...(operator.providers
+                ? { providers: withProviderApiKey(operator.providers, model, operatorAuthFile) }
+                : {}),
+            }),
         ...(operator.disabled_providers ? { disabled_providers: operator.disabled_providers } : {}),
         permission: { '*': 'allow', question: 'allow' },
         ...(version === 'v2'
           ? {
               agents: {
                 reviewer: { permissions: V2_REVIEWER_PERMISSIONS },
-                smoke_reviewer: { permissions: V2_REVIEWER_PERMISSIONS },
+                smoke_reviewer: { permissions: V2_SMOKE_REVIEWER_PERMISSIONS },
               },
             }
           : {}),
@@ -660,7 +759,9 @@ export async function startHost(options: HostOptions): Promise<Host> {
       );
     }
 
-    const pluginSpec = process.env.HOST_SMOKE_PLUGIN ?? buildPlugin();
+    const pluginOverride = options.pluginSpec || process.env.HOST_SMOKE_PLUGIN || undefined;
+    const builtPlugin = pluginOverride === undefined ? buildPlugin() : undefined;
+    const pluginSpec = pluginSpecForHost(version, pluginOverride, builtPlugin);
     log('debug', `используется спецификация плагина: ${pluginSpec}`, {
       sourceId: 'harness.start-host.5',
     });
@@ -925,7 +1026,12 @@ export class HttpResponseError extends Error {
   }
 }
 
-export async function api<T>(host: Host, method: string, path: string, body?: unknown): Promise<T> {
+export async function api(
+  host: Host,
+  method: string,
+  path: string,
+  body?: unknown
+): Promise<unknown> {
   const requestId = ++requestSequence;
   const requestKey = `${method} ${path}`;
   const requestCount = (requestCounts.get(requestKey) ?? 0) + 1;
@@ -1005,7 +1111,7 @@ export async function api<T>(host: Host, method: string, path: string, body?: un
       fields: { method, path, status: response.status, durationMs: Number(duration), responseSize },
     }
   );
-  return text ? (JSON.parse(text) as T) : (undefined as T);
+  return text ? JSON.parse(text) : undefined;
 }
 
 /**
@@ -1039,7 +1145,10 @@ export async function writeWorkflowSession(
   });
 }
 
-export async function readWorkflowSession(host: Host, sessionId: string): Promise<unknown | null> {
+export async function readWorkflowSession(
+  host: Pick<Host, 'homeDir'>,
+  sessionId: string
+): Promise<unknown | null> {
   // Плагин размещает свой runtime в data dir opencode (см. src/app/paths.ts),
   // который harness направил в изолированную домашнюю директорию.
   const runtime = join(host.homeDir, 'data', 'opencode', 'session-guard', 'runtime');

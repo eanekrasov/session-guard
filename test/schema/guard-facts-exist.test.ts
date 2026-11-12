@@ -110,7 +110,7 @@ function probeContext(): Record<string, unknown> {
     setGateStatus(session, gate, 'passed');
   }
   const task = { id: 'task-1', status: 'running', gates: {}, round: 0 };
-  return toGuardContext(session, task) as unknown as Record<string, unknown>;
+  return toGuardContext(session, task);
 }
 
 describe('every guard in the corpus reads facts that exist', () => {

@@ -4,9 +4,16 @@ import pkg from '../package.json' with { type: 'json' };
 const { SessionGuardPluginV1 } = await import('./index.js');
 const { default: OpenCodeMemPluginV2 } = await import('./v2/plugin.js');
 
+// Contract for profile authors: the shape of an entry in a profile's
+// `INVARIANTS` array. Re-exported from the root entrypoint (./plugin) so a
+// profile outside this repository can import the type from the package root.
+export type { InvariantCheck } from './types/index.ts';
+
 export const id =
   typeof pkg.name === 'string' && pkg.name.trim() ? pkg.name.trim() : 'session-guard';
+
 export { SessionGuardPluginV1 };
+
 export default {
   ...OpenCodeMemPluginV2,
   id,

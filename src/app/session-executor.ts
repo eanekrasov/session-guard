@@ -50,6 +50,7 @@ export interface SessionTransaction {
  *   8. вызвать store.save() только когда сериализованная форма изменилась
  *   9. запустить deferred эффекты (только после успешного save)
  *  10. отпустить хвост очереди в finally (нет возвращаемого значения!)
+ *  Лог saved отражает решение о сохранении до отложенных эффектов, а не их мутации.
  *
  * Реенрантные вызовы (тот же корень, тот же async контекст) выполняются
  * инлайн в существующей транзакции — нет load, нет save, нет очереди.
@@ -70,7 +71,7 @@ export class SessionExecutor {
     tx: SessionTransaction;
   }>();
 
-  private store: WorkflowStore;
+  private store: Pick<WorkflowStore, 'load' | 'save'>;
   private readonly log: LogFn;
   private readonly resolveParent?: ResolveParentFn;
 
@@ -84,7 +85,7 @@ export class SessionExecutor {
   private readonly parentCache = new Map<string, string>();
 
   constructor(
-    store: WorkflowStore,
+    store: Pick<WorkflowStore, 'load' | 'save'>,
     log?: LogFn,
     resolveParent?: ResolveParentFn,
     private readonly trackStageContext = false
@@ -168,11 +169,10 @@ export class SessionExecutor {
         }
       }
 
-      // Сравнение снимков — условный save только когда сессия мутировала
-      // (или была создана из null action'ом).
+      // Создание при loaded === null сохраняется вне этой транзакции.
+      const changed = loaded !== null && JSON.stringify(loaded) !== snapshot;
       if (loaded !== null) {
-        const after = JSON.stringify(loaded);
-        if (after !== snapshot) {
+        if (changed) {
           void this.log('debug', 'SessionExecutor: session changed — saving', {
             rootSessionId,
             sessionID,
@@ -197,11 +197,10 @@ export class SessionExecutor {
         }
       }
 
-      const saved = loaded !== null && JSON.stringify(loaded) !== snapshot;
       void this.log('debug', `SessionExecutor run for root ${rootSessionId}`, {
         sessionID,
         hasSession: loaded !== null,
-        saved,
+        saved: changed,
       });
 
       return result;

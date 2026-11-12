@@ -126,9 +126,9 @@ describe('V2 plugin contract', () => {
     const resolveParent = v2ParentResolver({
       get: async ({ sessionID }: V2SessionGetInput) => {
         calls.push({ sessionID });
-        return sessionID === 'child' ? ({ parentID: 'root' } as never) : ({} as never);
+        return sessionID === 'child' ? { parentID: 'root' } : {};
       },
-    } as never);
+    });
 
     await expect(resolveParent('child')).resolves.toBe('root');
     await expect(resolveParent('root')).resolves.toBeNull();

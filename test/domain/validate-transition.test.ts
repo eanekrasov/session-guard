@@ -3,6 +3,28 @@ import type { TransitionDef } from '../../src/schema/types.ts';
 import type { SessionFacts } from '../../src/domain/session-facts.ts';
 import { checkTransition as checkTransition } from '../../src/domain/engine.ts';
 
+function sessionFacts(overrides: Partial<SessionFacts> = {}): SessionFacts {
+  return {
+    currentStage: 'PLANNING',
+    lastApproval: null,
+    approvals: [],
+    tasks: [],
+    activeOperations: [],
+    verifications: [],
+    gates: {},
+    profileId: 'test',
+    revision: 0,
+    deliveryReceipt: null,
+    refs: {},
+    retryBudgets: {},
+    checks: undefined,
+    verified: () => false,
+    isExhausted: () => false,
+    approved: (type) => overrides.approvals?.some((approval) => approval.type === type) ?? false,
+    ...overrides,
+  };
+}
+
 describe('checkTransition', () => {
   it('allows a valid transition without a guard', () => {
     const transitions: TransitionDef[] = [{ from: 'PLANNING', to: 'EXECUTION' }];
@@ -25,9 +47,7 @@ describe('checkTransition', () => {
     const transitions: TransitionDef[] = [
       { from: 'PLANNING', to: 'EXECUTION', guard: "session.approved('plan')" },
     ];
-    const session = {
-      approvals: [{ type: 'plan', callId: 'c1', status: 'granted' }],
-    } as unknown as SessionFacts;
+    const session = sessionFacts({ approvals: [{ type: 'plan', status: 'granted' }] });
 
     const result = checkTransition('PLANNING', 'EXECUTION', transitions, session);
 
@@ -38,7 +58,7 @@ describe('checkTransition', () => {
     const transitions: TransitionDef[] = [
       { from: 'PLANNING', to: 'EXECUTION', guard: "session.approved('plan')" },
     ];
-    const session = { approvals: [] } as unknown as SessionFacts;
+    const session = sessionFacts();
 
     const result = checkTransition('PLANNING', 'EXECUTION', transitions, session);
 
@@ -73,9 +93,7 @@ describe('checkTransition', () => {
     const transitions: TransitionDef[] = [
       { from: 'EXECUTION', to: 'COMMIT', guard: 'session.gates.invariants == "passed"' },
     ];
-    const session = {
-      gates: { invariants: 'passed', review: 'pending' },
-    } as unknown as SessionFacts;
+    const session = sessionFacts({ gates: { invariants: 'passed', review: 'pending' } });
 
     const result = checkTransition('EXECUTION', 'COMMIT', transitions, session);
 
@@ -122,9 +140,7 @@ describe('checkTransition', () => {
   describe('transitions with guard', () => {
     it('allows when guard passes', () => {
       const transitions: TransitionDef[] = [{ from: 'EXECUTION', to: 'COMMIT' }];
-      const session = {
-        gates: { invariants: 'passed', review: 'passed' },
-      } as unknown as SessionFacts;
+      const session = sessionFacts({ gates: { invariants: 'passed', review: 'passed' } });
 
       const result = checkTransition('EXECUTION', 'COMMIT', transitions, session);
 

@@ -1,4 +1,4 @@
-import type { Result, ToolEditor } from '@opencode/plugin/promise/tool';
+import type { Result, ToolContext, ToolEditor } from '@opencode/plugin/promise/tool';
 import type { ToolDefinition } from '@opencode-ai/plugin';
 import { errorMessage } from './report.ts';
 import {
@@ -124,13 +124,12 @@ function runTool(
   surface: WorkflowToolSurface,
   name: string,
   input: unknown,
-  context: unknown
+  context: ToolContext
 ): Promise<Result> {
   const definition = surface.createTools()[name] as ToolDefinition & {
-    execute: (args: unknown, ctx: unknown) => Promise<Result>;
+    execute: (args: unknown, ctx: ToolContext) => Promise<Result>;
   };
-  const ctx = context as { sessionID: string; agent?: string };
-  return definition.execute(input, ctx);
+  return definition.execute(input, context);
 }
 
 /** Register the shared V1 behavior through V2 JSON-schema tool definitions. */
@@ -153,7 +152,7 @@ export function registerWorkflowTools(
             }
           : inputs[name],
       output: outputSchema,
-      execute: async (input: unknown, context: unknown): Promise<Result> => {
+      execute: async (input: unknown, context: ToolContext): Promise<Result> => {
         try {
           return await runTool(surface, name, input, context);
         } catch (error) {

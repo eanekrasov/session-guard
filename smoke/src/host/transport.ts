@@ -66,12 +66,12 @@ function toolOutput(state: Record<string, unknown>): string | undefined {
   const content = state.content;
   if (typeof state.output === 'string' && state.output !== '') return state.output;
   if (!Array.isArray(content)) return undefined;
-  const text = content
-    .map((entry) => fields(entry))
-    .filter((entry) => entry.type === 'text' && typeof entry.text === 'string')
-    .map((entry) => entry.text as string)
-    .join('\n');
-  return text === '' ? undefined : text;
+  const text: string[] = [];
+  for (const entry of content) {
+    const part = fields(entry);
+    if (part.type === 'text' && typeof part.text === 'string') text.push(part.text);
+  }
+  return text.length === 0 ? undefined : text.join('\n');
 }
 
 /**
@@ -212,7 +212,7 @@ export function compactParts(parts: Array<NormalizedPart | undefined>): Normaliz
 
 /** One host message, reduced to what the turn boundary needs. */
 export interface OrderedMessage {
-  role: unknown;
+  role: string | undefined;
   /** Timestamp the host itself wrote; array order is not promised by either API. */
   createdAt: number;
   items: unknown[];

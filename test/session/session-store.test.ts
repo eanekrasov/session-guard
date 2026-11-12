@@ -167,9 +167,9 @@ describe('WorkflowStore', () => {
 
       const loaded = await store.load('passthrough-test');
 
-      expect(loaded).not.toBeNull();
-      expect(loaded!.sessionId).toBe('passthrough-test');
-      expect((loaded as unknown as Record<string, unknown>).futureField).toBe('should survive');
+      if (!loaded) throw new Error('Session was not loaded');
+      expect(loaded.sessionId).toBe('passthrough-test');
+      expect(Reflect.get(loaded, 'futureField')).toBe('should survive');
     });
   });
 
@@ -268,7 +268,7 @@ describe('WorkflowStore', () => {
         verifications: [
           { stage: 'bug', status: 'confirmed', recordedAt: '2024-01-01T00:00:00.000Z' },
         ],
-      } as unknown as Record<string, unknown>;
+      };
       await writeFile(
         path.join(TEST_DIR, 'legacy-verification.json'),
         JSON.stringify(legacy),

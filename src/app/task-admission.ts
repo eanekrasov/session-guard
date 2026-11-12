@@ -60,8 +60,7 @@ export class TaskAdmissionImpl implements TaskAdmission {
 
   isWorkflowTask(tool: string, args: unknown): boolean {
     if (tool !== 'task' || !args || typeof args !== 'object') return false;
-    const taskArgs = args as TaskToolArgs;
-    return isWorkflowTaskDescription(taskArgs.description) !== null;
+    return isWorkflowTaskDescription(Reflect.get(args, 'description')) !== null;
   }
 
   async before(input: TaskAdmissionInput): Promise<void> {

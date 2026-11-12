@@ -8,6 +8,12 @@
 // If bumping @opencode-ai/plugin, re-verify these types match.
 
 declare module '@opencode-ai/plugin/tui' {
+  export namespace Plugin {
+    interface Context {
+      theme: TuiTheme;
+    }
+  }
+
   export interface TuiTheme {
     current: {
       [key: string]: unknown;
@@ -28,7 +34,7 @@ declare module '@opencode-ai/plugin/tui' {
   export type SlotRenderer<K extends keyof TuiSlotMap> = (
     ctx: Readonly<TuiSlotContext>,
     props: TuiSlotMap[K]
-  ) => JSX.Element;
+  ) => JSX.Element | null;
 
   export interface TuiSlotPlugin {
     id?: never;
@@ -73,7 +79,12 @@ declare module '@opencode-ai/plugin/tui' {
     workspace: TuiWorkspace;
     state: TuiState;
     keymap: {
-      registerLayer: (layer: never) => unknown;
+      registerLayer: (
+        layer: import('@opentui/keymap').Layer<
+          import('@opentui/core').Renderable,
+          import('@opentui/core').KeyEvent
+        >
+      ) => unknown;
     };
     ui: {
       DialogAlert: (props: {

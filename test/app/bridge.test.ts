@@ -31,19 +31,19 @@ describe('plugin entry point (R10)', () => {
   //   const { default: plugin } = await import('../../src/index.ts');
   //
   //   const result = await plugin.server({
-  //     client: {} as never,
+  //     client: {},
   //     project: {
   //       id: 'test',
   //       name: 'test',
   //       directory: '/tmp/test',
   //       worktree: '/tmp/test',
   //       time: { created: Date.now() },
-  //     } as never,
+  //     },
   //     directory: '/tmp/test',
   //     worktree: '/tmp/test',
-  //     experimental_workspace: {} as never,
+  //     experimental_workspace: {},
   //     serverUrl: new URL('http://localhost:0'),
-  //     $: {} as never,
+  //     $: {},
   //   });
   //
   //   expect(result).toBeDefined();

@@ -216,6 +216,17 @@ describe('createCliProvider', () => {
       expect(tasks[1]?.id).toBe('T2');
     });
 
+    it('rejects non-object task entries instead of fabricating empty tasks', async () => {
+      const executor = mockExecutor({
+        'ready --json': { ok: true, stdout: JSON.stringify([null]) },
+      });
+
+      const provider = createCliProvider({ executor, ttlMs: 0 });
+      await expect(provider.getReadyTasks()).rejects.toThrow(
+        '[ERROR] CLI task response must be a JSON object'
+      );
+    });
+
     it('returns empty array on non-array stdout', async () => {
       const executor = mockExecutor({
         'ready --json': { ok: true, stdout: '{}' },

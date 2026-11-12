@@ -1,6 +1,12 @@
 import { type Hooks, type Plugin as PluginV1, type PluginInput } from '@opencode-ai/plugin';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { opencodeStateDir, profilesDir, sessionsDir } from './app/paths.ts';
+import { createRuntime as createRulesRuntime } from './rules-engine/runtime/create-runtime.js';
+import { wireV1Rules } from './rules-engine/runtime/v1-adapter.js';
+import {
+  parsePluginOptions,
+  resolveAdditionalRuleDirectories,
+} from './rules-engine/config/plugin-options.js';
 
 // Contract for profile authors: the shape of an entry in a profile's
 // `INVARIANTS` array. It is re-exported here because the package publishes
@@ -15,13 +21,7 @@ export const SessionGuardPluginV1: PluginV1 = async (ctx: PluginInput): Promise<
   const projectDir = ctx.directory;
   const baseDir = opencodeStateDir();
 
-  // Создаём директории (try-catch для поддержки read-only env в тестах)
   const profiles = profilesDir(projectDir);
-  try {
-    mkdirSync(profiles, { recursive: true });
-  } catch {
-    /* не критично */
-  }
 
   const runtime = sessionsDir(baseDir);
   try {
@@ -36,7 +36,30 @@ export const SessionGuardPluginV1: PluginV1 = async (ctx: PluginInput): Promise<
   // served the first project's profiles and sessions.
   try {
     const { createRuntime } = await import('./app/runtime.ts');
-    return createRuntime(ctx, { storeDir: runtime, profilesDir: profiles });
+    const hooks = createRuntime(ctx, { storeDir: runtime, profilesDir: profiles });
+    const pluginOptions = ctx as PluginInput & { options?: unknown };
+    const { additionalRuleDirectories } = parsePluginOptions(
+      pluginOptions.options as Readonly<Record<string, unknown>> | undefined
+    );
+    const rulesRuntime = await createRulesRuntime({
+      client: ctx.client,
+      directory: ctx.worktree || ctx.directory,
+      projectDirectory: ctx.directory,
+      additionalRuleDirectories: resolveAdditionalRuleDirectories(
+        additionalRuleDirectories,
+        ctx.directory
+      ),
+    });
+    const rulesCleanup = await wireV1Rules(rulesRuntime, hooks);
+    const runtimeDispose = hooks.dispose;
+    hooks.dispose = async () => {
+      try {
+        await rulesCleanup();
+      } finally {
+        await runtimeDispose?.();
+      }
+    };
+    return hooks;
   } catch (e) {
     console.error('[session-guard] init error:', process.env.OPENCODE_HARNESS_DIR);
     writeFileSync(

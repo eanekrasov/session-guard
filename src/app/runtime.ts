@@ -11,11 +11,8 @@ import { ConsentOrchestrator } from './consent-orchestrator.ts';
 import type { LogFn } from './logger.ts';
 import { createLogFn } from './logger.ts';
 import { TaskApi } from './task-api.ts';
-import { resolveConfig } from '../public-api.ts';
+import { listProfiles, resolveConfig } from '../public-api.ts';
 import { sessionsDir, profilesDir as getProfilesDir, opencodeStateDir } from './paths.ts';
-import { OpenCodeRulesRuntime, type MessagesTransformOutput } from '../rules/runtime.ts';
-import type { ChatMessageInput, ChatMessageOutput } from '../rules/runtime-chat.ts';
-import { MatchedRulesStateStore } from '../rules/matched-rules-state.ts';
 import { syncAllProfileAgents } from './profile-agent-sync.ts';
 import { WorkflowBlockedError } from './blocked-error.ts';
 import { createReporter, errorMessage, type Reporter } from './report.ts';
@@ -27,7 +24,11 @@ import {
 } from './runtime-session-context.ts';
 import { WorkflowResultSettlerImpl } from './workflow-result-settler.ts';
 import { createTaskAdmission, type TaskAdmission } from './task-admission.ts';
-import { createChangeEnforcement, type ChangeEnforcement } from './change-enforcement.ts';
+import {
+  createChangeEnforcement,
+  extractBashCommand,
+  type ChangeEnforcement,
+} from './change-enforcement.ts';
 import { createToolExecutionPolicy, type ToolExecutionPolicy } from './tool-execution-policy.ts';
 import { createWorkflowLifecycle, type WorkflowLifecycle } from './workflow-lifecycle.ts';
 import { finishMutation as finishDomainMutation } from '../domain/operation-lifecycle.ts';
@@ -35,6 +36,10 @@ import type { RuntimeHostAdapter } from './runtime-host-adapter.ts';
 import { createV1RuntimeHostAdapter } from './runtime-host-adapter.ts';
 import type { SessionClient } from './runtime-types.ts';
 import { elapsedMs, errorTrace, summarizeToolArgs, summarizeToolInput } from './trace.ts';
+import { schemaId } from './profile-resolver.ts';
+import { createSession } from '../session/session-store.ts';
+import type { RuleMatchContextProvider } from '../rules-engine/runtime/match-context-provider.ts';
+import { matchesRuleMetadata } from '../rules-engine/rules/rule-filter.js';
 
 export { schemaToEngineConfig };
 
@@ -66,6 +71,7 @@ interface EventEnvelope {
 
 class SessionGuardRuntime {
   private readonly stageInstructionsEnabled: boolean;
+  private readonly autoStartEnabled: boolean;
   private readonly store: WorkflowStore;
   private readonly executor: SessionExecutor;
   private readonly mutationOrchestrator: MutationOrchestrator;
@@ -73,9 +79,9 @@ class SessionGuardRuntime {
   private readonly taskApi: TaskApi;
   private readonly log: LogFn;
   private readonly report: Reporter;
-  private rulesRuntime: OpenCodeRulesRuntime;
   private readonly workflowToolSurface: ReturnType<typeof createWorkflowToolSurface>;
   private readonly sessionContext: RuntimeSessionContext;
+  private readonly matchContextProvider?: RuleMatchContextProvider;
   private workflowResultSettler: WorkflowResultSettlerImpl;
   private readonly taskAdmission: TaskAdmission;
   private readonly changeEnforcement: ChangeEnforcement;
@@ -100,6 +106,8 @@ class SessionGuardRuntime {
 
   constructor(context: RuntimeContext, paths?: RuntimePaths) {
     this.stageInstructionsEnabled = context.stageInstructionsEnabled === true;
+    this.autoStartEnabled = context.autoStartEnabled !== false;
+    this.matchContextProvider = context.matchContextProvider;
     const client = context.client ?? {};
     this.log = context.host?.log ?? createLogFn(client);
     this.report = context.host?.report ?? createReporter(client, this.log);
@@ -221,11 +229,6 @@ class SessionGuardRuntime {
     });
     this.toolExecutionPolicy = createToolExecutionPolicy({
       guardrails: async (input) => this.guardrailBefore(input.args),
-      rules: async (input) =>
-        this.rulesRuntime.handleToolExecuteBefore(
-          { tool: input.tool, sessionID: input.sessionID, callID: input.callID },
-          { args: input.args }
-        ),
       consent: async (input) =>
         this.consentBefore(input.tool, input.sessionID, input.callID, input.args),
       taskAdmission: this.taskAdmission,
@@ -257,20 +260,6 @@ class SessionGuardRuntime {
       mutation: async () => undefined,
     });
 
-    // Инициализировать подсистему правил — файлы правил обнаруживаются лениво
-    // внутри OpenCodeRulesRuntime при первом использовании.
-    const matchedRulesStateStore = new MatchedRulesStateStore();
-    this.rulesRuntime = new OpenCodeRulesRuntime({
-      host:
-        context.host ??
-        createV1RuntimeHostAdapter({
-          client: client as PluginInput['client'],
-          directory: context.directory,
-        }),
-      directory: context.directory,
-      projectDirectory: context.directory,
-      matchedRulesStateStore,
-    });
     this.workflowToolSurface = createWorkflowToolSurface({
       stageInstructionsEnabled: this.stageInstructionsEnabled,
       profilesDir: this.profilesDir,
@@ -307,7 +296,7 @@ class SessionGuardRuntime {
    * Обработать [chat.message] — запустить гардрейлы на пользовательском вводе,
    * захватить базовую линию, затем оценить правила.
    */
-  async handleChatMessage(input: ChatMessageInput, output?: ChatMessageOutput): Promise<void> {
+  async handleChatMessage(input: { sessionID?: string }): Promise<void> {
     const sessionID = input?.sessionID;
     const session = sessionID ? await this.sessionContext.load(sessionID) : null;
     if (!session) {
@@ -340,9 +329,6 @@ class SessionGuardRuntime {
 
     // TODO: guardrails для chat.message будет реализован, когда SDK начнёт передавать текст сообщения. Пока блокировка работает в handleToolBefore.
     void validateUserInput;
-
-    // Делегировать подсистеме правил
-    await this.rulesRuntime.handleChatMessage(input, output ?? {});
   }
 
   /**
@@ -358,6 +344,7 @@ class SessionGuardRuntime {
     },
     output: { args: unknown }
   ): Promise<void> {
+    await this.autoStartWorkflow(input);
     await this.executor.run(input.sessionID, async (tx) => {
       // 0. Opt-in gate — нет сессии workflow значит нет механик плагина вообще.
       if (!tx.session) return;
@@ -383,6 +370,79 @@ class SessionGuardRuntime {
     });
   }
 
+  private async autoStartWorkflow(input: { tool: string; sessionID: string }): Promise<void> {
+    if (
+      !this.matchContextProvider ||
+      !this.autoStartEnabled ||
+      this.sessionContext.normalizeTool(input.tool) !== 'bash'
+    ) {
+      return;
+    }
+
+    const rootSessionID = await this.sessionContext.rootOf(input.sessionID);
+    if (await this.store.load(rootSessionID)) return;
+
+    const matchContext = await this.matchContextProvider.getMatchContext(input.sessionID);
+    const matches: Array<{ profileId: string; schemaId: string }> = [];
+    for (const profile of await listProfiles(this.profilesDir)) {
+      const declaredSchemaIds = new Set((profile.schemas ?? []).map(schemaId));
+      if (declaredSchemaIds.size === 0) continue;
+
+      let resolved;
+      try {
+        resolved = await resolveConfig(profile.id, this.profilesDir);
+      } catch (error) {
+        void this.log('debug', 'Auto-start skipped: profile could not be resolved', {
+          profileId: profile.id,
+          error: errorMessage(error),
+        });
+        continue;
+      }
+      for (const schema of resolved.schemas) {
+        if (
+          declaredSchemaIds.has(schema.id) &&
+          schema.autoStartTrigger &&
+          matchesRuleMetadata(schema.autoStartTrigger, matchContext)
+        ) {
+          matches.push({ profileId: profile.id, schemaId: schema.id });
+        }
+      }
+    }
+
+    if (matches.length !== 1) {
+      if (matches.length > 1) {
+        void this.log('warn', 'Auto-start skipped: context matches multiple workflow schemas', {
+          sessionID: rootSessionID,
+          matchingSchemas: matches,
+        });
+      }
+      return;
+    }
+
+    const { profileId, schemaId: selectedSchemaId } = matches[0]!;
+    const engine = await this.mutationOrchestrator.resolveEngine(profileId, selectedSchemaId);
+    const session = createSession(
+      rootSessionID,
+      profileId,
+      selectedSchemaId,
+      engine.getInitialStage()
+    );
+    if (this.stageInstructionsEnabled)
+      session.pendingStageContext = { stage: session.currentStage };
+
+    try {
+      await this.store.save(session);
+    } catch (error) {
+      if (await this.store.load(rootSessionID)) return;
+      throw error;
+    }
+    void this.log('info', 'Workflow session auto-started for context', {
+      sessionID: rootSessionID,
+      profileId,
+      schemaId: selectedSchemaId,
+    });
+  }
+
   /**
    * Обработать tool.execute.after — запускает гардрейлы, consent или мутацию.
    */
@@ -399,9 +459,7 @@ class SessionGuardRuntime {
       outputHasDsmlToolResult: output.output.includes('<｜DSML｜tool-result>'),
       argsType: input.args === null ? 'null' : typeof input.args,
       argsKeys:
-        typeof input.args === 'object' && input.args !== null
-          ? Object.keys(input.args as Record<string, unknown>)
-          : [],
+        typeof input.args === 'object' && input.args !== null ? Object.keys(input.args) : [],
     });
     try {
       await this.executor.run(input.sessionID, async (tx) => {
@@ -413,9 +471,6 @@ class SessionGuardRuntime {
 
         // 1. Guardrails — всегда санитизировать вывод
         output.output = this.guardrailAfter(output.output, tool);
-
-        // 1c. Rules — PostToolUse оценка + файловые наблюдения
-        await this.rulesRuntime.handleToolExecuteAfter(input, output);
 
         // 1a/1b/1d. Инварианты + Результат workflow + Файловый инструмент — всё в settler
         const operation = tx.session.activeOperations[input.callID];
@@ -466,7 +521,7 @@ class SessionGuardRuntime {
             outputLength: output.output.length,
             metadataKeys:
               typeof output.metadata === 'object' && output.metadata !== null
-                ? Object.keys(output.metadata as Record<string, unknown>)
+                ? Object.keys(output.metadata)
                 : [],
           });
           await this.consentAfter(tool, input.sessionID, input.callID, input.args, output);
@@ -544,7 +599,7 @@ class SessionGuardRuntime {
    * одобрения, чтобы модель знала текущее состояние workflow.
    */
   async handleSystemTransform(
-    input: { sessionID?: string; model: unknown },
+    input: { sessionID?: string },
     output: { system: string[] }
   ): Promise<void> {
     if (!input.sessionID) return;
@@ -641,28 +696,12 @@ class SessionGuardRuntime {
    * Обработать сжатие сессии — дополнить существующий контекст выводом
    * подсистемы правил.
    */
-  async handleSessionCompacting(
-    input: { sessionID?: string },
-    output: { context: string[]; prompt?: string }
-  ): Promise<void> {
-    // Opt-in gate — no workflow session means no plugin mechanics at all.
-    if (!(await this.sessionContext.has(input.sessionID))) return;
-
-    const rulesOutput = { context: [...output.context], prompt: undefined as string | undefined };
-    await this.rulesRuntime.handleSessionCompacting(input, rulesOutput);
-    output.context = rulesOutput.context;
-    if (rulesOutput.prompt) output.prompt = rulesOutput.prompt;
-  }
-
   /**
    * Обработать experimental.chat.messages.transform — делегировать подсистеме правил.
    */
-  async handleMessagesTransform(
-    _input: Record<string, never>,
-    output: MessagesTransformOutput
-  ): Promise<void> {
-    await this.rulesRuntime.handleMessagesTransform(_input, output);
-  }
+  async handleMessagesTransform(): Promise<void> {}
+
+  async handleSessionCompacting(): Promise<void> {}
 
   /**
    * Обработать события — очистить только ошибочный callId из трекинга
@@ -674,16 +713,6 @@ class SessionGuardRuntime {
     }
   ): Promise<void> {
     await this.workflowLifecycle.handleEvent(event);
-
-    if (event.event.type !== 'message.removed') return;
-
-    // Правила — механика на сессию. Подсистема правил читает сессию из
-    // `event.properties.sessionID` (не из `part`), поэтому гейтим по тому же
-    // полю: нет сессии workflow — нет правил.
-    const rulesSessionID = event.event.properties?.['sessionID'];
-    if (typeof rulesSessionID === 'string' && (await this.sessionContext.has(rulesSessionID))) {
-      await this.rulesRuntime.handleEvent(event);
-    }
   }
 
   // ── Inlined handler methods (former GuardrailHandler) ────────────────
@@ -808,65 +837,58 @@ class SessionGuardRuntime {
       config: (config) => this.handleConfig(config),
       chatMessage: this.handleChatMessage.bind(this),
       before: async (input, output) => {
-        const typedInput = input as Parameters<SessionGuardRuntime['handleToolBefore']>[0];
-        const typedOutput = output as Parameters<SessionGuardRuntime['handleToolBefore']>[1];
         const startedAt = Date.now();
         await this.log('debug', 'tool.execute.before started', {
-          ...summarizeToolInput(typedInput),
-          args: summarizeToolArgs(typedOutput.args),
+          ...summarizeToolInput(input),
+          args: summarizeToolArgs(output.args),
         });
         try {
-          await this.handleToolBefore(typedInput, typedOutput);
+          await this.handleToolBefore(input, output);
           void this.log('debug', 'tool.execute.before finished', {
-            ...summarizeToolInput(typedInput),
+            ...summarizeToolInput(input),
             durationMs: elapsedMs(startedAt),
           });
         } catch (error) {
           void this.log('error', 'tool.execute.before failed', {
-            ...summarizeToolInput(typedInput),
+            ...summarizeToolInput(input),
             durationMs: elapsedMs(startedAt),
             error: errorTrace(error),
           });
           this.report(errorMessage(error), {
-            tool: typedInput.tool,
-            sessionID: typedInput.sessionID,
-            callID: typedInput.callID,
+            tool: input.tool,
+            sessionID: input.sessionID,
+            callID: input.callID,
           });
           throw error;
         }
       },
       after: async (input, output) => {
-        const typedInput = input as Parameters<SessionGuardRuntime['handleToolAfter']>[0];
-        const typedOutput = output as Parameters<SessionGuardRuntime['handleToolAfter']>[1];
         const startedAt = Date.now();
         await this.log('debug', 'tool.execute.after started', {
-          ...summarizeToolInput(typedInput),
-          args: summarizeToolArgs(typedInput.args),
-          outputLength: typedOutput.output.length,
+          ...summarizeToolInput(input),
+          args: summarizeToolArgs(input.args),
+          outputLength: output.output.length,
         });
         try {
-          await this.handleToolAfter(typedInput, typedOutput);
+          await this.handleToolAfter(input, output);
           void this.log('debug', 'tool.execute.after finished', {
-            ...summarizeToolInput(typedInput),
+            ...summarizeToolInput(input),
             durationMs: elapsedMs(startedAt),
-            outputLength: typedOutput.output.length,
+            outputLength: output.output.length,
           });
         } catch (error) {
           void this.log('error', 'tool.execute.after failed', {
-            ...summarizeToolInput(typedInput),
+            ...summarizeToolInput(input),
             durationMs: elapsedMs(startedAt),
             error: errorTrace(error),
           });
           throw error;
         }
       },
-      event: (input) =>
-        this.handleEvent(input as Parameters<SessionGuardRuntime['handleEvent']>[0]),
-      systemTransform: (input, output) =>
-        this.handleSystemTransform(input as never, output as never),
-      compacting: (input, output) => this.handleSessionCompacting(input as never, output as never),
-      messagesTransform: (input, output) =>
-        this.handleMessagesTransform(input as never, output as MessagesTransformOutput),
+      event: (input) => this.handleEvent(input),
+      systemTransform: (input, output) => this.handleSystemTransform(input, output),
+      compacting: () => this.handleSessionCompacting(),
+      messagesTransform: () => this.handleMessagesTransform(),
       dispose: () => this.handleDispose(),
       tools: this.workflowToolSurface.createTools(),
     });
@@ -898,6 +920,8 @@ export interface RuntimePaths {
 
 export interface RuntimeContext {
   readonly stageInstructionsEnabled?: boolean;
+  readonly autoStartEnabled?: boolean;
+  readonly matchContextProvider?: RuleMatchContextProvider;
   readonly client?: {
     readonly session?: Pick<SessionClient, 'get' | 'list' | 'messages' | 'prompt'>;
     readonly app?: Pick<PluginInput['client']['app'], 'log'>;
@@ -910,13 +934,15 @@ export interface RuntimeContext {
   };
   readonly host?: RuntimeHostAdapter;
   readonly directory: string;
-  readonly project?: unknown;
+  readonly project?: PluginInput['project'];
   readonly worktree?: string;
   readonly resolveParent?: ResolveParentFn;
 }
 
 export interface RuntimeHooks extends Hooks {
   handleToolFailure(input: { sessionID: string; callID: string }): Promise<void>;
+  handleChatMessage(input: { sessionID?: string }): Promise<void>;
+  handleSystemTransform(input: { sessionID?: string }, output: { system: string[] }): Promise<void>;
   logMessage(level: 'debug' | 'info' | 'warn' | 'error', message: string): Promise<void>;
   workflowToolSurface: ReturnType<typeof createWorkflowToolSurface>;
 }
@@ -925,6 +951,11 @@ export function createRuntime(
   context: PluginInput | RuntimeContext,
   paths?: RuntimePaths
 ): RuntimeHooks {
+  const pluginOptions = Reflect.get(context, 'options');
+  const autoStartEnabled =
+    typeof pluginOptions === 'object' &&
+    pluginOptions !== null &&
+    Reflect.get(pluginOptions, 'autoStart') !== false;
   const runtimeContext: RuntimeContext =
     'host' in context || 'resolveParent' in context
       ? context
@@ -934,12 +965,15 @@ export function createRuntime(
             directory: context.directory,
           }),
           directory: context.directory,
+          autoStartEnabled,
         };
   const runtime = new SessionGuardRuntime(
     {
       client: runtimeContext.client,
       host: runtimeContext.host,
       stageInstructionsEnabled: runtimeContext.stageInstructionsEnabled,
+      autoStartEnabled: runtimeContext.autoStartEnabled,
+      matchContextProvider: runtimeContext.matchContextProvider,
       directory: runtimeContext.directory,
       resolveParent: runtimeContext.resolveParent,
     },
@@ -948,6 +982,8 @@ export function createRuntime(
   return {
     ...runtime.hooks,
     handleToolFailure: (input) => runtime.handleToolFailure(input),
+    handleChatMessage: (input) => runtime.handleChatMessage(input),
+    handleSystemTransform: (input, output) => runtime.handleSystemTransform(input, output),
     logMessage: (level, message) => runtime.logMessage(level, message),
     workflowToolSurface: runtime.workflowTools,
   };

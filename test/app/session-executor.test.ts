@@ -8,7 +8,7 @@ import type { ResolveParentFn } from '../../src/app/session-executor.ts';
 // ─── Mock store ───────────────────────────────────────────────────────────────
 
 function mockStore(): {
-  store: WorkflowStore;
+  store: Pick<WorkflowStore, 'load' | 'save'>;
   loadCalls: Array<string>;
   saveCalls: Array<WorkflowSession>;
   setLoadResult: (_session: WorkflowSession | null) => void;
@@ -31,7 +31,7 @@ function mockStore(): {
       saveCalls.push(sess);
     }),
     onSave: new Set<() => void>(),
-  } as unknown as WorkflowStore;
+  };
 
   return {
     store,
@@ -189,6 +189,28 @@ describe('SessionExecutor', () => {
       });
 
       expect(order).toEqual(['deferred-1', 'deferred-2']);
+    });
+
+    it('logs the save decision even when a deferred effect reverts the session', async () => {
+      const { store, saveCalls, setLoadResult } = mockStore();
+      setLoadResult(makeSession('se-defer-log'));
+      const log = vi.fn(async () => {});
+      const { SessionExecutor } = await import('../../src/app/session-executor.ts');
+      const executor = new SessionExecutor(store, log);
+
+      await executor.run('se-defer-log', async (tx) => {
+        tx.session!.currentStage = 'review';
+        tx.deferAfterSave(async () => {
+          tx.session!.currentStage = 'planning';
+        });
+      });
+
+      expect(saveCalls).toHaveLength(1);
+      expect(log).toHaveBeenCalledWith(
+        'debug',
+        'SessionExecutor run for root se-defer-log',
+        expect.objectContaining({ saved: true })
+      );
     });
 
     it('does NOT run deferred effects when session was not mutated', async () => {

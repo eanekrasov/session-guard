@@ -183,7 +183,7 @@ export const INVARIANTS: InvariantCheck[] = [
         if (/(Spacing\.|Radius\.|TypographyPalette\.|fontDp|0\.dp)/.test(line)) continue;
         const match = line.match(/\b(\d+)\.dp\b/);
         if (match) {
-          const value = parseInt(match[1]);
+          const value = parseInt(match[1]!);
           if (spacingValues.has(value) || radiusValues.has(value)) count++;
         }
       }

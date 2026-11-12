@@ -1,12 +1,7 @@
 /** @jsxImportSource @opentui/solid */
-import { appendFileSync, existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
-import { createSignal, getOwner, useContext } from 'solid-js';
+import { createSignal } from 'solid-js';
 import type { JSX } from '@opentui/solid';
-import { RendererContext } from '@opentui/solid';
-import { Plugin as PluginV2, usePlugin } from '@opencode/plugin/tui';
-import type { TuiPluginApi } from '@opencode-ai/plugin/tui';
+import { Plugin as PluginV2 } from '@opencode/plugin/tui';
 import {
   createStateSection,
   createSessionGuardCoordinator,
@@ -17,77 +12,15 @@ import {
   DETAILS_TITLE,
   type SectionApi,
   type SessionGuardSnapshot,
+  type TuiThemeApi,
 } from './v1.tsx';
-
-const DIAG_DIR = join(process.env.XDG_STATE_HOME ?? join(homedir(), '.local', 'state'), 'opencode');
-const DIAG_LOG = join(DIAG_DIR, 'session-guard-ui.log');
-const DIAG_MAX_FAILURES_PER_SLOT = 3;
-const DIAG_MAX_LOG_BYTES = 2_000_000;
-
-function diag(line: string): void {
-  try {
-    mkdirSync(DIAG_DIR, { recursive: true });
-    if (existsSync(DIAG_LOG) && statSync(DIAG_LOG).size > DIAG_MAX_LOG_BYTES) {
-      writeFileSync(DIAG_LOG, '', { mode: 0o600 });
-    }
-    appendFileSync(DIAG_LOG, `${new Date().toISOString()} ${line}\\n`, { mode: 0o600 });
-  } catch {
-    // diagnostics must never crash the plugin
-  }
-}
-
-try {
-  diag(`module load: ${import.meta.url}`);
-} catch (error) {
-  diag(`module load probe failed: ${error}`);
-}
-
-const diagOkSlots = new Set<string>();
-const diagFailureCount = new Map<string, number>();
-
-function diagFailure(slot: string, error: unknown): void {
-  const count = (diagFailureCount.get(slot) ?? 0) + 1;
-  diagFailureCount.set(slot, count);
-  if (count > DIAG_MAX_FAILURES_PER_SLOT) {
-    if (count === DIAG_MAX_FAILURES_PER_SLOT + 1) {
-      diag(
-        `render ${slot} still failing after ${DIAG_MAX_FAILURES_PER_SLOT} logged failures; further failures are suppressed until a render succeeds`
-      );
-    }
-    return;
-  }
-  const lines = [
-    `render ${slot} FAILED (${count}/${DIAG_MAX_FAILURES_PER_SLOT}): ${error instanceof Error ? error.message : String(error)}`,
-    `  stack: ${error instanceof Error ? error.stack : '(none)'}`,
-  ];
-  try {
-    const owner = getOwner() as { context?: Record<string, unknown> | null } | null;
-    lines.push(
-      `  owner=${owner ? 'present' : 'null'}; contextKeys=[${owner ? (owner.context ? Object.keys(owner.context).join(',') : 'null') : 'none'}]`
-    );
-  } catch (probeError) {
-    lines.push(`  owner probe failed: ${probeError}`);
-  }
-  try {
-    lines.push(
-      `  useContext(RendererContext): ${useContext(RendererContext) ? 'found' : 'MISSING'}`
-    );
-  } catch (probeError) {
-    lines.push(`  renderer probe failed: ${probeError}`);
-  }
-  try {
-    usePlugin();
-    lines.push('  usePlugin: ok');
-  } catch (probeError) {
-    lines.push(`  usePlugin: FAILED ${probeError}`);
-  }
-  diag(lines.join('\\n'));
-}
+import { createDisposables } from './setup.ts';
+import { diag, diagFailure, diagFailureCount, diagOkSlots } from './diag.ts';
 
 export const SessionGuardTuiV2 = (ctx: PluginV2.Context): (() => void) => {
   diag(`setup: app=${ctx.app?.version ?? '?'}; location=${ctx.location?.directory ?? '?'}`);
   const baseDir = (ctx.location ?? ctx.data.location.default())?.directory ?? process.cwd();
-  const disposers: Array<() => void> = [];
+  const bag = createDisposables();
 
   const [kvStore, setKvStore] = ctx.storage.memory('session-guard-tui-kv', {
     initial: {} as Record<string, unknown>,
@@ -98,6 +31,7 @@ export const SessionGuardTuiV2 = (ctx: PluginV2.Context): (() => void) => {
     keymap: {
       registerLayer: (layer: unknown) => {
         try {
+          // V1's OpenTUI layer shape differs from V2's keymap layer contract.
           ctx.keymap.layer(() => layer as never);
         } catch {
           /* keep the widget usable if keymap registration is unavailable */
@@ -116,7 +50,7 @@ export const SessionGuardTuiV2 = (ctx: PluginV2.Context): (() => void) => {
       dialog: {
         setSize: (size: 'medium' | 'large' | 'xlarge') => {
           try {
-            ctx.ui.dialog.set({ size } as never);
+            ctx.ui.dialog.set({ size });
           } catch {
             /* ignore host differences */
           }
@@ -163,15 +97,23 @@ export const SessionGuardTuiV2 = (ctx: PluginV2.Context): (() => void) => {
     },
     lifecycle: {
       onDispose: (fn: () => void) => {
-        disposers.push(fn);
+        bag.add(fn);
       },
     },
     event: {
       on: (event: string, handler: (event: unknown) => void) => {
         try {
           return ctx.data.on(event as never, (value: unknown) => {
-            const record = (value ?? {}) as Record<string, unknown>;
-            handler({ type: record.type ?? event, properties: record.properties ?? record });
+            const record =
+              typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {};
+            const properties =
+              typeof record.properties === 'object' && record.properties !== null
+                ? (record.properties as Record<string, unknown>)
+                : record;
+            handler({
+              type: typeof record.type === 'string' ? record.type : event,
+              properties,
+            });
           });
         } catch {
           return () => {};
@@ -193,7 +135,7 @@ export const SessionGuardTuiV2 = (ctx: PluginV2.Context): (() => void) => {
         border: ctx.theme.border.base,
       },
     },
-  } as unknown as SectionApi;
+  } satisfies SectionApi & TuiThemeApi;
 
   const section = createStateSection(adapter, baseDir);
   const [snapshot, setSnapshot] = createSignal<SessionGuardSnapshot>({
@@ -203,21 +145,15 @@ export const SessionGuardTuiV2 = (ctx: PluginV2.Context): (() => void) => {
   });
   const coordinator = createSessionGuardCoordinator({
     section,
-    api: adapter as unknown as TuiPluginApi,
+    api: adapter,
     baseDir,
     onUpdate: setSnapshot,
   });
-  disposers.push(() => coordinator.dispose());
+  bag.add(() => coordinator.dispose());
 
   ctx.ui.slot({
     append: 'home.footer',
-    render: () => (
-      <HomeProfiles
-        api={adapter as unknown as TuiPluginApi}
-        section={section}
-        snapshot={snapshot}
-      />
-    ),
+    render: () => <HomeProfiles api={adapter} section={section} snapshot={snapshot} />,
   });
 
   const renderBadge = (input: { sessionID?: string }): JSX.Element | null => {
@@ -228,12 +164,7 @@ export const SessionGuardTuiV2 = (ctx: PluginV2.Context): (() => void) => {
       const root = ctx.data.session.root(sessionID) || sessionID;
       const stage = readActiveStage(baseDir, root);
       if (stage === null) return null;
-      const theme = ctx.theme as unknown as Record<string, unknown>;
-      const color =
-        (theme as { text?: { feedback?: { success?: { base?: string } }; success?: string } })?.text
-          ?.feedback?.success?.base ??
-        (theme as { text?: { success?: string } })?.text?.success ??
-        '#ccc';
+      const color = ctx.theme.text.feedback.success.base;
       if (!diagOkSlots.has(slot)) {
         diagOkSlots.add(slot);
         diagFailureCount.delete(slot);
@@ -258,7 +189,7 @@ export const SessionGuardTuiV2 = (ctx: PluginV2.Context): (() => void) => {
         const result = (
           <box flexDirection="column">
             <WorkflowSidebarContent
-              api={adapter as unknown as TuiPluginApi}
+              api={adapter}
               section={section}
               sessionId={input?.sessionID ?? ''}
               snapshot={snapshot}
@@ -266,8 +197,25 @@ export const SessionGuardTuiV2 = (ctx: PluginV2.Context): (() => void) => {
             />
             <RulesSidebarContent
               sessionId={input?.sessionID ?? ''}
-              api={adapter as unknown as TuiPluginApi}
-              theme={(adapter as unknown as { theme: TuiPluginApi['theme'] }).theme}
+              projectDir={baseDir}
+              event={{
+                on: (event, handler) =>
+                  adapter.event.on(event, (value) => {
+                    const record =
+                      typeof value === 'object' && value !== null
+                        ? (value as Record<string, unknown>)
+                        : {};
+                    const properties =
+                      typeof record.properties === 'object' && record.properties !== null
+                        ? (record.properties as Record<string, unknown>)
+                        : record;
+                    handler({
+                      type: typeof record.type === 'string' ? record.type : event,
+                      properties,
+                    });
+                  }),
+              }}
+              theme={adapter.theme}
             />
           </box>
         );
@@ -323,15 +271,7 @@ export const SessionGuardTuiV2 = (ctx: PluginV2.Context): (() => void) => {
     },
   });
 
-  return () => {
-    disposers.splice(0).forEach((dispose) => {
-      try {
-        dispose();
-      } catch {
-        /* ignore disposal errors */
-      }
-    });
-  };
+  return () => bag.dispose();
 };
 
 export { PluginV2 };
