@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'bun:test';
 import { errorTrace, summarizeToolArgs, summarizeToolInput } from '../../src/app/trace.ts';
 
 describe('trace summaries', () => {

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'bun:test';
 import { mergeTransitions } from '../../src/schema/schema-loader.ts';
 import type { TransitionDef } from '../../src/schema/types.ts';
 

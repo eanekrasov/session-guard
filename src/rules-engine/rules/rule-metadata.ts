@@ -13,6 +13,7 @@ export interface RuleMetadata {
   command?: string[];
   project?: string[];
   branch?: string[];
+  stage?: string[];
   os?: string[];
   ci?: boolean;
   match?: 'any' | 'all';
@@ -38,6 +39,7 @@ interface ParsedFrontmatter {
   command?: unknown;
   project?: unknown;
   branch?: unknown;
+  stage?: unknown;
   os?: unknown;
   ci?: unknown;
   match?: unknown;
@@ -45,7 +47,16 @@ interface ParsedFrontmatter {
 }
 
 type StringArrayField =
-  'globs' | 'keywords' | 'tools' | 'model' | 'agent' | 'command' | 'project' | 'branch' | 'os';
+  | 'globs'
+  | 'keywords'
+  | 'tools'
+  | 'model'
+  | 'agent'
+  | 'command'
+  | 'project'
+  | 'branch'
+  | 'stage'
+  | 'os';
 
 // Unlike the other condition fields, a declared fileContains that yields no
 // valid literal resolves to [] (not undefined) so the rule fails closed
@@ -109,6 +120,7 @@ export function parseRuleMetadata(content: string): RuleMetadata | null {
       'command',
       'project',
       'branch',
+      'stage',
       'os',
     ];
 
@@ -196,6 +208,7 @@ export function hasConditions(meta: RuleMetadata | null | undefined): boolean {
     meta.command ||
     meta.project ||
     meta.branch ||
+    meta.stage ||
     meta.os ||
     meta.ci !== undefined
   );

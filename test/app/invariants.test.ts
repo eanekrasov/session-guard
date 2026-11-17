@@ -1,4 +1,4 @@
-import { describe, expect, test, afterEach } from 'vitest';
+import { describe, expect, test, afterEach } from 'bun:test';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';

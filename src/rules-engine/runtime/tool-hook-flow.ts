@@ -1,3 +1,8 @@
+/**
+ * Adapted from opencode-rules@1.0.0 (rules-v1@154d8d9): the tool-hook flow in
+ * the original was driven by the v1 client (tool.ids RPC); session-guard
+ * reworks it over the hook-shaped `tool.before`/`tool.after` inputs.
+ */
 import { evaluateHooks, serializeToolArgs } from '../rules/rule-hooks.js';
 import { matchRuleSnapshots, type RuleMatchContext } from '../rules/rule-filter.js';
 import type { RuleSnapshot } from '../rules/rule-discovery.js';
@@ -13,14 +18,17 @@ export class ToolHookFlow {
   private readonly debugLog: DebugLog;
   private readonly projectDirectory: string;
   private readonly ensureSessionRuleSnapshot: (sessionID: string) => Promise<RuleSnapshot[]>;
-  private readonly buildMatchContext: (sessionID: string) => Promise<RuleMatchContext>;
+  private readonly buildMatchContext: (
+    sessionID: string,
+    includeStage: boolean
+  ) => Promise<RuleMatchContext>;
   private readonly queueMatchedHooks: (input: MatchedHooksInput) => void;
 
   constructor(options: {
     debugLog: DebugLog;
     projectDirectory: string;
     ensureSessionRuleSnapshot: (sessionID: string) => Promise<RuleSnapshot[]>;
-    buildMatchContext: (sessionID: string) => Promise<RuleMatchContext>;
+    buildMatchContext: (sessionID: string, includeStage: boolean) => Promise<RuleMatchContext>;
     queueMatchedHooks: (input: MatchedHooksInput) => void;
   }) {
     this.debugLog = options.debugLog;
@@ -77,11 +85,20 @@ export class ToolHookFlow {
 
     // The context queries (tool RPCs, project tags, git branch) are the
     // expensive part of this path; skip them when nothing matched.
-    const matchContext = await this.buildMatchContext(sessionID);
+    const matchContext = await this.buildMatchContext(
+      sessionID,
+      allMatches.some(({ rule }) => rule.metadata?.stage !== undefined)
+    );
+    const stageMatches = allMatches.filter(
+      ({ rule }) =>
+        rule.metadata?.stage === undefined ||
+        (matchContext.stage !== undefined && rule.metadata.stage.includes(matchContext.stage))
+    );
+    if (stageMatches.length === 0) return;
 
     // A blocker must fire before any side-effect runs.
     if (hookType === 'PreToolUse') {
-      const blocker = allMatches.find((m) => m.hook.type === 'PreToolUse' && m.hook.block);
+      const blocker = stageMatches.find((m) => m.hook.type === 'PreToolUse' && m.hook.block);
       if (blocker) {
         this.debugLog(
           `PreToolUse block fired for rule ${blocker.rule.relativePath}, tool ${toolName}`
@@ -96,7 +113,7 @@ export class ToolHookFlow {
     // Queue each rule once no matter how many of its hooks matched.
     const seenRules = new Set<string>();
     const matchedHooks: MatchedHookContent[] = [];
-    for (const { hook, rule } of allMatches) {
+    for (const { hook, rule } of stageMatches) {
       if (!seenRules.has(rule.filePath)) {
         seenRules.add(rule.filePath);
         const lifetime = matchRuleSnapshots([rule], matchContext)[0]?.lifetime ?? 'ephemeral';

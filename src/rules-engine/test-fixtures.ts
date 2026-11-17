@@ -3,6 +3,7 @@ import os from 'node:os';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { createRuntime } from './runtime/create-runtime.js';
 import type { OpenCodeRulesRuntime } from './runtime/orchestrator.js';
+import type { RuntimePort } from './runtime/runtime-port.js';
 import type {
   V2SessionContextInput,
   V2SessionPromptInput,
@@ -11,6 +12,8 @@ import type {
   V2EventInput,
 } from './runtime/orchestrator.js';
 import type { MatchedRulesStateStore } from './session/matched-rules-state.js';
+import { fromSessionMessages } from './session/v2-messages.js';
+import { extractConnectedMcpCapabilityIDs } from './detection/mcp-tools.js';
 
 interface TestDirs {
   testDir: string;
@@ -277,13 +280,69 @@ export function createMockPluginInput(opts: MockPluginInput): {
 
 type MockPluginContextOptions_promptCalls = MockPluginInput['promptCalls'];
 
+/**
+ * Fake `RuntimePort` over the mock v2 context: durable admissions ride
+ * `session.synthetic`, history rides `session.context` (normalized identically
+ * to the real v2 port), MCP capabilities ride `mcp.list`. Semantics match
+ * `createV2RuntimePort` so tests asserting deliveries stay unchanged.
+ */
+export function createMockRuntimePort(
+  mockInput: ReturnType<typeof createMockPluginInput>
+): RuntimePort {
+  const context = mockInput.context;
+  return {
+    persistAdmission: async (sessionID, part) => {
+      const session = context.session;
+      if (!session?.synthetic || part.type !== 'text' || typeof part.text !== 'string') {
+        throw new Error('OpenCode session.synthetic is unavailable');
+      }
+      const callID = typeof part.messageID === 'string' ? part.messageID : part.id;
+      if (!callID) throw new Error('Delivery part lacks an id');
+      // Invoked through the receiver (like the real adapter) so SDK-style
+      // prototype methods that read `this` keep working.
+      await session.synthetic({
+        id: callID,
+        sessionID,
+        text: part.text,
+        ...(part.metadata ? { metadata: part.metadata } : {}),
+        resume: false,
+      });
+    },
+    readHistory: async (sessionID) => {
+      const contextImpl = context.session?.context;
+      if (!contextImpl) return { ok: true, messages: [] };
+      try {
+        const result = (await context.session!.context!({ sessionID })) as { data?: unknown };
+        const data = result?.data;
+        if (!Array.isArray(data)) return { ok: true, messages: [] };
+        return { ok: true, messages: fromSessionMessages(data) };
+      } catch {
+        return { ok: false };
+      }
+    },
+    queryAvailableToolIDs: async (contextToolIDs) => {
+      const ids = new Set<string>(contextToolIDs ?? []);
+      const mcpResult = await context.mcp.list({
+        location: { directory: context.location.directory },
+      });
+      for (const id of extractConnectedMcpCapabilityIDs(mcpResult.data)) {
+        ids.add(id);
+      }
+      return Array.from(ids);
+    },
+    synthetic: context.session?.synthetic
+      ? (input) => context.session!.synthetic!({ ...input, id: input.id ?? 'prt_rule' })
+      : undefined,
+  };
+}
+
 /** Wires a runtime against a mock context; returns the runtime for state inspection. */
 export async function wireRuntime(
   mockInput: ReturnType<typeof createMockPluginInput>,
   store?: MatchedRulesStateStore
 ): Promise<OpenCodeRulesRuntime> {
   const runtime = await createRuntime({
-    client: mockInput.context,
+    port: createMockRuntimePort(mockInput),
     directory: mockInput.context.location.directory,
     projectDirectory: mockInput.context.location.directory,
     ...(store !== undefined ? { matchedRulesStateStore: store } : {}),
@@ -325,4 +384,28 @@ export function restoreEnv(saved: EnvSnapshot): void {
       process.env[key] = value;
     }
   }
+}
+
+/**
+ * Polls toRun until it stops throwing or the timeout elapses (bun:test has no
+ * vi.waitFor). Rethrows the last error on timeout.
+ */
+export async function waitFor(
+  toRun: () => void | Promise<unknown>,
+  options: { timeout?: number; interval?: number } = {}
+): Promise<void> {
+  const timeout = options.timeout ?? 1000;
+  const interval = options.interval ?? 25;
+  const deadline = Date.now() + timeout;
+  let lastError: unknown;
+  while (Date.now() < deadline) {
+    try {
+      await toRun();
+      return;
+    } catch (error) {
+      lastError = error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, interval));
+  }
+  throw lastError ?? new Error(`waitFor: timed out after ${timeout}ms`);
 }

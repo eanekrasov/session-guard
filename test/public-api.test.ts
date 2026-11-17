@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from 'bun:test';
 import { resolve } from 'node:path';
 import { getCurrentStageGates, resolveConfig, listProfiles } from '../src/public-api.ts';
 import { createSession } from '../src/session/session-store.ts';
@@ -26,6 +26,10 @@ describe('resolveConfig', () => {
     // Schemas
     expect(profile.schemas).toHaveLength(1);
     expect(profile.schemas[0]?.source).toBe('android/session-guard.yaml');
+  });
+
+  it('throws for an unknown profileId', async () => {
+    expect(resolveConfig('non-existent', FIXTURES_DIR)).rejects.toThrow();
   });
 
   it('resolves base profile directly (no extends)', async () => {
@@ -113,7 +117,13 @@ describe('listProfiles', () => {
     const base = profiles.find((p) => p.id === 'base');
 
     expect(base).toBeDefined();
+    expect(base!.description).toBe('Base development profile');
+    expect(base!.extends).toBeUndefined();
+    expect(base!.schemas).toEqual(['session-guard.yaml']);
+    expect(base!.agentsDir).toBe('agents');
+    expect(base!.skillsDir).toBe('skills');
     expect(base!.agents).toEqual(['code', 'architect']);
-    expect(base!.schemas).toContain('session-guard.yaml');
+    expect(base!.skills).toEqual(['code-review', 'testing']);
+    expect(base!.invariants).toEqual(['no-console', 'strict-null']);
   });
 });

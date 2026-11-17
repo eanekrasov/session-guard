@@ -5,7 +5,10 @@ import { join } from 'node:path';
 import { createRuntime, type RuntimeContext } from '../../src/app/runtime.ts';
 import { createRuleMatchContextProvider } from '../../src/rules-engine/runtime/match-context-provider.ts';
 import { createDebugLog } from '../../src/rules-engine/shared/debug.ts';
-import { createMockPluginInput } from '../../src/rules-engine/test-fixtures.ts';
+import {
+  createMockPluginInput,
+  createMockRuntimePort,
+} from '../../src/rules-engine/test-fixtures.ts';
 import { createRuntime as createRulesRuntime } from '../../src/rules-engine/runtime/create-runtime.ts';
 import { WorkflowStore } from '../../src/session/session-store.ts';
 
@@ -132,7 +135,7 @@ describe('workflow auto-start', () => {
     });
     const mock = createMockPluginInput({ testDir: root });
     const rulesRuntime = await createRulesRuntime({
-      client: mock.context,
+      port: createMockRuntimePort(mock),
       directory: root,
       projectDirectory: root,
       ruleFiles: [],

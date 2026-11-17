@@ -1,4 +1,3 @@
 #!/usr/bin/env bash
 #MISE description="Run tests"
 bun test --parallel
-bunx vitest run --config vitest.rules.config.ts

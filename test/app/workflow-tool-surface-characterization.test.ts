@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'bun:test';
 import type { Hooks, PluginInput } from '@opencode-ai/plugin';
 
 import { createRuntime } from '../../src/app/runtime.ts';

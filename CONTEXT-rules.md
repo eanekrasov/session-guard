@@ -1,0 +1,48 @@
+# OpenCode Rules
+
+OpenCode Rules selects authored guidance for an OpenCode session and delivers that guidance into the conversation where it applies.
+
+## Language
+
+**Rule**:
+Authored guidance with optional matching conditions and hooks.
+
+**Matched rule**:
+A rule whose conditions apply to the current session context.
+_Avoid_: Active rule
+
+**File observation**:
+The path and file text one successful file-handling tool event exposes for matching.
+_Avoid_: Tool output blob
+
+**Working context**:
+The per-session monotonic set of observed file paths retained for compaction
+projection. It is rebuilt from eligible history parts but is not a
+Rule-matching source; live File observations are the sole source for `globs`
+and `fileContains`. Owned by the runtime's SessionWorkingContext module;
+SessionStore is only its physical storage.
+_Avoid_: Context paths
+
+**Earliest dispatch**:
+The first provider dispatch after a Rule becomes Matched at which its guidance
+can affect model work, using Durable or Transient delivery according to the
+Rule's lifetime.
+
+**Rule delivery**:
+Making matched rule content, including content activated by a hook, available to the conversation with the appropriate lifetime.
+_Avoid_: Rule injection
+
+**Durable delivery**:
+Rule delivery that persists in conversation history and remains available on later turns.
+_Avoid_: Persistent injection
+
+**Transient delivery**:
+Rule delivery that applies to one model dispatch without persisting in conversation history.
+_Avoid_: Ephemeral injection
+
+**Hook**:
+Rule behavior triggered by a matching tool event; it may activate the owning rule's content, block the event, or run a command.
+
+**Matched-rule state**:
+The per-session record of Matched rule paths, written after each accepted durable turn and refreshed by context dispatches while that turn remains armed, so it includes the current agent, model, and tools matches; read by the sidebar so it can distinguish matched from unmatched rules.
+_Avoid_: Active rules state

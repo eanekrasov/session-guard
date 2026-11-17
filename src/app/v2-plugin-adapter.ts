@@ -9,6 +9,7 @@ import { registerV2ProfileAgents } from './v2-profile-agent-sync.ts';
 import { registerWorkflowTools } from './v2-tool-surface-adapter.ts';
 import { createV2RuntimeHostAdapter } from './runtime-host-adapter.ts';
 import { createRuntime as createRulesRuntime } from '../rules-engine/runtime/create-runtime.js';
+import { createV2RuntimePort } from '../rules-engine/runtime/client-adapter.js';
 import { createRuleMatchContextProvider } from '../rules-engine/runtime/match-context-provider.js';
 import { createDebugLog } from '../rules-engine/shared/debug.js';
 import {
@@ -61,8 +62,10 @@ export async function setupV2Runtime(context: Context): Promise<() => Promise<vo
   const sessionStoreDirectory = sessionsDir(opencodeStateDir());
   const pluginOptions = context.options;
   const { additionalRuleDirectories } = parsePluginOptions(context.options);
+  let getCurrentStage: ((sessionID: string) => Promise<string | undefined>) | undefined;
   const matchContextProvider = createRuleMatchContextProvider({
     projectDirectory: worktreeDirectory,
+    getCurrentStage: (sessionID) => getCurrentStage?.(sessionID) ?? Promise.resolve(undefined),
     debugLog: createDebugLog(),
   });
 
@@ -79,13 +82,18 @@ export async function setupV2Runtime(context: Context): Promise<() => Promise<vo
     profilesDir: profileDirectory,
     storeDir: sessionStoreDirectory,
   });
+  getCurrentStage = hooks.getCurrentStage;
   const before = hooks['tool.execute.before']!;
   const after = hooks['tool.execute.after']!;
   const registrations: Registration[] = [];
   let rulesCleanup: (() => Promise<void>) | undefined;
   try {
     const rulesRuntime = await createRulesRuntime({
-      client: context,
+      port: createV2RuntimePort({
+        client: context as never,
+        directory: worktreeDirectory,
+        debugLog: createDebugLog(),
+      }),
       directory: worktreeDirectory,
       projectDirectory: worktreeDirectory,
       matchContextProvider,

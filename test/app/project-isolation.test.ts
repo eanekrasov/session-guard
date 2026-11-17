@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -64,7 +64,7 @@ afterEach(() => {
 });
 
 async function listProfilesThrough(hooks: Record<string, unknown>): Promise<string> {
-  const tools = (await (hooks as { tool?: { register?: unknown } }).tool) as
+  const tools = (hooks as { tool?: { register?: unknown } }).tool as
     | Record<string, { execute: (args: unknown, ctx: unknown) => Promise<{ output: string }> }>
     | undefined;
   if (!tools?.['workflow-list']) throw new Error('workflow-list is not registered');
@@ -77,7 +77,7 @@ describe('two projects in one process', () => {
     // Initialisation used to write the computed profiles directory into
     // process.env, so the second instance found it already set — with the
     // first project's path — and listed the first project's profiles.
-    const { SessionGuardPluginV1 } = await import('../../src/index.ts');
+    const { default: SessionGuardPluginV1 } = await import('../../src/v1/plugin.ts');
 
     const first = (await SessionGuardPluginV1(makeCtx(alpha))) as Record<string, unknown>;
     const second = (await SessionGuardPluginV1(makeCtx(beta))) as Record<string, unknown>;

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'bun:test';
 
 import { fixtureProfilesDir } from '../support/fixture-profiles.ts';
 import { resolveConfig } from '../../src/public-api.ts';

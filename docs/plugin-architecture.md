@@ -16,7 +16,9 @@ repository. Каталоги `<project>/.opencode/**` относятся к це
 ## Точка входа
 
 ```
-src/index.ts        — V1/V2 entrypoints и default с `setup` и `server`
+src/plugin.ts       — гибрид: default с `setup` (V2) и `server` (V1)
+src/v1/plugin.ts    — V1-плагин (@opencode-ai/plugin)
+src/v2/plugin.ts    — V2-плагин (@opencode/plugin)
 src/public-api.ts   — публичные функции разрешения профиля и чтения сессий
 ```
 
@@ -27,7 +29,7 @@ src/public-api.ts   — публичные функции разрешения �
 глобальный, и второй получал чужие профили.
 
 Сборка source repository выполняется задачей `mise run build` и кладёт три
-независимых JavaScript-артефакта: `dist/index.js` (плагин и библиотека),
+независимых JavaScript-артефакта: `dist/plugin.js` (плагин и библиотека),
 `dist/cli.js` (команда `sync-agents`) и `dist/tui.js` (боковая панель), а также
 две JSON Schema. Скрипт `scripts/verify-build.ts`, вызываемый последним шагом
 этой задачи, следит, чтобы артефакты не оказались одним и тем же файлом.
@@ -97,7 +99,9 @@ V2-композиция находится в `app/v2-plugin-adapter.ts`: она
 `RuleMatchContextProvider` для rules- и workflow-runtime. Provider использует
 `SessionStore` для prompt/model/agent и хранит файловые наблюдения текущей
 сессии; rules-runtime записывает их по успешному `tool.execute.after`, а
-workflow-runtime читает до автостарта. Новый формат auto-start работает только
+workflow-runtime читает до автостарта. Для фильтра `stage` provider также
+получает текущий `currentStage` из workflow-сессии; правило с `stage` без
+активной workflow-сессии не совпадает. Новый формат auto-start работает только
 в V2; V1 оставлен без автостарта.
 
 ### `tui/` — только чтение

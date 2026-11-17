@@ -49,15 +49,13 @@ OpenCode из него не загружает плагин автоматиче
 `<project>/.opencode/profiles` либо через `SESSION_GUARD_PROFILES_DIR`.
 
 Пример точки входа ниже относится к source repository; в target project
-подключается опубликованный или собранный `dist`, а не путь `src/index.ts`:
+подключается опубликованный или собранный `dist`, а не путь `src/v1/plugin.ts`:
 
 ```typescript
-// src/index.ts
+// src/v1/plugin.ts
 export const SessionGuardPluginV1: Plugin = async (ctx: PluginInput) => {
   return createRuntime(ctx, { storeDir, profilesDir });
 };
-
-export default { id: 'session-guard', server: SessionGuardPluginV1 };
 ```
 
 Подключение в конфигурации OpenCode указывает на target-путь или пакет:
@@ -83,7 +81,7 @@ mise run build
 
 | Файл                              | Что это                                    |
 | --------------------------------- | ------------------------------------------ |
-| `dist/index.js`                   | плагин и публичное API библиотеки          |
+| `dist/plugin.js`                  | плагин и публичное API библиотеки          |
 | `dist/cli.js`                     | команды `sync-agents` и `validate-schemas` |
 | `dist/tui.js`                     | TUI-модуль: боковая панель состояния       |
 | `dist/profile.schema.json`        | JSON Schema для `profile.json`             |
@@ -93,8 +91,8 @@ mise run build
 проверяет наличие этих артефактов и то, что точки входа не перезаписали друг
 друга.
 
-В `package.json` точки входа разведены: по экспортам `.` → `dist/index.js` и
-`./tui` → `dist/tui.js`, а `bin` публикует `dist/cli.js` под именем
+В `package.json` точки входа разведены: по экспортам `./server` → `dist/plugin.js`
+и `./tui` → `dist/tui.js`, а `bin` публикует `dist/cli.js` под именем
 `session-guard`.
 
 CLI поддерживает `session-guard validate-schemas [--cwd <dir>]`: он разрешает
@@ -211,10 +209,9 @@ Dashboard поставляется отдельно от `@eanekrasov/session-gu
 внутри активной сессии OpenCode и получает сведения о сессиях через CLI. В source
 repository `mise run dashboard` запускает пакет с CLI из исходников.
 Dashboard — отдельный приватный пакет репозитория и не публикуется. Для локального
-запуска ему нужны Bun и CLI `session-guard`; сервер слушает порт `3456`.
-`DASHBOARD_TOKEN` включает Bearer-аутентификацию, `DASHBOARD_HOST` меняет адрес
-(по умолчанию `127.0.0.1`), `ALLOWED_ORIGIN` задаёт CORS. Показывает все сессии,
-включая архивные, из настроенного store.
+запуска нужны Bun/Node и CLI `session-guard`; панель слушает порт `3456` на
+`127.0.0.1`. `DASHBOARD_TOKEN` включает Bearer-аутентификацию, `ALLOWED_ORIGIN`
+задаёт CORS. Показывает все сессии, включая архивные, из настроенного store.
 
 ---
 

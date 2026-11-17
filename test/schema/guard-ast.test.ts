@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from 'bun:test';
 
 import { evaluateGuard, parse } from '../../src/schema/guard-ast.ts';
 

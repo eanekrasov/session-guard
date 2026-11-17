@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { expect, test } from 'vitest';
+import { expect, test } from 'bun:test';
 
 test('routes complete JSONL records independently of human filtering', () => {
   const directory = mkdtempSync(join(tmpdir(), 'smoke-logger-test-'));

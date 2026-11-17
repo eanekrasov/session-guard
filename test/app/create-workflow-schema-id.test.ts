@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import type { RuntimeContext } from '../../src/app/runtime.ts';
 import { WorkflowStore } from '../../src/session/session-store.ts';
 import { fixtureProfilesDir } from '../support/fixture-profiles.ts';

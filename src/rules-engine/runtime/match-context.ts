@@ -11,6 +11,7 @@ export interface BuildRuleMatchContextOptions {
   availableToolIDs: string[];
   modelID: string | undefined;
   agentType: string | undefined;
+  stage?: string;
   projectDirectory: string;
   debugLog: DebugLog;
 }
@@ -54,6 +55,7 @@ export async function buildRuleMatchContext(
     availableToolIDs,
     modelID,
     agentType,
+    stage,
     projectDirectory,
     debugLog,
   } = opts;
@@ -102,6 +104,9 @@ export async function buildRuleMatchContext(
   if (agentType !== undefined) {
     context.agentType = agentType;
   }
+  if (stage !== undefined) {
+    context.stage = stage;
+  }
   if (command !== undefined) {
     context.command = command;
   }
@@ -115,7 +120,7 @@ export async function buildRuleMatchContext(
   debugLog(
     `Match context: model=${modelID ?? 'none'}, agent=${agentType ?? 'none'}, ` +
       `command=${command ?? 'none'}, branch=${gitBranch ?? 'none'}, ` +
-      `os=${os}, ci=${ci}, projectTags=${projectTags?.join(',') ?? 'none'}`
+      `stage=${stage ?? 'none'}, os=${os}, ci=${ci}, projectTags=${projectTags?.join(',') ?? 'none'}`
   );
 
   return context;

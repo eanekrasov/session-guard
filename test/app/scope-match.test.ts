@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from 'bun:test';
 import { matchesScope, scopesIntersect } from '../../src/app/scope-match.ts';
 
 describe('matchesScope', () => {

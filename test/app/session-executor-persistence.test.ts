@@ -91,7 +91,7 @@ async function loadSession(
 
 // Use the in-memory store approach from session-executor.test.ts for store.save
 // counting, since we need to intercept the real store.
-import { vi } from 'vitest';
+import { vi } from 'bun:test';
 
 function createMockStore() {
   const loadCalls: Array<string> = [];

@@ -35,7 +35,6 @@ schema. В текущем репозитории есть:
 | `HARNESS_AUTO_APPROVE`       | При `true` автоматически выдаёт запрошенное consent; только для автоматизированных прогонов |
 | `XDG_DATA_HOME`              | База OpenCode state directory; по умолчанию `~/.local/share`                                |
 | `DASHBOARD_TOKEN`            | Включает Bearer-аутентификацию dashboard                                                    |
-| `DASHBOARD_HOST`             | Адрес dashboard; по умолчанию `127.0.0.1`                                                   |
 | `ALLOWED_ORIGIN`             | Разрешённый CORS origin                                                                     |
 
 `OPENCODE_HARNESS_DIR` может быть абсолютным или относительным: относительный
@@ -48,11 +47,7 @@ schema. В текущем репозитории есть:
 выбирает профиль с таким id и работает только если у профиля ровно одна schema;
 при нескольких schema укажите `<profile>/<schema>`.
 
-## Подключение
-
-Плагин экспортирует `SessionGuardPluginV1` из `src/index.ts` и должен быть подключён
-через конфигурацию OpenCode или локальный путь установки. Точный путь подключения
-проверяйте в конфигурации конкретного OpenCode checkout.
+## Автозапуск
 
 Автозапуск workflow по `autoStartTrigger` включён по умолчанию. Его можно
 отключить в настройках экземпляра плагина опцией `autoStart: false`; это не
@@ -87,6 +82,6 @@ mise run dashboard
 У target project нет автоматически создаваемого dashboard-процесса. Dashboard
 получает сессии и профили через `session-guard` CLI и наследует его переменные
 окружения, включая `SESSION_GUARD_PROFILES_DIR` и `SESSION_GUARD_STORE_DIR`.
-Сервер использует порт `3456`.
+Dashboard-панель (Next.js) слушает порт `3456` на `127.0.0.1`.
 Если задан `DASHBOARD_TOKEN`, клиент должен передавать
 `Authorization: Bearer <token>`; `ALLOWED_ORIGIN` задаёт CORS.

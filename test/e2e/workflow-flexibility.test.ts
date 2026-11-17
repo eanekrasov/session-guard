@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from 'bun:test';
 import { compileWorkflow } from '../../src/schema/compile-workflow.ts';
 import type { ResolvedSchema } from '../../src/schema/types.ts';
 

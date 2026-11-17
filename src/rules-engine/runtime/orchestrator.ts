@@ -1,3 +1,9 @@
+/**
+ * Adapted from opencode-rules@1.0.0 (rules-v1@154d8d9): the v1 orchestrator
+ * consumed the v1 client (`OpenCodeClient`) internally. Reworked in session-guard
+ * to consume opencode V2 hook payloads and a `V2DeliverySink` (synthetic),
+ * and to build its match context through `RuleMatchContextProvider`.
+ */
 import {
   hasFileObservationFamily,
   matchRuleSnapshots,
@@ -27,7 +33,7 @@ import {
 import type { RuleMatchContextProvider } from './match-context-provider.js';
 import { createRuleMatchContextProvider } from './match-context-provider.js';
 import type { DeliveryPart } from '../delivery/rule-delivery-codec.js';
-import { OpenCodeClientAdapter, type OpenCodeClient } from './client-adapter.js';
+import type { RuntimePort } from './runtime-port.js';
 import { ToolHookFlow } from './tool-hook-flow.js';
 
 // v2 hook payloads, kept structural so the orchestrator stays testable
@@ -89,13 +95,14 @@ interface HookRegistration {
 }
 
 interface OpenCodeRulesRuntimeOptions {
-  client: unknown;
   directory: string;
   projectDirectory: string;
   ruleFiles: DiscoveredRule[];
   sessionStore: SessionStore;
   matchedRulesStateStore: MatchedRulesStateStore;
   matchContextProvider?: RuleMatchContextProvider;
+  /** Host operations; supplied by the platform adapter (v2 host or v1 hooks). */
+  port: RuntimePort;
   debugLog?: DebugLog;
 }
 
@@ -113,7 +120,7 @@ export class OpenCodeRulesRuntime {
   private sessionStore: SessionStore;
   private matchedRulesStateStore: MatchedRulesStateStore;
   private debugLog: DebugLog;
-  private clientAdapter: OpenCodeClientAdapter;
+  private port: RuntimePort;
   private toolHookFlow: ToolHookFlow;
   private ruleDelivery: RuleDelivery;
   private sessionWorkingContext: SessionWorkingContext;
@@ -134,28 +141,24 @@ export class OpenCodeRulesRuntime {
     this.sessionStore = this.matchContextProvider.sessionStore;
     this.matchedRulesStateStore = opts.matchedRulesStateStore;
     this.debugLog = opts.debugLog ?? createDebugLog();
-    this.clientAdapter = new OpenCodeClientAdapter({
-      client: opts.client as OpenCodeClient,
-      directory: opts.directory,
-      debugLog: this.debugLog,
-    });
+    this.port = opts.port;
     this.sessionWorkingContext = createSessionWorkingContext({
       sessionStore: opts.sessionStore,
       projectDirectory: opts.projectDirectory,
-      readHistory: (sessionID) => this.clientAdapter.readClientHistory(sessionID),
+      readHistory: (sessionID) => this.port.readHistory(sessionID),
       debugLog: this.debugLog,
     });
     this.ruleDelivery = createRuleDelivery({
       rawHistory: this.sessionWorkingContext.rawHistory,
       debugLog: this.debugLog,
-      persistAdmission: (sessionID, part) =>
-        this.clientAdapter.persistRuleAdmission(sessionID, part),
+      persistAdmission: (sessionID, part) => this.port.persistAdmission(sessionID, part),
     });
     this.toolHookFlow = new ToolHookFlow({
       debugLog: this.debugLog,
       projectDirectory: opts.projectDirectory,
       ensureSessionRuleSnapshot: (sessionID) => this.ensureSessionRuleSnapshot(sessionID),
-      buildMatchContext: (sessionID) => this.buildSessionRuleMatchContext(sessionID),
+      buildMatchContext: (sessionID, includeStage) =>
+        this.buildSessionRuleMatchContext(sessionID, undefined, undefined, undefined, includeStage),
       queueMatchedHooks: (input) => this.ruleDelivery.queueMatchedHooks(input),
     });
   }
@@ -198,11 +201,13 @@ export class OpenCodeRulesRuntime {
     onEvent?: (event: V2EventInput) => Promise<void> | void
   ): Promise<() => Promise<void>> {
     // Keep the session domain so sink calls (synthetic) stay method-bound.
-    this.deliverySink = context.session?.synthetic
-      ? {
-          synthetic: (input, ...rest) => context.session!.synthetic!(input, ...rest),
-        }
-      : null;
+    this.deliverySink = this.port.synthetic
+      ? { synthetic: this.port.synthetic }
+      : context.session?.synthetic
+        ? {
+            synthetic: (input, ...rest) => context.session!.synthetic!(input, ...rest),
+          }
+        : null;
 
     const registrations: HookRegistration[] = [];
     try {
@@ -524,9 +529,10 @@ export class OpenCodeRulesRuntime {
     sessionID: string,
     userPrompt?: string,
     modelID?: string,
-    agentType?: string
+    agentType?: string,
+    includeStage = false
   ): Promise<RuleMatchContext> {
-    const availableToolIDs = await this.clientAdapter.queryAvailableToolIDs(
+    const availableToolIDs = await this.port.queryAvailableToolIDs(
       this.matchContextProvider.getAvailableToolIDs(sessionID)
     );
     if (userPrompt !== undefined || modelID !== undefined || agentType !== undefined) {
@@ -536,7 +542,7 @@ export class OpenCodeRulesRuntime {
         if (agentType !== undefined) current.lastAgentType = agentType;
       });
     }
-    return this.matchContextProvider.getMatchContext(sessionID, availableToolIDs);
+    return this.matchContextProvider.getMatchContext(sessionID, availableToolIDs, includeStage);
   }
 
   private async evaluateSessionRules(
@@ -548,7 +554,8 @@ export class OpenCodeRulesRuntime {
       input.sessionID,
       input.userPrompt,
       input.modelID,
-      input.agentType
+      input.agentType,
+      selected.some((snapshot) => snapshot.metadata?.stage !== undefined)
     );
     return matchRuleSnapshots(selected, context);
   }

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'bun:test';
 import type { ToolEditor } from '@opencode/plugin/promise/tool';
 import { CallID } from '@opencode/plugin/promise/tool';
 import { Agent, Session, SessionMessage } from '@opencode/schema';

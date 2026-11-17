@@ -2,17 +2,17 @@
  * Check that a build produced everything it claims to, and that the
  * entrypoints are actually distinct.
  *
- * The bundler writes `dist/index.js`, `dist/cli.js` and `dist/tui.js`, and a
+ * The bundler writes `dist/plugin.js`, `dist/cli.js` and `dist/tui.js`, and a
  * misconfigured entry name made one overwrite another — a build that looked
  * successful and shipped the same artifact twice.
  */
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 
 const required = [
-  'dist/index.js',
+  'dist/plugin.js',
   'dist/cli.js',
   'dist/tui.js',
-  'dist/index.d.ts',
+  'dist/plugin.d.ts',
   'dist/tui.d.ts',
   'dist/profile.schema.json',
   'dist/profile-schema.schema.json',
@@ -24,7 +24,7 @@ if (missing.length > 0) {
   process.exit(1);
 }
 
-const entrypoints = ['dist/index.js', 'dist/cli.js', 'dist/tui.js'];
+const entrypoints = ['dist/plugin.js', 'dist/cli.js', 'dist/tui.js'];
 const distinct = new Set(entrypoints.map((file) => readFileSync(file, 'utf-8')));
 if (distinct.size !== entrypoints.length) {
   console.error('ERROR: the entrypoints are not distinct - one overwrites another');

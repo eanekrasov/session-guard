@@ -4,7 +4,7 @@
 // These are CONTRACT tests — they verify the public interface contract,
 // not internal implementation details.
 
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test } from 'bun:test';
 import { toSessionSnapshot } from '../../src/types/session-snapshot.ts';
 import type { WorkflowSession, TaskStatus, GateStatus } from '../../src/types/index.ts';
 

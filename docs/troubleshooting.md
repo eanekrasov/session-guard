@@ -73,7 +73,7 @@ CLI. Проверьте, что команда доступна dashboard-про
 окружение. По умолчанию store находится в глобальном каталоге OpenCode; при
 `SESSION_GUARD_STORE_DIR` это значение должно совпадать у runtime и CLI. Порт по
 умолчанию — `3456`; при удалённом или браузерном доступе проверьте также
-`DASHBOARD_HOST`, `DASHBOARD_TOKEN` и `ALLOWED_ORIGIN`.
+`DASHBOARD_TOKEN` и `ALLOWED_ORIGIN`.
 
 ## Что приложить при обращении за помощью
 

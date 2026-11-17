@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'bun:test';
 
 import { canonicalProjectPath, isReadOnlyBash } from '../../src/app/change-enforcement.ts';
 import { matchesScope } from '../../src/app/scope-match.ts';

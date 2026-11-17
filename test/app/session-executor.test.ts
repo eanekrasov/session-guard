@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'bun:test';
 
 import type { WorkflowSession } from '../../src/session/session-schema.ts';
 import type { WorkflowStore } from '../../src/session/session-store.ts';

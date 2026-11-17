@@ -1,8 +1,3 @@
-// Test seam and runtime factory. The v2 plugin loader imports only the
-// default export of src/index.ts, so tests construct the runtime directly
-// through this module instead of a named-export workaround (v1's
-// __testOnly is retired).
-
 import { discoverRuleFiles } from '../rules/rule-discovery.js';
 import { OpenCodeRulesRuntime } from './orchestrator.js';
 import { SessionStore } from '../session/session-store.js';
@@ -12,15 +7,18 @@ import {
   createRuleMatchContextProvider,
   type RuleMatchContextProvider,
 } from './match-context-provider.js';
+import type { RuntimePort } from './runtime-port.js';
 
 export interface CreateRuntimeOptions {
-  client: unknown;
+  /** Host operations port, supplied by the platform adapter (v2 host or V1 hooks). */
+  port: RuntimePort;
   directory: string;
   projectDirectory: string;
   /** Already resolved to absolute paths; ignored when ruleFiles is supplied. */
   additionalRuleDirectories?: readonly string[];
   ruleFiles?: DiscoveredRuleInput[];
   sessionStore?: SessionStore;
+  getCurrentStage?: (sessionID: string) => Promise<string | undefined>;
   matchContextProvider?: RuleMatchContextProvider;
   matchedRulesStateStore?: MatchedRulesStateStore;
   debugLog?: DebugLog;
@@ -44,16 +42,17 @@ export async function createRuntime(opts: CreateRuntimeOptions): Promise<OpenCod
     createRuleMatchContextProvider({
       projectDirectory: opts.projectDirectory,
       sessionStore: opts.sessionStore,
+      getCurrentStage: opts.getCurrentStage,
       debugLog,
     });
   return new OpenCodeRulesRuntime({
-    client: opts.client,
     directory: opts.directory,
     projectDirectory: opts.projectDirectory,
     ruleFiles,
     sessionStore: matchContextProvider.sessionStore,
     matchedRulesStateStore: opts.matchedRulesStateStore ?? new MatchedRulesStateStore(),
     matchContextProvider,
+    port: opts.port,
     debugLog,
   });
 }

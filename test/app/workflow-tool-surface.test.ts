@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'bun:test';
 
 import { createWorkflowToolSurface } from '../../src/app/workflow-tool-surface.ts';
 import type { WorkflowStore } from '../../src/session/session-store.ts';

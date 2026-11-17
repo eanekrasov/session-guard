@@ -1,8 +1,14 @@
-// Adapters from opencode v2 message shapes into the plugin's internal
-// { info, parts } message form. The delivery codec, ledger, and working
-// context all consume the internal form, so normalization happens once at
-// the boundary: the session `context` hook, the client history read, and
-// the session `prompt` hook.
+/**
+ * Adapters from opencode v2 message shapes into the plugin's internal
+ * { info, parts } message form. The delivery codec, ledger, and working
+ * context all consume the internal form, so normalization happens once at
+ * the boundary: the session `context` hook, the client history read, and
+ * the session `prompt` hook.
+ *
+ * Adapted from opencode-rules@1.0.0 (rules-v1@154d8d9): the original
+ * session/message-extraction.ts and delivery codec consumed v1 `.message`
+ * shapes; this module is the v2-normalization boundary added in session-guard.
+ */
 
 import type { MessagePartWithSession, MessageWithInfo } from './message-extraction.js';
 

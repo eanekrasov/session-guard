@@ -226,6 +226,9 @@ project:
 branch:
   - main
   - feature/*
+stage:
+  - implementation
+  - review
 os:
   - linux
   - darwin
@@ -264,6 +267,9 @@ match: any
 - `branch` (optional): Array of git branch patterns to match
   - Supports exact names and glob patterns (e.g., `feature/*`, `release/**`)
   - Uses minimatch for glob matching
+- `stage` (optional): Array of current session-guard workflow stage IDs
+  - Rule applies when the current workflow stage is included in the array
+  - Requires an active workflow session; otherwise it does not match
 - `os` (optional): Array of operating systems to match
   - Values: `linux`, `darwin`, `win32`
 - `ci` (optional): Boolean to match CI environment
@@ -283,6 +289,7 @@ match: any
 - **globs + fileContains**: One file-observation family — a single observed file must satisfy both (AND)
 - **Only keywords**: Rule applies when the user's prompt contains any keyword
 - **Only tools**: Rule applies when any listed tool is available
+- **Only stage**: Rule applies when the active workflow session is at a listed stage
 - **Multiple conditions with `match: any` (default)**: Rule applies when ANY condition matches (OR logic across all fields; the file-observation family counts as one check)
 - **Multiple conditions with `match: all`**: Rule applies only when ALL declared conditions match
 
@@ -305,7 +312,7 @@ The plugin uses `minimatch` for pattern matching:
 
 This repository includes a `crafting-rules/` skill that teaches AI agents how to create well-formatted rules. The skill provides:
 
-- **Rule format reference** - Frontmatter fields (`globs`, `fileContains`, `keywords`, `tools`, `model`, `agent`, `command`, `project`, `branch`, `os`, `ci`, `match`) and markdown body structure
+- **Rule format reference** - Frontmatter fields (`globs`, `fileContains`, `keywords`, `tools`, `model`, `agent`, `command`, `project`, `branch`, `stage`, `os`, `ci`, `match`) and markdown body structure
 - **Matching strategy guidance** - When to use globs vs keywords vs runtime filters vs combinations
 - **Pattern extraction workflow** - How to identify repeated conversation patterns that should become rules
 - **Keyword safety guidelines** - Denylist of overly broad keywords to avoid, allowlist of safe alternatives, and an audit checklist

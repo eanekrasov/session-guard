@@ -1,4 +1,4 @@
-import { describe, expect, test, vi } from 'vitest';
+import { describe, expect, test, vi } from 'bun:test';
 import { createRuntimeHooks } from '../../src/app/runtime-hooks.ts';
 
 describe('runtime hooks adapter', () => {

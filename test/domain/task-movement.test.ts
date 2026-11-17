@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'bun:test';
 import { nextTaskStage } from '../../src/domain/task-movement.ts';
 import type { StageDef } from '../../src/schema/types.ts';
 import type { LoopRun } from '../../src/session/session-schema.ts';
@@ -61,7 +61,10 @@ describe('a loop with no transitions runs its stages in order', () => {
   });
 
   it('completes the task after the last stage', () => {
-    expect(nextTaskStage(linear, runAt('verify'), true, evaluate)).toEqual({ kind: 'complete' });
+    expect(nextTaskStage(linear, runAt('verify'), true, evaluate)).toEqual({
+      kind: 'complete',
+      effects: undefined,
+    });
   });
 
   it('leaves a failure to the loop retry budget', () => {
@@ -100,7 +103,10 @@ describe('a loop with transitions is moved by them', () => {
   });
 
   it('completes on a stage nothing leads out of', () => {
-    expect(nextTaskStage(branching, runAt('commit'), true, evaluate)).toEqual({ kind: 'complete' });
+    expect(nextTaskStage(branching, runAt('commit'), true, evaluate)).toEqual({
+      kind: 'complete',
+      effects: undefined,
+    });
   });
 
   it('waits rather than completing when every way out is blocked', () => {
@@ -131,7 +137,10 @@ describe('a loop with transitions is moved by them', () => {
       ],
     };
     const passedRun = runAt('verify', { review: 'passed', qa: 'passed' });
-    expect(nextTaskStage(withEnding, passedRun, true, evaluate)).toEqual({ kind: 'complete' });
+    expect(nextTaskStage(withEnding, passedRun, true, evaluate)).toEqual({
+      kind: 'complete',
+      effects: undefined,
+    });
 
     // And the ending is guarded like any other departure.
     const failedRun = runAt('verify', { review: 'failed' });
@@ -182,6 +191,7 @@ describe('what holds a task inside a stage', () => {
   it('ends it once the operator has consented', () => {
     expect(nextTaskStage(withConsent, runAt('code'), true, evaluate, () => true)).toEqual({
       kind: 'complete',
+      effects: undefined,
     });
   });
 

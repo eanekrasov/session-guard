@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { mkdirSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -52,7 +52,7 @@ describe('plugin.ts', () => {
     // The plugin used to write its computed defaults into process.env. That
     // turned the first project's local default into a global override, and a
     // second instance for another project read the first project's value.
-    const { SessionGuardPluginV1 } = await import('../../src/index.ts');
+    const { default: SessionGuardPluginV1 } = await import('../../src/v1/plugin.ts');
     const { sessionsDir, opencodeStateDir } = await import('../../src/app/paths.ts');
 
     const ctx = makeMockCtx();
@@ -66,7 +66,7 @@ describe('plugin.ts', () => {
   it('does not override existing SESSION_GUARD_STORE_DIR', async () => {
     process.env.SESSION_GUARD_STORE_DIR = '/custom/store/dir';
 
-    const { SessionGuardPluginV1 } = await import('../../src/index.ts');
+    const { default: SessionGuardPluginV1 } = await import('../../src/v1/plugin.ts');
 
     const ctx = makeMockCtx();
     await SessionGuardPluginV1(ctx);
@@ -75,7 +75,7 @@ describe('plugin.ts', () => {
   });
 
   it('respects OPENCODE_HARNESS_DIR for profiles', async () => {
-    const { SessionGuardPluginV1 } = await import('../../src/index.ts');
+    const { default: SessionGuardPluginV1 } = await import('../../src/v1/plugin.ts');
     const { profilesDir } = await import('../../src/app/paths.ts');
 
     process.env.OPENCODE_HARNESS_DIR = 'custom-harness';
@@ -88,7 +88,7 @@ describe('plugin.ts', () => {
   });
 
   it('respects absolute OPENCODE_HARNESS_DIR', async () => {
-    const { SessionGuardPluginV1 } = await import('../../src/index.ts');
+    const { default: SessionGuardPluginV1 } = await import('../../src/v1/plugin.ts');
     const { profilesDir } = await import('../../src/app/paths.ts');
 
     process.env.OPENCODE_HARNESS_DIR = '/absolute/path';
@@ -100,7 +100,7 @@ describe('plugin.ts', () => {
   });
 
   it('state store remains global regardless of OPENCODE_HARNESS_DIR', async () => {
-    const { SessionGuardPluginV1 } = await import('../../src/index.ts');
+    const { default: SessionGuardPluginV1 } = await import('../../src/v1/plugin.ts');
     const { sessionsDir, opencodeStateDir } = await import('../../src/app/paths.ts');
 
     process.env.OPENCODE_HARNESS_DIR = 'custom-harness';
@@ -112,8 +112,9 @@ describe('plugin.ts', () => {
   });
 
   it('validates catch block exists in source', async () => {
-    const pluginSource = readFileSync(join(import.meta.dirname, '../../src/index.ts'), 'utf-8');
+    const pluginSource = readFileSync(join(import.meta.dirname, '../../src/v1/plugin.ts'), 'utf-8');
 
+    expect(pluginSource).toContain('getCurrentStage: hooks.getCurrentStage');
     expect(pluginSource).toContain('try {');
     expect(pluginSource).toContain('catch (e)');
     expect(pluginSource).toContain('sm-init-error.json');

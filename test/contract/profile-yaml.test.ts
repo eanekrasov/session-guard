@@ -4,7 +4,7 @@
 // Verifies that ProfileYamlSchema, StageYamlSchema, TransitionYamlSchema,
 // and ActionEntryYamlSchema correctly parse valid input and reject invalid.
 
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test } from 'bun:test';
 import {
   ProfileYamlSchema,
   StageYamlSchema,

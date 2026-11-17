@@ -1,6 +1,6 @@
 {
   "name": "@eanekrasov/session-guard",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "description": "Session guard for OpenCode — gives schema-based workflow with strict validation between steps",
   "keywords": [
     "opencode",
@@ -19,8 +19,8 @@
     "email": "e.nekrasov@crpt.ru"
   },
   "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "main": "dist/plugin.js",
+  "types": "dist/plugin.d.ts",
   "bin": {
     "session-guard": "dist/cli.js"
   },
@@ -28,14 +28,6 @@
     ".": {
       "import": "./dist/plugin.js",
       "types": "./dist/plugin.d.ts"
-    },
-    "./server": {
-      "import": "./dist/plugin.js",
-      "types": "./dist/plugin.d.ts"
-    },
-    "./v2": {
-      "import": "./dist/v2/plugin.js",
-      "types": "./dist/v2/plugin.d.ts"
     },
     "./tui": {
       "import": "./dist/tui.js",
@@ -76,11 +68,6 @@
     "!src/**/*.spec.ts",
     "!src/test-fixtures.ts",
     "!src/api-surface.typecheck.ts",
-    "tui/",
-    "!tui/**/*.test.ts",
-    "!tui/**/*.test.tsx",
-    "!tui/**/*.spec.ts",
-    "!tui/**/*.spec.tsx",
     "LICENSE",
     "README.md",
     "docs",
@@ -127,7 +114,6 @@
     "jsmin": "1.0.1",
     "prettier": "^3.9.10",
     "typescript-eslint": "^8.72.2",
-    "vitest": "5.1.0",
     "typescript": "^5.9.3"
   }
 }

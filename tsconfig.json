@@ -4,11 +4,11 @@
   "compilerOptions": {
     // In-repo profiles import the package by its published name — that is the
     // contract for profile authors. Without this mapping TypeScript resolves it
-    // through the package's own `exports` to `dist/index.d.ts`, needs a project
+    // through the package's own `exports` to `dist/plugin.d.ts`, needs a project
     // root to map that output back to a source, and fails with TS2209 because
     // `rootDir` is unset here. Mapping to the source keeps `check` build-free.
     "paths": {
-      "@eanekrasov/session-guard": ["./src/index.ts"]
+      "@eanekrasov/session-guard": ["./src/plugin.ts"]
     },
     "outDir": "dist",
     "declaration": false, // true
@@ -57,5 +57,5 @@
     //"isolatedModules": true
   },
   "include": ["src/**/*", "test/**/*", "scripts/**/*", "smoke/**/*"],
-  "exclude": ["profiles/**/*", "src/rules-engine/**/*.vitest.ts"]
+  "exclude": ["profiles/**/*"]
 }

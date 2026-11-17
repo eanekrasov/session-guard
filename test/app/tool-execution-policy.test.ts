@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'bun:test';
 
 import { createToolExecutionPolicy } from '../../src/app/tool-execution-policy.ts';
 import { createSession } from '../../src/session/session-store.ts';

@@ -21,6 +21,7 @@ export type RuleConditionKind =
   | 'command'
   | 'project'
   | 'branch'
+  | 'stage'
   | 'os'
   | 'ci';
 
@@ -215,6 +216,14 @@ export function evaluateRuleMetadata(
     });
   }
 
+  if (metadata.stage) {
+    checks.push({
+      kind: 'stage',
+      matched: Boolean(context.stage && metadata.stage.includes(context.stage)),
+      lifetime: lifetimeForKind('stage'),
+    });
+  }
+
   if (metadata.os) {
     checks.push({
       kind: 'os',
@@ -251,6 +260,7 @@ export interface RuleMatchContext {
   command?: string;
   projectTags?: string[];
   gitBranch?: string;
+  stage?: string;
   os?: string;
   ci?: boolean;
 }

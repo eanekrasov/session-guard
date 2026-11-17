@@ -3,7 +3,7 @@ import { execSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { rmSync } from 'node:fs';
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { WorkflowStore, createSession } from '../../src/session/session-store.ts';
 import { approve } from '../../src/domain/approvals.ts';
 import { createTask } from '../support/task-factory.ts';

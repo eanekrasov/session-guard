@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from 'bun:test';
 import type { WorkflowSession } from '../../src/session/session-schema.ts';
 import { toSessionFacts } from '../../src/domain/session-facts.ts';
 import { createTask } from '../support/task-factory.ts';

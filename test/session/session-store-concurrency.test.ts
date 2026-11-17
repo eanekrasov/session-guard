@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import {
   WorkflowStore,
   createSession,
@@ -112,9 +112,9 @@ describe('two stores over one directory', () => {
 
     // Whichever won, the file holds that writer's work whole — not a mixture,
     // and not the loser's silent overwrite.
-    const onDisk = await first.load('race');
-    expect(['written by the first store', 'written by the second store']).toContain(onDisk?.title);
-    expect(onDisk?.revision).toBe(2);
+    const onDisk = (await first.load('race'))!;
+    expect(['written by the first store', 'written by the second store']).toContain(onDisk.title);
+    expect(onDisk.revision).toBe(2);
   });
 
   it('leaves no lock file behind, so the next save is not blocked', async () => {

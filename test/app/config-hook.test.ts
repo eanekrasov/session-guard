@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import type { Config } from '@opencode-ai/plugin';
 import type { PluginInput } from '@opencode-ai/plugin';
 

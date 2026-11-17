@@ -8,7 +8,7 @@ import pluginModule, {
   createStateSection,
   SessionGuardTuiV2,
   type SectionApi,
-} from '../../src/tui/index.tsx';
+} from '../../src/tui.ts';
 
 const RUNTIME_SUBDIR = 'sessions';
 
@@ -163,7 +163,7 @@ describe('sidebar-state: проводка плагина', () => {
       },
     };
     void (pluginModule.tui as (...args: unknown[]) => unknown)(api, undefined, {});
-    expect(pluginModule.id).toBe('session-guard.sidebar-state');
+    expect(pluginModule.id).toBe('session-guard-tui');
     expect(registered).toEqual({
       order: 350,
       slots: {

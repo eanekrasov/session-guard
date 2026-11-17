@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from 'bun:test';
 import type { WorkflowSession } from '../../src/session/session-schema.ts';
 import type { EngineConfig } from '../../src/domain/engine.ts';
 import { SessionGuardEngine } from '../../src/domain/engine.ts';

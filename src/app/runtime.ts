@@ -292,6 +292,10 @@ class SessionGuardRuntime {
       .filter((loop): loop is string => loop !== undefined && loop !== '$currentTask.id');
   }
 
+  async getCurrentStage(sessionID: string): Promise<string | undefined> {
+    return (await this.sessionContext.load(sessionID))?.currentStage;
+  }
+
   /**
    * Обработать [chat.message] — запустить гардрейлы на пользовательском вводе,
    * захватить базовую линию, затем оценить правила.
@@ -940,6 +944,7 @@ export interface RuntimeContext {
 }
 
 export interface RuntimeHooks extends Hooks {
+  getCurrentStage(sessionID: string): Promise<string | undefined>;
   handleToolFailure(input: { sessionID: string; callID: string }): Promise<void>;
   handleChatMessage(input: { sessionID?: string }): Promise<void>;
   handleSystemTransform(input: { sessionID?: string }, output: { system: string[] }): Promise<void>;
@@ -981,6 +986,7 @@ export function createRuntime(
   );
   return {
     ...runtime.hooks,
+    getCurrentStage: (sessionID) => runtime.getCurrentStage(sessionID),
     handleToolFailure: (input) => runtime.handleToolFailure(input),
     handleChatMessage: (input) => runtime.handleChatMessage(input),
     handleSystemTransform: (input, output) => runtime.handleSystemTransform(input, output),

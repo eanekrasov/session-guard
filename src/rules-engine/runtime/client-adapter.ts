@@ -1,16 +1,21 @@
+/**
+ * Adapted from opencode-rules@1.0.0 (rules-v1@154d8d9):
+ * originally the v1 `pluginInput.client` adapter in runtime/client-adapter.ts.
+ * Reworked in session-guard for the v2 host: the v2 plugin context IS the
+ * client (v1's `pluginInput.client` is gone). Session history in v2 is
+ * `session.context({ sessionID })` -> SessionMessageInfo[]; the v1
+ * `session.messages` and `tool.ids` RPCs are gone.
+ */
 import { extractConnectedMcpCapabilityIDs } from '../detection/mcp-tools.js';
 import { logWarning } from '../shared/debug.js';
 import type { DebugLog } from '../shared/debug.js';
 import type { RawHistoryResult } from '../delivery/rule-delivery-history.js';
 import type { DeliveryPart } from '../delivery/rule-delivery-codec.js';
 import { fromSessionMessages } from '../session/v2-messages.js';
+import type { RuntimePort } from './runtime-port.js';
 
 /**
  * Structural view of the opencode v2 client surface this plugin consumes.
- * The v2 plugin context IS the client (v1's `pluginInput.client` is gone),
- * so adapters receive the context object itself. Session history in v2 is
- * `session.context({ sessionID })` -> SessionMessageInfo[]; the v1
- * `session.messages` and `tool.ids` RPCs are gone.
  */
 export interface OpenCodeClient {
   session?: {
@@ -118,4 +123,24 @@ export class OpenCodeClientAdapter {
 
     return Array.from(ids);
   }
+}
+
+/**
+ * v2 implementation of the Rules engine port over an opencode v2 client
+ * surface (the plugin context). The legacy `client` path in createRuntime
+ * builds this internally; adapters may also construct it directly.
+ */
+export function createV2RuntimePort(options: {
+  client: OpenCodeClient;
+  directory: string;
+  debugLog: DebugLog;
+}): RuntimePort {
+  const adapter = new OpenCodeClientAdapter(options);
+  const session = options.client.session;
+  return {
+    persistAdmission: (sessionID, part) => adapter.persistRuleAdmission(sessionID, part),
+    readHistory: (sessionID) => adapter.readClientHistory(sessionID),
+    queryAvailableToolIDs: (contextToolIDs) => adapter.queryAvailableToolIDs(contextToolIDs),
+    synthetic: session?.synthetic ? (input) => session.synthetic!(input) : undefined,
+  };
 }

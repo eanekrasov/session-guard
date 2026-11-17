@@ -1,8 +1,65 @@
 import { describe, expect, test } from 'bun:test';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import type { OpenCodeRulesRuntime } from '../../src/rules-engine/runtime/orchestrator.js';
+import { createRuntime } from '../../src/rules-engine/runtime/create-runtime.js';
 import { wireV1Rules } from '../../src/rules-engine/runtime/v1-adapter.js';
+import {
+  createMockPluginInput,
+  createMockRuntimePort,
+} from '../../src/rules-engine/test-fixtures.js';
 
 describe('V1 rules adapter', () => {
+  test('provides the workflow stage to the V1 rules match context', async () => {
+    const testDir = mkdtempSync(path.join(tmpdir(), 'session-guard-v1-stage-'));
+    try {
+      const rulePath = path.join(testDir, 'stage-rule.md');
+      writeFileSync(rulePath, '---\nstage:\n  - review\n---\n\nReview-stage guidance.');
+      const mock = createMockPluginInput({ testDir });
+      const runtime = await createRuntime({
+        port: createMockRuntimePort(mock),
+        directory: testDir,
+        projectDirectory: testDir,
+        ruleFiles: [{ filePath: rulePath, relativePath: 'stage-rule.md' }],
+        getCurrentStage: async (sessionID) => (sessionID === 'ses_v1' ? 'review' : undefined),
+      });
+      const hooks: Record<string, unknown> = {
+        'experimental.chat.messages.transform': async () => {},
+      };
+      const cleanup = await wireV1Rules(runtime, hooks);
+      const transform = hooks['experimental.chat.messages.transform'] as (
+        input: { sessionID: string },
+        output: { messages: Array<Record<string, unknown>> }
+      ) => Promise<void>;
+
+      const output = {
+        messages: [
+          {
+            info: {
+              id: 'msg_user',
+              sessionID: 'ses_v1',
+              role: 'user',
+              time: { created: 1 },
+              agent: 'code',
+              model: { providerID: 'test', modelID: 'model' },
+            },
+            parts: [{ id: 'part_user', type: 'text', text: 'Review this' }],
+          },
+        ],
+      };
+      await transform({ sessionID: 'ses_v1' }, output);
+
+      expect(output.messages.at(-1)?.parts?.[0]).toMatchObject({
+        text: expect.stringContaining('Review-stage guidance.'),
+        synthetic: true,
+      });
+      await cleanup();
+    } finally {
+      rmSync(testDir, { recursive: true, force: true });
+    }
+  });
+
   test('bridges durable prompt and transient context injection, then restores hooks', async () => {
     const originalChatMessage = async () => {};
     const originalMessagesTransform = async () => {};
@@ -104,5 +161,56 @@ describe('V1 rules adapter', () => {
     expect(cleanupCalled).toBe(true);
     expect(hooks['chat.message']).toBe(originalChatMessage);
     expect(hooks['experimental.chat.messages.transform']).toBe(originalMessagesTransform);
+  });
+
+  test('prose mention of a path does not trigger a glob rule (compat change)', async () => {
+    const testDir = mkdtempSync(path.join(tmpdir(), 'session-guard-v1-prose-'));
+    try {
+      const rulePath = path.join(testDir, 'prose-rule.mdc');
+      writeFileSync(
+        rulePath,
+        '---\nglobs:\n  - "src/components/Button.tsx"\n---\n\nProse-only guidance.'
+      );
+      const mock = createMockPluginInput({ testDir });
+      const runtime = await createRuntime({
+        port: createMockRuntimePort(mock),
+        directory: testDir,
+        projectDirectory: testDir,
+        ruleFiles: [{ filePath: rulePath, relativePath: 'prose-rule.mdc' }],
+      });
+      const hooks: Record<string, unknown> = {
+        'experimental.chat.messages.transform': async () => {},
+        'chat.message': async () => {},
+      };
+      const cleanup = await wireV1Rules(runtime, hooks);
+      const transform = hooks['experimental.chat.messages.transform'] as (
+        input: { sessionID: string },
+        output: { messages: Array<Record<string, unknown>> }
+      ) => Promise<void>;
+
+      const output = {
+        messages: [
+          {
+            info: {
+              id: 'msg_user',
+              sessionID: 'ses_prose',
+              role: 'user',
+              time: { created: 1 },
+              agent: 'code',
+              model: { providerID: 'test', modelID: 'model' },
+            },
+            parts: [{ id: 'part_user', type: 'text', text: 'look at src/components/Button.tsx' }],
+          },
+        ],
+      };
+      await transform({ sessionID: 'ses_prose' }, output);
+
+      // Paths named in prose must not be treated as tool observations:
+      // glob rules fire on tool reads/writes, not on plain text.
+      expect(output.messages).toHaveLength(1);
+      await cleanup();
+    } finally {
+      rmSync(testDir, { recursive: true, force: true });
+    }
   });
 });

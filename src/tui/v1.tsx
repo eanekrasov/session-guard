@@ -30,7 +30,7 @@ import { SidebarContent as RulesSidebarContent } from './slots/sidebar-content.t
 import { isColorValue } from './slots/theme-colors.ts';
 export { SidebarContent as RulesSidebarContent } from './slots/sidebar-content.tsx';
 
-const id = 'session-guard.sidebar-state' as const;
+const id = 'session-guard-tui' as const;
 const SLOT_ORDER = 350;
 
 const DETAILS_COMMAND = 'harness.workflow.details';

@@ -1,3 +1,8 @@
+/**
+ * Adapted from opencode-rules@1.0.0 (rules-v1@154d8d9): added in session-guard
+ * as the V2 match-context provider boundary; the v1 original built match
+ * context ad hoc inside the orchestrator.
+ */
 import { buildRuleMatchContext } from './match-context.js';
 import type { DebugLog } from '../shared/debug.js';
 import { BoundedSessionMap } from '../shared/bounded-session-map.js';
@@ -14,12 +19,17 @@ export interface RuleMatchContextProvider {
   setAvailableToolIDs(sessionID: string, toolIDs: string[]): void;
   getAvailableToolIDs(sessionID: string): string[];
   recordToolEvent(sessionID: string, event: RawToolEvent): FileObservation[];
-  getMatchContext(sessionID: string, availableToolIDs?: string[]): Promise<RuleMatchContext>;
+  getMatchContext(
+    sessionID: string,
+    availableToolIDs?: string[],
+    includeStage?: boolean
+  ): Promise<RuleMatchContext>;
 }
 
 export function createRuleMatchContextProvider(options: {
   projectDirectory: string;
   sessionStore?: SessionStore;
+  getCurrentStage?: (sessionID: string) => Promise<string | undefined>;
   debugLog: DebugLog;
 }): RuleMatchContextProvider {
   const sessionStore = options.sessionStore ?? new SessionStore();
@@ -38,14 +48,23 @@ export function createRuleMatchContextProvider(options: {
     recordToolEvent: (sessionID, event) => {
       return fileObservations.recordToolEvent(sessionID, event);
     },
-    getMatchContext: async (sessionID, availableToolIDs) => {
+    getMatchContext: async (sessionID, availableToolIDs, includeStage = false) => {
       const state = sessionStore.get(sessionID);
+      let stage: string | undefined;
+      if (includeStage && options.getCurrentStage) {
+        try {
+          stage = await options.getCurrentStage(sessionID);
+        } catch (error) {
+          options.debugLog(`Failed to read workflow stage for ${sessionID}: ${String(error)}`);
+        }
+      }
       return buildRuleMatchContext({
         fileObservations: fileObservations.getForMatching(sessionID),
         userPrompt: state?.lastUserPrompt,
         availableToolIDs: availableToolIDs ?? availableTools.get(sessionID)?.ids ?? [],
         modelID: state?.lastModelID,
         agentType: state?.lastAgentType,
+        stage,
         projectDirectory: options.projectDirectory,
         debugLog: options.debugLog,
       });

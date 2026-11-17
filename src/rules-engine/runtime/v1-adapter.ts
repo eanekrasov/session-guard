@@ -1,6 +1,9 @@
 import type { Hooks } from '@opencode-ai/plugin';
 import type { UserMessage } from '@opencode-ai/sdk';
 import type { OpenCodeRulesRuntime, V2DeliverySink } from './orchestrator.js';
+import type { RuntimePort, ReadHistory } from './runtime-port.js';
+import type { RawHistoryResult } from '../delivery/rule-delivery-history.js';
+import type { DeliveryPart } from '../delivery/rule-delivery-codec.js';
 
 type Hook = (input: never, output?: never) => Promise<void> | void;
 type HookRegistration = { dispose(): Promise<void> };
@@ -11,6 +14,31 @@ type AdaptedHookName =
   | 'experimental.chat.messages.transform'
   | 'event';
 type HookArguments<Name extends AdaptedHookName> = Parameters<NonNullable<Hooks[Name]>>;
+
+/**
+ * V1 host shapes for tool hooks (mirrors app/runtime.ts handleToolBefore/
+ * handleToolAfter). The core consumes the v2 contract ({ tool, sessionID, id,
+ * input, status, result }); wireV1Rules converts so observations survive.
+ * before: args ride the output, after: args ride the input.
+ */
+interface V1ToolBeforeInput {
+  tool?: string;
+  sessionID?: string;
+  callID?: string;
+  agent?: string;
+  messageID?: string;
+}
+interface V1ToolAfterInput {
+  tool?: string;
+  sessionID?: string;
+  callID?: string;
+  args?: unknown;
+}
+interface V1ToolAfterOutput {
+  title?: string;
+  output?: string;
+  metadata?: unknown;
+}
 type ChatMessageOutput = HookArguments<'chat.message'>[1];
 type TransformMessage =
   HookArguments<'experimental.chat.messages.transform'>[1]['messages'][number];
@@ -20,6 +48,103 @@ interface ContextMessage {
   id?: string;
   role?: string;
   content?: unknown[];
+}
+
+/**
+ * V1 implementation of the rules engine port over the V1 hooks facade.
+ * Durable admission appends a synthetic text part to the in-flight
+ * `chat.message` output; transient context uses the messages-transform hook
+ * output. History/tool RPCs that V1 exposes via `pluginInput.client` are
+ * surfaced through a small client accessor (callers may leave it absent).
+ */
+export function createV1RuntimePort(options: {
+  hooks: Hooks;
+  /** Optional V1 client (`pluginInput.client`) for history / tool IDs. */
+  client?: {
+    session?: {
+      messages?: (input: {
+        path: { id: string };
+        query?: { directory?: string };
+      }) => Promise<{ data?: unknown }>;
+    };
+    tool?: {
+      ids?: (input: { query: { directory: string } }) => Promise<{ data?: string[] }>;
+    };
+  } | null;
+  directory?: string;
+}): RuntimePort {
+  const { hooks, client, directory } = options;
+  // Lazily captured output of the last Fired chat.message; `synthetic` appends
+  // into it, mirroring wireV1Rules' internal chatOutput.
+  let chatOutput: ChatMessageOutput | undefined;
+  const originalChatMessage = hooks['chat.message'];
+
+  // Wrap chat.message so synthetic parts land in the current output.
+  if (typeof originalChatMessage === 'function' && !Reflect.get(hooks, '__sgPortWrapped')) {
+    Reflect.set(hooks, '__sgPortWrapped', true);
+    Reflect.set(hooks, 'chat.message', async (input: never, output: ChatMessageOutput) => {
+      chatOutput = output;
+      try {
+        return await Reflect.apply(originalChatMessage, undefined, [input, output]);
+      } finally {
+        chatOutput = undefined;
+      }
+    });
+  }
+
+  const persistViaChat = async (sessionID: string, part: DeliveryPart): Promise<void> => {
+    const output = chatOutput;
+    if (!output || part.type !== 'text' || typeof part.text !== 'string') {
+      throw new Error('V1 chat.message output is unavailable');
+    }
+    output.parts.push({
+      id: part.id ?? `prt_rules_${sessionID}`,
+      sessionID,
+      messageID: output.message?.id as string | undefined,
+      type: 'text',
+      text: part.text,
+      synthetic: true,
+      ...(part.metadata !== undefined ? { metadata: part.metadata } : {}),
+    } as never);
+  };
+
+  const readHistory: ReadHistory = async (sessionID: string): Promise<RawHistoryResult> => {
+    const messages = client?.session?.messages;
+    if (!messages) return { ok: true, messages: [] };
+    try {
+      const data = await messages({
+        path: { id: sessionID },
+        query: directory ? { directory } : undefined,
+      });
+      const list = data?.data;
+      return { ok: true, messages: Array.isArray(list) ? list : [] };
+    } catch {
+      return { ok: false };
+    }
+  };
+
+  const queryAvailableToolIDs = async (contextToolIDs?: readonly string[]): Promise<string[]> => {
+    const ids = new Set<string>(contextToolIDs ?? []);
+    if (client?.tool?.ids && directory) {
+      try {
+        const result = await client.tool.ids({ query: { directory } });
+        const data = result?.data;
+        if (Array.isArray(data)) for (const id of data) ids.add(id);
+      } catch {
+        // tool.ids is best-effort; contextToolIDs still apply.
+      }
+    }
+    return Array.from(ids);
+  };
+
+  return {
+    persistAdmission: persistViaChat,
+    readHistory,
+    queryAvailableToolIDs,
+    // V1 delivers durable rules by appending synthetic parts to chat.message;
+    // the port routes there via persistAdmission. synthetic stays absent so
+    // the core's durable turn falls back to the persistAdmission path.
+  };
 }
 
 /** Bridges the upstream runtime's V2 hook contract to OpenCode's V1 hooks. */
@@ -106,12 +231,34 @@ export async function wireV1Rules(
     });
   };
 
-  install('tool.execute.before', async (input, output) =>
-    invoke('tool.execute.before', input, output)
-  );
-  install('tool.execute.after', async (input, output) =>
-    invoke('tool.execute.after', input, output)
-  );
+  install('tool.execute.before', async (input, output) => {
+    const { tool, sessionID, callID, agent, messageID } = input as never as V1ToolBeforeInput;
+    await invoke('tool.execute.before', {
+      tool,
+      sessionID,
+      ...(agent !== undefined ? { agent } : {}),
+      ...(messageID !== undefined ? { messageID } : {}),
+      id: callID,
+      input: (output as { args?: unknown }).args,
+    });
+  });
+  install('tool.execute.after', async (input, output) => {
+    const { tool, sessionID, callID, args } = input as never as V1ToolAfterInput;
+    const result = output as V1ToolAfterOutput;
+    await invoke('tool.execute.after', {
+      tool,
+      sessionID,
+      id: callID,
+      input: args,
+      // The V1 host only fires the after hook for completed executions, so the
+      // v2 "completed" gate is satisfied by construction.
+      status: 'completed',
+      result: {
+        ...(typeof result.output === 'string' ? { output: result.output } : {}),
+        ...(result.metadata !== undefined ? { metadata: result.metadata } : {}),
+      },
+    });
+  });
   install('chat.message', async (input, output) => {
     chatOutput = output;
     try {
@@ -138,8 +285,16 @@ export async function wireV1Rules(
       (message): message is UserTransformMessage => message.info.role === 'user'
     );
     const sessionID = userMessage?.info.sessionID ?? source[0]?.info.sessionID;
+    // V1 user messages carry the agent/model on the message info; the v2
+    // context hook reads them from the top-level input, so hoist them here
+    // (like chat-capture) with the V1 model shape mapped to the V2 Model.Ref.
+    const info = userMessage?.info;
     await invoke('session.context', {
       sessionID,
+      ...(info?.agent !== undefined ? { agent: info.agent } : {}),
+      ...(info?.model?.modelID !== undefined
+        ? { model: { providerID: info.model.providerID, id: info.model.modelID } }
+        : {}),
       messages: normalized,
     });
     output.messages = [

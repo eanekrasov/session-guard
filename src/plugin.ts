@@ -1,21 +1,18 @@
-import type { PluginModule } from '@opencode-ai/plugin';
-import type { Plugin as V2Plugin } from '@opencode/plugin/promise/plugin';
+import type { PluginModule as PluginV1 } from '@opencode-ai/plugin';
+import type { Plugin as PluginV2 } from '@opencode/plugin/promise/plugin';
 import pkg from '../package.json' with { type: 'json' };
-const { SessionGuardPluginV1 } = await import('./index.js');
-const { default: OpenCodeMemPluginV2 } = await import('./v2/plugin.js');
+const { default: SessionGuardPluginV1 } = await import('./v1/plugin.js');
+const { default: SessionGuardPluginV2 } = await import('./v2/plugin.js');
 
 // Contract for profile authors: the shape of an entry in a profile's
 // `INVARIANTS` array. Re-exported from the root entrypoint (./plugin) so a
 // profile outside this repository can import the type from the package root.
 export type { InvariantCheck } from './types/index.ts';
 
-export const id =
-  typeof pkg.name === 'string' && pkg.name.trim() ? pkg.name.trim() : 'session-guard';
-
-export { SessionGuardPluginV1 };
+const id = typeof pkg.name === 'string' && pkg.name.trim() ? pkg.name.trim() : 'session-guard';
 
 export default {
-  ...OpenCodeMemPluginV2,
+  ...SessionGuardPluginV2,
   id,
   server: SessionGuardPluginV1,
-} satisfies PluginModule & V2Plugin;
+} satisfies PluginV1 & PluginV2;

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from 'bun:test';
 
 // Pure helper behaviour lives in test/domain/session-queries.test.ts.
 // This file covers the delivery-permit schema and the host argument shape

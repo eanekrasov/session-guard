@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test } from 'bun:test';
 import type { ConsentManifest, ConsentRequest } from '../../src/app/consent.ts';
 import {
   calculatePlanEvidence,

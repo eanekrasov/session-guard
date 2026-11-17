@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from 'bun:test';
 import type { TransitionDef } from '../../src/schema/types.ts';
 import type { SessionFacts } from '../../src/domain/session-facts.ts';
 import { checkTransition as checkTransition } from '../../src/domain/engine.ts';
