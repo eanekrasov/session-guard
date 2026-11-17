@@ -42,17 +42,6 @@
       "types": "./dist/tui.d.ts"
     }
   },
-  "scripts": {
-    "build": "tsc && bun run build-tui.mjs",
-    "dev": "tsc --watch",
-    "test": "vitest",
-    "test:run": "vitest run",
-    "lint": "eslint src tui",
-    "format": "prettier --write 'src/**/*.ts' 'tui/**/*.tsx' 'tui/**/*.ts'",
-    "format:check": "prettier --check 'src/**/*.ts' 'tui/**/*.tsx' 'tui/**/*.ts'",
-    "clean": "rm -rf dist",
-    "prepublishOnly": "bun run clean && bun run build"
-  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/eanekrasov/session-guard.git"
